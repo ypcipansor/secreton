@@ -1,22 +1,33 @@
-use sqlx::{SqlitePool, PgPool, Row};
-use serde_json::Value;
+use std::any::Any;
+use std::sync::Arc;
 use anyhow::Result;
-use tracing::info;
-use argon2::{Argon2, PasswordHasher, PasswordVerifier};
-use argon2::password_hash::{SaltString, rand_core::OsRng, PasswordHash};
-use rand::RngCore;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use rand::RngCore;
+use serde::{Serialize, Deserialize};
+use serde_json::Value;
+use sqlx::{PgPool, Row, SqlitePool};
+use tokio::sync::RwLock;
+use tracing::{info, error};
+
+use argon2::{Argon2, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{rand_core::OsRng, PasswordHash, SaltString};
+
 use crate::models::lease::Lease;
 use crate::models::policy::Policy;
-use std::any::Any;
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
 use crate::models::pki::{PkiCa, PkiCert};
-use crate::audit::AuditDevice;
-use crate::state::AppState;
 use crate::models::sentinel::SentinelPolicy;
 use crate::models::user::Token;
 use crate::models::plugin::PluginCatalogEntry;
+use crate::audit::AuditDevice;
+use crate::state::AppState;
+
+// Re-export storage types
+pub mod mfa;
+pub mod secure;
+
+pub use mfa::{MfaSecret, MfaRecoveryCodes, MfaStorage};
+pub use secure::{SecureStorage, SharedSecureStorage};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditLog {
@@ -30,6 +41,18 @@ pub struct AuditLog {
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     fn as_any(&self) -> &dyn Any;
+    
+    // MFA related methods
+    async fn store_mfa_secret(&self, user_id: &str, secret: &str, method: crate::auth::mfa::MfaMethod) -> Result<()>;
+    async fn get_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<String>;
+    async fn delete_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()>;
+    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool>;
+    async fn get_user_mfa_methods(&self, user_id: &str) -> Result<Vec<crate::auth::mfa::MfaMethod>>;
+    async fn get_mfa_status(&self, user_id: &str) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>>;
+    async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()>;
+    async fn disable_mfa(&self, user_id: &str) -> Result<()>;
+    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()>;
+    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>>;
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32>;
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>>;
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>>;
@@ -65,6 +88,33 @@ impl PostgresStorage {
         Ok(Self { pool })
     }
     async fn create_tables(pool: &PgPool) -> Result<()> {
+        // Create MFA tables
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS mfa_secrets (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                method TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(user_id, method)
+            )
+            "#
+        ).execute(pool).await?;
+        
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS user_mfa_settings (
+                user_id TEXT PRIMARY KEY,
+                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                method TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            "#
+        ).execute(pool).await?;
+        
+        // Create main tables
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS secrets (
@@ -373,6 +423,223 @@ impl StorageBackend for PostgresStorage {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    
+    async fn store_mfa_secret(&self, user_id: &str, secret: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        
+        sqlx::query(
+            r#"
+            INSERT INTO mfa_secrets (user_id, method, secret)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, method) 
+            DO UPDATE SET secret = $3, updated_at = NOW()
+            "#,
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .bind(secret)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn get_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<String> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        
+        let row = sqlx::query(
+            "SELECT secret FROM mfa_secrets WHERE user_id = ? AND method = ?"
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        row
+            .map(|r| r.get::<String, _>("secret"))
+            .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
+    }
+    
+    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool> {
+        let row = sqlx::query(
+            "SELECT is_enabled FROM user_mfa_settings WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        Ok(row.map(|r| r.get::<bool, _>("is_enabled")).unwrap_or(false))
+    }
+    
+    async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+        };
+        
+        sqlx::query(
+            r#"
+            INSERT INTO user_mfa_settings (user_id, is_enabled, method)
+            VALUES ($1, TRUE, $2)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET is_enabled = TRUE, method = $2, updated_at = NOW()
+            "#,
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn disable_mfa(&self, user_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE user_mfa_settings 
+            SET is_enabled = FALSE, updated_at = NOW()
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn delete_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+        };
+        
+        sqlx::query(
+            r#"
+            DELETE FROM mfa_secrets 
+            WHERE user_id = $1 AND method = $2
+            "#,
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn get_user_mfa_methods(&self, user_id: &str) -> Result<Vec<crate::auth::mfa::MfaMethod>> {
+        let rows = sqlx::query(
+            "SELECT method FROM user_mfa_settings WHERE user_id = ? AND is_enabled = 1"
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        
+        let methods = rows
+            .into_iter()
+            .filter_map(|r| r.get::<String,_>("method").parse().ok())
+            .collect();
+            
+        Ok(methods)
+    }
+    
+    async fn get_mfa_status(&self, user_id: &str) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>> {
+        let rows = sqlx::query(
+            "SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        
+        let mut status = std::collections::HashMap::new();
+        for row in rows {
+            let method_str: String = row.get("method");
+            let is_enabled: bool = row.get("is_enabled");
+            if let Ok(method) = method_str.parse() {
+                status.insert(method, is_enabled);
+            }
+        }
+        
+        // Check all possible methods and set to false if not present
+        for method in crate::auth::mfa::MfaMethod::all() {
+            status.entry(method).or_insert(false);
+        }
+        
+        Ok(status)
+    }
+    
+    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()> {
+        // Delete existing codes
+        sqlx::query(
+            r#"
+            DELETE FROM mfa_recovery_codes 
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        
+        // Insert new codes in a transaction
+        let mut tx = self.pool.begin().await?;
+        
+        for code in codes {
+            sqlx::query(
+                r#"
+                INSERT INTO mfa_recovery_codes (user_id, code, is_used)
+                VALUES ($1, $2, FALSE)
+                "#,
+            )
+            .bind(user_id)
+            .bind(code)
+            .execute(&mut *tx)
+            .await?;
+        }
+        
+        tx.commit().await?;
+        
+        Ok(())
+    }
+    
+    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT code FROM mfa_recovery_codes WHERE user_id = ? AND is_used = 0"
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        
+        let codes = rows.into_iter().map(|r| r.get::<String,_>("code")).collect();
+        Ok(codes)
+    }
+    
+    async fn disable_mfa(&self, user_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE user_mfa_settings 
+            SET is_enabled = FALSE, updated_at = NOW()
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
         // Ambil versi terakhir
         let row = sqlx::query("SELECT COALESCE(MAX(version), 0) as max_version FROM secrets WHERE path = $1")
@@ -665,11 +932,175 @@ impl StorageType {
         }
     }
 }
-
-// Implement StorageBackend for Storage (SQLite)
 #[async_trait]
 impl StorageBackend for Storage {
     fn as_any(&self) -> &dyn Any { self }
+    
+    async fn store_mfa_secret(&self, user_id: &str, secret: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO mfa_secrets (user_id, method, secret, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            "#,
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .bind(secret)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn get_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<String> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        
+        let row = sqlx::query(
+            "SELECT secret FROM mfa_secrets WHERE user_id = ? AND method = ?"
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        row
+            .map(|r| r.get::<String,_>("secret"))
+            .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
+    }
+    
+    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool> {
+        let row = sqlx::query(
+            "SELECT is_enabled FROM user_mfa_settings WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        Ok(row.map(|r| r.get::<bool,_>("is_enabled")).unwrap_or(false))
+    }
+    
+    async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        
+        sqlx::query(
+            r#"
+            INSERT INTO user_mfa_settings (user_id, is_enabled, method, updated_at)
+            VALUES (?, 1, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) 
+            DO UPDATE SET is_enabled = 1, method = ?, updated_at = CURRENT_TIMESTAMP
+            "#,
+        )
+        .bind(user_id)
+        .bind(method_str)
+        .bind(method_str)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn disable_mfa(&self, user_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE user_mfa_settings 
+            SET is_enabled = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            "#,
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    async fn delete_mfa_secret(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
+        let method_str = match method {
+            crate::auth::mfa::MfaMethod::Totp => "totp",
+            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
+            crate::auth::mfa::MfaMethod::Email => "email",
+        };
+        sqlx::query("DELETE FROM mfa_secrets WHERE user_id = ? AND method = ?")
+            .bind(user_id)
+            .bind(method_str)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+    async fn get_user_mfa_methods(&self, user_id: &str) -> Result<Vec<crate::auth::mfa::MfaMethod>> {
+        let rows = sqlx::query("SELECT method FROM user_mfa_settings WHERE user_id = ? AND is_enabled = 1")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut methods = Vec::new();
+        for row in rows {
+            let m: String = row.get("method");
+            let parsed = match m.as_str() {
+                "totp" => Some(crate::auth::mfa::MfaMethod::Totp),
+                "webauthn" => Some(crate::auth::mfa::MfaMethod::WebAuthn),
+                "email" => Some(crate::auth::mfa::MfaMethod::Email),
+                _ => None,
+            };
+            if let Some(p) = parsed { methods.push(p); }
+        }
+        Ok(methods)
+    }
+    async fn get_mfa_status(&self, user_id: &str) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>> {
+        let rows = sqlx::query("SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut status = std::collections::HashMap::new();
+        for row in rows {
+            let m: String = row.get("method");
+            let enabled: bool = row.get("is_enabled");
+            let method = match m.as_str() {
+                "totp" => Some(crate::auth::mfa::MfaMethod::Totp),
+                "webauthn" => Some(crate::auth::mfa::MfaMethod::WebAuthn),
+                "email" => Some(crate::auth::mfa::MfaMethod::Email),
+                _ => None,
+            };
+            if let Some(mm) = method { status.insert(mm, enabled); }
+        }
+        for method in [crate::auth::mfa::MfaMethod::Totp, crate::auth::mfa::MfaMethod::WebAuthn, crate::auth::mfa::MfaMethod::Email] { status.entry(method).or_insert(false); }
+        Ok(status)
+    }
+    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        for c in codes {
+            sqlx::query("INSERT INTO mfa_recovery_codes (user_id, code, is_used) VALUES (?, ?, 0)")
+                .bind(user_id)
+                .bind(c)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query("SELECT code FROM mfa_recovery_codes WHERE user_id = ? AND is_used = 0")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|r| r.get::<String,_>("code")).collect())
+    }
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> { self.store_secret_versioned(path, data).await }
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>> { self.get_latest_secret(path).await }
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>> { self.get_secret_versions(path).await }
@@ -761,6 +1192,33 @@ impl Storage {
     }
 
     async fn create_tables(pool: &SqlitePool) -> Result<()> {
+        // Create MFA tables first
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS mfa_secrets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                method TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, method)
+            )
+            "#
+        ).execute(pool).await?;
+        
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS user_mfa_settings (
+                user_id TEXT PRIMARY KEY,
+                is_enabled BOOLEAN NOT NULL DEFAULT 0,
+                method TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        ).execute(pool).await?;
+        
+        // Create main tables
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS secrets (

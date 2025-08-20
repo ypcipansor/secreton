@@ -14,11 +14,9 @@ use std::net::SocketAddr;
 use axum::extract::ConnectInfo;
 use axum::http::HeaderMap;
 use axum_prometheus::PrometheusMetricLayer;
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 use utoipa::ToSchema;
 use crate::routes::api;
-use crate::core::AppState;
+// use crate::core::AppState; // remove self-import to avoid duplicate name
 use crate::utils::error::AppError;
 use crate::storage::StorageBackend;
 use base64::Engine;
@@ -28,15 +26,16 @@ use crate::secrets::SecretManager;
 use crate::utils::config::Config;
 use metrics_exporter_prometheus::PrometheusHandle;
 use crate::services::plugin::{PluginRegistry};
-use hyper::StatusCode as HyperStatusCode;
-use hyper::response::IntoResponse;
-use serde::{Debug, Clone};
+use axum::http::StatusCode as HyperStatusCode;
+use axum::response::IntoResponse;
+use std::fmt::Debug;
+use std::clone::Clone;
 use std::sync::Mutex;
 use chrono::Utc;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::Path as FsPath;
 use crate::secrets::auto_unseal_master_key;
 use crate::services::audit::{AuditDevice, AuditDeviceType, DbAuditDevice, FileAuditDevice, log_audit, ExternalAuditDevice, WebhookAuditDevice, log_audit_external};
 use crate::routes::api::{totp_generate, ssh_generate, cloud_secret_generate};
@@ -131,26 +130,11 @@ pub async fn status_control_group(Json(payload): Json<StatusRequest>) -> impl In
     }
 }
 
-mod plugins;
-use plugins::dyn_password::DynPasswordPlugin;
-use plugins::sops_file::SopsFilePlugin;
-use plugins::kms::KmsPlugin;
+use crate::plugins::dyn_password::DynPasswordPlugin;
+use crate::plugins::sops_file::SopsFilePlugin;
+use crate::plugins::kms::KmsPlugin;
 
-#[derive(OpenApi)]
-#[openapi(
-    paths(
-        login, get_secret, create_secret, update_secret, delete_secret, get_secret_versions,
-        add_role, assign_role_to_user, add_policy_to_role, revoke_token,
-        backup_data, restore_data, get_leader, health_check, list_plugins
-    ),
-    components(
-        schemas(CreateSecretRequest, AddRoleRequest, AssignRoleRequest, AddPolicyRequest, RevokeTokenRequest, RestoreRequest)
-    ),
-    tags(
-        (name = "Vault Adhyaksa API", description = "API for secure secret management")
-    )
-)]
-pub struct ApiDoc;
+// OpenAPI generation is disabled for now
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplicationStatus {
@@ -183,7 +167,7 @@ pub struct AppState {
     pub auth_manager: Arc<AuthManager>,
     pub secret_manager: Arc<SecretManager>,
     pub config: Config,
-    pub plugin_registry: Arc<PluginRegistry>,
+    pub plugin_registry: Arc<Mutex<PluginRegistry>>,
     pub node_id: String,
     pub peers: Vec<String>,
     pub is_active: bool,
@@ -194,6 +178,7 @@ pub struct AppState {
     pub audit_devices: Arc<Vec<Box<dyn AuditDevice>>>,
     pub external_audit_devices: Arc<Vec<Box<dyn ExternalAuditDevice>>>,
     pub engine_registry: Arc<Mutex<HashMap<String, String>>>, // path -> engine_name
+    pub vault_client: Option<Arc<vault::VaultClient>>, // Vault client for secure secret operations
 }
 
 pub struct VaultServer {
@@ -214,6 +199,33 @@ impl VaultServer {
         let storage = crate::storage::StorageType::from_config(backend, &config.database_url).await?;
         let auth_manager = Arc::new(AuthManager::new(&config.jwt_secret, storage.clone())?);
         let secret_manager = Arc::new(SecretManager::new(&config.encryption_key).await?);
+
+        // Initialize Vault client if configured
+        let vault_client = if let (Ok(vault_addr), Ok(vault_token)) = (
+            std::env::var("VAULT_ADDR"),
+            std::env::var("VAULT_TOKEN"),
+        ) {
+            let vault_config = vault::VaultConfig {
+                address: vault_addr,
+                token: vault_token,
+                mount_path: std::env::var("VAULT_MOUNT_PATH").unwrap_or_else(|_| "transit".to_string()),
+                key_name: std::env::var("VAULT_KEY_NAME").unwrap_or_else(|_| "vault-adhyaksa".to_string()),
+            };
+            
+            let client = vault::VaultClient::new(vault_config);
+            if let Err(e) = client.init().await {
+                tracing::error!("Failed to initialize Vault client: {}", e);
+                None
+            } else {
+                tracing::info!("Vault client initialized successfully");
+                Some(Arc::new(client))
+            }
+        } else {
+            tracing::warn!("Vault client not configured. Set VAULT_ADDR and VAULT_TOKEN environment variables to enable Vault integration.");
+            None
+        };
+
+        // Initialize plugin registry
         let mut plugin_registry = PluginRegistry::new();
         let dyn_password = DynPasswordPlugin;
         dyn_password.register(&mut plugin_registry);
@@ -225,7 +237,7 @@ impl VaultServer {
         plugin_registry.register_secret_engine("totp", Box::new(|| Box::new(|| async { /* TOTP stub */ }))); // stub
         plugin_registry.register_secret_engine("ssh", Box::new(|| Box::new(|| async { /* SSH stub */ }))); // stub
         plugin_registry.register_secret_engine("cloud", Box::new(|| Box::new(|| async { /* Cloud stub */ }))); // stub
-        let plugin_registry = Arc::new(plugin_registry);
+        let plugin_registry = Arc::new(Mutex::new(plugin_registry));
         let node_id = config.node_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let peers = config.peers.clone().unwrap_or_else(Vec::new);
         // File lock untuk leader election
@@ -327,50 +339,134 @@ impl VaultServer {
     }
 
     fn create_router(&self) -> Router {
-        Router::new()
+        // Define public routes that don't require authentication
+        let public_routes = Router::new()
             .route("/health", get(health_check))
             .route("/v1/auth/login", post(api::login))
             .route("/v1/auth/ldap/login", post(api::ldap_login))
+            .route("/v1/auth/mfa/login", post(api::mfa::login_with_mfa))
+            .route("/v1/sys/health", get(api::health_check))
+            .route("/v1/sys/ready", get(api::ready_check))
+            .route("/v1/sys/seal_status", get(seal_status))
+            .route("/v1/sys/init", post(init_vault))
+            .route("/v1/sys/unseal", post(unseal_vault));
+
+        // Define protected routes that require authentication
+        let protected_routes = Router::new()
+            // MFA endpoints
+            .route("/v1/auth/mfa/setup", post(api::mfa::setup_mfa))
+            .route("/v1/auth/mfa/verify", post(api::mfa::verify_mfa))
+            .route("/v1/auth/mfa/status", get(api::mfa::get_mfa_status))
+            .route("/v1/auth/mfa/disable", post(api::mfa::disable_mfa))
+            .route("/v1/auth/mfa/recovery-codes", get(api::mfa::get_recovery_codes))
+            .route("/v1/auth/mfa/recovery-codes/regenerate", post(api::mfa::regenerate_recovery_codes))
+            
+            // Auth endpoints
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/revoke", post(revoke_token))
             .route("/v1/auth/oidc/login", get(api::oidc_login))
             .route("/v1/auth/oidc/callback", get(api::oidc_callback))
+            .route("/v1/auth/approle/role", post(api::generate_approle))
+            .route("/v1/auth/approle/login", post(api::approle_login_handler))
+            .route("/v1/auth/approle/secret-id/rotate", post(api::rotate_approle_secret_id))
+            
+            // Secrets management
             .route("/v1/secrets/:path", get(api::get_secret))
             .route("/v1/secrets/:path", post(api::create_secret))
             .route("/v1/secrets/:path", put(api::update_secret))
             .route("/v1/secrets/:path", delete(api::delete_secret))
             .route("/v1/secrets/:path/versions", get(api::get_secret_versions))
+            
+            // Dynamic credentials
             .route("/v1/dynamic/db/:role", get(api::generate_dynamic_db_credential))
             .route("/v1/dynamic/aws/:role", get(api::generate_dynamic_aws_credential))
             .route("/v1/dynamic/{engine}/credential", post(api::generate_dynamic_credential))
             .route("/v1/dynamic/{engine}/credential", delete(api::revoke_dynamic_credential))
-            .route("/v1/sys/init", post(init_vault))
-            .route("/v1/sys/unseal", post(unseal_vault))
+            
+            // System endpoints
             .route("/v1/sys/leader", get(api::get_leader))
-            .route("/v1/sys/health", get(api::health_check))
-            .route("/v1/sys/ready", get(api::ready_check))
-            .route("/v1/sys/backup", get(api::backup_data))
-            .route("/v1/sys/restore", post(api::restore_data))
-            .route("/v1/sys/seal_status", get(seal_status))
-            .route("/v1/admin/roles", post(api::add_role))
-            .route("/v1/admin/assign-role", post(api::assign_role_to_user))
-            .route("/v1/admin/policies", post(api::add_policy_to_role))
-            .route("/v1/lease/renew/:id", post(api::renew_lease))
-            .route("/v1/lease/revoke/:id", post(api::revoke_lease))
-            .route("/v1/auth/approle/role", post(api::generate_approle))
-            .route("/v1/auth/approle/login", post(api::approle_login))
-            .route("/v1/auth/approle/secret-id/rotate", post(api::rotate_approle_secret_id))
+            .route("/v1/sys/backup", get(backup_data))
+            .route("/v1/sys/restore", post(restore_data))
             .route("/v1/sys/plugins", get(list_plugins))
-            .route("/v1/plugins/:name/:action", axum::routing::post(api::plugin_action))
+            .route("/v1/plugins/:name/:action", post(api::plugin_action))
+            
+            // Cluster management
             .route("/v1/cluster/status", get(cluster_status))
             .route("/v1/cluster/promote", post(promote_node))
             .route("/v1/cluster/heartbeat", post(cluster_heartbeat))
             .route("/v1/replication/status", get(replication_status))
             .route("/v1/replication/sync", post(sync_replication))
+            
+            // Secret generation
             .route("/v1/secret/totp/generate", post(totp_generate))
             .route("/v1/secret/ssh/generate", post(ssh_generate))
             .route("/v1/secret/cloud/generate", post(cloud_secret_generate))
+            
+            // Engine management
             .route("/v1/sys/mount", post(mount_engine))
+            .route("/v1/sys/unmount", post(unmount_engine))
+            .route("/v1/sys/remount", post(remount_engine))
+            .route("/v1/engine/:engine_path/:action", post(generic_engine_route))
+            
+            // Admin endpoints
+            .route("/v1/admin/roles", post(add_role))
+            .route("/v1/admin/assign-role", post(assign_role_to_user))
+            .route("/v1/admin/policies", post(add_policy_to_role))
+            
+            // Lease management
+            .route("/v1/lease/renew/:id", post(api::renew_lease_handler))
+            .route("/v1/lease/revoke/:id", post(api::revoke_lease_handler))
+            
+            // Control group and audit
+            .route("/v1/sys/approve_control_group", post(approve_control_group))
+            .route("/v1/sys/status_control_group", post(status_control_group))
+            .route("/v1/sys/audit_verify", post(audit_verify));
+
+        // Apply authentication middleware to protected routes
+        let protected_with_auth = protected_routes.layer(axum::middleware::from_fn_with_state(
+            self.state.clone(),
+            |state: axum::extract::State<Arc<AppState>>, 
+             request: axum::http::Request<axum::body::Body>, 
+             next: axum::middleware::Next| {
+                let state = state.0.clone();
+                async move {
+                    // Skip auth for public paths
+                    let path = request.uri().path();
+                    let public_paths = [
+                        "/health",
+                        "/v1/auth/login",
+                        "/v1/auth/ldap/login",
+                        "/v1/auth/mfa/login",
+                        "/v1/sys/health",
+                        "/v1/sys/ready",
+                        "/v1/sys/seal_status",
+                        "/v1/sys/init",
+                        "/v1/sys/unseal",
+                    ];
+                    
+                    if public_paths.contains(&path) {
+                        return next.run(request).await;
+                    }
+                    
+                    // Check authentication for protected routes
+                    let headers = request.headers().clone();
+                    match extract_username_and_validate_token(&headers, &state.storage).await {
+                        Ok(user_id) => {
+                            let mut request = request;
+                            request.extensions_mut().insert(user_id);
+                            next.run(request).await
+                        }
+                        Err(e) => e.into_response(),
+                    }
+                }
+            }
+        ));
+
+        // Combine all routes with proper state and middleware
+        Router::new()
+            .merge(public_routes)
+            .merge(protected_with_auth)
+            .with_state(self.state.clone())
             .route("/v1/sys/unmount", post(unmount_engine))
             .route("/v1/sys/remount", post(remount_engine))
             .route("/v1/engine/:engine_path/:action", post(generic_engine_route))
@@ -383,11 +479,9 @@ impl VaultServer {
 
     pub fn create_router_with_metrics_and_docs(&self) -> (Router, PrometheusHandle) {
         let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
-        let swagger = SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi());
         let app = self.create_router()
             .layer(prometheus_layer)
-            .route("/metrics", axum::routing::get(|| async move { metric_handle.render() }))
-            .merge(SwaggerUi::new("/swagger-ui").into());
+            .route("/metrics", axum::routing::get(|| async move { metric_handle.render() }));
         (app, metric_handle)
     }
 }

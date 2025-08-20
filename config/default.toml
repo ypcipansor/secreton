@@ -1,0 +1,17 @@
+# Server configuration
+[server]
+host = "127.0.0.1"
+port = 8080
+log_level = "info"
+storage_path = "./data"
+
+# Database configuration
+[database]
+url = "sqlite:./data/brankas.db"
+max_connections = 5
+
+# Authentication configuration
+[auth]
+token_ttl = 3600  # 1 hour in seconds
+refresh_token_ttl = 2592000  # 30 days in seconds
+jwt_secret = "change-this-to-a-secure-random-string"

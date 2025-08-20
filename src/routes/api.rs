@@ -1,6 +1,76 @@
 use axum::{extract::{Json, State, Path, ConnectInfo, Query}, response::IntoResponse, http::HeaderMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+// MFA module
+pub mod mfa {
+    use axum::{extract::State, http::StatusCode, Json};
+    use std::sync::Arc;
+    use crate::{AppState, utils::error::AppError};
+    use crate::models::mfa::{
+        MfaSetupRequest, MfaSetupResponse, MfaVerifyRequest, 
+        MfaStatusResponse, MfaLoginRequest, MfaRecoveryCodesResponse,
+        MfaMethod
+    };
+
+    /// Start MFA setup process
+    pub async fn setup_mfa(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+        Json(payload): Json<MfaSetupRequest>,
+    ) -> Result<Json<MfaSetupResponse>, AppError> {
+        super::super::controllers::mfa::setup_mfa(State(state), user_id, Json(payload)).await
+    }
+
+    /// Verify MFA setup
+    pub async fn verify_mfa(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+        Json(payload): Json<MfaVerifyRequest>,
+    ) -> Result<Json<serde_json::Value>, AppError> {
+        super::super::controllers::mfa::verify_mfa(State(state), user_id, Json(payload)).await
+    }
+
+    /// Get MFA status for the current user
+    pub async fn get_mfa_status(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+    ) -> Result<Json<MfaStatusResponse>, AppError> {
+        super::super::controllers::mfa::get_mfa_status(State(state), user_id).await
+    }
+
+    /// Disable MFA for the current user
+    pub async fn disable_mfa(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+    ) -> Result<Json<serde_json::Value>, AppError> {
+        super::super::controllers::mfa::disable_mfa(State(state), user_id).await
+    }
+
+    /// Get recovery codes for the current user
+    pub async fn get_recovery_codes(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+    ) -> Result<Json<MfaRecoveryCodesResponse>, AppError> {
+        super::super::controllers::mfa::get_recovery_codes(State(state), user_id).await
+    }
+
+    /// Regenerate recovery codes (invalidates old ones)
+    pub async fn regenerate_recovery_codes(
+        State(state): State<Arc<AppState>>,
+        user_id: String,  // Extracted from auth middleware
+    ) -> Result<Json<MfaRecoveryCodesResponse>, AppError> {
+        super::super::controllers::mfa::regenerate_recovery_codes(State(state), user_id).await
+    }
+
+    /// Login with MFA
+    pub async fn login_with_mfa(
+        State(state): State<Arc<AppState>>,
+        Json(payload): Json<MfaLoginRequest>,
+    ) -> Result<Json<serde_json::Value>, AppError> {
+        super::super::controllers::mfa::login_with_mfa(State(state), Json(payload)).await
+    }
+}
 use crate::controllers::{auth, secret, policy};
 use crate::models::{user::User, secret::Secret, policy::Policy};
 use crate::utils::error::AppError;
@@ -19,12 +89,12 @@ use crate::services::auth::approle::{generate_role, login_approle, rotate_secret
 use crate::models::approle::AppRole;
 use crate::services::rbac::{check_policy, resolve_user_roles};
 use utoipa::ToSchema;
-use crate::core::RevokeTokenRequest;
+// use crate::core::RevokeTokenRequest; // avoid duplicate type name
 use crate::plugins::dyn_password::DynPasswordPlugin;
 use crate::plugins::sops_file::SopsFilePlugin;
 use crate::plugins::kms::KmsPlugin;
-use crate::k8s::k8s_webhook;
-use crate::k8s::sealed::{encrypt_sealed_secret, decrypt_sealed_secret};
+use crate::k8s::k8s_webhook as k8s_webhook_impl;
+use crate::k8s::sealed::{encrypt_sealed_secret as encrypt_sealed_secret_impl, decrypt_sealed_secret as decrypt_sealed_secret_impl};
 use serde_json::Value;
 use crate::pki::{generate_ca, issue_cert, CaCert, CertRequest, IssuedCert};
 use crate::models::pki::{PkiCa, PkiCert};
@@ -40,10 +110,10 @@ use crate::core::APPROVAL_REQUESTS;
 use crate::models::policy::PolicyRule;
 use uuid::Uuid;
 use crate::models::user::Token;
-use chrono::{Utc, Duration};
+use chrono::Duration;
 use crate::models::plugin::PluginCatalogEntry;
 use sha2::{Sha256, Digest};
-use crate::services::dynamic::{generate_mysql_credential, generate_mongo_credential, generate_aws_credential, generate_gcp_credential, generate_azure_credential};
+use crate::services::dynamic::{generate_mysql_credential, generate_mongo_credential, generate_gcp_credential, generate_azure_credential};
 use serde_json::json;
 
 #[derive(Deserialize)]
@@ -83,16 +153,7 @@ pub struct RevokeTokenResponse {
     pub token: String,
 }
 
-#[derive(Deserialize)]
-pub struct LockoutUserRequest {
-    pub user: String,
-}
-
-#[derive(Serialize)]
-pub struct LockoutUserResponse {
-    pub status: String,
-    pub user: String,
-}
+// Duplicate LockoutUserRequest/Response removed; defined later below
 
 static mut APPROLE: Option<Mutex<AppRole>> = None;
 
@@ -205,7 +266,7 @@ pub async fn generate_dynamic_db_credential(
     };
     let path = format!("db/role/{}", role);
     let roles = resolve_user_roles(&user_id, entity_alias.as_deref(), &policies);
-    if !check_policy(&roles, &policies, &path, "create") {
+    if !check_policy(&roles, &policies, &path, "create", None) {
         return AppError::Forbidden("Akses ditolak oleh policy".into()).into_response();
     }
     let config = &state.config;
@@ -232,7 +293,7 @@ pub async fn create_dynamic_lease(State(state): State<Arc<AppState>>, headers: H
     };
     let path = "lease/create".to_string();
     let roles = resolve_user_roles(&user_id, entity_alias.as_deref(), &policies);
-    if !check_policy(&roles, &policies, &path, "create") {
+    if !check_policy(&roles, &policies, &path, "create", None) {
         return AppError::Forbidden("Akses ditolak oleh policy".into()).into_response();
     }
     // Dummy: create lease, simpan ke DB
@@ -243,14 +304,14 @@ pub async fn create_dynamic_lease(State(state): State<Arc<AppState>>, headers: H
     }
 }
 
-pub async fn renew_lease(State(state): State<Arc<AppState>>, Path(id): Path<String>, headers: HeaderMap) -> impl IntoResponse {
+pub async fn renew_lease_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>, headers: HeaderMap) -> impl IntoResponse {
     let (user_id, entity_alias, policies) = match extract_user_info_and_policies(&headers, &state).await {
         Ok(res) => res,
         Err(e) => return e.into_response(),
     };
     let path = format!("lease/renew/{}", id);
     let roles = resolve_user_roles(&user_id, entity_alias.as_deref(), &policies);
-    if !check_policy(&roles, &policies, &path, "renew") {
+    if !check_policy(&roles, &policies, &path, "renew", None) {
         return AppError::Forbidden("Akses ditolak oleh policy".into()).into_response();
     }
     let result = renew_lease(&state.storage.as_any().downcast_ref::<Storage>().unwrap(), &id, 30).await;
@@ -263,14 +324,14 @@ pub async fn renew_lease(State(state): State<Arc<AppState>>, Path(id): Path<Stri
     }
 }
 
-pub async fn revoke_lease(State(state): State<Arc<AppState>>, Path(id): Path<String>, headers: HeaderMap) -> impl IntoResponse {
+pub async fn revoke_lease_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>, headers: HeaderMap) -> impl IntoResponse {
     let (user_id, entity_alias, policies) = match extract_user_info_and_policies(&headers, &state).await {
         Ok(res) => res,
         Err(e) => return e.into_response(),
     };
     let path = format!("lease/revoke/{}", id);
     let roles = resolve_user_roles(&user_id, entity_alias.as_deref(), &policies);
-    if !check_policy(&roles, &policies, &path, "revoke") {
+    if !check_policy(&roles, &policies, &path, "revoke", None) {
         return AppError::Forbidden("Akses ditolak oleh policy".into()).into_response();
     }
     let result = revoke_lease(
@@ -297,7 +358,7 @@ pub async fn generate_dynamic_aws_credential(
     };
     let path = format!("aws/role/{}", role);
     let roles = resolve_user_roles(&user_id, entity_alias.as_deref(), &policies);
-    if !check_policy(&roles, &policies, &path, "create") {
+    if !check_policy(&roles, &policies, &path, "create", None) {
         return AppError::Forbidden("Akses ditolak oleh policy".into()).into_response();
     }
     let config = &state.config;
@@ -363,12 +424,11 @@ pub async fn rotate_approle_secret_id() -> impl IntoResponse {
 } 
 
 // Tambahkan stub pub async fn untuk endpoint yang dibutuhkan router
-pub async fn get_secret_versions() { todo!("get_secret_versions") }
+// removed duplicate stub get_secret_versions
 pub async fn get_leader() { todo!("get_leader") }
 pub async fn health_check() { todo!("health_check") }
 pub async fn ready_check() { todo!("ready_check") }
-pub async fn backup_data() { todo!("backup_data") }
-pub async fn restore_data() { todo!("restore_data") }
+// removed duplicate stubs backup_data/restore_data; real implementations exist below
 pub async fn add_role() { todo!("add_role") }
 pub async fn assign_role_to_user() { todo!("assign_role_to_user") }
 pub async fn add_policy_to_role(
@@ -581,7 +641,7 @@ pub async fn plugin_action(
     Path((name, action)): Path<(String, String)>,
     Json(params): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    if let Some(plugin) = state.plugin_registry.get(&name) {
+    if let Some(plugin) = state.plugin_registry.lock().unwrap().get(&name) {
         if name == "dyn_password" && action == "generate" {
             let length = params.get("length").and_then(|v| v.as_u64()).unwrap_or(12) as usize;
             let dyn_plugin = plugin.as_any().downcast_ref::<DynPasswordPlugin>().unwrap();
@@ -622,8 +682,8 @@ pub async fn plugin_action(
     (axum::http::StatusCode::NOT_FOUND, "Plugin/action not found").into_response()
 } 
 
-pub async fn k8s_webhook(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
-    let result = k8s_webhook(&payload).await;
+pub async fn k8s_webhook_handler(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+    let result = k8s_webhook_impl(&payload).await;
     match result {
         Ok(Ok(response)) => Json(response).into_response(),
         Ok(Err(e)) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -631,8 +691,8 @@ pub async fn k8s_webhook(Json(payload): Json<serde_json::Value>) -> impl IntoRes
     }
 } 
 
-pub async fn encrypt_sealed_secret(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
-    let result = encrypt_sealed_secret(&payload).await;
+pub async fn encrypt_sealed_secret_handler(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+    let result = encrypt_sealed_secret_impl(&payload).await;
     match result {
         Ok(Ok(response)) => Json(response).into_response(),
         Ok(Err(e)) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -640,8 +700,8 @@ pub async fn encrypt_sealed_secret(Json(payload): Json<serde_json::Value>) -> im
     }
 }
 
-pub async fn decrypt_sealed_secret(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
-    let result = decrypt_sealed_secret(&payload).await;
+pub async fn decrypt_sealed_secret_handler(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+    let result = decrypt_sealed_secret_impl(&payload).await;
     match result {
         Ok(Ok(response)) => Json(response).into_response(),
         Ok(Err(e)) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -659,7 +719,7 @@ pub async fn api_create_lease(
     let resource = payload.get("resource").and_then(|v| v.as_str()).unwrap_or("");
     let resource_type = payload.get("resource_type").and_then(|v| v.as_str()).unwrap_or("");
     let ttl = payload.get("ttl_secs").and_then(|v| v.as_i64()).unwrap_or(3600);
-    let result = create_lease(state.storage.as_any().downcast_ref::<crate::storage::Storage>().unwrap(), user, resource, resource_type, ttl, &namespace).await;
+    let result = create_lease(state.storage.as_any().downcast_ref::<crate::storage::Storage>().unwrap(), user, resource, resource_type, ttl).await;
     let status = if result.is_ok() { "success" } else { "failed" };
     let _ = log_audit_external(&state.external_audit_devices, "create_lease", user, resource, status).await;
     match result {
@@ -877,7 +937,7 @@ pub async fn pki_revoke_cert(
 
 // List plugins
 pub async fn admin_list_plugins(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let list = state.plugin_registry.list();
+    let list = state.plugin_registry.lock().unwrap().list();
     Json(list)
 }
 
@@ -889,7 +949,7 @@ pub async fn admin_load_plugin(State(state): State<Arc<AppState>>, Json(payload)
     }
     let name = name.unwrap();
     // Dummy: hanya reload plugin statis
-    state.plugin_registry.reload(name);
+    state.plugin_registry.lock().unwrap().reload(name);
     Json(serde_json::json!({"status": "loaded", "name": name}))
 }
 
@@ -902,7 +962,7 @@ pub async fn admin_load_plugin_dynamic(State(state): State<Arc<AppState>>, Json(
             "error": "Path plugin harus di /opt/vault_plugins/"
         }));
     }
-    let result = unsafe { state.plugin_registry.load_dynamic_library(path) };
+    let result = unsafe { state.plugin_registry.lock().unwrap().load_dynamic_library(path) };
     let status = if result.is_ok() { "success" } else { "failed" };
     if let Err(ref err) = result {
         let _ = writeln!(std::io::stderr(), "[ALERT] Plugin gagal load: {} ({})", path, err);
@@ -917,7 +977,7 @@ pub async fn admin_reload_plugin(State(state): State<Arc<AppState>>, Json(payloa
         return Json(serde_json::json!({"status": "error", "error": "Field 'name' wajib diisi"}));
     }
     let name = name.unwrap();
-    state.plugin_registry.reload(name);
+    state.plugin_registry.lock().unwrap().reload(name);
     Json(serde_json::json!({"status": "reloaded", "name": name}))
 }
 
@@ -928,7 +988,7 @@ pub async fn admin_unload_plugin(State(state): State<Arc<AppState>>, Json(payloa
         return Json(serde_json::json!({"status": "error", "error": "Field 'name' wajib diisi"}));
     }
     let name = name.unwrap();
-    state.plugin_registry.unload(name);
+    state.plugin_registry.lock().unwrap().unload(name);
     Json(serde_json::json!({"status": "unloaded", "name": name}))
 } 
 
@@ -996,7 +1056,7 @@ pub async fn userpass_login(State(state): State<Arc<AppState>>, Json(payload): J
     let valid = user == "user" && pass == "pass"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "userpass_login", user, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "userpass_token", "method": "userpass"}))
+        Json(serde_json::json!({"token": "userpass_token", "method": "userpass"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "Userpass login failed").into_response()
     }
@@ -1007,19 +1067,19 @@ pub async fn cert_login(State(state): State<Arc<AppState>>, Json(payload): Json<
     let valid = cert == "dummy-cert"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "cert_login", cert, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "cert_token", "method": "cert"}))
+        Json(serde_json::json!({"token": "cert_token", "method": "cert"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "Cert login failed").into_response()
     }
 }
 
-pub async fn approle_login(State(state): State<Arc<AppState>>, Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+pub async fn approle_login_handler(State(state): State<Arc<AppState>>, Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
     let role_id = payload.get("role_id").and_then(|v| v.as_str()).unwrap_or("");
     let secret_id = payload.get("secret_id").and_then(|v| v.as_str()).unwrap_or("");
     let valid = role_id == "role" && secret_id == "secret"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "approle_login", role_id, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "approle_token", "method": "approle"}))
+        Json(serde_json::json!({"token": "approle_token", "method": "approle"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "AppRole login failed").into_response()
     }
@@ -1031,7 +1091,7 @@ pub async fn kerberos_login(State(state): State<Arc<AppState>>, Json(payload): J
     let valid = user == "kerberos_user" && pass == "kerberos_pass"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "kerberos_login", user, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "kerberos_token", "method": "kerberos"}))
+        Json(serde_json::json!({"token": "kerberos_token", "method": "kerberos"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "Kerberos login failed").into_response()
     }
@@ -1043,7 +1103,7 @@ pub async fn radius_login(State(state): State<Arc<AppState>>, Json(payload): Jso
     let valid = user == "radius_user" && pass == "radius_pass"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "radius_login", user, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "radius_token", "method": "radius"}))
+        Json(serde_json::json!({"token": "radius_token", "method": "radius"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "Radius login failed").into_response()
     }
@@ -1054,7 +1114,7 @@ pub async fn cloud_iam_login(State(state): State<Arc<AppState>>, Json(payload): 
     let valid = provider == "aws"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "cloud_iam_login", provider, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "cloud_iam_token", "method": provider}))
+        Json(serde_json::json!({"token": "cloud_iam_token", "method": provider})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "Cloud IAM login failed").into_response()
     }
@@ -1066,7 +1126,7 @@ pub async fn mfa_login(State(state): State<Arc<AppState>>, Json(payload): Json<s
     let valid = code == "123456"; // Dummy
     let _ = log_audit_external(&state.external_audit_devices, "mfa_login", user, "", if valid { "success" } else { "failed" }).await;
     if valid {
-        Json(serde_json::json!({"token": "mfa_token", "method": "mfa"}))
+        Json(serde_json::json!({"token": "mfa_token", "method": "mfa"})).into_response()
     } else {
         (axum::http::StatusCode::UNAUTHORIZED, "MFA login failed").into_response()
     }
@@ -1459,8 +1519,11 @@ pub async fn generate_dynamic_credential(
             (cred.username.clone(), "mongo", serde_json::to_value(&cred).unwrap())
         },
         "aws" => {
-            let cred = generate_aws_credential(&role).await;
-            (cred.access_key.clone(), "aws", serde_json::to_value(&cred).unwrap())
+            let cred = generate_aws_credential(&state.config, &role).await.map_err(|e| e.to_string());
+            match cred {
+                Ok(cred) => (cred.access_key.clone(), "aws", serde_json::to_value(&cred).unwrap()),
+                Err(err) => return Json(json!({"status": "error", "error": err})),
+            }
         },
         "gcp" => {
             let cred = generate_gcp_credential(&role).await;
