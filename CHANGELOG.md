@@ -8,7 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Planning for high-availability clustering with consensus
+- **🏛️ Raft Integrated Storage**: HashiCorp Vault-compatible storage backend ✨ **NEW**
+  - Self-contained storage with no external dependencies
+  - Built-in high availability and automatic failover
+  - Raft consensus algorithm for strong consistency
+  - Multi-node cluster support with leader election
+  - Compatible with all existing APIs (Transit + KV engines)
+  - Production-ready with snapshotting and log compaction
+
+- **🚀 Raft Cluster Management**: Complete cluster operations toolkit
+  - `start-raft.sh` - Single node Raft storage startup
+  - `start-cluster.sh` - Multi-node cluster bootstrap script  
+  - `stop-cluster.sh` - Graceful cluster shutdown
+  - `demo-raft.sh` - Comprehensive Raft storage demonstration
+  - Environment variable configuration support
+  - Automatic data directory and log management
+
+- **📚 Raft Documentation**: Complete operational guides
+  - `docs/RAFT_STORAGE.md` - Comprehensive Raft storage documentation
+  - Architecture diagrams and deployment patterns
+  - Performance tuning and troubleshooting guides
+  - Production deployment recommendations
+  - Security and backup procedures
+
+- Planning for high-availability clustering enhancements
 - Future support for external storage backends (PostgreSQL, etcd, Consul)
 - Advanced authentication providers (LDAP, OIDC, Active Directory)
 - Web UI interface development (v2.0.0 target)
@@ -16,10 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret versioning and rollback capabilities
 
 ### Changed
+- **Storage Abstraction Enhanced**: Pluggable backend architecture
+- **API Services Updated**: Support for Raft backend configuration
+- **Environment Configuration**: Extended for Raft cluster settings
 - Performance optimizations for high-throughput scenarios
 - Enhanced audit logging and SIEM integration
 
 ### Security
+- **Raft Network Security**: TLS support for inter-node communication
+- **Data Encryption**: All Raft data encrypted at rest
+- **Consensus Security**: Authentication between cluster nodes
 - Ongoing security audit and penetration testing preparation
 - Advanced threat detection and monitoring
 

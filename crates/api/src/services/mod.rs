@@ -87,11 +87,90 @@ impl ServiceContainer {
     async fn create_storage_backend(
         config: &ApiConfig,
     ) -> Result<Arc<dyn StorageBackend + Send + Sync>> {
-        // TODO: Create storage backend based on config
-        // For now, create a mock implementation
+        use brankas_storage::{MockStorageBackend, RaftStorageBackend, RaftConfig};
         
-        use brankas_storage::MockStorageBackend;
-        Ok(Arc::new(MockStorageBackend::new()))
+        // Get storage backend type from config or environment
+        let backend_type = std::env::var("BRANKAS_STORAGE_BACKEND")
+            .unwrap_or_else(|_| "memory".to_string());
+        
+        tracing::info!("Initializing storage backend: {}", backend_type);
+        
+        match backend_type.as_str() {
+            "raft" | "integrated" => {
+                // Create Raft configuration
+                let raft_config = RaftConfig {
+                    node_id: std::env::var("BRANKAS_NODE_ID")
+                        .unwrap_or_else(|_| format!("brankas-node-{}", uuid::Uuid::new_v4())),
+                    data_dir: std::env::var("BRANKAS_RAFT_DATA_DIR")
+                        .unwrap_or_else(|_| "./data/raft".to_string())
+                        .into(),
+                    bind_addr: std::env::var("BRANKAS_RAFT_BIND_ADDR")
+                        .unwrap_or_else(|_| "127.0.0.1:8201".to_string()),
+                    advertise_addr: std::env::var("BRANKAS_RAFT_ADVERTISE_ADDR")
+                        .unwrap_or_else(|_| "127.0.0.1:8201".to_string()),
+                    peers: std::env::var("BRANKAS_RAFT_PEERS")
+                        .unwrap_or_else(|_| "".to_string())
+                        .split(',')
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|s| s.trim().to_string())
+                        .collect(),
+                    snapshot_enabled: std::env::var("BRANKAS_RAFT_SNAPSHOT_ENABLED")
+                        .unwrap_or_else(|_| "true".to_string())
+                        .parse()
+                        .unwrap_or(true),
+                    snapshot_interval_secs: std::env::var("BRANKAS_RAFT_SNAPSHOT_INTERVAL")
+                        .unwrap_or_else(|_| "120".to_string())
+                        .parse()
+                        .unwrap_or(120),
+                    log_retention_count: std::env::var("BRANKAS_RAFT_LOG_RETENTION")
+                        .unwrap_or_else(|_| "10000".to_string())
+                        .parse()
+                        .unwrap_or(10000),
+                    performance_multiplier: std::env::var("BRANKAS_RAFT_PERFORMANCE_MULTIPLIER")
+                        .unwrap_or_else(|_| "1".to_string())
+                        .parse()
+                        .unwrap_or(1),
+                };
+                
+                tracing::info!("Raft configuration: {:?}", raft_config);
+                
+                let backend = RaftStorageBackend::new(raft_config).await
+                    .map_err(|e| anyhow::anyhow!("Failed to create Raft storage backend: {}", e))?;
+                
+                // Initialize the Raft cluster
+                backend.initialize_cluster().await
+                    .map_err(|e| anyhow::anyhow!("Failed to initialize Raft cluster: {}", e))?;
+                
+                tracing::info!("Raft integrated storage backend initialized successfully");
+                Ok(Arc::new(backend))
+            }
+            
+            "memory" | "mock" => {
+                tracing::info!("Using in-memory mock storage backend");
+                Ok(Arc::new(MockStorageBackend::new()))
+            }
+            
+            // TODO: Add other backends (PostgreSQL, Redis, File)
+            "postgres" => {
+                tracing::warn!("PostgreSQL backend not yet implemented, falling back to memory");
+                Ok(Arc::new(MockStorageBackend::new()))
+            }
+            
+            "redis" => {
+                tracing::warn!("Redis backend not yet implemented, falling back to memory");
+                Ok(Arc::new(MockStorageBackend::new()))
+            }
+            
+            "file" => {
+                tracing::warn!("File backend not yet implemented, falling back to memory");
+                Ok(Arc::new(MockStorageBackend::new()))
+            }
+            
+            _ => {
+                tracing::warn!("Unknown storage backend '{}', falling back to memory", backend_type);
+                Ok(Arc::new(MockStorageBackend::new()))
+            }
+        }
     }
 }
 

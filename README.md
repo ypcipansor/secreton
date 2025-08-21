@@ -32,6 +32,7 @@ A high-performance, secure secret management and cryptographic transit system bu
 - **Async Architecture**: Built with Tokio for high-concurrency and performance
 - **Memory Safety**: Rust's ownership model eliminates buffer overflows and memory leaks
 - **Compliance Ready**: Architecture supports audit trails and compliance requirements
+- **Raft Integrated Storage**: Self-contained HA storage with consensus ✨ **NEW**
 
 ### API Capabilities
 - **RESTful API**: HTTP/JSON interface with comprehensive endpoints
@@ -39,6 +40,7 @@ A high-performance, secure secret management and cryptographic transit system bu
 - **KV Secrets Engine**: Versioned secret storage with metadata ✅ **COMPLETE**  
 - **CLI Tool**: Full command-line interface for all operations ✅ **COMPLETE**
 - **Health Monitoring**: Built-in health checks and system status ✅ **COMPLETE**
+- **Raft Storage**: HashiCorp Vault-compatible integrated storage ✅ **COMPLETE** ✨ **NEW**
 
 ## 🏗️ Architecture
 
@@ -95,27 +97,59 @@ brankas/
 
 ### Usage Options
 
-**Option 1: HTTP API**
+**Option 1: HTTP API with Memory Storage** 
 ```bash
-# Direct REST API calls
+# Direct REST API calls with default memory backend
+cargo run -p brankas-api --bin api_server
 curl http://127.0.0.1:8200/health
 curl -X POST http://127.0.0.1:8200/v1/transit/keys/my-key
 ```
 
-**Option 2: CLI Tool** ✨ **NEW**
+**Option 2: HTTP API with Raft Storage** ✨ **NEW**
 ```bash
-# Build and use CLI
+# Production-ready integrated storage with HA
+./start-raft.sh
+# or 
+BRANKAS_STORAGE_BACKEND=raft cargo run -p brankas-api --bin api_server
+```
+
+**Option 3: CLI Tool** ✨ **NEW**
+```bash
+# Build and use CLI with any backend
 cargo build -p brankas-cli
 ./target/debug/brankas-cli status
 ./target/debug/brankas-cli transit create-key my-key
 ./target/debug/brankas-cli secret put config --data password=secret
 ```
 
-**Option 3: Demo Scripts** ✨ **NEW**
+**Option 4: Demo Scripts** ✨ **NEW**
 ```bash
 # Run comprehensive demonstrations
-./demo_complete.sh  # HTTP API + both engines
-./demo_cli.sh       # CLI tool complete demo
+./demo_complete.sh    # HTTP API + both engines
+./demo_cli.sh         # CLI tool complete demo  
+./demo-raft.sh        # Raft storage backend demo ✨ **NEW**
+```
+
+### Storage Backend Options ✨ **NEW**
+
+Brankas supports multiple storage backends:
+
+**Memory (Default)** - For development and testing:
+```bash
+export BRANKAS_STORAGE_BACKEND=memory
+cargo run -p brankas-api --bin api_server
+```
+
+**Raft Integrated Storage** - For production HA:
+```bash
+# Single node
+export BRANKAS_STORAGE_BACKEND=raft
+export BRANKAS_NODE_ID=node-1
+cargo run -p brankas-api --bin api_server
+
+# Multi-node cluster
+./start-cluster.sh
+```
 ```
 
 ## 📚 API Documentation
@@ -698,28 +732,37 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🎉 Current Status
 
-**Brankas Vault System v1.2.0 is now COMPLETE!** ✨
+**Brankas Vault System v1.3.0 is now COMPLETE with Raft Storage!** ✨
 
 ✅ **Fully Implemented Features:**
 - **Triple Interface Architecture**: HTTP API + CLI Tool + Demo Scripts
 - **Dual-Engine System**: Transit (encryption) + KV (secrets) engines
+- **Multiple Storage Backends**: Memory (dev) + Raft (production) ✨ **NEW**
+- **Raft Integrated Storage**: HashiCorp Vault-compatible consensus storage ✨ **NEW**
 - **Complete HTTP API server** with Axum framework  
-- **Full-Featured CLI Tool** with clap and reqwest ✨ **NEW**
+- **Full-Featured CLI Tool** with clap and reqwest
 - **Production-Ready Demo Scripts** for automated testing
 - **Transit Engine**: AES-256-GCM encryption with secure key management
-- **KV Secrets Engine**: Versioned secret storage with metadata ✨ **NEW**
+- **KV Secrets Engine**: Versioned secret storage with metadata
+- **High Availability Clustering**: Multi-node Raft clusters ✨ **NEW**
 - **Multiple Crypto Algorithms**: AES-256-GCM and ChaCha20-Poly1305
 - **Comprehensive Security**: Memory-safe async implementation, audit logging
 - **Enterprise Features**: Health monitoring, error handling, performance optimized
-- **Complete Documentation**: CLI Guide, API docs, examples, compliance info
+- **Complete Documentation**: All guides including Raft operations
 
-🎯 **Production Ready** - Both HTTP API and CLI interfaces fully implemented and tested.
+🎯 **Production Ready** - Full HTTP API, CLI, and HA Raft storage implemented and tested.
 
 📚 **Documentation Complete:**
-- ✅ README.md (this file) - comprehensive overview
+- ✅ README.md (this file) - comprehensive overview with Raft info
 - ✅ CLI_GUIDE.md - detailed CLI usage guide  
+- ✅ docs/RAFT_STORAGE.md - complete Raft operations guide ✨ **NEW**
 - ✅ SECURITY.md - security practices and compliance
 - ✅ API documentation with examples
-- ✅ Demo scripts for testing both interfaces
+- ✅ Demo scripts for all storage backends
 
-🚀 **Next Phase**: High availability clustering, additional storage backends, advanced authentication
+🏛️ **Storage Options:**
+- **Memory Backend**: Perfect for development and testing
+- **Raft Backend**: Production-ready with HA, consensus, and automatic failover
+- **Future Backends**: PostgreSQL, Redis, etcd support planned
+
+🚀 **Ready for Production**: Self-contained vault with integrated storage, no external dependencies required!

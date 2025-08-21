@@ -1,11 +1,12 @@
 //! Brankas Storage Abstraction Layer
 //!
 //! Provides unified interface for different storage backends including
-//! PostgreSQL, Redis, and file-based storage.
+//! PostgreSQL, Redis, file-based storage, and Raft integrated storage.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use thiserror::Error;
@@ -13,6 +14,9 @@ use thiserror::Error;
 pub mod backends;
 pub mod models;
 pub mod cache;
+
+// Re-export common backends
+pub use backends::{PostgresBackend, RedisBackend, FileBackend, RaftStorageBackend, RaftConfig};
 
 /// Storage operation errors
 #[derive(Error, Debug)]
@@ -374,5 +378,191 @@ impl Default for PoolSettings {
             idle_timeout_seconds: 600,
             max_lifetime_seconds: 3600,
         }
+    }
+}
+
+/// Simple in-memory mock storage backend for testing and development
+#[derive(Debug, Clone)]
+pub struct MockStorageBackend {
+    data: Arc<std::sync::RwLock<HashMap<String, VaultEntry>>>,
+    id_index: Arc<std::sync::RwLock<HashMap<Uuid, String>>>,
+}
+
+impl MockStorageBackend {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            id_index: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl StorageBackend for MockStorageBackend {
+    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+        let mut data = self.data.write().unwrap();
+        let mut id_index = self.id_index.write().unwrap();
+        
+        data.insert(entry.path.clone(), entry.clone());
+        id_index.insert(entry.id, entry.path.clone());
+        
+        Ok(())
+    }
+    
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+        let id_index = self.id_index.read().unwrap();
+        if let Some(path) = id_index.get(&id) {
+            let data = self.data.read().unwrap();
+            Ok(data.get(path).cloned())
+        } else {
+            Ok(None)
+        }
+    }
+    
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+        let data = self.data.read().unwrap();
+        Ok(data.get(path).cloned())
+    }
+    
+    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+        let mut data = self.data.write().unwrap();
+        if data.contains_key(&entry.path) {
+            data.insert(entry.path.clone(), entry.clone());
+            Ok(())
+        } else {
+            Err(StorageError::NotFound {
+                resource_type: "VaultEntry".to_string(),
+                id: entry.path.clone(),
+            })
+        }
+    }
+    
+    async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+        let mut id_index = self.id_index.write().unwrap();
+        if let Some(path) = id_index.remove(&id) {
+            let mut data = self.data.write().unwrap();
+            data.remove(&path);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+    
+    async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+        let mut data = self.data.write().unwrap();
+        if let Some(entry) = data.remove(path) {
+            let mut id_index = self.id_index.write().unwrap();
+            id_index.remove(&entry.id);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+    
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+        let data = self.data.read().unwrap();
+        let mut results: Vec<VaultEntry> = data.values()
+            .filter(|entry| {
+                // Simple filtering logic
+                if let Some(prefix) = &params.path_prefix {
+                    if !entry.path.starts_with(prefix) {
+                        return false;
+                    }
+                }
+                if let Some(owner) = params.owner_id {
+                    if entry.owner_id != owner {
+                        return false;
+                    }
+                }
+                !entry.is_expired() || params.include_expired
+            })
+            .cloned()
+            .collect();
+        
+        // Apply limit
+        if let Some(limit) = params.limit {
+            results.truncate(limit as usize);
+        }
+        
+        Ok(results)
+    }
+    
+    async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
+        let entries = self.list(params).await?;
+        Ok(entries.len() as u64)
+    }
+    
+    async fn exists(&self, path: &str) -> StorageResult<bool> {
+        let data = self.data.read().unwrap();
+        Ok(data.contains_key(path))
+    }
+    
+    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+        // For mock, just return a no-op transaction
+        Ok(Box::new(MockTransaction))
+    }
+    
+    async fn health_check(&self) -> StorageResult<HealthStatus> {
+        Ok(HealthStatus {
+            is_healthy: true,
+            response_time_ms: 1.0,
+            connections_active: 1,
+            connections_idle: 0,
+            last_error: None,
+            uptime_seconds: 3600,
+        })
+    }
+    
+    async fn get_stats(&self) -> StorageResult<StorageStats> {
+        let data = self.data.read().unwrap();
+        let total_entries = data.len() as u64;
+        let total_size_bytes = data.values()
+            .map(|e| e.encrypted_data.len() as u64)
+            .sum();
+        
+        Ok(StorageStats {
+            total_entries,
+            total_size_bytes,
+            average_entry_size: if total_entries > 0 {
+                total_size_bytes as f64 / total_entries as f64
+            } else {
+                0.0
+            },
+            entries_by_security_level: HashMap::new(),
+            entries_created_today: total_entries,
+            entries_updated_today: 0,
+            expired_entries: 0,
+        })
+    }
+    
+    async fn migrate(&self) -> StorageResult<()> {
+        // Mock migration - nothing to do
+        Ok(())
+    }
+}
+
+/// Mock transaction for testing
+pub struct MockTransaction;
+
+#[async_trait]
+impl StorageTransaction for MockTransaction {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+        Ok(())
+    }
+    
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+        Ok(())
+    }
+    
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
+        Ok(true)
+    }
+    
+    async fn commit(self: Box<Self>) -> StorageResult<()> {
+        Ok(())
+    }
+    
+    async fn rollback(self: Box<Self>) -> StorageResult<()> {
+        Ok(())
     }
 }
