@@ -11,9 +11,9 @@ use axum::{
     Json,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use uuid::Uuid;
 
 use crate::auth::{AuthService, extract_bearer_token, AuthError};
@@ -100,7 +100,7 @@ pub async fn request_id(mut request: Request, next: Next) -> Response {
 
 /// Authentication middleware
 pub async fn auth_middleware(
-    State(state): State<ApiState>,
+    State(_state): State<ApiState>,
     headers: HeaderMap,
     mut request: Request,
     next: Next,
@@ -280,7 +280,7 @@ pub async fn request_size_limit(
 
 /// Audit logging middleware
 pub async fn audit_logging(
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
     let method = request.method().clone();

@@ -17,9 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     print_startup_banner();
     
+    println!("Creating transit engine...");
     // Create transit engine
     let transit_engine = Arc::new(TransitEngine::new());
     
+    println!("Creating API state...");
     // Create API state
     let api_state = ApiState {
         transit: TransitApiState {
@@ -27,18 +29,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     
+    println!("Creating router...");
     // Create router
     let app = create_api_router(api_state);
     
+    println!("Binding to address...");
     // Bind server
     let config = ApiConfig::default();
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     let listener = TcpListener::bind(addr).await?;
     
-    info!("🚀 Brankas API server starting on http://{}", addr);
-    info!("📋 Health check: http://{}/health", addr);
-    info!("📋 Version info: http://{}/version", addr);
-    info!("🔐 Transit API: http://{}/v1/transit", addr);
+    println!("🚀 Brankas API server starting on http://{}", addr);
+    println!("📋 Health check: http://{}/health", addr);
+    println!("📋 Version info: http://{}/version", addr);
+    println!("🔐 Transit API: http://{}/v1/transit", addr);
     
     // Start server
     serve(listener, app)

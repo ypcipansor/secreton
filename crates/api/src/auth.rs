@@ -5,14 +5,12 @@
 
 use serde::{Deserialize, Serialize};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation, Algorithm};
-use std::collections::HashMap;
 use axum::{
-    extract::{Request, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
-use tracing::{info, warn, error, debug};
+use tracing::{warn, error};
 use chrono::{DateTime, Utc, Duration};
 use uuid::Uuid;
 

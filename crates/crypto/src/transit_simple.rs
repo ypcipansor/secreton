@@ -49,8 +49,8 @@ impl TransitKey {
         let mut key_material = vec![0u8; 32]; // 256-bit key
         OsRng.fill_bytes(&mut key_material);
         
-        Ok(TransitKey {
-            name,
+        Ok(Self {
+            name: name.clone(),
             key_type,
             key_material,
             version: 1,
@@ -58,81 +58,20 @@ impl TransitKey {
         })
     }
     
-    pub fn encrypt(&self, plaintext: &[u8], context: Option<&[u8]>) -> CryptoResult<String> {
-        match self.key_type {
-            KeyType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new_from_slice(&self.key_material)
-                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
-                
-                let mut nonce_bytes = [0u8; 12];
-                OsRng.fill_bytes(&mut nonce_bytes);
-                let nonce = Nonce::from_slice(&nonce_bytes);
-                
-                let ciphertext = cipher.encrypt(nonce, plaintext)
-                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
-                
-                // Format: vault:v1:base64(nonce):base64(ciphertext)
-                let mut result = format!("vault:v{}:", self.version);
-                result.push_str(&BASE64.encode(&nonce_bytes));
-                result.push(':');
-                result.push_str(&BASE64.encode(&ciphertext));
-                
-                Ok(result)
-            },
-            KeyType::ChaCha20Poly1305 => {
-                let cipher = ChaCha20Poly1305::new_from_slice(&self.key_material)
-                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
-                
-                let mut nonce_bytes = [0u8; 12];
-                OsRng.fill_bytes(&mut nonce_bytes);
-                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
-                
-                let ciphertext = cipher.encrypt(nonce, plaintext)
-                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
-                
-                let mut result = format!("vault:v{}:", self.version);
-                result.push_str(&BASE64.encode(&nonce_bytes));
-                result.push(':');
-                result.push_str(&BASE64.encode(&ciphertext));
-                
-                Ok(result)
-            },
-        }
+    pub fn name(&self) -> &str {
+        &self.name
     }
     
-    pub fn decrypt(&self, ciphertext: &str, context: Option<&[u8]>) -> CryptoResult<Vec<u8>> {
-        let parts: Vec<&str> = ciphertext.split(':').collect();
-        if parts.len() != 4 || parts[0] != "vault" {
-            return Err(CryptoError::InvalidCiphertext("Invalid format".to_string()));
-        }
-        
-        let nonce_bytes = BASE64.decode(parts[2])
-            .map_err(|e| CryptoError::InvalidCiphertext(e.to_string()))?;
-        let encrypted_bytes = BASE64.decode(parts[3])
-            .map_err(|e| CryptoError::InvalidCiphertext(e.to_string()))?;
-        
-        match self.key_type {
-            KeyType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new_from_slice(&self.key_material)
-                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
-                
-                let nonce = Nonce::from_slice(&nonce_bytes);
-                let plaintext = cipher.decrypt(nonce, encrypted_bytes.as_slice())
-                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
-                
-                Ok(plaintext)
-            },
-            KeyType::ChaCha20Poly1305 => {
-                let cipher = ChaCha20Poly1305::new_from_slice(&self.key_material)
-                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
-                
-                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
-                let plaintext = cipher.decrypt(nonce, encrypted_bytes.as_slice())
-                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
-                
-                Ok(plaintext)
-            },
-        }
+    pub fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.created_at
+    }
+    
+    pub fn key_type(&self) -> &KeyType {
+        &self.key_type
+    }
+    
+    pub fn version(&self) -> u32 {
+        self.version
     }
 }
 
@@ -169,6 +108,84 @@ impl TransitEngine {
         keys.insert(name, transit_key);
         Ok(())
     }
+
+    async fn encrypt_with_key(&self, key: &TransitKey, plaintext: &[u8], _context: Option<&[u8]>) -> CryptoResult<String> {
+        match key.key_type {
+            KeyType::Aes256Gcm => {
+                let cipher = Aes256Gcm::new_from_slice(&key.key_material)
+                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
+                
+                let mut nonce_bytes = [0u8; 12];
+                OsRng.fill_bytes(&mut nonce_bytes);
+                let nonce = Nonce::from_slice(&nonce_bytes);
+                
+                let ciphertext = cipher.encrypt(nonce, plaintext)
+                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
+                
+                // Format: vault:v1:base64(nonce):base64(ciphertext)
+                let mut result = format!("vault:v{}:", key.version);
+                result.push_str(&BASE64.encode(&nonce_bytes));
+                result.push(':');
+                result.push_str(&BASE64.encode(&ciphertext));
+                
+                Ok(result)
+            },
+            KeyType::ChaCha20Poly1305 => {
+                let cipher = ChaCha20Poly1305::new_from_slice(&key.key_material)
+                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
+                
+                let mut nonce_bytes = [0u8; 12];
+                OsRng.fill_bytes(&mut nonce_bytes);
+                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+                
+                let ciphertext = cipher.encrypt(nonce, plaintext)
+                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
+                
+                let mut result = format!("vault:v{}:", key.version);
+                result.push_str(&BASE64.encode(&nonce_bytes));
+                result.push(':');
+                result.push_str(&BASE64.encode(&ciphertext));
+                
+                Ok(result)
+            },
+        }
+    }
+    
+    async fn decrypt_with_key(&self, key: &TransitKey, ciphertext: &str, _context: Option<&[u8]>) -> CryptoResult<Vec<u8>> {
+        // Parse vault format: vault:v1:base64data
+        let parts: Vec<&str> = ciphertext.split(':').collect();
+        if parts.len() != 4 || parts[0] != "vault" {
+            return Err(CryptoError::InvalidCiphertext("Invalid format".to_string()));
+        }
+        
+        let nonce_bytes = BASE64.decode(parts[2])
+            .map_err(|e| CryptoError::InvalidCiphertext(e.to_string()))?;
+        let encrypted_bytes = BASE64.decode(parts[3])
+            .map_err(|e| CryptoError::InvalidCiphertext(e.to_string()))?;
+        
+        match key.key_type {
+            KeyType::Aes256Gcm => {
+                let cipher = Aes256Gcm::new_from_slice(&key.key_material)
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+                
+                let nonce = Nonce::from_slice(&nonce_bytes);
+                let plaintext = cipher.decrypt(nonce, encrypted_bytes.as_slice())
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+                
+                Ok(plaintext)
+            },
+            KeyType::ChaCha20Poly1305 => {
+                let cipher = ChaCha20Poly1305::new_from_slice(&key.key_material)
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+                
+                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+                let plaintext = cipher.decrypt(nonce, encrypted_bytes.as_slice())
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+                
+                Ok(plaintext)
+            },
+        }
+    }
     
     pub async fn encrypt(
         &self,
@@ -181,7 +198,7 @@ impl TransitEngine {
         let key = keys.get(key_name)
             .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
         
-        key.encrypt(plaintext, context)
+        self.encrypt_with_key(key, plaintext, context).await
     }
     
     pub async fn decrypt(
@@ -194,7 +211,7 @@ impl TransitEngine {
         let key = keys.get(key_name)
             .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
         
-        key.decrypt(ciphertext, context)
+        self.decrypt_with_key(key, ciphertext, context).await
     }
     
     pub async fn list_keys(&self) -> Vec<String> {
