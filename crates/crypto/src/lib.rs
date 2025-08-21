@@ -13,12 +13,14 @@ pub mod encryption;
 pub mod hashing;
 pub mod key_derivation;
 pub mod transit_simple;
+pub mod kv_engine;
 pub mod error;
 
 pub use encryption::*;
 pub use hashing::*;
 pub use key_derivation::*;
 pub use transit_simple::*;
+pub use kv_engine::*;
 pub use error::*;
 
 // Re-export transit_simple as transit for compatibility

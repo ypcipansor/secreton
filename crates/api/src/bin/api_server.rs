@@ -5,10 +5,10 @@ use tokio::net::TcpListener;
 use tracing::{info, error};
 
 use brankas_api::{
-    ApiState, ApiConfig, TransitApiState,
+    ApiState, ApiConfig, TransitApiState, KVApiState,
     create_api_router,
 };
-use brankas_crypto::transit_simple::TransitEngine;
+use brankas_crypto::{transit_simple::TransitEngine, KVEngine};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,11 +21,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create transit engine
     let transit_engine = Arc::new(TransitEngine::new());
     
+    println!("Creating KV engine...");
+    // Create KV engine
+    let kv_engine = Arc::new(KVEngine::new());
+    
     println!("Creating API state...");
     // Create API state
     let api_state = ApiState {
         transit: TransitApiState {
             engine: transit_engine,
+        },
+        kv: KVApiState {
+            engine: kv_engine,
         },
     };
     
@@ -43,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📋 Health check: http://{}/health", addr);
     println!("📋 Version info: http://{}/version", addr);
     println!("🔐 Transit API: http://{}/v1/transit", addr);
+    println!("🗄️  KV Secrets API: http://{}/v1/secrets", addr);
     
     // Start server
     serve(listener, app)

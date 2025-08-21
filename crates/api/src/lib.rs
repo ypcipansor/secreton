@@ -11,15 +11,18 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 pub mod transit;
+pub mod kv;
 pub mod auth;
 pub mod middleware;
 
 pub use transit::{TransitApiState, create_transit_router};
+pub use kv::{KVApiState, create_kv_router};
 
 // Simple API state
 #[derive(Clone)]
 pub struct ApiState {
     pub transit: TransitApiState,
+    pub kv: KVApiState,
 }
 
 #[derive(Clone)]
@@ -58,10 +61,11 @@ pub fn create_api_router(state: ApiState) -> Router {
         .route("/health", get(health_check))
         .route("/version", get(get_version))
         
-        // Transit engine endpoints - use correct state
+        // Transit engine endpoints
         .nest("/v1/transit", create_transit_router().with_state(state.transit.clone()))
         
-        .with_state(state)
+        // KV secrets engine endpoints
+        .nest("/v1", create_kv_router(state.kv.clone()))
 }
 
 pub async fn health_check() -> Json<HealthResponse> {
