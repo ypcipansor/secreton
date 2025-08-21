@@ -250,7 +250,7 @@ impl Default for MigrationConfig {
 }
 
 /// Audit configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditConfig {
     /// Enable audit logging
     pub enabled: bool,

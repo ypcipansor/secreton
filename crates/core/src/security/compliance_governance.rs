@@ -9,16 +9,15 @@
 //! - Cross-jurisdictional compliance management
 //! - Automated compliance reporting and dashboards
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
-use tokio::time::{interval, Interval};
-use regex::Regex;
+use tokio::time::interval;
 
 /// Supported compliance frameworks
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -127,7 +126,7 @@ pub struct ComplianceRequirement {
     pub exceptions: Vec<ComplianceException>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ComplianceSeverity {
     Critical,
     High,
@@ -467,12 +466,35 @@ pub struct NotificationSettings {
     pub notification_channels: Vec<String>,
 }
 
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            critical_findings_immediate: true,
+            daily_digest_enabled: true,
+            weekly_reports_enabled: true,
+            compliance_threshold_alerts: 0.9,
+            notification_channels: vec!["email".to_string()],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportingConfig {
     pub executive_report_frequency: Duration,
     pub technical_report_frequency: Duration,
     pub regulatory_report_frequency: Duration,
     pub custom_reports: Vec<CustomReportConfig>,
+}
+
+impl Default for ReportingConfig {
+    fn default() -> Self {
+        Self {
+            executive_report_frequency: Duration::from_secs(86400 * 7), // Weekly
+            technical_report_frequency: Duration::from_secs(86400), // Daily  
+            regulatory_report_frequency: Duration::from_secs(86400 * 30), // Monthly
+            custom_reports: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -493,7 +515,7 @@ pub struct IntegrationConfig {
     pub workflow_automation: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ComplianceMetrics {
     pub total_checks_performed: u64,
     pub compliance_score_history: VecDeque<(DateTime<Utc>, f64)>,
@@ -924,7 +946,7 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Generate remediation steps based on findings
-    fn generate_remediation_steps(&self, requirement: &ComplianceRequirement, findings: &[ComplianceFinding]) -> Vec<RemediationStep> {
+    fn generate_remediation_steps(&self, _requirement: &ComplianceRequirement, findings: &[ComplianceFinding]) -> Vec<RemediationStep> {
         let mut steps = Vec::new();
         let mut step_counter = 1;
 
@@ -1187,8 +1209,8 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Start continuous compliance monitoring
-    pub async fn start_continuous_monitoring(&self) {
-        let engine = Arc::new(self);
+    pub async fn start_continuous_monitoring(self: Arc<Self>) {
+        let engine = self;
         let check_frequency = engine.config.default_check_frequency;
 
         tokio::spawn(async move {

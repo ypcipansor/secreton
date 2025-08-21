@@ -10,9 +10,32 @@ use std::collections::HashMap;
 pub mod audit;
 pub mod error;
 pub mod types;
+pub mod security;
+pub mod api;
 
 pub use error::{CoreError};
 pub use audit::{AuditEntry, AuditLogger, AuditStorage};
+pub use security::{
+    // Core Security Components
+    AdvancedSecurityConfig,
+    // Entropy & Randomness
+    EntropyAugmentationEngine, EntropySource, EntropyQuality,
+    // HSM Integration
+    HsmManager, HsmProvider,
+    // Audit Systems
+    AdvancedAuditSystem, AuditEvent, ComplianceReport,
+    // Zero Trust Architecture
+    ZeroTrustEngine,
+    // Advanced MFA
+    AdvancedMfaEngine, MfaChallengeType, MfaAuthResult,
+    // Compliance & Governance
+    ComplianceGovernanceEngine, ComplianceFramework, ComplianceRequirement,
+    // Post-Quantum Cryptography
+    QuantumSafeCryptoEngine, PostQuantumAlgorithm, QuantumSecurityLevel,
+    // Threat Intelligence
+    ThreatIntelligenceEngine, ThreatIndicator, ThreatDetection
+};
+pub use api::{SecurityAPI, start_security_server};
 pub use types::{Version, HealthStatus, TimeRange, Pagination, Environment};
 
 /// Security classification levels

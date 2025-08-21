@@ -11,23 +11,34 @@
 //! - Geographic and network-based risk assessment
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use sha2::{Sha256, Digest};
+use sha2::Sha256;
 use hmac::{Hmac, Mac};
 use base32;
+use hex;
+use base64::{Engine as _, engine::general_purpose};
 use qrcode::QrCode;
 use rand::{thread_rng, Rng};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// MFA Risk levels for adaptive authentication
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 /// MFA challenge types
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MfaChallengeType {
     /// Time-based One-Time Password
     Totp {
@@ -120,6 +131,26 @@ pub struct KeystrokeProfile {
     pub confidence_score: f64,
 }
 
+impl PartialEq for KeystrokeProfile {
+    fn eq(&self, other: &Self) -> bool {
+        // Use epsilon comparison for f64 values
+        const EPSILON: f64 = 1e-10;
+        
+        self.dwell_times.len() == other.dwell_times.len() &&
+        self.flight_times.len() == other.flight_times.len() &&
+        self.typing_rhythm.len() == other.typing_rhythm.len() &&
+        self.dwell_times.iter().zip(&other.dwell_times).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        self.flight_times.iter().zip(&other.flight_times).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        self.typing_rhythm.iter().zip(&other.typing_rhythm).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        (self.confidence_score - other.confidence_score).abs() < EPSILON &&
+        match (&self.pressure_patterns, &other.pressure_patterns) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < EPSILON),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MouseProfile {
     pub movement_velocity: Vec<f64>,
@@ -127,6 +158,22 @@ pub struct MouseProfile {
     pub click_patterns: Vec<f64>,
     pub scroll_behavior: Vec<f64>,
     pub confidence_score: f64,
+}
+
+impl PartialEq for MouseProfile {
+    fn eq(&self, other: &Self) -> bool {
+        const EPSILON: f64 = 1e-10;
+        
+        self.movement_velocity.len() == other.movement_velocity.len() &&
+        self.acceleration_patterns.len() == other.acceleration_patterns.len() &&
+        self.click_patterns.len() == other.click_patterns.len() &&
+        self.scroll_behavior.len() == other.scroll_behavior.len() &&
+        self.movement_velocity.iter().zip(&other.movement_velocity).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        self.acceleration_patterns.iter().zip(&other.acceleration_patterns).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        self.click_patterns.iter().zip(&other.click_patterns).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        self.scroll_behavior.iter().zip(&other.scroll_behavior).all(|(a, b)| (a - b).abs() < EPSILON) &&
+        (self.confidence_score - other.confidence_score).abs() < EPSILON
+    }
 }
 
 /// MFA authentication result
@@ -193,7 +240,7 @@ pub struct MfaChallenge {
     pub context: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ChallengeState {
     Pending,
     Verified,
@@ -348,9 +395,11 @@ impl MfaMethod for TotpMethod {
 
 impl TotpMethod {
     fn generate_secret(&self) -> String {
-        let mut rng = thread_rng();
-        let secret: Vec<u8> = (0..20).map(|_| rng.gen()).collect();
-        base32::encode(base32::Alphabet::RFC4648 { padding: false }, &secret)
+        // Generate 20 random bytes for TOTP secret
+        let mut secret = [0u8; 20];
+        let rng = ring::rand::SystemRandom::new();
+        ring::rand::SecureRandom::fill(&rng, &mut secret).expect("Failed to generate random secret");
+        base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &secret)
     }
 
     fn generate_totp_code(&self, secret: &str, algorithm: &TotpAlgorithm, digits: u8, period: u32) -> Result<String, MfaError> {
@@ -364,7 +413,7 @@ impl TotpMethod {
     }
 
     fn generate_hotp_code(&self, secret: &str, counter: u64, algorithm: &TotpAlgorithm, digits: u8) -> Result<String, MfaError> {
-        let secret_bytes = base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret)
+        let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
             .ok_or_else(|| MfaError::OtpGenerationFailed { reason: "Invalid secret".to_string() })?;
         
         let counter_bytes = counter.to_be_bytes();
@@ -578,9 +627,10 @@ impl MfaMethod for HardwareKeyMethod {
     async fn create_challenge(&self, user_id: &str, method: &MfaChallengeType, context: &HashMap<String, String>) -> Result<MfaChallenge, MfaError> {
         if let MfaChallengeType::HardwareKey { .. } = method {
             // Generate challenge data for hardware key
-            let mut rng = thread_rng();
-            let challenge_bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
-            let challenge_b64 = base64::encode(&challenge_bytes);
+            let mut challenge_bytes = [0u8; 32];
+            let rng = ring::rand::SystemRandom::new();
+            ring::rand::SecureRandom::fill(&rng, &mut challenge_bytes).expect("Failed to generate challenge");
+            let challenge_b64 = general_purpose::STANDARD.encode(&challenge_bytes);
             
             let mut challenge_context = context.clone();
             challenge_context.insert("challenge_data".to_string(), challenge_b64);
@@ -768,7 +818,7 @@ impl AdvancedMfaEngine {
         let method = {
             let methods = self.methods.read().unwrap();
             methods.get(&method_name).cloned()
-                .ok_or_else(|| MfaError::MethodNotEnrolled { method: method_name })?
+                .ok_or_else(|| MfaError::MethodNotEnrolled { method: method_name.clone() })?
         };
 
         let mut challenge = method.create_challenge(user_id, &mfa_method, &context).await?;
@@ -828,7 +878,7 @@ impl AdvancedMfaEngine {
         // Update challenge attempt count
         {
             let mut active_challenges = self.active_challenges.write().unwrap();
-            if let Some(mut stored_challenge) = active_challenges.get_mut(&challenge_id) {
+            if let Some(stored_challenge) = active_challenges.get_mut(&challenge_id) {
                 stored_challenge.attempts += 1;
                 if result.success {
                     stored_challenge.state = ChallengeState::Verified;

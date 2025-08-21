@@ -11,14 +11,32 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
+use tracing::{info, error};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use rand::{RngCore, CryptoRng};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use chrono::{DateTime, Utc, Datelike};
+use rand::RngCore;
+
+/// Base64 serialization module for secure data
+mod base64_serde {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        STANDARD.decode(s).map_err(serde::de::Error::custom)
+    }
+}
 
 /// Post-quantum cryptographic algorithms
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,15 +65,15 @@ pub enum PostQuantumAlgorithm {
     
     /// Alternative Round 4 Candidates
     Bike,
-    Classic_McEliece,
+    ClassicMcEliece,
     HQC,
     SIKE, // Note: Broken but kept for compatibility
     
     /// Hybrid Algorithms (Classical + Post-Quantum)
-    HybridRSA_Kyber768,
-    HybridECDSA_Dilithium3,
-    HybridECDH_Kyber1024,
-    HybridAES_Kyber512,
+    HybridRsaKyber768,
+    HybridEcdsaDilithium3,
+    HybridEcdhKyber1024,
+    HybridAesKyber512,
     
     /// Custom implementations
     Custom(String),
@@ -72,14 +90,28 @@ pub enum QuantumSecurityLevel {
     Level5 = 256,
 }
 
+/// Secure container for private key material
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurePrivateKey {
+    #[serde(with = "base64_serde")]
+    pub key_material: Vec<u8>,
+}
+
+impl Drop for SecurePrivateKey {
+    fn drop(&mut self) {
+        // Zero out key material on drop for security
+        self.key_material.fill(0);
+    }
+}
+
 /// Post-quantum key pair
-#[derive(Debug, Clone, Serialize, Deserialize, ZeroizeOnDrop)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostQuantumKeyPair {
     pub algorithm: PostQuantumAlgorithm,
     pub security_level: QuantumSecurityLevel,
     pub public_key: Vec<u8>,
     #[serde(skip_serializing)]
-    pub private_key: Vec<u8>,
+    pub private_key: SecurePrivateKey,
     pub key_id: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
@@ -354,7 +386,7 @@ pub struct KeyRotationPolicy {
     pub quantum_threat_rotation: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct QuantumCryptoMetrics {
     pub operations_performed: HashMap<String, u64>,
     pub key_generations: u64,
@@ -744,10 +776,10 @@ impl QuantumSafeCryptoEngine {
             PostQuantumAlgorithm::Falcon512 |
             PostQuantumAlgorithm::Falcon1024 => false, // Post-quantum algorithms
             
-            PostQuantumAlgorithm::HybridRSA_Kyber768 |
-            PostQuantumAlgorithm::HybridECDSA_Dilithium3 |
-            PostQuantumAlgorithm::HybridECDH_Kyber1024 |
-            PostQuantumAlgorithm::HybridAES_Kyber512 => false, // Hybrid provides quantum resistance
+            PostQuantumAlgorithm::HybridRsaKyber768 |
+            PostQuantumAlgorithm::HybridEcdsaDilithium3 |
+            PostQuantumAlgorithm::HybridEcdhKyber1024 |
+            PostQuantumAlgorithm::HybridAesKyber512 => false, // Hybrid provides quantum resistance
             
             _ => true, // Conservative approach for unknown algorithms
         }
@@ -797,13 +829,13 @@ impl QuantumSafeCryptoEngine {
         for algorithm in vulnerable_algorithms {
             let (replacement, priority, effort) = match algorithm.as_str() {
                 "RSA-2048" | "RSA-3072" | "RSA-4096" => {
-                    (PostQuantumAlgorithm::HybridRSA_Kyber768, MigrationPriority::High, Duration::from_secs(86400 * 30))
+                    (PostQuantumAlgorithm::HybridRsaKyber768, MigrationPriority::High, Duration::from_secs(86400 * 30))
                 }
                 "ECDSA" | "ECDH" => {
-                    (PostQuantumAlgorithm::HybridECDSA_Dilithium3, MigrationPriority::High, Duration::from_secs(86400 * 45))
+                    (PostQuantumAlgorithm::HybridEcdsaDilithium3, MigrationPriority::High, Duration::from_secs(86400 * 45))
                 }
                 "AES-128" => {
-                    (PostQuantumAlgorithm::HybridAES_Kyber512, MigrationPriority::Medium, Duration::from_secs(86400 * 60))
+                    (PostQuantumAlgorithm::HybridAesKyber512, MigrationPriority::Medium, Duration::from_secs(86400 * 60))
                 }
                 _ => {
                     (PostQuantumAlgorithm::Kyber768, MigrationPriority::Medium, Duration::from_secs(86400 * 90))
@@ -916,8 +948,8 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Start continuous threat assessment
-    pub async fn start_threat_monitoring(&self) {
-        let engine = Arc::new(self);
+    pub fn start_threat_monitoring(self: Arc<Self>) {
+        let engine = Arc::clone(&self);
         let frequency = engine.config.threat_assessment_frequency;
 
         tokio::spawn(async move {
@@ -946,7 +978,10 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         // Mock key generation
         let mut rng = rand::thread_rng();
         let public_key = (0..1024).map(|_| rng.next_u32() as u8).collect();
-        let private_key = (0..2048).map(|_| rng.next_u32() as u8).collect();
+        let private_key_material: Vec<u8> = (0..2048).map(|_| rng.next_u32() as u8).collect();
+        let private_key = SecurePrivateKey {
+            key_material: private_key_material,
+        };
         
         Ok(PostQuantumKeyPair {
             algorithm: algorithm.clone(),
@@ -1041,8 +1076,8 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
             PostQuantumAlgorithm::Dilithium2,
             PostQuantumAlgorithm::Dilithium3,
             PostQuantumAlgorithm::Dilithium5,
-            PostQuantumAlgorithm::HybridRSA_Kyber768,
-            PostQuantumAlgorithm::HybridECDSA_Dilithium3,
+            PostQuantumAlgorithm::HybridRsaKyber768,
+            PostQuantumAlgorithm::HybridEcdsaDilithium3,
         ]
     }
 
@@ -1188,7 +1223,7 @@ mod tests {
         // Post-quantum algorithms should not be vulnerable
         assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Kyber768));
         assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Dilithium3));
-        assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::HybridRSA_Kyber768));
+        assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::HybridRsaKyber768));
         
         // Custom algorithms should be considered vulnerable by default
         assert!(engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Custom("RSA-2048".to_string())));

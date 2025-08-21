@@ -12,15 +12,13 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
-use tokio::time::{interval, Interval};
-use regex::Regex;
-use sha2::{Sha256, Digest};
+use tokio::time::interval;
 
 /// Threat intelligence sources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -134,7 +132,7 @@ pub enum ConfidenceLevel {
     VeryHigh = 95,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ThreatSeverity {
     Info = 1,
     Low = 2,
@@ -616,7 +614,7 @@ pub struct AlertSuppression {
     pub grouping_criteria: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ThreatIntelMetrics {
     pub indicators_processed: u64,
     pub detections_generated: u64,
