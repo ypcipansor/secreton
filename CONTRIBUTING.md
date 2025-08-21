@@ -1,99 +1,203 @@
 # Contributing to Brankas Security Vault System
 
-Thank you for your interest in contributing to Brankas! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Brankas! This document provides comprehensive guidelines for contributing to our security-focused vault system.
 
-## Table of Contents
+## 🎯 Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Development Environment](#development-environment)
+- [Architecture Overview](#architecture-overview)
 - [Contributing Process](#contributing-process)
 - [Code Standards](#code-standards)
 - [Security Guidelines](#security-guidelines)
-- [Testing](#testing)
+- [Testing Requirements](#testing-requirements)
 - [Documentation](#documentation)
 - [Commit Guidelines](#commit-guidelines)
 - [Pull Request Process](#pull-request-process)
 - [Review Process](#review-process)
-- [Release Process](#release-process)
+- [Security Reporting](#security-reporting)
 
-## Code of Conduct
+## 📜 Code of Conduct
 
 This project adheres to a professional code of conduct. By participating, you agree to:
 
-- Be respectful and inclusive in all interactions
-- Focus on constructive feedback and collaboration  
-- Prioritize security and quality in all contributions
-- Respect intellectual property and licensing terms
-- Report security issues responsibly through proper channels
+- **Be respectful and inclusive** in all interactions
+- **Focus on constructive feedback** and collaboration  
+- **Prioritize security and quality** in all contributions
+- **Respect intellectual property** and licensing terms
+- **Report security issues responsibly** through proper channels
+- **Follow banking-grade security practices**
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Rust**: 1.70+ (latest stable recommended)
-- **Git**: For version control
-- **OpenSSL**: Development libraries (`libssl-dev` on Ubuntu)
-- **SQLite**: For storage backend testing
-- **Docker**: For containerized development (optional)
+**Required Tools:**
+- **Rust 1.70+**: Latest stable recommended (`rustup update`)
+- **Cargo**: Package manager (comes with Rust)
+- **Git**: Version control system
+- **OpenSSL**: Development libraries (`libssl-dev` on Ubuntu, `openssl-devel` on RHEL)
 
-### Initial Setup
+**Optional Tools:**
+- **Docker**: For containerized development
+- **SQLite3**: For local storage backend testing
+- **Postman/curl**: For API testing
+- **jq**: JSON processing for testing scripts
 
-1. **Fork the repository** on your platform
-2. **Clone your fork**:
+### Quick Setup
+
+1. **Fork and Clone**:
    ```bash
    git clone https://github.com/your-username/brankas.git
    cd brankas
    ```
-3. **Add upstream remote**:
+
+2. **Install Dependencies**:
    ```bash
-   git remote add upstream https://github.com/brankas/security-vault.git
-   ```
-4. **Install dependencies**:
-   ```bash
-   cargo build
+   # Ubuntu/Debian
+   sudo apt update && sudo apt install build-essential libssl-dev pkg-config
+   
+   # RHEL/CentOS/Fedora  
+   sudo dnf install gcc openssl-devel pkg-config
+   
+   # macOS
+   brew install openssl pkg-config
    ```
 
-## Development Environment
+3. **Build and Test**:
+   ```bash
+   cargo build --workspace
+   cargo test --workspace
+   ./demo_api.sh  # Test HTTP API
+   ./demo_cli.sh  # Test CLI Tool
+   ```
+
+## 🏗️ Architecture Overview
+
+Understanding Brankas architecture is crucial for effective contributions:
+
+### System Components
+
+```
+brankas/
+├── crates/
+│   ├── core/          # Core types and traits
+│   ├── crypto/        # Cryptographic implementations  
+│   ├── api/           # HTTP API server (Axum-based)
+│   ├── storage/       # Storage backends
+│   ├── cli/           # Command-line interface ✨ NEW
+│   └── agent/         # Future: HA agent
+├── config/            # Configuration files
+├── docs/              # Documentation
+├── examples/          # Code examples
+├── scripts/           # Utility scripts
+└── tests/             # Integration tests
+```
+
+### Key Architecture Principles
+
+### Development Workflow
+
+1. **Create Feature Branch**:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Development Environment**:
+   ```bash
+   # Set environment for development
+   export RUST_LOG=debug
+   export RUST_BACKTRACE=1
+   export BRANKAS_LOG_LEVEL=debug
+   ```
+
+3. **Build and Test**:
+   ```bash
+   # Full workspace build
+   cargo build --workspace
+   
+   # Run all tests
+   cargo test --workspace
+   
+   # Run specific crate tests
+   cargo test -p brankas-core
+   cargo test -p brankas-cli
+   
+   # Integration tests
+   cargo test --test integration
+   ```
+
+4. **Code Quality**:
+   ```bash
+   # Format code (required)
+   cargo fmt --all
+   
+   # Lint code (required)
+   cargo clippy --workspace --all-targets -- -D warnings
+   
+   # Security audit
+   cargo audit
+   ```
+
+## 🧰 Development Environment
 
 ### Recommended IDE Setup
 
-- **VS Code** with extensions:
-  - `rust-analyzer`: Rust language support
-  - `CodeLLDB`: Debugging support
-  - `Better TOML`: Configuration file support
-  - `GitLens`: Git integration
+**VS Code Extensions:**
+- `rust-analyzer`: Rust language support with IntelliSense
+- `CodeLLDB`: Debugging support for Rust
+- `Better TOML`: Configuration file highlighting
+- `GitLens`: Advanced Git integration
+- `Thunder Client`: API testing (alternative to Postman)
+
+**Alternative IDEs:**
+- **IntelliJ IDEA**: With Rust plugin
+- **Neovim/Vim**: With rust-analyzer LSP
+- **Emacs**: With rust-mode and LSP support
 
 ### Environment Configuration
 
-Create `.env` in project root:
+Create development configuration:
+
 ```bash
+# Create .env file for development
+cat > .env << EOF
 # Development configuration
 BRANKAS_HOST=127.0.0.1
 BRANKAS_PORT=8200
 BRANKAS_LOG_LEVEL=debug
-RUST_LOG=debug
-RUST_BACKTRACE=1
+RUST_LOG=brankas=debug,tower_http=debug
+RUST_BACKTRACE=full
 
-# Testing
+# Testing settings
 BRANKAS_TEST_MODE=true
 BRANKAS_STORAGE_BACKEND=memory
+
+# Security (development only)
+BRANKAS_TLS_ENABLED=false
+BRANKAS_AUTH_DISABLED=true  # Only for development!
+EOF
 ```
 
-### Build and Run
+### Build Targets
 
 ```bash
-# Build all crates
-cargo build
+# Build specific components
+cargo build -p brankas-core      # Core library
+cargo build -p brankas-crypto    # Crypto engine
+cargo build -p brankas-api       # HTTP API server
+cargo build -p brankas-cli       # CLI tool
+cargo build -p brankas-storage   # Storage backends
 
-# Run API server
-cargo run -p brankas-api --bin api_server
+# Build with features
+cargo build --features sqlite    # SQLite storage backend
+cargo build --features postgres  # PostgreSQL backend
+cargo build --all-features      # All available features
 
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
+# Release builds
+cargo build --release --workspace
+```
 
 # Lint code
 cargo clippy
