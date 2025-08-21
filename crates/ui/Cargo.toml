@@ -1,0 +1,11 @@
+[package]
+name = "brankas-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Web UI for Brankas vault system"
+
+[dependencies]
+brankas-core.workspace = true
+serde.workspace = true

@@ -1,3 +1,22 @@
+# Security & Compliance
+- Zero Trust, memory-only, audit immutable, MFA, policy granular
+- Mengikuti standar: PCI DSS, ISO 27001, NIST SP 800-53, OJK/BI
+- Lihat `SECURITY.md` dan `docs/COMPLIANCE.md` untuk checklist dan mapping compliance
+- Contoh konfigurasi TLS/mTLS: `docs/TLS_EXAMPLE.md`
+
+# CI/CD Security
+- Pipeline otomatis: audit dependency, static analysis, test, format
+- Lihat `.github/workflows/security.yml`
+
+# Fitur Utama
+- Memory-only secrets engine (impossible to leak to disk)
+- Policy & MFA enforcement di semua operasi
+- Audit log immutable, siap integrasi SIEM
+- Envelope encryption & Shamir’s Secret Sharing
+
+# Catatan
+- Tidak ada sistem yang benar-benar impossible to hack, tapi Brankas menekan risiko ke level minimum sesuai standar internasional dan perbankan.
+- Lakukan security review eksternal dan update checklist secara berkala.
 # Brankas Adhyaksa
 
 A secure secret management system inspired by HashiCorp Vault, built with Rust and Axum.

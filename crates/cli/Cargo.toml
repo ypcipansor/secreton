@@ -1,0 +1,11 @@
+[package]
+name = "brankas-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "CLI for Brankas vault system"
+
+[dependencies]
+brankas-core.workspace = true
+serde.workspace = true

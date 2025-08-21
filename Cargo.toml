@@ -1,108 +1,150 @@
-[package]
-name = "brankas-adhyaksa"
-version = "0.3.0"
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/agent", 
+    "crates/ui",
+    "crates/crypto",
+    "crates/storage",
+    "crates/api",
+    "crates/cli"
+]
+
+[workspace.package]
+version = "1.0.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
-description = "Secure secret management system"
-repository = "https://github.com/yourusername/brankas-adhyaksa"
-license = "MIT OR Apache-2.0"
-readme = "README.md"
+authors = ["Brankas Security Team <security@brankas.io>"]
+license = "Apache-2.0"
+repository = "https://github.com/brankas/security-vault"
+homepage = "https://brankas.io"
+description = "Advanced Security Vault System with Quantum-Safe Cryptography"
+keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
+categories = ["cryptography", "authentication", "security-tools"]
+rust-version = "1.70"
 
-[features]
-default = ["sqlite"]
-sqlite = ["sqlx/sqlite"]
-postgres = ["sqlx/postgres"]
-
-[dependencies]
-# Web framework
-axum = { version = "0.7", features = ["macros", "ws"] }
-tokio = { version = "1.36", features = ["full", "rt-multi-thread", "time", "fs"] }
-tower = { version = "0.5", features = ["util", "timeout", "load-shed", "limit"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-full", "fs"] }
-hyper = { version = "1.0", features = ["server", "http1", "http2"] }
-
-# Async
-async-trait = "0.1"
-futures = "0.3"
-
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "migrate", "chrono", "json"] }
-
-# Security / Cryptography
-aes-gcm = { version = "0.10", features = ["aes"] }
-argon2 = { version = "0.5", features = ["std"] }
-bcrypt = "0.15"
-hmac = { version = "0.12", features = ["std"] }
-pbkdf2 = "0.12"
-rand = { version = "0.8", features = ["std"] }
-ring = "0.17"
-rsa = { version = "0.9", features = ["sha2"] }
-sha2 = "0.10"
-sha-1 = { version = "0.10", features = ["std"] }
-base32 = "0.4"
-base64 = "0.21"
-totp-rs = { version = "5.7.0", features = ["otpauth"] }
-hex = "0.4"
-
-# JWT and Authentication
-jsonwebtoken = "9.2"
-
-# Serialization
+[workspace.dependencies]
+# Core crate dependencies
+brankas-core = { path = "crates/core" }
+brankas-crypto = { path = "crates/crypto" }
+brankas-storage = { path = "crates/storage" }
+brankas-api = { path = "crates/api" }
+# Core dependencies
+tokio = { version = "1.35", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_with = "3.0"
-toml = "0.8"
-
-# Configuration
-config = { version = "0.13", features = ["yaml"] }
-dotenv = "0.15"
-
-# Utilities & Logging
 anyhow = "1.0"
 thiserror = "1.0"
-log = "0.4"
-tracing = { version = "0.1", features = ["log"] }
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.4", features = ["v4", "serde"] }
-once_cell = "1.19"
-lazy_static = "1.4"
-dashmap = { version = "5.5", features = ["raw-api"] }
-parking_lot = "0.12"
+uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-urlencoding = "2.1"
+
+# Async runtime
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
+
+# Cryptography
+ring = "0.17"
+rustls = "0.22"
+rustls-webpki = "0.102"
+aes-gcm = "0.10"
+aes = "0.8"
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+sha2 = "0.10"
+sha3 = "0.10"
+blake3 = "1.5"
+hmac = "0.12"
+pbkdf2 = "0.12"
+hkdf = "0.12"
+scrypt = "0.11"
+hex = "0.4"
+rand = "0.8"
+
+# RustCrypto elliptic curves
+p256 = "0.13"
+p384 = "0.13"
+k256 = "0.13"
+x25519-dalek = "2.0"
+ed25519-dalek = "2.1"
+rsa = "0.9"
+
+# Cryptographic traits and utilities
+digest = "0.10"
+signature = "2.2"
+elliptic-curve = "0.13"
+generic-array = "0.14"
+subtle = "2.6"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Post-quantum cryptography (experimental/deprecated - not ready for production)
+# kyber = "0.1"
+# dilithium = "0.2.0-alpha.3"  
+# falcon = "0.5"
+# sphincs-plus = "0.2"
+
+# Network and HTTP
+axum = { version = "0.7", features = ["macros", "multipart", "json", "tracing"] }
+hyper = { version = "1.0", features = ["full"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+tonic = { version = "0.10", features = ["tls"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression"] }
+prost = "0.12"
 
-# Monitoring and Metrics
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Configuration
+toml = "0.8"
+config = "0.14"
+clap = { version = "4.4", features = ["derive"] }
+
+# Metrics and monitoring
 prometheus = "0.13"
-axum-prometheus = "0.5"
-utoipa = { version = "5.4", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+opentelemetry = "0.21"
+opentelemetry-jaeger = "0.20"
 
-# Clustering / Shamir / Raft
-bc-shamir = "0.8"
-openraft = { version = "0.8", features = ["serde"] }
+# Security utilities
+zeroize = { version = "1.7", features = ["zeroize_derive"] }
+secrecy = { version = "0.8", features = ["serde"] }
+constant_time_eq = "0.3"
 
-# WASM (optional/extensions)
-wasmtime = "14.0"
+# Serialization formats
+bincode = "1.3"
+rmp-serde = "1.1"
+cbor4ii = "0.3"
+base64 = "0.22"
+num_cpus = "1.16"
 
-# Cloud Integration (optional)
-aws-config = { version = "1.1", optional = true }
-aws-sdk-iam = { version = "1.14", optional = true }
-
-# Authentication (optional)
-ldap3 = { version = "0.11", optional = true }
-openidconnect = { version = "3.4", optional = true }
-
-glob = "0.3"
-
-[dev-dependencies]
-tokio-test = "0.4"
+# Development dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
 wiremock = "0.5"
-tempfile = "3.3"
-mockall = { version = "0.11", features = [] }
-mockall_derive = "0.11"
-url = { version = "2.4", features = ["serde"] }
-assert_matches = "1.5"
 
-[build-dependencies]
-vergen = { version = "8.0", features = ["build", "git"] }
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+inherits = "release"
+debug = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+incremental = true
+
+# Security-focused profile for maximum performance
+[profile.security]
+inherits = "release" 
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = true

@@ -1,0 +1,40 @@
+[package]
+name = "brankas-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Secure storage backend for Brankas vault system"
+keywords = ["storage", "database", "vault", "security"]
+
+[dependencies]
+# Core dependencies
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+
+# Database
+sqlx.workspace = true
+redis.workspace = true
+
+# Cryptography
+brankas-crypto = { path = "../crypto" }
+zeroize.workspace = true
+secrecy.workspace = true
+
+# Configuration
+toml.workspace = true
+
+# Utilities
+bincode.workspace = true
+rmp-serde.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true

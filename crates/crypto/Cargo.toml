@@ -1,0 +1,63 @@
+[package]
+name = "brankas-crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Cryptographic primitives and quantum-safe algorithms for Brankas"
+keywords = ["cryptography", "quantum-safe", "post-quantum"]
+
+[dependencies]
+# Core dependencies
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+# Cryptographic dependencies - RustCrypto suite
+ring.workspace = true
+aes.workspace = true
+aes-gcm.workspace = true
+chacha20poly1305.workspace = true
+argon2.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+blake3.workspace = true
+hmac.workspace = true
+pbkdf2.workspace = true
+hkdf.workspace = true
+scrypt.workspace = true
+hex.workspace = true
+rand.workspace = true
+
+# Elliptic curve cryptography
+p256.workspace = true
+p384.workspace = true
+k256.workspace = true
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+rsa.workspace = true
+
+# Cryptographic traits and utilities
+digest.workspace = true
+signature.workspace = true
+elliptic-curve.workspace = true
+generic-array.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+
+# Additional utilities
+bincode.workspace = true
+rand_core = { version = "0.6", features = ["getrandom"] }
+base64.workspace = true
+
+# Async utilities
+async-trait.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
