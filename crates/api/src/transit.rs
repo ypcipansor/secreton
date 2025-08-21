@@ -32,10 +32,34 @@ pub struct CreateKeyResponse {
     pub message: String,
 }
 
+#[derive(Deserialize)]
+pub struct EncryptRequest {
+    pub plaintext: String, // base64 encoded
+    pub context: Option<String>, // base64 encoded
+}
+
+#[derive(Serialize)]
+pub struct EncryptResponse {
+    pub ciphertext: String,
+}
+
+#[derive(Deserialize)]
+pub struct DecryptRequest {
+    pub ciphertext: String,
+    pub context: Option<String>, // base64 encoded
+}
+
+#[derive(Serialize)]
+pub struct DecryptResponse {
+    pub plaintext: String, // base64 encoded
+}
+
 pub fn create_transit_router() -> Router<TransitApiState> {
     Router::new()
         .route("/keys", get(list_keys))
         .route("/keys/:key_name", post(create_key))
+        .route("/encrypt/:key_name", post(encrypt_data))
+        .route("/decrypt/:key_name", post(decrypt_data))
 }
 
 pub async fn list_keys(
@@ -60,6 +84,77 @@ pub async fn create_key(
         },
         Err(e) => {
             warn!("Failed to create key {}: {:?}", key_name, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn encrypt_data(
+    State(state): State<TransitApiState>,
+    Path(key_name): Path<String>,
+    Json(request): Json<EncryptRequest>,
+) -> Result<Json<EncryptResponse>, StatusCode> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    
+    // Decode base64 plaintext
+    let plaintext_bytes = match BASE64.decode(&request.plaintext) {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+    
+    // Decode context if provided
+    let context = if let Some(ctx) = request.context {
+        match BASE64.decode(&ctx) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => return Err(StatusCode::BAD_REQUEST),
+        }
+    } else {
+        None
+    };
+    
+    match state.engine.encrypt(&key_name, &plaintext_bytes, context.as_deref(), None).await {
+        Ok(ciphertext) => {
+            info!("Encrypted data with key: {}", key_name);
+            Ok(Json(EncryptResponse {
+                ciphertext,
+            }))
+        },
+        Err(e) => {
+            warn!("Failed to encrypt with key {}: {:?}", key_name, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn decrypt_data(
+    State(state): State<TransitApiState>,
+    Path(key_name): Path<String>,
+    Json(request): Json<DecryptRequest>,
+) -> Result<Json<DecryptResponse>, StatusCode> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    
+    // Decode context if provided
+    let context = if let Some(ctx) = request.context {
+        match BASE64.decode(&ctx) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => return Err(StatusCode::BAD_REQUEST),
+        }
+    } else {
+        None
+    };
+    
+    match state.engine.decrypt(&key_name, &request.ciphertext, context.as_deref()).await {
+        Ok(plaintext_bytes) => {
+            info!("Decrypted data with key: {}", key_name);
+            let plaintext_b64 = BASE64.encode(&plaintext_bytes);
+            Ok(Json(DecryptResponse {
+                plaintext: plaintext_b64,
+            }))
+        },
+        Err(e) => {
+            warn!("Failed to decrypt with key {}: {:?}", key_name, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }

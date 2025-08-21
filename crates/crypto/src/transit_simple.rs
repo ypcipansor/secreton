@@ -194,11 +194,14 @@ impl TransitEngine {
         context: Option<&[u8]>,
         _key_version: Option<u32>,
     ) -> CryptoResult<String> {
-        let keys = self.keys.read().unwrap();
-        let key = keys.get(key_name)
-            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+        let key = {
+            let keys = self.keys.read().unwrap();
+            keys.get(key_name)
+                .cloned()
+                .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?
+        };
         
-        self.encrypt_with_key(key, plaintext, context).await
+        self.encrypt_with_key(&key, plaintext, context).await
     }
     
     pub async fn decrypt(
@@ -207,11 +210,14 @@ impl TransitEngine {
         ciphertext: &str,
         context: Option<&[u8]>,
     ) -> CryptoResult<Vec<u8>> {
-        let keys = self.keys.read().unwrap();
-        let key = keys.get(key_name)
-            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+        let key = {
+            let keys = self.keys.read().unwrap();
+            keys.get(key_name)
+                .cloned()
+                .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?
+        };
         
-        self.decrypt_with_key(key, ciphertext, context).await
+        self.decrypt_with_key(&key, ciphertext, context).await
     }
     
     pub async fn list_keys(&self) -> Vec<String> {
