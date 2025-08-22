@@ -38,6 +38,7 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 - **🔥 Circuit Breaker**: Advanced fault tolerance and disaster recovery
 - **📊 Real-Time Monitoring**: Comprehensive metrics and intelligent alerting
 - **🎯 Zero-Trust Architecture**: Continuous verification and risk assessment
+- **📝 Secret Versioning & Audit Trail**: Track, rollback, and audit every secret change with cryptographic integrity ✨ **NEW**
 
 ### ✅ **High-Performance Engines**
 - **Transit Engine**: Complete encryption/decryption-as-a-service with 100K+ ops/sec
@@ -57,7 +58,7 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 - **Invincible Security**: Advanced threat detection and automated response
 - **Zero Trust**: Continuous verification with device attestation
 - **Zero Error**: Comprehensive fault tolerance and automatic recovery
-- **Secret Versioning**: Intelligent version tracking with secure lifecycle
+- **Secret Versioning & Audit Trail**: Versioned secrets, rollback, and tamper-evident audit for every change ✨ **NEW**
 - **Key Isolation**: Hardware-backed key separation with HSM redundancy
 
 ### 🏢 **Enterprise Features**  

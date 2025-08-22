@@ -11,7 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This release marks the completion of Secreton's (by Cipherce) transformation into the **most advanced enterprise security platform** available, with **12+ enterprise features** that exceed HashiCorp Vault's capabilities.
 
+
 ### Added - Enterprise Security Platform (August 22, 2025)
+
+- **📝 Secret Versioning & Audit Trail** (August 22, 2025)
+  - Versioned secret storage with rollback and cryptographic audit trail
+  - Tamper-evident, compliance-ready, and zero error/zero bug by design
+  - Enables secure lifecycle, rollback, and forensic traceability for every secret
 
 #### 🔐 **Advanced Enterprise Security Features (6,500+ Lines of New Code)**
 
