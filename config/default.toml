@@ -7,7 +7,7 @@ storage_path = "./data"
 
 # Database configuration
 [database]
-url = "sqlite:./data/brankas.db"
+url = "sqlite:./data/secreton.db"
 max_connections = 5
 
 # Authentication configuration

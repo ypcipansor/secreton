@@ -124,6 +124,7 @@ pub struct AuthenticationResponse {
 /// Security API main structure with integrated security components
 pub struct SecurityAPI {
     // Integration with security modules for production use
+    #[allow(dead_code)]
     security_manager: Option<Arc<AdvancedSecurityManager>>,
 }
 
@@ -342,6 +343,7 @@ impl SecurityAPI {
 }
 
 /// Helper function for security manager
+#[allow(dead_code)]
 fn with_security_manager() -> impl Filter<Extract = (), Error = std::convert::Infallible> + Clone {
     warp::any()
 }
@@ -352,7 +354,7 @@ async fn health_handler() -> Result<impl Reply, Rejection> {
     let response = ApiResponse::success(HashMap::from([
         ("status", "healthy"),
         ("version", "1.0.0"),
-        ("service", "brankas-security-api"),
+        ("service", "secreton-security-api"),
         ("timestamp", timestamp.as_str()),
         ("uptime", "operational"),
         ("components", "8") // All security components

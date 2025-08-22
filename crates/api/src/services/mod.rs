@@ -100,7 +100,7 @@ impl ServiceContainer {
                 // Create Raft configuration
                 let raft_config = RaftConfig {
                     node_id: std::env::var("BRANKAS_NODE_ID")
-                        .unwrap_or_else(|_| format!("brankas-node-{}", uuid::Uuid::new_v4())),
+                        .unwrap_or_else(|_| format!("secreton-node-{}", uuid::Uuid::new_v4())),
                     data_dir: std::env::var("BRANKAS_RAFT_DATA_DIR")
                         .unwrap_or_else(|_| "./data/raft".to_string())
                         .into(),

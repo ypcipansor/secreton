@@ -1,11 +1,20 @@
 # Changelog
 
-All notable changes to the Brankas Security Vault System will be documented in this file.
+All notable changes to the Secreton Security Vault System will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed - Complete Rebranding to Secreton (August 22, 2025)
+- **🔄 Complete System Rebranding**: Full transition from "Brankas" to "Secreton"
+  - **All package names** updated from `brankas-*` to `secreton-*`
+  - **Documentation** fully updated across README.md, CONTRIBUTING.md, and all guides
+  - **License and copyright** updated to reflect new brand identity
+  - **Configuration files** and scripts updated with new naming convention
+  - **Source code references** systematically updated across all crates
+  - **Repository metadata** updated in Cargo.toml workspace configuration
 
 ### Added - Major Security Optimizations (August 22, 2025)
 - **🎯 Comprehensive Code Optimization**: Complete system-wide optimization achieving 100% compilation success
@@ -130,7 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **🚀 Complete CLI Tool Implementation**: Full-featured command-line interface
-  - `brankas-cli` binary with comprehensive command structure
+  - `secreton-cli` binary with comprehensive command structure
   - Transit commands: `create-key`, `list-keys`, `encrypt`, `decrypt`
   - KV Secret commands: `put`, `get`, `list`, `delete`
   - System commands: `status`, `health`
@@ -220,13 +229,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Core Architecture**: Complete crate-based modular architecture
-  - `brankas-core`: Core types and interfaces
-  - `brankas-crypto`: Cryptographic engines and algorithms
-  - `brankas-storage`: Storage backend abstractions
-  - `brankas-api`: HTTP API server and routing
-  - `brankas-agent`: Distributed agent framework
-  - `brankas-ui`: Web UI components
-  - `brankas-cli`: Command-line interface
+  - `secreton-core`: Core types and interfaces
+  - `secreton-crypto`: Cryptographic engines and algorithms
+  - `secreton-storage`: Storage backend abstractions
+  - `secreton-api`: HTTP API server and routing
+  - `secreton-agent`: Distributed agent framework
+  - `secreton-ui`: Web UI components
+  - `secreton-cli`: Command-line interface
 - **Transit Cryptographic Engine**: Full encryption-as-a-service functionality
   - AES-256-GCM encryption/decryption support
   - ChaCha20-Poly1305 encryption/decryption support
@@ -331,7 +340,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Version 1.0.0 - "Foundation Release"
 
-This is the first stable release of Brankas, providing a solid foundation for secure secret management and cryptographic operations. The release focuses on:
+This is the first stable release of Secreton, providing a solid foundation for secure secret management and cryptographic operations. The release focuses on:
 
 1. **Production Readiness**: Complete HTTP API server with health monitoring
 2. **Security First**: Memory-only architecture with enterprise-grade encryption
@@ -367,7 +376,7 @@ This is the initial release - no migration required.
 
 ### Contributors
 
-- Brankas Security Team
+- Secreton Security Team
 - Community contributors and reviewers
 - Security auditors and compliance experts
 

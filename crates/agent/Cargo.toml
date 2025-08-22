@@ -1,14 +1,14 @@
 [package]
-name = "brankas-agent"
+name = "secreton-agent"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Agent for Brankas vault system"
+description = "Agent for Secreton vault system"
 
 [dependencies]
 # Core dependencies
-brankas-core = { path = "../core" }
+secreton-core = { path = "../core" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

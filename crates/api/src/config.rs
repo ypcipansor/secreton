@@ -533,7 +533,7 @@ impl Default for JwtConfig {
             refresh_expiration: Duration::from_secs(86400 * 7), // 7 days
             algorithm: "HS256".to_string(),
             issuer: "brankas".to_string(),
-            audience: "brankas-api".to_string(),
+            audience: "secreton-api".to_string(),
         }
     }
 }
@@ -551,7 +551,7 @@ impl Default for SessionConfig {
 impl Default for CookieConfig {
     fn default() -> Self {
         Self {
-            name: "brankas-session".to_string(),
+            name: "secreton-session".to_string(),
             domain: None,
             path: "/".to_string(),
             secure: false,

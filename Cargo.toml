@@ -13,10 +13,10 @@ members = [
 [workspace.package]
 version = "1.0.0"
 edition = "2021"
-authors = ["Brankas Security Team <security@brankas.io>"]
+authors = ["Secreton Security Team <security@secreton.io>"]
 license = "Apache-2.0"
-repository = "https://github.com/brankas/security-vault"
-homepage = "https://brankas.io"
+repository = "https://github.com/secreton/security-vault"
+homepage = "https://secreton.io"
 description = "Advanced Security Vault System with Quantum-Safe Cryptography"
 keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
@@ -24,10 +24,10 @@ rust-version = "1.70"
 
 [workspace.dependencies]
 # Core crate dependencies
-brankas-core = { path = "crates/core" }
-brankas-crypto = { path = "crates/crypto" }
-brankas-storage = { path = "crates/storage" }
-brankas-api = { path = "crates/api" }
+secreton-core = { path = "crates/core" }
+secreton-crypto = { path = "crates/crypto" }
+secreton-storage = { path = "crates/storage" }
+secreton-api = { path = "crates/api" }
 # Core dependencies
 tokio = { version = "1.35", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -120,10 +120,12 @@ rmp-serde = "1.1"
 cbor4ii = "0.3"
 num_cpus = "1.16"
 
-# Development dependencies
+# Development and testing dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.4"
 wiremock = "0.5"
+tokio-test = "0.4"
+pretty_assertions = "1.4"
 
 [profile.release]
 opt-level = 3

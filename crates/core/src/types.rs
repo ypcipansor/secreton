@@ -39,45 +39,39 @@ impl Version {
 
     /// Parse version from string (semver format)
     pub fn parse(s: &str) -> Result<Self, String> {
-        let parts: Vec<&str> = s.split('.').collect();
+        // First split by '+' to separate build metadata
+        let (version_part, build) = if let Some(pos) = s.find('+') {
+            let (v, b) = s.split_at(pos);
+            (v, Some(b[1..].to_string()))
+        } else {
+            (s, None)
+        };
+
+        // Then split by '-' to separate pre-release
+        let (core_part, pre_release) = if let Some(pos) = version_part.find('-') {
+            let (c, p) = version_part.split_at(pos);
+            (c, Some(p[1..].to_string()))
+        } else {
+            (version_part, None)
+        };
+
+        // Parse major.minor.patch
+        let parts: Vec<&str> = core_part.split('.').collect();
         if parts.len() < 3 {
             return Err("Version must have at least major.minor.patch".to_string());
         }
 
         let major = parts[0].parse::<u32>().map_err(|_| "Invalid major version")?;
         let minor = parts[1].parse::<u32>().map_err(|_| "Invalid minor version")?;
-        
-        // Handle patch version which might have pre-release or build info
-        let patch_full = parts[2];
-        let (patch_str, rest) = if let Some(pos) = patch_full.find('-') {
-            patch_full.split_at(pos)
-        } else if let Some(pos) = patch_full.find('+') {
-            patch_full.split_at(pos)
-        } else {
-            (patch_full, "")
-        };
+        let patch = parts[2].parse::<u32>().map_err(|_| "Invalid patch version")?;
 
-        let patch = patch_str.parse::<u32>().map_err(|_| "Invalid patch version")?;
-
-        let mut version = Self::new(major, minor, patch);
-
-        // Parse pre-release and build info
-        if !rest.is_empty() {
-            if rest.starts_with('-') {
-                let rest = &rest[1..];
-                if let Some(pos) = rest.find('+') {
-                    let (pre_release, build) = rest.split_at(pos);
-                    version.pre_release = Some(pre_release.to_string());
-                    version.build = Some(build[1..].to_string());
-                } else {
-                    version.pre_release = Some(rest.to_string());
-                }
-            } else if rest.starts_with('+') {
-                version.build = Some(rest[1..].to_string());
-            }
-        }
-
-        Ok(version)
+        Ok(Self {
+            major,
+            minor,
+            patch,
+            pre_release,
+            build,
+        })
     }
 
     /// Compare versions (semver compatibility)

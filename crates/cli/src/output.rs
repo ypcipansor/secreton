@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum OutputFormat {
     Json,
@@ -7,6 +8,7 @@ pub enum OutputFormat {
     Text,
 }
 
+#[allow(dead_code)]
 impl OutputFormat {
     pub fn format<T: Serialize + std::fmt::Debug>(&self, data: &T) -> String {
         match self {

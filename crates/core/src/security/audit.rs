@@ -493,6 +493,7 @@ impl AdvancedAuditSystem {
     }
 
     /// Create and sign an audit entry
+    #[allow(dead_code)]
     async fn create_signed_entry(&self, event: AuditEvent) -> Result<SignedAuditEntry, AuditError> {
         // Get next sequence number
         let sequence_number = {

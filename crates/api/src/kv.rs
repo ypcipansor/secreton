@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-use brankas_crypto::{KVEngine, SecretData, SecretMetadata};
+use brankas_crypto::{KVEngine, SecretMetadata};
 
 /// API state for KV engine
 #[derive(Clone)]

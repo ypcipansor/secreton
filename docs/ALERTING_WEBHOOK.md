@@ -21,7 +21,7 @@ use lettre::{Message, SmtpTransport, Transport};
 
 pub fn send_alert_email(subject: &str, body: &str, to: &str) {
     let email = Message::builder()
-        .from("brankas@yourdomain.com".parse().unwrap())
+        .from("secreton@yourdomain.com".parse().unwrap())
         .to(to.parse().unwrap())
         .subject(subject)
         .body(body.to_string())

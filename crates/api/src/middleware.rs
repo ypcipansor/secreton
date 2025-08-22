@@ -348,7 +348,7 @@ mod tests {
         let mut rate_limiter = RateLimitState::new(5); // 5 requests per minute
         
         // Should allow 5 requests
-        for i in 0..5 {
+        for _ in 0..5 {
             assert!(rate_limiter.check_rate_limit("test-client"));
         }
         

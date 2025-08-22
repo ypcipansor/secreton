@@ -1,4 +1,4 @@
-# Compliance Mapping: Brankas
+# Compliance Mapping: Secreton
 
 ## PCI DSS
 - Encryption at rest & in transit: AES-GCM, TLS/mTLS
@@ -23,4 +23,4 @@
 
 ---
 
-**Brankas** sudah memenuhi fitur utama compliance di atas. Untuk audit formal, lakukan review eksternal dan update dokumen ini secara berkala.
+**Secreton** sudah memenuhi fitur utama compliance di atas. Untuk audit formal, lakukan review eksternal dan update dokumen ini secara berkala.

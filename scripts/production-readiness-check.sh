@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Brankas Security System - Production Readiness Checker
-# This script validates that the Brankas deployment meets production requirements
-# Author: Brankas Security Team
+# Secreton Security System - Production Readiness Checker
+# This script validates that the Secreton deployment meets production requirements
+# Author: Secreton Security Team
 # Version: 1.0.0
 
 set -euo pipefail
@@ -16,10 +16,10 @@ PURPLE='\033[0;35m'
 NC='\033[0m'
 
 # Configuration
-BRANKAS_API="https://localhost:8200"
-CONFIG_DIR="/etc/brankas"
-DATA_DIR="/var/lib/brankas"
-LOG_DIR="/var/log/brankas"
+SECRETON_API="https://localhost:8200"
+CONFIG_DIR="/etc/secreton"
+DATA_DIR="/var/lib/secreton"
+LOG_DIR="/var/log/secreton"
 REQUIRED_MEMORY_GB=16
 REQUIRED_DISK_GB=100
 REQUIRED_CPU_CORES=8
@@ -137,7 +137,7 @@ check_file_system() {
         "$CONFIG_DIR:Configuration directory"
         "$DATA_DIR:Data directory" 
         "$LOG_DIR:Log directory"
-        "/opt/brankas:Installation directory"
+        "/opt/secreton:Installation directory"
     )
     
     for dir_info in "${required_dirs[@]}"; do
@@ -196,15 +196,15 @@ check_network_configuration() {
     if command -v ufw &> /dev/null; then
         local ufw_status=$(ufw status | grep -c "8200/tcp.*ALLOW" || echo "0")
         if [[ $ufw_status -gt 0 ]]; then
-            success "UFW firewall configured for Brankas"
+            success "UFW firewall configured for Secreton"
         else
-            warn "UFW firewall may not be configured for Brankas"
+            warn "UFW firewall may not be configured for Secreton"
         fi
     elif command -v firewall-cmd &> /dev/null; then
         if firewall-cmd --list-ports | grep -q 8200; then
-            success "Firewalld configured for Brankas"
+            success "Firewalld configured for Secreton"
         else
-            warn "Firewalld may not be configured for Brankas"
+            warn "Firewalld may not be configured for Secreton"
         fi
     else
         warn "No supported firewall detected"
@@ -275,31 +275,31 @@ check_services() {
     check_start "Service Status"
     
     # Check systemd service
-    if systemctl is-active --quiet brankas.service; then
-        success "Brankas service is active"
+    if systemctl is-active --quiet secreton.service; then
+        success "Secreton service is active"
     else
-        error "Brankas service is not active"
+        error "Secreton service is not active"
     fi
     
-    if systemctl is-enabled --quiet brankas.service; then
-        success "Brankas service is enabled"
+    if systemctl is-enabled --quiet secreton.service; then
+        success "Secreton service is enabled"
     else
-        warn "Brankas service is not enabled for auto-start"
+        warn "Secreton service is not enabled for auto-start"
     fi
     
     # Check Docker containers
-    local running_containers=$(docker ps --filter "name=brankas" --format "{{.Names}}" | wc -l)
+    local running_containers=$(docker ps --filter "name=secreton" --format "{{.Names}}" | wc -l)
     if [[ $running_containers -gt 0 ]]; then
-        success "Brankas containers running: $running_containers"
+        success "Secreton containers running: $running_containers"
         
         # List running containers
-        docker ps --filter "name=brankas" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | while read -r line; do
+        docker ps --filter "name=secreton" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | while read -r line; do
             if [[ "$line" != *"NAMES"* ]]; then
                 log "  $line"
             fi
         done
     else
-        error "No Brankas containers are running"
+        error "No Secreton containers are running"
     fi
 }
 
@@ -308,11 +308,11 @@ check_api_health() {
     check_start "API Health"
     
     # Test API connectivity
-    if curl -s -k "$BRANKAS_API/v1/sys/health" > /dev/null; then
+    if curl -s -k "$SECRETON_API/v1/sys/health" > /dev/null; then
         success "API endpoint accessible"
         
         # Get detailed health information
-        local health_response=$(curl -s -k "$BRANKAS_API/v1/sys/health")
+        local health_response=$(curl -s -k "$SECRETON_API/v1/sys/health")
         local sealed=$(echo "$health_response" | jq -r '.sealed // "unknown"')
         local initialized=$(echo "$health_response" | jq -r '.initialized // "unknown"')
         local standby=$(echo "$health_response" | jq -r '.standby // "unknown"')
@@ -342,7 +342,7 @@ check_api_health() {
             warn "Could not determine vault version"
         fi
     else
-        error "API endpoint not accessible at $BRANKAS_API"
+        error "API endpoint not accessible at $SECRETON_API"
     fi
 }
 
@@ -414,7 +414,7 @@ check_monitoring_logging() {
     
     # Check log files
     local log_files=(
-        "$LOG_DIR/brankas.log:Main application log"
+        "$LOG_DIR/secreton.log:Main application log"
         "$LOG_DIR/security-monitor.log:Security monitoring log"
         "$LOG_DIR/audit.log:Audit log"
     )
@@ -432,7 +432,7 @@ check_monitoring_logging() {
     done
     
     # Check log rotation
-    if [[ -f "/etc/logrotate.d/brankas" ]]; then
+    if [[ -f "/etc/logrotate.d/secreton" ]]; then
         success "Log rotation configured"
     else
         warn "Log rotation not configured"
@@ -461,10 +461,10 @@ check_backup_configuration() {
     check_start "Backup Configuration"
     
     # Check backup script
-    if [[ -f "/usr/local/bin/brankas-backup" ]]; then
+    if [[ -f "/usr/local/bin/secreton-backup" ]]; then
         success "Backup script installed"
         
-        if [[ -x "/usr/local/bin/brankas-backup" ]]; then
+        if [[ -x "/usr/local/bin/secreton-backup" ]]; then
             success "Backup script is executable"
         else
             error "Backup script is not executable"
@@ -474,7 +474,7 @@ check_backup_configuration() {
     fi
     
     # Check backup directory
-    local backup_dir="/var/backup/brankas"
+    local backup_dir="/var/backup/secreton"
     if [[ -d "$backup_dir" ]]; then
         success "Backup directory exists"
         
@@ -489,7 +489,7 @@ check_backup_configuration() {
     fi
     
     # Check backup cron job
-    if crontab -l 2>/dev/null | grep -q "brankas-backup"; then
+    if crontab -l 2>/dev/null | grep -q "secreton-backup"; then
         success "Backup cron job configured"
     else
         warn "Backup cron job not configured"
@@ -552,10 +552,10 @@ generate_summary() {
     if [[ $FAILED_CHECKS -eq 0 ]]; then
         if [[ $WARNING_CHECKS -eq 0 ]]; then
             echo -e "\n${GREEN}🎉 PRODUCTION READY!${NC}"
-            echo -e "${GREEN}Brankas is fully configured and ready for production deployment.${NC}"
+            echo -e "${GREEN}Secreton is fully configured and ready for production deployment.${NC}"
         else
             echo -e "\n${YELLOW}⚠️  PRODUCTION READY WITH WARNINGS${NC}"
-            echo -e "${YELLOW}Brankas is ready for production but has some non-critical issues to address.${NC}"
+            echo -e "${YELLOW}Secreton is ready for production but has some non-critical issues to address.${NC}"
         fi
     else
         echo -e "\n${RED}❌ NOT PRODUCTION READY${NC}"
@@ -591,7 +591,7 @@ generate_summary() {
     echo -e "${GREEN}• Set up monitoring and alerting${NC}"
     echo -e "${GREEN}• Establish backup and recovery procedures${NC}"
     echo -e "${GREEN}• Conduct security penetration testing${NC}"
-    echo -e "${GREEN}• Train operations team on Brankas management${NC}"
+    echo -e "${GREEN}• Train operations team on Secreton management${NC}"
     
     # Return appropriate exit code
     if [[ $FAILED_CHECKS -gt 0 ]]; then
@@ -606,7 +606,7 @@ generate_summary() {
 # Main execution
 main() {
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║                    BRANKAS PRODUCTION READINESS CHECKER                      ║${NC}"
+    echo -e "${BLUE}║                    SECRETON PRODUCTION READINESS CHECKER                      ║${NC}"
     echo -e "${BLUE}║                         Advanced Security System                             ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     

@@ -1,11 +1,11 @@
 [package]
-name = "brankas-ui"
+name = "secreton-ui"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Web UI for Brankas vault system"
+description = "Web UI for Secreton vault system"
 
 [dependencies]
-brankas-core.workspace = true
+secreton-core.workspace = true
 serde.workspace = true

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Brankas API Testing Script
+# Secreton API Testing Script
 # Tests all endpoints and validates functionality
 
 set -e
@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 print_header() {
     echo -e "\n${BLUE}===========================================${NC}"
-    echo -e "${BLUE}🔐 BRANKAS API TESTING SUITE${NC}"
+    echo -e "${BLUE}🔐 SECRETON API TESTING SUITE${NC}"
     echo -e "${BLUE}===========================================${NC}"
     echo -e "${YELLOW}Base URL: ${BASE_URL}${NC}"
     echo -e "${YELLOW}Timestamp: $(date)${NC}\n"
@@ -168,7 +168,7 @@ run_tests() {
     echo "================================="
     
     # Test data for encryption
-    TEST_DATA="SGVsbG8sIEJyYW5rYXMgU2VjdXJpdHkhCg=="  # "Hello, Brankas Security!" in base64
+    TEST_DATA="SGVsbG8sIEJyYW5rYXMgU2VjdXJpdHkhCg=="  # "Hello, Secreton Security!" in base64
     
     # Encrypt with AES key
     if test_endpoint "Encrypt with AES" "POST" "/v1/transit/encrypt/test-aes" "200" \
@@ -265,7 +265,7 @@ run_tests() {
     echo -e "${BLUE}📈 Success Rate: $success_rate%${NC}"
     
     if [ $FAILED -eq 0 ]; then
-        echo -e "\n${GREEN}🎉 All tests passed! Brankas API is working perfectly.${NC}"
+        echo -e "\n${GREEN}🎉 All tests passed! Secreton API is working perfectly.${NC}"
         exit 0
     else
         echo -e "\n${RED}⚠️  Some tests failed. Please check the output above.${NC}"
@@ -282,7 +282,7 @@ trap cleanup INT
 
 # Main execution
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    echo "Brankas API Testing Suite"
+    echo "Secreton API Testing Suite"
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"

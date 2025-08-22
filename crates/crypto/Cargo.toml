@@ -1,10 +1,10 @@
 [package]
-name = "brankas-crypto"
+name = "secreton-crypto"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Cryptographic primitives and quantum-safe algorithms for Brankas"
+description = "Cryptographic primitives and quantum-safe algorithms for Secreton"
 keywords = ["cryptography", "quantum-safe", "post-quantum"]
 
 [dependencies]

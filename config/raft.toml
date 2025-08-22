@@ -1,4 +1,4 @@
-# Brankas Vault - Raft Integrated Storage Configuration
+# Secreton Vault - Raft Integrated Storage Configuration
 # Compatible with HashiCorp Vault integrated storage approach
 
 [server]
@@ -11,7 +11,7 @@ tls_enabled = false
 backend_type = "raft"
 
 # Node configuration
-node_id = "brankas-node-1"
+node_id = "secreton-node-1"
 data_dir = "./data/raft"
 
 # Cluster communication

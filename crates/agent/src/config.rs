@@ -204,7 +204,7 @@ impl Default for EmailConfig {
             smtp_port: 587,
             username: "".to_string(),
             password: "".to_string(),
-            from_address: "brankas-agent@localhost".to_string(),
+            from_address: "secreton-agent@localhost".to_string(),
             to_addresses: Vec::new(),
             use_tls: true,
         }
@@ -425,7 +425,7 @@ impl Default for LoggingConfig {
             level: "info".to_string(),
             format: "text".to_string(),
             file_enabled: true,
-            file_path: "/var/log/brankas-agent.log".to_string(),
+            file_path: "/var/log/secreton-agent.log".to_string(),
             max_file_size_mb: 100,
             max_files: 10,
             structured: true,

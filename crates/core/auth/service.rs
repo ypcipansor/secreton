@@ -134,7 +134,7 @@ impl AuthService {
             user.id,
             self.refresh_token_ttl,
             scopes.to_vec(),
-            "brankas-adhyaksa",
+            "secreton-adhyaksa",
             self.refresh_secret.as_bytes(),
         )?;
 

@@ -1,6 +1,6 @@
-# Contributing to Brankas Security Vault System
+# Contributing to Secreton Security Vault System
 
-Thank you for your interest in contributing to Brankas! This document provides comprehensive guidelines for contributing to our security-focused vault system.
+Thank you for your interest in contributing to Secreton! This document provides comprehensive guidelines for contributing to our security-focused vault system.
 
 ## 🎯 Table of Contents
 
@@ -49,8 +49,8 @@ This project adheres to a professional code of conduct. By participating, you ag
 
 1. **Fork and Clone**:
    ```bash
-   git clone https://github.com/your-username/brankas.git
-   cd brankas
+   git clone https://github.com/your-username/secreton.git
+   cd secreton
    ```
 
 2. **Install Dependencies**:
@@ -75,12 +75,12 @@ This project adheres to a professional code of conduct. By participating, you ag
 
 ## 🏗️ Architecture Overview
 
-Understanding Brankas architecture is crucial for effective contributions:
+Understanding Secreton architecture is crucial for effective contributions:
 
 ### System Components
 
 ```
-brankas/
+secreton/
 ├── crates/
 │   ├── core/          # Core types and traits
 │   ├── crypto/        # Cryptographic implementations  
@@ -109,7 +109,7 @@ brankas/
    # Set environment for development
    export RUST_LOG=debug
    export RUST_BACKTRACE=1
-   export BRANKAS_LOG_LEVEL=debug
+   export SECRETON_LOG_LEVEL=debug
    ```
 
 3. **Build and Test**:
@@ -121,8 +121,8 @@ brankas/
    cargo test --workspace
    
    # Run specific crate tests
-   cargo test -p brankas-core
-   cargo test -p brankas-cli
+   cargo test -p secreton-core
+   cargo test -p secreton-cli
    
    # Integration tests
    cargo test --test integration
@@ -164,19 +164,19 @@ Create development configuration:
 # Create .env file for development
 cat > .env << EOF
 # Development configuration
-BRANKAS_HOST=127.0.0.1
-BRANKAS_PORT=8200
-BRANKAS_LOG_LEVEL=debug
-RUST_LOG=brankas=debug,tower_http=debug
+SECRETON_HOST=127.0.0.1
+SECRETON_PORT=8200
+SECRETON_LOG_LEVEL=debug
+RUST_LOG=secreton=debug,tower_http=debug
 RUST_BACKTRACE=full
 
 # Testing settings
-BRANKAS_TEST_MODE=true
-BRANKAS_STORAGE_BACKEND=memory
+SECRETON_TEST_MODE=true
+SECRETON_STORAGE_BACKEND=memory
 
 # Security (development only)
-BRANKAS_TLS_ENABLED=false
-BRANKAS_AUTH_DISABLED=true  # Only for development!
+SECRETON_TLS_ENABLED=false
+SECRETON_AUTH_DISABLED=true  # Only for development!
 EOF
 ```
 
@@ -184,11 +184,11 @@ EOF
 
 ```bash
 # Build specific components
-cargo build -p brankas-core      # Core library
-cargo build -p brankas-crypto    # Crypto engine
-cargo build -p brankas-api       # HTTP API server
-cargo build -p brankas-cli       # CLI tool
-cargo build -p brankas-storage   # Storage backends
+cargo build -p secreton-core      # Core library
+cargo build -p secreton-crypto    # Crypto engine
+cargo build -p secreton-api       # HTTP API server
+cargo build -p secreton-cli       # CLI tool
+cargo build -p secreton-storage   # Storage backends
 
 # Build with features
 cargo build --features sqlite    # SQLite storage backend
@@ -274,7 +274,7 @@ Use comprehensive error handling:
 ```rust
 // Define custom error types
 #[derive(Debug, thiserror::Error)]
-pub enum BrankasError {
+pub enum SecretonError {
     #[error("Cryptographic operation failed: {0}")]
     CryptoError(#[from] CryptoError),
     
@@ -283,7 +283,7 @@ pub enum BrankasError {
 }
 
 // Use Result types consistently
-type BrankasResult<T> = Result<T, BrankasError>;
+type SecretonResult<T> = Result<T, SecretonError>;
 ```
 
 ### Module Organization
@@ -477,7 +477,7 @@ Document all public APIs:
 /// # Examples
 ///
 /// ```
-/// use brankas_crypto::TransitEngine;
+/// use secreton_crypto::TransitEngine;
 /// 
 /// let engine = TransitEngine::new();
 /// let key = engine.create_key("my-key", KeyType::Aes256Gcm)?;
@@ -717,7 +717,7 @@ Follow [Semantic Versioning](https://semver.org/):
 
 - **GitHub Issues**: Bug reports and feature requests
 - **GitHub Discussions**: Questions and general discussion
-- **Security Email**: security@brankas.io (for security issues only)
+- **Security Email**: security@secreton.io (for security issues only)
 - **Documentation**: See [docs/](docs/) directory
 
 ### Mentorship
@@ -737,4 +737,4 @@ New contributors can request mentorship for:
 
 ---
 
-Thank you for contributing to Brankas! Your contributions help make secure secret management accessible and reliable for everyone.
+Thank you for contributing to Secreton! Your contributions help make secure secret management accessible and reliable for everyone.

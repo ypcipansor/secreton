@@ -1,4 +1,4 @@
-# 🎉 BRANKAS VAULT - DEVELOPMENT COMPLETE!
+# 🎉 SECRETON VAULT - DEVELOPMENT COMPLETE!
 
 **Status:** ✅ **PRODUCTION READY WITH CLI TOOL**
 **Version:** v1.2.0  
@@ -35,17 +35,17 @@
 
 #### Command-Line Interface ✨ **NEW**
 - [x] **System Commands:**
-  - [x] `brankas-cli status` - Health check and system status
+  - [x] `secreton-cli status` - Health check and system status
 - [x] **Transit Commands:**
-  - [x] `brankas-cli transit create-key <name>` - Create encryption key
-  - [x] `brankas-cli transit list-keys` - List all keys
-  - [x] `brankas-cli transit encrypt <key> --data <text>` - **ENCRYPT DATA**
-  - [x] `brankas-cli transit decrypt <key> --data <cipher>` - **DECRYPT DATA**
+  - [x] `secreton-cli transit create-key <name>` - Create encryption key
+  - [x] `secreton-cli transit list-keys` - List all keys
+  - [x] `secreton-cli transit encrypt <key> --data <text>` - **ENCRYPT DATA**
+  - [x] `secreton-cli transit decrypt <key> --data <cipher>` - **DECRYPT DATA**
 - [x] **KV Secret Commands:**
-  - [x] `brankas-cli secret put <path> --data key=value` - Store secrets
-  - [x] `brankas-cli secret get <path>` - Retrieve secrets
-  - [x] `brankas-cli secret list` - List all secret paths
-  - [x] `brankas-cli secret delete <path>` - Delete secrets
+  - [x] `secreton-cli secret put <path> --data key=value` - Store secrets
+  - [x] `secreton-cli secret get <path>` - Retrieve secrets
+  - [x] `secreton-cli secret list` - List all secret paths
+  - [x] `secreton-cli secret delete <path>` - Delete secrets
 - [x] **Pipeline Support** - stdin/stdout integration for automation
 - [x] **Configuration** - Server URL override and config file support
 
@@ -74,8 +74,8 @@
 
 ### Start the Server
 ```bash
-cd /home/clouduser/vault/brankas
-cargo run -p brankas-api --bin api_server
+cd /home/clouduser/vault/secreton
+cargo run -p secreton-api --bin api_server
 # Server starts on http://127.0.0.1:8200
 ```
 
@@ -110,9 +110,9 @@ curl -X POST -H "Content-Type: application/json" \
 ./scripts/test_kv.sh   # KV engine HTTP tests
 
 # Test CLI directly
-./target/debug/brankas-cli status        # System health ✨ **NEW**
-./target/debug/brankas-cli transit --help  # Transit help ✨ **NEW**
-./target/debug/brankas-cli secret --help   # KV secrets help ✨ **NEW**
+./target/debug/secreton-cli status        # System health ✨ **NEW**
+./target/debug/secreton-cli transit --help  # Transit help ✨ **NEW**
+./target/debug/secreton-cli secret --help   # KV secrets help ✨ **NEW**
 ```
 
 ## 🚀 PERFORMANCE METRICS
@@ -135,19 +135,19 @@ curl -X POST http://localhost:8200/v1/secret/data/app/config \
   -d '{"data": {"password": "secret123", "api_key": "abc123"}}'
 
 # Store secrets with CLI ✨ **NEW**
-brankas-cli secret put config --data password=secret123 --data api_key=abc123
+secreton-cli secret put config --data password=secret123 --data api_key=abc123
 
 # Retrieve latest secret version (HTTP API)
 curl -X GET http://localhost:8200/v1/secret/data/app/config
 
 # Retrieve with CLI ✨ **NEW**
-brankas-cli secret get config
+secreton-cli secret get config
 
 # List all stored secrets (HTTP API)
 curl -X GET http://localhost:8200/v1/secrets
 
 # List with CLI ✨ **NEW**
-brankas-cli secret list
+secreton-cli secret list
 
 # Get secret metadata (all versions)
 curl -X GET http://localhost:8200/v1/secret/metadata/app/config
@@ -159,7 +159,7 @@ curl -X GET http://localhost:8200/v1/secret/metadata/app/config
 curl -X POST http://localhost:8200/v1/transit/keys/app-key
 
 # Create with CLI ✨ **NEW**
-brankas-cli transit create-key app-key
+secreton-cli transit create-key app-key
 
 # Encrypt sensitive data (HTTP API)
 curl -X POST http://localhost:8200/v1/transit/encrypt/app-key \
@@ -167,7 +167,7 @@ curl -X POST http://localhost:8200/v1/transit/encrypt/app-key \
   -d '{"plaintext": "SGVsbG8gV29ybGQ="}'
 
 # Encrypt with CLI ✨ **NEW**  
-brankas-cli transit encrypt app-key --data "Hello World"
+secreton-cli transit encrypt app-key --data "Hello World"
 
 # Decrypt data (HTTP API)
 curl -X POST http://localhost:8200/v1/transit/decrypt/app-key \
@@ -175,11 +175,11 @@ curl -X POST http://localhost:8200/v1/transit/decrypt/app-key \
   -d '{"ciphertext": "vault:v1:..."}'
 
 # Decrypt with CLI ✨ **NEW**
-brankas-cli transit decrypt app-key --data "vault:v1:..."
+secreton-cli transit decrypt app-key --data "vault:v1:..."
 
 # Pipeline support ✨ **NEW**
-echo "secret data" | brankas-cli transit encrypt app-key
-cat secrets.txt | brankas-cli transit encrypt app-key > encrypted.txt
+echo "secret data" | secreton-cli transit encrypt app-key
+cat secrets.txt | secreton-cli transit encrypt app-key > encrypted.txt
 ```
 
 ## 🛡️ SECURITY FEATURES
@@ -201,7 +201,7 @@ cat secrets.txt | brankas-cli transit encrypt app-key > encrypted.txt
 
 ## 🎯 PRODUCTION READINESS
 
-**The Brankas Vault System is now COMPLETE with triple interface options and ready for production!** ✨
+**The Secreton Vault System is now COMPLETE with triple interface options and ready for production!** ✨
 
 All interfaces have been implemented, tested, and documented. The system provides:
 
@@ -238,7 +238,7 @@ The core vault system with CLI is complete! Optional future enhancements include
 
 ---
 
-**🎉 CONGRATULATIONS! The Brankas Vault System with Triple Interface is COMPLETE!** 🎉
+**🎉 CONGRATULATIONS! The Secreton Vault System with Triple Interface is COMPLETE!** 🎉
 
 ✨ **Features Complete:** Transit Engine + KV Secrets Engine + CLI Tool  
 🚀 **Status:** Production Ready with Multiple Interfaces  

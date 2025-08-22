@@ -1,10 +1,10 @@
 [package]
-name = "brankas-api"
+name = "secreton-api"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "RESTful and gRPC API server for Brankas vault system"
+description = "RESTful and gRPC API server for Secreton vault system"
 keywords = ["api", "rest", "grpc", "http", "server"]
 
 [dependencies]
@@ -34,8 +34,8 @@ base64.workspace = true
 hex.workspace = true
 
 # Internal dependencies
-brankas-crypto = { path = "../crypto" }
-brankas-core = { path = "../core" }
+secreton-crypto = { path = "../crypto" }
+secreton-core = { path = "../core" }
 prost.workspace = true
 
 # TLS
@@ -54,7 +54,7 @@ utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 
 # Storage
-brankas-storage = { path = "../storage" }
+secreton-storage = { path = "../storage" }
 
 # Metrics
 prometheus.workspace = true

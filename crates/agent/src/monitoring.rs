@@ -427,8 +427,8 @@ impl SystemMonitor {
             event_type: ProcessEventType::Started,
             process_id: std::process::id(),
             parent_id: Some(1),
-            name: "brankas-agent".to_string(),
-            command_line: Some("/usr/bin/brankas-agent".to_string()),
+            name: "secreton-agent".to_string(),
+            command_line: Some("/usr/bin/secreton-agent".to_string()),
             user_id: Some(1000),
             cpu_usage: Some(5.2),
             memory_usage: Some(1024 * 1024 * 64), // 64MB

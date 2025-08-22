@@ -1,11 +1,11 @@
-# Contoh Konfigurasi TLS/mTLS untuk Brankas
+# Contoh Konfigurasi TLS/mTLS untuk Secreton
 
 ## TLS (Server Only)
 ```
 [server]
 tls_enabled = true
-tls_cert_path = "/etc/brankas/certs/server.crt"
-tls_key_path = "/etc/brankas/certs/server.key"
+tls_cert_path = "/etc/secreton/certs/server.crt"
+tls_key_path = "/etc/secreton/certs/server.key"
 ```
 
 ## mTLS (Mutual TLS)
@@ -13,9 +13,9 @@ tls_key_path = "/etc/brankas/certs/server.key"
 [server]
 tls_enabled = true
 mtls_enabled = true
-tls_cert_path = "/etc/brankas/certs/server.crt"
-tls_key_path = "/etc/brankas/certs/server.key"
-tls_ca_path = "/etc/brankas/certs/ca.crt"
+tls_cert_path = "/etc/secreton/certs/server.crt"
+tls_key_path = "/etc/secreton/certs/server.key"
+tls_ca_path = "/etc/secreton/certs/ca.crt"
 ```
 
 - Pastikan semua komunikasi antar service menggunakan TLS/mTLS.

@@ -654,7 +654,7 @@ impl MfaMethod for HardwareKeyMethod {
     async fn verify_response(&self, challenge: &MfaChallenge, response: &str) -> Result<MfaAuthResult, MfaError> {
         // In a real implementation, this would verify the WebAuthn/FIDO2 signature
         // For now, we'll do a mock verification
-        let challenge_data = challenge.context.get("challenge_data")
+        let _challenge_data = challenge.context.get("challenge_data")
             .ok_or(MfaError::InvalidResponse)?;
             
         // Mock verification - in reality this would verify cryptographic signature

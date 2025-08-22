@@ -107,12 +107,11 @@ pub struct ConcreteRiskAssessmentEngine;
 
 #[async_trait]
 impl RiskAssessmentEngine for ConcreteRiskAssessmentEngine {
-    async fn calculate_risk_score(&self, entity: &ZeroTrustEntity, context: &AccessContext) -> Result<RiskScore, ZeroTrustError> {
+    async fn calculate_risk_score(&self, entity: &ZeroTrustEntity, _context: &AccessContext) -> Result<RiskScore, ZeroTrustError> {
         use super::zero_trust::{RiskComponent, TrustLevel};
         use chrono::Utc;
         
         let mut components = HashMap::new();
-        let mut total = 0u8;
         
         // Simple risk calculation based on trust level
         let trust_risk = match entity.trust_level {
@@ -125,10 +124,9 @@ impl RiskAssessmentEngine for ConcreteRiskAssessmentEngine {
         };
         
         components.insert(RiskComponent::BehavioralAnomaly, trust_risk);
-        total = trust_risk;
         
         Ok(RiskScore {
-            total_score: total,
+            total_score: trust_risk,
             components,
             calculated_at: Utc::now(),
             confidence: 0.85, // Mock confidence level

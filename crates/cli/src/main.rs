@@ -11,7 +11,7 @@ use config::CliConfig;
 
 #[derive(Parser)]
 #[command(
-    name = "brankas-cli",
+    name = "secreton-cli",
     about = "Command line interface for Brankas vault system",
     version = "1.0.0",
     author = "Brankas Team"

@@ -590,7 +590,10 @@ impl QuantumSafeCryptoEngine {
                 })?
         };
 
-        let signature = provider.sign(data, &key_pair).await?;
+        let mut signature = provider.sign(data, &key_pair).await?;
+
+        // Set the public key ID for verification
+        signature.public_key_id = signer_key_id.to_string();
 
         // Update metrics
         {
@@ -1045,9 +1048,9 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
     }
 
     async fn verify(&self, data: &[u8], signature: &QuantumSignature, _public_key: &PostQuantumKeyPair) -> Result<bool, QuantumCryptoError> {
-        // Mock verification - check if data hash matches signature prefix
+        // Mock verification - check if data hash matches signature prefix (simplified)
         for (i, byte) in data.iter().enumerate().take(16) {
-            if signature.signature.get(i).unwrap_or(&0) & 0x0F != (*byte & 0x0F) {
+            if signature.signature.get(i).unwrap_or(&0) ^ byte != 0 {
                 return Ok(false);
             }
         }

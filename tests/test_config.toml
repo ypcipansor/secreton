@@ -1,0 +1,51 @@
+# Secreton Enterprise Vault - Test Configuration
+# Configuration file for comprehensive test execution
+
+[workspace]
+root = "/home/clouduser/vault/secreton"
+test_results_dir = "test_results"
+
+[test_categories]
+unit = { pattern = "unit::", description = "Unit Tests", timeout = 300 }
+integration = { pattern = "integration::", description = "Integration Tests", timeout = 600 }
+performance = { pattern = "performance::", description = "Performance Benchmarks", timeout = 900 }
+security = { pattern = "security_validation::", description = "Security Validation", timeout = 1200 }
+
+[test_environments]
+[test_environments.banking]
+config_level = "banking_grade"
+compliance_requirements = ["pci_dss", "sox", "basel_iii"]
+encryption_algorithms = ["AES-256-GCM", "ChaCha20-Poly1305"]
+min_key_size = 256
+
+[test_environments.government]
+config_level = "government_grade"
+compliance_requirements = ["fips_140_2", "common_criteria"]
+encryption_algorithms = ["AES-256-GCM", "quantum_safe"]
+min_key_size = 256
+quantum_safe_required = true
+
+[performance_thresholds]
+encryption_ops_per_sec = 1000
+decryption_ops_per_sec = 1000
+mfa_verifications_per_sec = 100
+threat_assessments_per_sec = 500
+max_response_time_ms = 100
+
+[security_requirements]
+min_entropy_quality = 0.95
+max_timing_variance_ratio = 2.0
+required_key_strength_bits = 256
+hsm_operations_required = true
+
+[audit_settings]
+enable_comprehensive_logging = true
+log_performance_metrics = true
+generate_compliance_reports = true
+store_security_events = true
+
+[reporting]
+formats = ["json", "html", "markdown"]
+include_coverage = true
+include_benchmarks = true
+generate_summary = true

@@ -1,13 +1,13 @@
 [package]
-name = "brankas-cli"
+name = "secreton-cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "CLI for Brankas vault system"
+description = "CLI for Secreton vault system"
 
 [dependencies]
-brankas-core.workspace = true
+secreton-core.workspace = true
 serde.workspace = true
 anyhow = "1.0"
 base64 = "0.21"

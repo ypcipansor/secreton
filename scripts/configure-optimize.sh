@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Brankas Advanced Security System - Configuration Optimizer
-# This script automatically optimizes Brankas configuration for maximum security and performance
-# Author: Brankas Security Team
+# Secreton Advanced Security System - Configuration Optimizer
+# This script automatically optimizes Secreton configuration for maximum security and performance
+# Author: Secreton Security Team
 # Version: 1.0.0
 
 set -euo pipefail
@@ -18,7 +18,7 @@ NC='\033[0m'
 # Configuration
 DEPLOYMENT_TYPE=${DEPLOYMENT_TYPE:-"banking-grade"}  # banking-grade, government-grade, high-performance
 OPTIMIZE_FOR=${OPTIMIZE_FOR:-"balanced"}  # security, performance, balanced
-CONFIG_DIR="/etc/brankas"
+CONFIG_DIR="/etc/secreton"
 BACKUP_SUFFIX=$(date +%Y%m%d_%H%M%S)
 
 log() {
@@ -38,7 +38,7 @@ error() {
 backup_configuration() {
     log "Backing up existing configuration..."
     
-    local backup_dir="/var/backup/brankas/config_$BACKUP_SUFFIX"
+    local backup_dir="/var/backup/secreton/config_$BACKUP_SUFFIX"
     sudo mkdir -p "$backup_dir"
     
     if [[ -d "$CONFIG_DIR" ]]; then
@@ -88,7 +88,7 @@ generate_security_config() {
     local config_file="$CONFIG_DIR/security.toml"
     
     cat > "/tmp/security.toml" << EOF
-# Brankas Advanced Security Configuration
+# Secreton Advanced Security Configuration
 # Deployment Type: $DEPLOYMENT_TYPE
 # Optimization: $OPTIMIZE_FOR
 # Generated: $(date -Iseconds)
@@ -364,7 +364,7 @@ databases = 16
 EOF
 
     sudo mv "/tmp/security.toml" "$config_file"
-    sudo chown brankas:brankas "$config_file"
+    sudo chown secreton:secreton "$config_file"
     sudo chmod 600 "$config_file"
     
     log "Security configuration generated: $config_file"
@@ -375,8 +375,8 @@ generate_performance_tuning() {
     log "Generating system performance tuning..."
     
     # Kernel parameters
-    cat > "/tmp/99-brankas-performance.conf" << EOF
-# Brankas Performance Tuning
+    cat > "/tmp/99-secreton-performance.conf" << EOF
+# Secreton Performance Tuning
 # Generated: $(date -Iseconds)
 # Optimization: $OPTIMIZE_FOR
 
@@ -415,23 +415,23 @@ kernel.yama.ptrace_scope = 2
 net.core.bpf_jit_harden = 2
 EOF
 
-    sudo mv "/tmp/99-brankas-performance.conf" /etc/sysctl.d/99-brankas-performance.conf
-    sudo sysctl -p /etc/sysctl.d/99-brankas-performance.conf
+    sudo mv "/tmp/99-secreton-performance.conf" /etc/sysctl.d/99-secreton-performance.conf
+    sudo sysctl -p /etc/sysctl.d/99-secreton-performance.conf
     
     # System limits
-    cat > "/tmp/brankas-limits.conf" << EOF
-# Brankas System Limits
-brankas soft nofile 1048576
-brankas hard nofile 1048576
-brankas soft nproc 32768
-brankas hard nproc 32768
-brankas soft memlock unlimited
-brankas hard memlock unlimited
-brankas soft core 0
-brankas hard core 0
+    cat > "/tmp/secreton-limits.conf" << EOF
+# Secreton System Limits
+secreton soft nofile 1048576
+secreton hard nofile 1048576
+secreton soft nproc 32768
+secreton hard nproc 32768
+secreton soft memlock unlimited
+secreton hard memlock unlimited
+secreton soft core 0
+secreton hard core 0
 EOF
 
-    sudo mv "/tmp/brankas-limits.conf" /etc/security/limits.d/brankas.conf
+    sudo mv "/tmp/secreton-limits.conf" /etc/security/limits.d/secreton.conf
     
     log "System performance tuning applied"
 }
@@ -442,7 +442,7 @@ optimize_database() {
     
     # PostgreSQL optimization
     cat > "/tmp/postgresql.conf" << EOF
-# Brankas PostgreSQL Optimization
+# Secreton PostgreSQL Optimization
 # Generated: $(date -Iseconds)
 
 # Connection settings
@@ -481,7 +481,7 @@ effective_io_concurrency = $([ "$STORAGE_TYPE" == "ssd" ] && echo "200" || echo 
 EOF
 
     sudo mv "/tmp/postgresql.conf" "$CONFIG_DIR/postgresql.conf"
-    sudo chown brankas:brankas "$CONFIG_DIR/postgresql.conf"
+    sudo chown secreton:secreton "$CONFIG_DIR/postgresql.conf"
     
     log "Database configuration optimized"
 }
@@ -500,12 +500,12 @@ global:
     optimization: '$OPTIMIZE_FOR'
 
 rule_files:
-  - "brankas_rules.yml"
+  - "secreton_rules.yml"
 
 scrape_configs:
-  - job_name: 'brankas'
+  - job_name: 'secreton'
     static_configs:
-      - targets: ['brankas:8200']
+      - targets: ['secreton:8200']
     metrics_path: '/v1/sys/metrics'
     params:
       format: ['prometheus']
@@ -540,7 +540,7 @@ alerting:
 EOF
 
     sudo mv "/tmp/prometheus.yml" "$CONFIG_DIR/prometheus.yml"
-    sudo chown brankas:brankas "$CONFIG_DIR/prometheus.yml"
+    sudo chown secreton:secreton "$CONFIG_DIR/prometheus.yml"
     
     log "Monitoring configuration generated"
 }
@@ -566,26 +566,26 @@ apply_security_hardening() {
     
     # Configure fail2ban for additional protection
     if command -v fail2ban-client &>/dev/null; then
-        cat > "/tmp/brankas.conf" << EOF
-[brankas]
+        cat > "/tmp/secreton.conf" << EOF
+[secreton]
 enabled = true
 port = 8200
 protocol = tcp
-filter = brankas
-logpath = /var/log/brankas/audit.log
+filter = secreton
+logpath = /var/log/secreton/audit.log
 maxretry = $([ "$DEPLOYMENT_TYPE" == "government-grade" ] && echo "3" || echo "5")
 bantime = $([ "$DEPLOYMENT_TYPE" == "government-grade" ] && echo "3600" || echo "1800")
 findtime = 600
 EOF
         
-        sudo mv "/tmp/brankas.conf" /etc/fail2ban/jail.d/brankas.conf
+        sudo mv "/tmp/secreton.conf" /etc/fail2ban/jail.d/secreton.conf
         sudo systemctl reload fail2ban || true
-        log "Fail2ban configured for Brankas"
+        log "Fail2ban configured for Secreton"
     fi
     
     # Set up AppArmor profile if available
     if command -v apparmor_status &>/dev/null; then
-        log "AppArmor detected - consider creating Brankas profile"
+        log "AppArmor detected - consider creating Secreton profile"
     fi
     
     log "Security hardening applied"
@@ -664,14 +664,14 @@ display_summary() {
     echo -e "  ${GREEN}✓${NC} System hardening applied"
     
     echo -e "\n${PURPLE}Next Steps:${NC}"
-    echo -e "  ${YELLOW}1.${NC} Restart Brankas services to apply changes"
+    echo -e "  ${YELLOW}1.${NC} Restart Secreton services to apply changes"
     echo -e "  ${YELLOW}2.${NC} Run production readiness check"
     echo -e "  ${YELLOW}3.${NC} Perform load testing with new configuration"
     echo -e "  ${YELLOW}4.${NC} Monitor performance metrics"
     echo -e "  ${YELLOW}5.${NC} Fine-tune based on actual workload"
     
-    echo -e "\n${GREEN}Restart Command:${NC} sudo systemctl restart brankas.service"
-    echo -e "${GREEN}Status Check:${NC} sudo systemctl status brankas.service"
+    echo -e "\n${GREEN}Restart Command:${NC} sudo systemctl restart secreton.service"
+    echo -e "${GREEN}Status Check:${NC} sudo systemctl status secreton.service"
     echo -e "${GREEN}Readiness Check:${NC} ./production-readiness-check.sh"
     
     log "Configuration optimization completed successfully!"
@@ -680,7 +680,7 @@ display_summary() {
 # Main execution
 main() {
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║                    BRANKAS CONFIGURATION OPTIMIZER                           ║${NC}"
+    echo -e "${BLUE}║                    SECRETON CONFIGURATION OPTIMIZER                           ║${NC}"
     echo -e "${BLUE}║                      Advanced Security System                                ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     
@@ -693,9 +693,9 @@ main() {
         error "This script should not be run as root. Use sudo for individual commands."
     fi
     
-    # Ensure brankas user exists
-    if ! id "brankas" &>/dev/null; then
-        error "Brankas user not found. Run deployment script first."
+    # Ensure secreton user exists
+    if ! id "secreton" &>/dev/null; then
+        error "Secreton user not found. Run deployment script first."
     fi
     
     # Run optimization steps

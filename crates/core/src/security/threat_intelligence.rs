@@ -504,32 +504,32 @@ pub struct ResourceUsage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ThreatIntelError {
-    #[error("Source connection failed: {source} - {reason}")]
-    SourceConnectionFailed { source: String, reason: String },
+    #[error("Source connection failed: {0} - {1}")]
+    SourceConnectionFailed(String, String),
     
-    #[error("Indicator parsing failed: {reason}")]
-    IndicatorParsingFailed { reason: String },
+    #[error("Indicator parsing failed: {0}")]
+    IndicatorParsingFailed(String),
     
-    #[error("Detection analysis failed: {reason}")]
-    DetectionAnalysisFailed { reason: String },
+    #[error("Detection analysis failed: {0}")]
+    DetectionAnalysisFailed(String),
     
-    #[error("Response action failed: {action} - {reason}")]
-    ResponseActionFailed { action: String, reason: String },
+    #[error("Response action failed: {0} - {1}")]
+    ResponseActionFailed(String, String),
     
-    #[error("Behavioral analysis failed: {reason}")]
-    BehavioralAnalysisFailed { reason: String },
+    #[error("Behavioral analysis failed: {0}")]
+    BehavioralAnalysisFailed(String),
     
-    #[error("Threat hunt failed: {hunt_id} - {reason}")]
-    ThreatHuntFailed { hunt_id: String, reason: String },
+    #[error("Threat hunt failed: {0} - {1}")]
+    ThreatHuntFailed(String, String),
     
-    #[error("Integration error: {system} - {message}")]
-    IntegrationError { system: String, message: String },
+    #[error("Integration error: {0} - {1}")]
+    IntegrationError(String, String),
     
-    #[error("Database error: {message}")]
-    DatabaseError { message: String },
+    #[error("Database error: {0}")]
+    DatabaseError(String),
     
-    #[error("Configuration error: {parameter} - {reason}")]
-    ConfigurationError { parameter: String, reason: String },
+    #[error("Configuration error: {0} - {1}")]
+    ConfigurationError(String, String),
 }
 
 /// Trait for threat intelligence sources
@@ -1075,9 +1075,9 @@ impl ThreatIntelligenceEngine {
         let detection = {
             let detections = self.detections.read().unwrap();
             detections.get(detection_id).cloned()
-                .ok_or_else(|| ThreatIntelError::DetectionAnalysisFailed {
-                    reason: format!("Detection {} not found", detection_id)
-                })?
+                .ok_or_else(|| ThreatIntelError::DetectionAnalysisFailed(
+                    format!("Detection {} not found", detection_id)
+                ))?
         };
 
         if !self.config.auto_response_enabled {
@@ -1137,9 +1137,9 @@ impl ThreatIntelligenceEngine {
         Ok(executed_count)
     }
 
-    /// Start threat intelligence monitoring
-    pub async fn start_threat_monitoring(&self) {
-        let engine = Arc::new(self);
+    /// Start threat intelligence monitoring  
+    pub async fn start_threat_monitoring(self: Arc<Self>) {
+        let engine = self;
         let refresh_interval = engine.config.indicator_refresh_interval;
 
         tokio::spawn(async move {

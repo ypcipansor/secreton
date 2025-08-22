@@ -1,4 +1,4 @@
-# Brankas - Advanced Security Vault System
+# Secreton - Advanced Security Vault System
 
 A high-performance, secure secret management and cryptographic transit system built with Rust. Provides enterprise-grade encryption-as-a-service and versioned secret storage with multiple interfaces.
 
@@ -77,10 +77,10 @@ A high-performance, secure secret management and cryptographic transit system bu
 
 ## 🏗️ Architecture
 
-Brankas follows a modular crate-based architecture:
+Secreton follows a modular crate-based architecture:
 
 ```
-brankas/
+secreton/
 ├── crates/
 │   ├── core/          # Core types and interfaces ✅
 │   ├── crypto/        # Cryptographic engines (Transit, KV) ✅
@@ -108,8 +108,8 @@ brankas/
 
 1. **Clone the repository:**
    ```bash
-   git clone https://gitlab.com/analisiskebutuhan/brankas-vault-adhyaksa.git
-   cd brankas-vault-adhyaksa/brankas
+   git clone https://gitlab.com/analisiskebutuhan/secreton-vault-adhyaksa.git
+   cd secreton-vault-adhyaksa/secreton
    ```
 
 2. **Build the project:**
@@ -118,13 +118,13 @@ brankas/
    cargo build --release
    
    # Or build specific components
-   cargo build --release -p brankas-api --bin api_server  # HTTP API
-   cargo build --release -p brankas-cli                   # CLI Tool
+   cargo build --release -p secreton-api --bin api_server  # HTTP API
+   cargo build --release -p secreton-cli                   # CLI Tool
    ```
 
 3. **Start the API server:**
    ```bash
-   cargo run -p brankas-api --bin api_server
+   cargo run -p secreton-api --bin api_server
    # Server starts on http://127.0.0.1:8200
    ```
 
@@ -133,7 +133,7 @@ brankas/
 **Option 1: HTTP API with Memory Storage** 
 ```bash
 # Direct REST API calls with default memory backend
-cargo run -p brankas-api --bin api_server
+cargo run -p secreton-api --bin api_server
 curl http://127.0.0.1:8200/health
 curl -X POST http://127.0.0.1:8200/v1/transit/keys/my-key
 ```
@@ -141,18 +141,18 @@ curl -X POST http://127.0.0.1:8200/v1/transit/keys/my-key
 **Option 2: HTTP API with Raft Storage** ✨ **NEW**
 ```bash
 # Production-ready integrated storage with HA
-./start-raft.sh
+./scripts/cluster/start-raft.sh
 # or 
-BRANKAS_STORAGE_BACKEND=raft cargo run -p brankas-api --bin api_server
+SECRETON_STORAGE_BACKEND=raft cargo run -p secreton-api --bin api_server
 ```
 
 **Option 3: CLI Tool** ✨ **NEW**
 ```bash
 # Build and use CLI with any backend
-cargo build -p brankas-cli
-./target/debug/brankas-cli status
-./target/debug/brankas-cli transit create-key my-key
-./target/debug/brankas-cli secret put config --data password=secret
+cargo build -p secreton-cli
+./target/debug/secreton-cli status
+./target/debug/secreton-cli transit create-key my-key
+./target/debug/secreton-cli secret put config --data password=secret
 ```
 
 **Option 4: Demo Scripts** ✨ **NEW**
@@ -165,20 +165,20 @@ cargo build -p brankas-cli
 
 ### Storage Backend Options ✨ **NEW**
 
-Brankas supports multiple storage backends:
+Secreton supports multiple storage backends:
 
 **Memory (Default)** - For development and testing:
 ```bash
-export BRANKAS_STORAGE_BACKEND=memory
-cargo run -p brankas-api --bin api_server
+export SECRETON_STORAGE_BACKEND=memory
+cargo run -p secreton-api --bin api_server
 ```
 
 **Raft Integrated Storage** - For production HA:
 ```bash
 # Single node
-export BRANKAS_STORAGE_BACKEND=raft
-export BRANKAS_NODE_ID=node-1
-cargo run -p brankas-api --bin api_server
+export SECRETON_STORAGE_BACKEND=raft
+export SECRETON_NODE_ID=node-1
+cargo run -p secreton-api --bin api_server
 
 # Multi-node cluster
 ./start-cluster.sh
@@ -232,7 +232,7 @@ GET /v1/transit/keys
 
 **CLI:**
 ```bash
-brankas-cli transit list-keys
+secreton-cli transit list-keys
 ```
 
 **Response:**
@@ -252,7 +252,7 @@ Content-Type: application/json
 
 **CLI:**
 ```bash
-brankas-cli transit create-key my-app-key
+secreton-cli transit create-key my-app-key
 ```
 
 Creates a new encryption key using AES-256-GCM by default.
@@ -279,9 +279,9 @@ Content-Type: application/json
 
 **CLI:**
 ```bash
-brankas-cli transit encrypt my-app-key --data "Hello World"
+secreton-cli transit encrypt my-app-key --data "Hello World"
 # Or from stdin:
-echo "Hello World" | brankas-cli transit encrypt my-app-key
+echo "Hello World" | secreton-cli transit encrypt my-app-key
 ```
 
 Encrypts the provided data using the specified key.
@@ -307,9 +307,9 @@ Content-Type: application/json
 
 **CLI:**
 ```bash
-brankas-cli transit decrypt my-app-key --data "vault:v1:randomnonce:encrypteddata"
+secreton-cli transit decrypt my-app-key --data "vault:v1:randomnonce:encrypteddata"
 # Or from stdin:
-echo "vault:v1:randomnonce:encrypteddata" | brankas-cli transit decrypt my-app-key
+echo "vault:v1:randomnonce:encrypteddata" | secreton-cli transit decrypt my-app-key
 ```
 Decrypts the provided ciphertext using the specified key.
 
@@ -342,7 +342,7 @@ Content-Type: application/json
 
 **CLI:**
 ```bash
-brankas-cli secret put myapp \
+secreton-cli secret put myapp \
   --data password=my-secret-password \
   --data api_key=abc123 \
   --data database_url=postgresql://localhost:5432/myapp
@@ -365,7 +365,7 @@ GET /v1/secret/data/{path}
 
 **CLI:**
 ```bash
-brankas-cli secret get myapp
+secreton-cli secret get myapp
 ```
 
 **Response:**
@@ -392,7 +392,7 @@ GET /v1/secrets
 
 **CLI:**
 ```bash
-brankas-cli secret list
+secreton-cli secret list
 ```
 
 **Response:**
@@ -411,7 +411,7 @@ DELETE /v1/secret/data/{path}
 
 **CLI:**
 ```bash
-brankas-cli secret delete myapp
+secreton-cli secret delete myapp
 ```
 
 Performs soft delete - secret can be recovered. Use destroy for permanent deletion.
@@ -432,7 +432,7 @@ Generates cryptographically secure random data.
 **Using HTTP API:**
 ```bash
 # 1. Start the server
-cargo run -p brankas-api --bin api_server
+cargo run -p secreton-api --bin api_server
 
 # 2. Check health
 curl http://127.0.0.1:8200/health
@@ -456,25 +456,25 @@ curl -X POST -H "Content-Type: application/json" \
 **Using CLI Tool:** ✨ **NEW**
 ```bash
 # 1. Build and start server
-cargo run -p brankas-api --bin api_server &
+cargo run -p secreton-api --bin api_server &
 
 # 2. Build CLI
-cargo build -p brankas-cli
+cargo build -p secreton-cli
 
 # 3. Check system status
-./target/debug/brankas-cli status
+./target/debug/secreton-cli status
 
 # 4. Create encryption key
-./target/debug/brankas-cli transit create-key my-app-key
+./target/debug/secreton-cli transit create-key my-app-key
 
 # 5. Encrypt data
-./target/debug/brankas-cli transit encrypt my-app-key --data "Hello World"
+./target/debug/secreton-cli transit encrypt my-app-key --data "Hello World"
 
 # 6. Decrypt data (use output from step 5)
-./target/debug/brankas-cli transit decrypt my-app-key --data "vault:v1:..."
+./target/debug/secreton-cli transit decrypt my-app-key --data "vault:v1:..."
 
 # 7. List all keys
-./target/debug/brankas-cli transit list-keys
+./target/debug/secreton-cli transit list-keys
 ```
 
 ### Example 2: KV Secrets Workflow ✨ **NEW**
@@ -496,35 +496,35 @@ curl http://127.0.0.1:8200/v1/secrets
 **Using CLI Tool:**
 ```bash
 # Store secrets
-./target/debug/brankas-cli secret put app-config \
+./target/debug/secreton-cli secret put app-config \
   --data db_url=postgresql://localhost:5432/myapp \
   --data api_key=abc123
 
 # Retrieve secrets
-./target/debug/brankas-cli secret get app-config
+./target/debug/secreton-cli secret get app-config
 
 # List all secrets
-./target/debug/brankas-cli secret list
+./target/debug/secreton-cli secret list
 ```
 
 ### Example 3: Combined Workflow - Encrypt then Store ✨ **NEW**
 
 ```bash
 # Create encryption key for sensitive data
-./target/debug/brankas-cli transit create-key sensitive-key
+./target/debug/secreton-cli transit create-key sensitive-key
 
 # Encrypt a database password
-ENCRYPTED_PASS=$(./target/debug/brankas-cli transit encrypt sensitive-key --data "super-secret-password" | tail -n 1)
+ENCRYPTED_PASS=$(./target/debug/secreton-cli transit encrypt sensitive-key --data "super-secret-password" | tail -n 1)
 
 # Store the encrypted password with other config
-./target/debug/brankas-cli secret put db-config \
+./target/debug/secreton-cli secret put db-config \
   --data host=db.example.com \
   --data port=5432 \
   --data encrypted_password="$ENCRYPTED_PASS"
 
 # Later: retrieve and decrypt
-./target/debug/brankas-cli secret get db-config
-./target/debug/brankas-cli transit decrypt sensitive-key --data "$ENCRYPTED_PASS"
+./target/debug/secreton-cli secret get db-config
+./target/debug/secreton-cli transit decrypt sensitive-key --data "$ENCRYPTED_PASS"
 ```
 
 ## 🧪 Testing and Demo Scripts
@@ -553,27 +553,27 @@ The test script validates:
 
 ```bash
 # Server Configuration
-BRANKAS_HOST=127.0.0.1
-BRANKAS_PORT=8200
-BRANKAS_LOG_LEVEL=info
+SECRETON_HOST=127.0.0.1
+SECRETON_PORT=8200
+SECRETON_LOG_LEVEL=info
 
 # Security
-BRANKAS_TLS_CERT_FILE=/path/to/cert.pem
-BRANKAS_TLS_KEY_FILE=/path/to/key.pem
-BRANKAS_ENABLE_MTLS=false
+SECRETON_TLS_CERT_FILE=/path/to/cert.pem
+SECRETON_TLS_KEY_FILE=/path/to/key.pem
+SECRETON_ENABLE_MTLS=false
 
 # Storage Backend
-BRANKAS_STORAGE_BACKEND=memory  # memory, sqlite, postgres
-BRANKAS_STORAGE_PATH=./data
+SECRETON_STORAGE_BACKEND=memory  # memory, sqlite, postgres
+SECRETON_STORAGE_PATH=./data
 
 # Authentication
-BRANKAS_AUTH_METHOD=jwt  # jwt, ldap, oidc
+SECRETON_AUTH_METHOD=jwt  # jwt, ldap, oidc
 JWT_SECRET=your-256-bit-secret
 JWT_EXPIRATION=3600
 
 # High Availability
-BRANKAS_CLUSTER_MODE=false
-BRANKAS_CLUSTER_PEERS=node1:8201,node2:8201
+SECRETON_CLUSTER_MODE=false
+SECRETON_CLUSTER_PEERS=node1:8201,node2:8201
 ```
 
 ### Configuration File
@@ -583,16 +583,16 @@ Create `config/vault.toml`:
 [server]
 host = "127.0.0.1"
 port = 8200
-tls_cert_file = "/etc/brankas/tls/cert.pem"
-tls_key_file = "/etc/brankas/tls/key.pem"
+tls_cert_file = "/etc/secreton/tls/cert.pem"
+tls_key_file = "/etc/secreton/tls/key.pem"
 
 [storage]
 backend = "sqlite"
-path = "/var/lib/brankas/data"
+path = "/var/lib/secreton/data"
 
 [security]
 enable_audit = true
-audit_file = "/var/log/brankas/audit.log"
+audit_file = "/var/log/secreton/audit.log"
 require_mfa = true
 
 [crypto]
@@ -670,13 +670,13 @@ cargo doc --open
 ### Docker
 ```bash
 # Build image
-docker build -t brankas:latest .
+docker build -t secreton:latest .
 
 # Run container
 docker run -p 8200:8200 \
-  -e BRANKAS_HOST=0.0.0.0 \
-  -v /etc/brankas:/etc/brankas:ro \
-  brankas:latest
+  -e SECRETON_HOST=0.0.0.0 \
+  -v /etc/secreton:/etc/secreton:ro \
+  secreton:latest
 ```
 
 ### Kubernetes
@@ -684,26 +684,26 @@ docker run -p 8200:8200 \
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: brankas
+  name: secreton
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: brankas
+      app: secreton
   template:
     metadata:
       labels:
-        app: brankas
+        app: secreton
     spec:
       containers:
-      - name: brankas
-        image: brankas:latest
+      - name: secreton
+        image: secreton:latest
         ports:
         - containerPort: 8200
         env:
-        - name: BRANKAS_HOST
+        - name: SECRETON_HOST
           value: "0.0.0.0"
-        - name: BRANKAS_CLUSTER_MODE
+        - name: SECRETON_CLUSTER_MODE
           value: "true"
 ```
 
@@ -719,7 +719,7 @@ We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.
 5. Submit a pull request
 
 ### Security Issues
-Please report security vulnerabilities to `security@brankas.io` following our responsible disclosure policy.
+Please report security vulnerabilities to `security@secreton.io` following our responsible disclosure policy.
 
 ## 📄 License
 
@@ -737,12 +737,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - **Documentation**: [docs/](docs/)
 - **Examples**: [examples/](examples/)
 - **Issues**: GitHub Issues
-- **Security**: security@brankas.io
+- **Security**: security@secreton.io
 - **Commercial Support**: Available upon request
 
 ---
 
-**⚠️ Security Notice**: This is security-critical software. Always perform thorough security reviews, penetration testing, and compliance audits before production deployment. While Brankas follows industry best practices, no system is completely immune to attacks.ance
+**⚠️ Security Notice**: This is security-critical software. Always perform thorough security reviews, penetration testing, and compliance audits before production deployment. While Secreton follows industry best practices, no system is completely immune to attacks.ance
 - Zero Trust, memory-only, audit immutable, MFA, policy granular
 - Mengikuti standar: PCI DSS, ISO 27001, NIST SP 800-53, OJK/BI
 - Lihat `SECURITY.md` dan `docs/COMPLIANCE.md` untuk checklist dan mapping compliance
@@ -759,13 +759,13 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - Envelope encryption & Shamir’s Secret Sharing
 
 # Catatan
-- Tidak ada sistem yang benar-benar impossible to hack, tapi Brankas menekan risiko ke level minimum sesuai standar internasional dan perbankan.
+- Tidak ada sistem yang benar-benar impossible to hack, tapi Secreton menekan risiko ke level minimum sesuai standar internasional dan perbankan.
 - Lakukan security review eksternal dan update checklist secara berkala.
 ---
 
 ## 🎉 Current Status
 
-**Brankas Vault System v1.3.0 is now COMPLETE with Raft Storage!** ✨
+**Secreton Vault System v1.3.0 is now COMPLETE with Raft Storage!** ✨
 
 ✅ **Fully Implemented Features:**
 - **Triple Interface Architecture**: HTTP API + CLI Tool + Demo Scripts

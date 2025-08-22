@@ -1,4 +1,4 @@
-# Security Review Checklist (Brankas)
+# Security Review Checklist (Secreton)
 
 - [ ] Semua akses enforce policy & MFA
 - [ ] Tidak ada root token statis

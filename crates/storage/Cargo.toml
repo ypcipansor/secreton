@@ -1,10 +1,10 @@
 [package]
-name = "brankas-storage"
+name = "secreton-storage"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Secure storage backend for Brankas vault system"
+description = "Secure storage backend for Secreton vault system"
 keywords = ["storage", "database", "vault", "security"]
 
 [dependencies]
@@ -24,7 +24,7 @@ sqlx.workspace = true
 redis.workspace = true
 
 # Cryptography
-brankas-crypto = { path = "../crypto" }
+secreton-crypto = { path = "../crypto" }
 zeroize.workspace = true
 secrecy.workspace = true
 

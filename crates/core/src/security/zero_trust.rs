@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, Timelike};
-use sha2::Digest;
 
 /// Trust levels for zero trust evaluation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -915,7 +914,7 @@ impl ZeroTrustEngine {
     /// Get zero trust engine metrics
     pub fn get_metrics(&self) -> ZeroTrustEngineHealthMetrics {
         let entities = self.entities.read().unwrap();
-        let policies = self.policies.read().unwrap();
+        let _policies = self.policies.read().unwrap();
         
         ZeroTrustEngineHealthMetrics {
             overall_health: 100.0, // Mock value

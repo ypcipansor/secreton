@@ -45,8 +45,8 @@ impl Default for AuthConfig {
         Self {
             jwt_secret: "your-super-secret-key".to_string(),
             jwt_expiration_hours: 24,
-            issuer: "brankas-vault".to_string(),
-            audience: "brankas-api".to_string(),
+            issuer: "secreton-vault".to_string(),
+            audience: "secreton-api".to_string(),
             require_auth: true,
             admin_roles: vec!["admin".to_string(), "vault-admin".to_string()],
         }
@@ -420,8 +420,8 @@ mod tests {
             ],
             exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
             iat: Utc::now().timestamp() as usize,
-            iss: "brankas-vault".to_string(),
-            aud: "brankas-api".to_string(),
+            iss: "secreton-vault".to_string(),
+            aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
         };
         

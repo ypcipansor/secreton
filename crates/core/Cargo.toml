@@ -1,10 +1,10 @@
 [package]
-name = "brankas-core"
+name = "secreton-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Core types and utilities for Brankas vault system"
+description = "Core types and utilities for Secreton vault system"
 keywords = ["core", "types", "utilities", "security"]
 
 [dependencies]

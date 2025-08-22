@@ -2,7 +2,7 @@ use axum::serve;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{info, error};
+use tracing::error;
 
 use brankas_api::{
     ApiState, ApiConfig, TransitApiState, KVApiState,

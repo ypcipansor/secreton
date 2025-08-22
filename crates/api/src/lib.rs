@@ -8,7 +8,6 @@ use axum::{
     Router,
 };
 use serde::Serialize;
-use std::collections::HashMap;
 
 pub mod transit;
 pub mod kv;

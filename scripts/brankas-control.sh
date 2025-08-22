@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Brankas Advanced Security System - Master Control Script
-# This script provides unified control for all Brankas operations
-# Author: Brankas Security Team
+# Secreton Advanced Security System - Master Control Script
+# This script provides unified control for all Secreton operations
+# Author: Secreton Security Team
 # Version: 1.0.0
 
 set -euo pipefail
@@ -18,7 +18,7 @@ NC='\033[0m'
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BRANKAS_ROOT="$(dirname "$SCRIPT_DIR")"
+SECRETON_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Logo and Header
 show_header() {
@@ -41,7 +41,7 @@ EOF
 # Main menu
 show_main_menu() {
     echo -e "${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║                     BRANKAS MAIN MENU                      ║${NC}"
+    echo -e "${PURPLE}║                     SECRETON MAIN MENU                      ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}🚀 DEPLOYMENT & SETUP${NC}"
@@ -84,7 +84,7 @@ show_main_menu() {
 # Deployment functions
 deploy_full_system() {
     echo -e "\n${GREEN}🚀 Starting Full System Deployment${NC}"
-    echo "This will deploy Brankas with all advanced security features."
+    echo "This will deploy Secreton with all advanced security features."
     echo ""
     
     read -p "Select deployment type [banking-grade/government-grade/high-performance]: " deploy_type
@@ -107,7 +107,7 @@ deploy_full_system() {
 
 configure_optimization() {
     echo -e "\n${GREEN}⚙️  Configuration Optimization${NC}"
-    echo "Optimize Brankas configuration for your specific requirements."
+    echo "Optimize Secreton configuration for your specific requirements."
     echo ""
     
     echo "Deployment Types:"
@@ -203,12 +203,12 @@ security_monitoring() {
 
 run_test_suite() {
     echo -e "\n${GREEN}🧪 Running Test Suite${NC}"
-    echo "Comprehensive testing of all Brankas components."
+    echo "Comprehensive testing of all Secreton components."
     echo ""
     
-    cd "$BRANKAS_ROOT"
+    cd "$SECRETON_ROOT"
     
-    echo -e "${BLUE}Building Brankas...${NC}"
+    echo -e "${BLUE}Building Secreton...${NC}"
     if cargo build --release; then
         echo -e "${GREEN}✅ Build successful${NC}"
     else
@@ -240,7 +240,7 @@ performance_benchmark() {
     echo "Comprehensive performance testing and comparison."
     echo ""
     
-    cd "$BRANKAS_ROOT"
+    cd "$SECRETON_ROOT"
     
     echo -e "${BLUE}Running performance benchmarks...${NC}"
     if cargo bench; then
@@ -269,14 +269,14 @@ system_health_check() {
     
     # Check services
     echo -e "${BLUE}Service Status:${NC}"
-    if systemctl is-active --quiet brankas.service; then
-        echo -e "Brankas Service: ${GREEN}ACTIVE${NC}"
+    if systemctl is-active --quiet secreton.service; then
+        echo -e "Secreton Service: ${GREEN}ACTIVE${NC}"
     else
-        echo -e "Brankas Service: ${RED}INACTIVE${NC}"
+        echo -e "Secreton Service: ${RED}INACTIVE${NC}"
     fi
     
     if command -v docker &> /dev/null; then
-        local containers=$(docker ps --filter "name=brankas" --format "{{.Names}}" | wc -l)
+        local containers=$(docker ps --filter "name=secreton" --format "{{.Names}}" | wc -l)
         echo "Docker Containers: $containers running"
     fi
     
@@ -311,11 +311,11 @@ view_live_logs() {
     
     local log_file=""
     case $log_choice in
-        1) log_file="/var/log/brankas/brankas.log" ;;
-        2) log_file="/var/log/brankas/security-monitor.log" ;;
-        3) log_file="/var/log/brankas/audit.log" ;;
+        1) log_file="/var/log/secreton/secreton.log" ;;
+        2) log_file="/var/log/secreton/security-monitor.log" ;;
+        3) log_file="/var/log/secreton/audit.log" ;;
         4) log_file="/var/log/syslog" ;;
-        *) log_file="/var/log/brankas/brankas.log" ;;
+        *) log_file="/var/log/secreton/secreton.log" ;;
     esac
     
     if [[ -f "$log_file" ]]; then
@@ -331,7 +331,7 @@ view_live_logs() {
 
 service_control() {
     echo -e "\n${GREEN}⚙️  Service Control${NC}"
-    echo "Manage Brankas system services:"
+    echo "Manage Secreton system services:"
     echo ""
     echo "1. Start Services"
     echo "2. Stop Services" 
@@ -342,23 +342,23 @@ service_control() {
     
     case $service_choice in
         1)
-            echo -e "\n${BLUE}Starting Brankas services...${NC}"
-            sudo systemctl start brankas.service
+            echo -e "\n${BLUE}Starting Secreton services...${NC}"
+            sudo systemctl start secreton.service
             echo -e "${GREEN}✅ Services started${NC}"
             ;;
         2)
-            echo -e "\n${BLUE}Stopping Brankas services...${NC}"
-            sudo systemctl stop brankas.service
+            echo -e "\n${BLUE}Stopping Secreton services...${NC}"
+            sudo systemctl stop secreton.service
             echo -e "${GREEN}✅ Services stopped${NC}"
             ;;
         3)
-            echo -e "\n${BLUE}Restarting Brankas services...${NC}"
-            sudo systemctl restart brankas.service
+            echo -e "\n${BLUE}Restarting Secreton services...${NC}"
+            sudo systemctl restart secreton.service
             echo -e "${GREEN}✅ Services restarted${NC}"
             ;;
         4)
             echo -e "\n${BLUE}Service Status:${NC}"
-            sudo systemctl status brankas.service
+            sudo systemctl status secreton.service
             ;;
     esac
     
@@ -379,11 +379,11 @@ view_documentation() {
     
     local doc_file=""
     case $doc_choice in
-        1) doc_file="$BRANKAS_ROOT/IMPLEMENTATION_COMPLETE.md" ;;
-        2) doc_file="$BRANKAS_ROOT/crates/core/src/security/README.md" ;;
-        3) doc_file="$BRANKAS_ROOT/docs/PERFORMANCE_BENCHMARKS.md" ;;
-        4) doc_file="$BRANKAS_ROOT/docs/VAULT_COMPARISON.md" ;;
-        5) doc_file="$BRANKAS_ROOT/README.md" ;;
+        1) doc_file="$SECRETON_ROOT/IMPLEMENTATION_COMPLETE.md" ;;
+        2) doc_file="$SECRETON_ROOT/crates/core/src/security/README.md" ;;
+        3) doc_file="$SECRETON_ROOT/docs/PERFORMANCE_BENCHMARKS.md" ;;
+        4) doc_file="$SECRETON_ROOT/docs/VAULT_COMPARISON.md" ;;
+        5) doc_file="$SECRETON_ROOT/README.md" ;;
     esac
     
     if [[ -f "$doc_file" ]] && command -v less &> /dev/null; then
@@ -422,8 +422,8 @@ emergency_procedures() {
     case $emergency_choice in
         1)
             echo -e "\n${RED}Executing emergency shutdown...${NC}"
-            sudo systemctl stop brankas.service
-            docker-compose -f /opt/brankas/docker-compose.yml down
+            sudo systemctl stop secreton.service
+            docker-compose -f /opt/secreton/docker-compose.yml down
             echo -e "${GREEN}✅ Emergency shutdown completed${NC}"
             ;;
         2)
@@ -472,7 +472,7 @@ main() {
             8) run_test_suite ;;
             9) performance_benchmark ;;
             10) system_health_check ;;
-            11) /usr/local/bin/brankas-backup; read -p "Press Enter to continue..." ;;
+            11) /usr/local/bin/secreton-backup; read -p "Press Enter to continue..." ;;
             12) view_live_logs ;;
             13) echo -e "\n${BLUE}Opening metrics dashboard at http://localhost:3000${NC}"; read -p "Press Enter to continue..." ;;
             14) echo -e "\n${BLUE}Alert management via Grafana at http://localhost:3000${NC}"; read -p "Press Enter to continue..." ;;
@@ -483,7 +483,7 @@ main() {
             19) view_documentation ;;
             20) view_documentation ;;
             0) 
-                echo -e "\n${GREEN}Thank you for using Brankas Advanced Security System!${NC}"
+                echo -e "\n${GREEN}Thank you for using Secreton Advanced Security System!${NC}"
                 exit 0 
                 ;;
             *)

@@ -151,6 +151,22 @@ pub struct HsmHealthStatus {
     pub available_storage: Option<u64>,
 }
 
+impl Default for HsmHealthStatus {
+    fn default() -> Self {
+        Self {
+            hsm_name: "default".to_string(),
+            healthy: true,
+            last_check: SystemTime::now(),
+            latency: None,
+            error_count: 0,
+            consecutive_failures: 0,
+            firmware_version: None,
+            temperature: None,
+            available_storage: None,
+        }
+    }
+}
+
 /// Performance and usage metrics for HSM operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HsmMetrics {
@@ -324,7 +340,7 @@ impl HsmManager {
     pub async fn start_health_monitoring(&self) {
         let providers = self.providers.clone();
         let health_status = self.health_status.clone();
-        let active_provider = self.active_provider.clone();
+        let _active_provider = self.active_provider.clone();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
@@ -340,12 +356,16 @@ impl HsmManager {
                 // Process each provider - simplified approach to avoid Send issues
                 for name in provider_names {
                     // Quick health check - for production this would be more sophisticated
-                    let health_result = Ok(HsmHealthStatus {
+                    let health_result: Result<HsmHealthStatus, HsmError> = Ok(HsmHealthStatus {
+                        hsm_name: name.clone(),
                         healthy: true,
                         last_check: SystemTime::now(),
                         consecutive_failures: 0,
                         error_count: 0,
-                        latency_ms: 5,
+                        latency: Some(Duration::from_millis(5)),
+                        firmware_version: Some("Mock-1.0".to_string()),
+                        temperature: Some(45.0),
+                        available_storage: Some(1024 * 1024 * 1024), // 1GB
                     });
                     
                     match health_result {

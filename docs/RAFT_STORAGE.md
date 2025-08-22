@@ -1,6 +1,6 @@
-# Brankas Vault - Raft Integrated Storage
+# Secreton Vault - Raft Integrated Storage
 
-Brankas Vault implements HashiCorp Vault-compatible integrated storage using the Raft consensus algorithm. This provides a self-contained, highly available storage solution without external dependencies.
+Secreton Vault implements HashiCorp Vault-compatible integrated storage using the Raft consensus algorithm. This provides a self-contained, highly available storage solution without external dependencies.
 
 ## 📋 Table of Contents
 
@@ -56,7 +56,7 @@ Raft Integrated Storage is inspired by HashiCorp Vault's integrated storage back
 
 ```
 ┌─────────────────────────────────────────┐
-│           Brankas API Layer             │
+│           Secreton API Layer             │
 ├─────────────────────────────────────────┤
 │          Transit Engine                 │
 │            KV Engine                    │
@@ -77,24 +77,24 @@ Raft Integrated Storage is inspired by HashiCorp Vault's integrated storage back
 
 ```bash
 # Storage Backend Selection
-export BRANKAS_STORAGE_BACKEND="raft"
+export SECRETON_STORAGE_BACKEND="raft"
 
 # Node Configuration
-export BRANKAS_NODE_ID="brankas-node-1"
-export BRANKAS_RAFT_DATA_DIR="./data/raft"
+export SECRETON_NODE_ID="secreton-node-1"
+export SECRETON_RAFT_DATA_DIR="./data/raft"
 
 # Network Configuration
-export BRANKAS_RAFT_BIND_ADDR="127.0.0.1:8201"
-export BRANKAS_RAFT_ADVERTISE_ADDR="127.0.0.1:8201"
+export SECRETON_RAFT_BIND_ADDR="127.0.0.1:8201"
+export SECRETON_RAFT_ADVERTISE_ADDR="127.0.0.1:8201"
 
 # Cluster Configuration
-export BRANKAS_RAFT_PEERS="node2:8201,node3:8201"
+export SECRETON_RAFT_PEERS="node2:8201,node3:8201"
 
 # Performance Tuning
-export BRANKAS_RAFT_SNAPSHOT_ENABLED="true"
-export BRANKAS_RAFT_SNAPSHOT_INTERVAL="120"
-export BRANKAS_RAFT_LOG_RETENTION="10000"
-export BRANKAS_RAFT_PERFORMANCE_MULTIPLIER="1"
+export SECRETON_RAFT_SNAPSHOT_ENABLED="true"
+export SECRETON_RAFT_SNAPSHOT_INTERVAL="120"
+export SECRETON_RAFT_LOG_RETENTION="10000"
+export SECRETON_RAFT_PERFORMANCE_MULTIPLIER="1"
 ```
 
 ### Configuration File (config/raft.toml)
@@ -106,7 +106,7 @@ port = 8200
 
 [storage]
 backend_type = "raft"
-node_id = "brankas-node-1"
+node_id = "secreton-node-1"
 data_dir = "./data/raft"
 bind_addr = "127.0.0.1:8201"
 advertise_addr = "127.0.0.1:8201"
@@ -127,11 +127,11 @@ Perfect for development and testing:
 
 ```bash
 # Start single node
-export BRANKAS_STORAGE_BACKEND="raft"
-export BRANKAS_NODE_ID="dev-node"
-export BRANKAS_RAFT_DATA_DIR="./data/dev-raft"
+export SECRETON_STORAGE_BACKEND="raft"
+export SECRETON_NODE_ID="dev-node"
+export SECRETON_RAFT_DATA_DIR="./data/dev-raft"
 
-cargo run -p brankas-api --bin api_server
+cargo run -p secreton-api --bin api_server
 ```
 
 ### 2. Three-Node Cluster (Production)
@@ -180,14 +180,14 @@ For maximum fault tolerance (tolerates 2 node failures):
 
 2. **Configure Node**:
    ```bash
-   export BRANKAS_STORAGE_BACKEND="raft"
-   export BRANKAS_NODE_ID="node-1"
-   export BRANKAS_RAFT_DATA_DIR="./data/raft/node-1"
+   export SECRETON_STORAGE_BACKEND="raft"
+   export SECRETON_NODE_ID="node-1"
+   export SECRETON_RAFT_DATA_DIR="./data/raft/node-1"
    ```
 
 3. **Start Server**:
    ```bash
-   cargo run -p brankas-api --bin api_server
+   cargo run -p secreton-api --bin api_server
    ```
 
 ## 🏛️ Multi-Node Cluster
@@ -196,22 +196,22 @@ For maximum fault tolerance (tolerates 2 node failures):
 
 1. **Bootstrap First Node**:
    ```bash
-   export BRANKAS_STORAGE_BACKEND="raft"
-   export BRANKAS_NODE_ID="node-1"
-   export BRANKAS_RAFT_BIND_ADDR="10.0.1.1:8201"
-   export BRANKAS_RAFT_PEERS=""
+   export SECRETON_STORAGE_BACKEND="raft"
+   export SECRETON_NODE_ID="node-1"
+   export SECRETON_RAFT_BIND_ADDR="10.0.1.1:8201"
+   export SECRETON_RAFT_PEERS=""
    
-   cargo run -p brankas-api --bin api_server
+   cargo run -p secreton-api --bin api_server
    ```
 
 2. **Join Additional Nodes**:
    ```bash
-   export BRANKAS_STORAGE_BACKEND="raft"
-   export BRANKAS_NODE_ID="node-2"
-   export BRANKAS_RAFT_BIND_ADDR="10.0.1.2:8201"
-   export BRANKAS_RAFT_PEERS="10.0.1.1:8201,10.0.1.3:8201"
+   export SECRETON_STORAGE_BACKEND="raft"
+   export SECRETON_NODE_ID="node-2"
+   export SECRETON_RAFT_BIND_ADDR="10.0.1.2:8201"
+   export SECRETON_RAFT_PEERS="10.0.1.1:8201,10.0.1.3:8201"
    
-   cargo run -p brankas-api --bin api_server
+   cargo run -p secreton-api --bin api_server
    ```
 
 3. **Verify Cluster**:
@@ -264,12 +264,12 @@ cp -r ./data/raft ./backup/raft-$(date +%Y%m%d-%H%M%S)
 
 ```bash
 # Add new node to existing cluster
-export BRANKAS_NODE_ID="node-4"
-export BRANKAS_RAFT_PEERS="existing-nodes..."
+export SECRETON_NODE_ID="node-4"
+export SECRETON_RAFT_PEERS="existing-nodes..."
 
 # Remove node (graceful)
 # 1. Stop the node
-# 2. Update BRANKAS_RAFT_PEERS on remaining nodes
+# 2. Update SECRETON_RAFT_PEERS on remaining nodes
 # 3. Clean up data directory
 ```
 
@@ -291,13 +291,13 @@ export BRANKAS_RAFT_PEERS="existing-nodes..."
 
 ```bash
 # Increase performance multiplier for faster elections
-export BRANKAS_RAFT_PERFORMANCE_MULTIPLIER="2"
+export SECRETON_RAFT_PERFORMANCE_MULTIPLIER="2"
 
 # Adjust snapshot frequency
-export BRANKAS_RAFT_SNAPSHOT_INTERVAL="60"
+export SECRETON_RAFT_SNAPSHOT_INTERVAL="60"
 
 # Increase log retention for better recovery
-export BRANKAS_RAFT_LOG_RETENTION="50000"
+export SECRETON_RAFT_LOG_RETENTION="50000"
 ```
 
 ## 🔐 Security
@@ -330,7 +330,7 @@ export BRANKAS_RAFT_LOG_RETENTION="50000"
 telnet <leader-ip> 8201
 
 # Verify configuration
-echo $BRANKAS_RAFT_PEERS
+echo $SECRETON_RAFT_PEERS
 ```
 
 **Issue: Split-brain scenario**
@@ -359,8 +359,8 @@ du -sh ./data/raft/
 
 ```bash
 # Enable debug logging
-export BRANKAS_LOG_LEVEL="debug"
-export RUST_LOG="brankas=debug"
+export SECRETON_LOG_LEVEL="debug"
+export RUST_LOG="secreton=debug"
 
 # Check server logs
 tail -f server.log
@@ -388,7 +388,7 @@ ls -la ./data/raft/
 
 ## 🔗 API Compatibility
 
-The Raft storage backend is fully compatible with all Brankas Vault APIs:
+The Raft storage backend is fully compatible with all Secreton Vault APIs:
 
 - **Transit Engine**: Encryption/decryption operations
 - **KV Secrets Engine**: Secret storage and retrieval

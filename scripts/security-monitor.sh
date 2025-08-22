@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# Brankas Security Monitoring and Incident Response Script
+# Secreton Security Monitoring and Incident Response Script
 # This script provides real-time security monitoring and automated incident response
-# Author: Brankas Security Team
+# Author: Secreton Security Team
 # Version: 1.0.0
 
 set -euo pipefail
 
 # Configuration
-BRANKAS_API="https://localhost:8200"
+SECRETON_API="https://localhost:8200"
 MONITORING_INTERVAL=${MONITORING_INTERVAL:-30}  # seconds
 ALERT_THRESHOLD_FAILED_LOGINS=${ALERT_THRESHOLD_FAILED_LOGINS:-10}
 ALERT_THRESHOLD_ANOMALY_SCORE=${ALERT_THRESHOLD_ANOMALY_SCORE:-0.8}
@@ -25,8 +25,8 @@ PURPLE='\033[0;35m'
 NC='\033[0m'
 
 # Logging
-LOG_FILE="/var/log/brankas/security-monitor.log"
-ALERT_LOG="/var/log/brankas/security-alerts.log"
+LOG_FILE="/var/log/secreton/security-monitor.log"
+ALERT_LOG="/var/log/secreton/security-alerts.log"
 
 log() {
     local message="$1"
@@ -78,7 +78,7 @@ send_webhook_alert() {
     curl -s -X POST "$ALERT_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
         -d "{
-            \"text\": \"Brankas Security Alert\",
+            \"text\": \"Secreton Security Alert\",
             \"attachments\": [{
                 \"color\": \"$([ "$severity" == "CRITICAL" ] && echo "danger" || echo "warning")\",
                 \"fields\": [{
@@ -103,13 +103,13 @@ send_email_alert() {
     local message="$1"
     
     {
-        echo "Subject: CRITICAL: Brankas Security Alert"
+        echo "Subject: CRITICAL: Secreton Security Alert"
         echo "To: $EMAIL_ALERTS"
         echo "Content-Type: text/html; charset=UTF-8"
         echo ""
         echo "<html><body>"
         echo "<h2 style='color: red;'>CRITICAL Security Alert</h2>"
-        echo "<p><strong>System:</strong> Brankas Advanced Security Vault</p>"
+        echo "<p><strong>System:</strong> Secreton Advanced Security Vault</p>"
         echo "<p><strong>Timestamp:</strong> $(date -Iseconds)</p>"
         echo "<p><strong>Alert:</strong> $message</p>"
         echo "<p>Please investigate immediately and take appropriate action.</p>"
@@ -127,14 +127,14 @@ send_emergency_notification() {
         twilio api:core:messages:create \
             --to "$EMERGENCY_CONTACT" \
             --from "+1234567890" \
-            --body "CRITICAL Brankas Security Alert: $message" || true
+            --body "CRITICAL Secreton Security Alert: $message" || true
     fi
 }
 
-# Get Brankas API token
+# Get Secreton API token
 get_api_token() {
     # In production, this should use a service account or machine token
-    local token_file="/etc/brankas/monitor-token"
+    local token_file="/etc/secreton/monitor-token"
     if [[ -f "$token_file" ]]; then
         cat "$token_file"
     else
@@ -146,27 +146,27 @@ get_api_token() {
 check_system_health() {
     local token=$(get_api_token)
     
-    # Check Brankas health
-    local health_response=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/health" 2>/dev/null || echo "{}")
+    # Check Secreton health
+    local health_response=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/health" 2>/dev/null || echo "{}")
     local sealed=$(echo "$health_response" | jq -r '.sealed // "unknown"')
     local initialized=$(echo "$health_response" | jq -r '.initialized // "unknown"')
     
     if [[ "$sealed" == "true" ]]; then
-        alert "CRITICAL" "Brankas is sealed - service unavailable"
+        alert "CRITICAL" "Secreton is sealed - service unavailable"
         return 1
     elif [[ "$initialized" == "false" ]]; then
-        alert "HIGH" "Brankas is not initialized"
+        alert "HIGH" "Secreton is not initialized"
         return 1
     fi
     
     # Check performance metrics
-    local perf_response=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/metrics?format=prometheus" 2>/dev/null || echo "")
+    local perf_response=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/metrics?format=prometheus" 2>/dev/null || echo "")
     
     if [[ -n "$perf_response" ]]; then
         # Parse key metrics
-        local cpu_usage=$(echo "$perf_response" | grep "brankas_runtime_cpu_seconds_total" | tail -1 | awk '{print $2}' | cut -d'.' -f1)
-        local memory_usage=$(echo "$perf_response" | grep "brankas_runtime_alloc_bytes" | tail -1 | awk '{print $2}')
-        local request_rate=$(echo "$perf_response" | grep "brankas_core_handle_request_count" | tail -1 | awk '{print $2}')
+        local cpu_usage=$(echo "$perf_response" | grep "secreton_runtime_cpu_seconds_total" | tail -1 | awk '{print $2}' | cut -d'.' -f1)
+        local memory_usage=$(echo "$perf_response" | grep "secreton_runtime_alloc_bytes" | tail -1 | awk '{print $2}')
+        local request_rate=$(echo "$perf_response" | grep "secreton_core_handle_request_count" | tail -1 | awk '{print $2}')
         
         # Alert on high resource usage
         if [[ -n "$cpu_usage" && "$cpu_usage" -gt 80 ]]; then
@@ -187,7 +187,7 @@ monitor_security_events() {
     
     # Check authentication failures
     local auth_failures=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/audit/failures?limit=100" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/audit/failures?limit=100" 2>/dev/null | \
         jq -r '.data.failures // []' | \
         jq 'length')
     
@@ -196,7 +196,7 @@ monitor_security_events() {
         
         # Get failure details for analysis
         local failure_details=$(curl -s -k -H "X-Vault-Token: $token" \
-            "$BRANKAS_API/v1/sys/audit/failures?limit=10" 2>/dev/null | \
+            "$SECRETON_API/v1/sys/audit/failures?limit=10" 2>/dev/null | \
             jq -r '.data.failures[] | "\(.timestamp): \(.client_ip) - \(.error)"' | \
             head -5)
         
@@ -208,7 +208,7 @@ monitor_security_events() {
     
     # Check for privilege escalation attempts
     local privilege_events=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/audit/privilege-escalation" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/audit/privilege-escalation" 2>/dev/null | \
         jq -r '.data.events // []' | \
         jq 'length')
     
@@ -218,7 +218,7 @@ monitor_security_events() {
     
     # Check zero-trust violations
     local zero_trust_violations=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/zero-trust/violations" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/zero-trust/violations" 2>/dev/null | \
         jq -r '.data.violations // []' | \
         jq 'length')
     
@@ -233,7 +233,7 @@ monitor_threat_intelligence() {
     
     # Check threat intelligence alerts
     local threat_alerts=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/threat-intelligence/alerts" 2>/dev/null | \
+        "$SECRETON_API/v1/threat-intelligence/alerts" 2>/dev/null | \
         jq -r '.data.alerts // []')
     
     if [[ "$threat_alerts" != "[]" ]]; then
@@ -258,7 +258,7 @@ monitor_threat_intelligence() {
     
     # Check behavioral anomalies
     local anomalies=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/threat-intelligence/anomalies" 2>/dev/null | \
+        "$SECRETON_API/v1/threat-intelligence/anomalies" 2>/dev/null | \
         jq -r '.data.anomalies // []')
     
     if [[ "$anomalies" != "[]" ]]; then
@@ -283,7 +283,7 @@ monitor_hsm_status() {
     local token=$(get_api_token)
     
     local hsm_status=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/hsm/status" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/hsm/status" 2>/dev/null | \
         jq -r '.data.status // "unknown"')
     
     if [[ "$hsm_status" != "healthy" ]]; then
@@ -292,7 +292,7 @@ monitor_hsm_status() {
     
     # Check HSM key availability
     local key_count=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/hsm/keys" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/hsm/keys" 2>/dev/null | \
         jq -r '.data.keys // []' | \
         jq 'length')
     
@@ -306,7 +306,7 @@ monitor_compliance() {
     local token=$(get_api_token)
     
     local compliance_status=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/compliance/status" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/compliance/status" 2>/dev/null | \
         jq -r '.data // {}')
     
     # Check critical compliance frameworks
@@ -364,17 +364,17 @@ automated_incident_response() {
 
 # Generate security report
 generate_security_report() {
-    local report_file="/var/log/brankas/security-report-$(date +%Y%m%d_%H%M%S).json"
+    local report_file="/var/log/secreton/security-report-$(date +%Y%m%d_%H%M%S).json"
     local token=$(get_api_token)
     
     log "Generating security report: $report_file"
     
     # Collect comprehensive security data
-    local health_data=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/health" 2>/dev/null || echo "{}")
-    local metrics_data=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/metrics?format=json" 2>/dev/null || echo "{}")
-    local audit_summary=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/audit/summary" 2>/dev/null || echo "{}")
-    local threat_summary=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/threat-intelligence/summary" 2>/dev/null || echo "{}")
-    local compliance_status=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/compliance/status" 2>/dev/null || echo "{}")
+    local health_data=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/health" 2>/dev/null || echo "{}")
+    local metrics_data=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/metrics?format=json" 2>/dev/null || echo "{}")
+    local audit_summary=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/audit/summary" 2>/dev/null || echo "{}")
+    local threat_summary=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/threat-intelligence/summary" 2>/dev/null || echo "{}")
+    local compliance_status=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/compliance/status" 2>/dev/null || echo "{}")
     
     # Create comprehensive report
     jq -n --argjson health "$health_data" \
@@ -400,7 +400,7 @@ generate_security_report() {
 display_dashboard() {
     clear
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║                    BRANKAS SECURITY MONITORING DASHBOARD                     ║${NC}"
+    echo -e "${BLUE}║                    SECRETON SECURITY MONITORING DASHBOARD                     ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
@@ -415,7 +415,7 @@ display_dashboard() {
     echo -e "${PURPLE}SYSTEM STATUS${NC}"
     echo "─────────────"
     
-    local health_response=$(curl -s -k -H "X-Vault-Token: $token" "$BRANKAS_API/v1/sys/health" 2>/dev/null || echo "{}")
+    local health_response=$(curl -s -k -H "X-Vault-Token: $token" "$SECRETON_API/v1/sys/health" 2>/dev/null || echo "{}")
     local sealed=$(echo "$health_response" | jq -r '.sealed // "unknown"')
     local initialized=$(echo "$health_response" | jq -r '.initialized // "unknown"')
     local standby=$(echo "$health_response" | jq -r '.standby // "unknown"')
@@ -441,14 +441,14 @@ display_dashboard() {
     
     # Threat Intelligence
     local threat_score=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/threat-intelligence/current-risk" 2>/dev/null | \
+        "$SECRETON_API/v1/threat-intelligence/current-risk" 2>/dev/null | \
         jq -r '.data.risk_score // 0.0')
     
     echo -e "Current Threat Level: $(format_threat_level "$threat_score")"
     
     # Compliance Status
     local compliance_score=$(curl -s -k -H "X-Vault-Token: $token" \
-        "$BRANKAS_API/v1/sys/compliance/score" 2>/dev/null | \
+        "$SECRETON_API/v1/sys/compliance/score" 2>/dev/null | \
         jq -r '.data.overall_score // 0.0')
     
     echo -e "Compliance Score: $(format_compliance_score "$compliance_score")"
@@ -503,7 +503,7 @@ format_compliance_score() {
 
 # Main monitoring loop
 main_monitor_loop() {
-    log "Starting Brankas security monitoring..."
+    log "Starting Secreton security monitoring..."
     
     # Ensure log files exist
     touch "$LOG_FILE" "$ALERT_LOG"
