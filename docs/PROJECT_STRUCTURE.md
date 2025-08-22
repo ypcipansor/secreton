@@ -2,7 +2,7 @@
 
 ## Organized Directory Layout
 
-After recent optimization and cleanup, Secreton Enterprise Vault follows a clean, professional structure:
+After recent optimization and cleanup, Secreton Enterprise Vault by Cipherce follows a clean, professional structure:
 
 ```
 secreton/

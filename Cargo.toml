@@ -13,11 +13,11 @@ members = [
 [workspace.package]
 version = "1.0.0"
 edition = "2021"
-authors = ["Secreton Security Team <security@secreton.io>"]
+authors = ["Cipherce Security Team <security@cipherce.io>"]
 license = "Apache-2.0"
-repository = "https://github.com/secreton/security-vault"
-homepage = "https://secreton.io"
-description = "Advanced Security Vault System with Quantum-Safe Cryptography"
+repository = "https://github.com/cipherce/secreton-vault"
+homepage = "https://cipherce.io/secreton"
+description = "Advanced Security Vault System with Quantum-Safe Cryptography by Cipherce"
 keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
 rust-version = "1.70"

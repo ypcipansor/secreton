@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Secreton Security Vault System will be documented in this file.
+All notable changes to the Secreton Security Vault System by Cipherce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 **MAJOR MILESTONE: Complete Enterprise Implementation Superior to HashiCorp Vault**
 
-This release marks the completion of Secreton's transformation into the **most advanced enterprise security platform** available, with **12+ enterprise features** that exceed HashiCorp Vault's capabilities.
+This release marks the completion of Secreton's (by Cipherce) transformation into the **most advanced enterprise security platform** available, with **12+ enterprise features** that exceed HashiCorp Vault's capabilities.
 
 ### Added - Enterprise Security Platform (August 22, 2025)
 

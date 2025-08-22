@@ -1,6 +1,6 @@
-# Contributing to Secreton Security Vault System
+# Contributing to Secreton Security Vault System by Cipherce
 
-Thank you for your interest in contributing to Secreton! This document provides comprehensive guidelines for contributing to our security-focused vault system.
+Thank you for your interest in contributing to Secreton by Cipherce! This document provides comprehensive guidelines for contributing to our security-focused vault system.
 
 ## 🎯 Table of Contents
 

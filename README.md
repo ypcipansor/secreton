@@ -1,8 +1,9 @@
 # Secreton - Enterprise Security Vault System
+### *Developed by Cipherce*
 
 🏆 **The Ultimate Enterprise Security Platform - Superior to HashiCorp Vault**
 
-A next-generation, quantum-safe security vault system built with Rust that **exceeds HashiCorp Vault's capabilities** with advanced enterprise features, military-grade compliance, and AI-powered performance optimization.
+A next-generation, quantum-safe security vault system built with Rust by **Cipherce** that **exceeds HashiCorp Vault's capabilities** with advanced enterprise features, military-grade compliance, and AI-powered performance optimization.
 
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![Security](https://img.shields.io/badge/Security-FIPS%20140--3%20L3-critical.svg?style=for-the-badge)
