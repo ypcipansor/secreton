@@ -1,6 +1,6 @@
 //! Security Module Declaration
 //! 
-//! This module exposes all advanced security components implemented in Brankas.
+//! This module exposes all advanced security components implemented in Secreton.
 //! These modules collectively provide security capabilities that exceed HashiCorp Vault
 //! and meet international banking standards, zero-trust architecture, and maximum security requirements.
 
@@ -18,6 +18,24 @@ pub mod audit;
 
 /// Zero-trust architecture with continuous verification and risk assessment
 pub mod zero_trust;
+
+/// FIPS 140-2/3 compliance engine with HSM integration
+pub mod fips_compliance;
+
+/// Advanced seal wrapping engine with multi-layer encryption
+pub mod seal_wrapping;
+
+/// Managed keys engine for automatic key lifecycle management
+pub mod managed_keys;
+
+/// Enterprise namespaces for hierarchical multi-tenancy
+pub mod enterprise_namespaces;
+
+/// Advanced replication engine with conflict resolution and disaster recovery
+pub mod advanced_replication;
+
+/// Enterprise performance engine with intelligent optimization
+pub mod enterprise_performance;
 
 /// Advanced MFA system with adaptive authentication and behavioral biometrics
 pub mod advanced_mfa;
