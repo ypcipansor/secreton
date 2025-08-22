@@ -39,6 +39,7 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 - **📊 Real-Time Monitoring**: Comprehensive metrics and intelligent alerting
 - **🎯 Zero-Trust Architecture**: Continuous verification and risk assessment
 - **📝 Secret Versioning & Audit Trail**: Track, rollback, and audit every secret change with cryptographic integrity ✨ **NEW**
+ - **🚫 Granular Revocation**: Revoke secrets by secret, subtree, user, session, or type with tamper-evident audit ✨ **NEW**
 
 ### ✅ **High-Performance Engines**
 - **Transit Engine**: Complete encryption/decryption-as-a-service with 100K+ ops/sec
@@ -59,6 +60,7 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 - **Zero Trust**: Continuous verification with device attestation
 - **Zero Error**: Comprehensive fault tolerance and automatic recovery
 - **Secret Versioning & Audit Trail**: Versioned secrets, rollback, and tamper-evident audit for every change ✨ **NEW**
+ - **Granular Revocation**: Fine-grained revoke (per secret, subtree, user, session, type) with audit and compliance ✨ **NEW**
 - **Key Isolation**: Hardware-backed key separation with HSM redundancy
 
 ### 🏢 **Enterprise Features**  

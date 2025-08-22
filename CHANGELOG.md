@@ -19,6 +19,11 @@ This release marks the completion of Secreton's (by Cipherce) transformation int
   - Tamper-evident, compliance-ready, and zero error/zero bug by design
   - Enables secure lifecycle, rollback, and forensic traceability for every secret
 
+- **🚫 Granular Revocation** (August 22, 2025)
+  - Fine-grained revoke: per secret, subtree, user, session, or type
+  - Tamper-evident, audit-integrated, and compliance-ready
+  - Enables zero trust, maximum security, and forensic traceability
+
 #### 🔐 **Advanced Enterprise Security Features (6,500+ Lines of New Code)**
 
 - **🛡️ FIPS 140-3 Level 3 Compliance Engine** (600+ lines)
