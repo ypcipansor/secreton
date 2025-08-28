@@ -1129,7 +1129,7 @@ impl ManagedKeysEngine {
         }
 
         // Schedule rotation if needed
-        if let Some(next_rotation) = managed_key.lifecycle.next_rotation {
+        if let Some(_next_rotation) = managed_key.lifecycle.next_rotation {
             if let Some(scheduler) = &self.rotation_scheduler {
                 // Would schedule rotation here - placeholder
             }
@@ -1150,9 +1150,9 @@ impl ManagedKeysEngine {
     pub async fn rotate_key(
         &self,
         key_id: &ManagedKeyId,
-        reason: RotationReason,
+        _reason: RotationReason,
     ) -> SecretonResult<RotatedKey> {
-        let (managed_key, provider) = {
+        if let (managed_key, _provider) = {
             let keys = self.managed_keys.read().await;
             let managed_key = keys
                 .get(key_id)
@@ -1167,59 +1167,59 @@ impl ManagedKeysEngine {
                 .clone();
 
             (managed_key, provider)
-        };
+        } {
+            // Perform the rotation - placeholder implementation
+            let new_key_id = uuid::Uuid::new_v4().to_string();
 
-        // Perform the rotation - placeholder implementation
-        let new_key_id = uuid::Uuid::new_v4().to_string();
+            // Create rotated key result
+            let rotated_at = chrono::Utc::now();
+            let rotated_key = RotatedKey {
+                old_key_id: managed_key.id.clone(),
+                new_key_id: new_key_id.clone(),
+                rotated_at,
+            };
 
-        // Create rotated key result
-        let rotated_key = RotatedKey {
-            old_key_id: managed_key.id.clone(),
-            new_key_id: new_key_id.clone(),
-            rotated_at: chrono::Utc::now(),
-        };
+            // Update managed key record
+            {
+                let mut keys = self.managed_keys.write().await;
+                if let Some(key) = keys.get_mut(&managed_key.id) {
+                    key.state = KeyState::Deprecated;
+                }
 
-        // Update managed key record
-        {
-            let mut keys = self.managed_keys.write().await;
-            if let Some(key) = keys.get_mut(&rotated_key.old_key_id) {
-                key.state = KeyState::Deprecated;
+                // Create new key record for the rotated key
+                let mut new_managed_key = managed_key.clone();
+                new_managed_key.id = new_key_id.clone();
+                new_managed_key.state = KeyState::Active;
+                new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
+                new_managed_key.lifecycle.next_rotation = self
+                    .calculate_next_rotation(&new_managed_key.key_type)
+                    .await;
+
+                keys.insert(new_key_id.clone(), new_managed_key);
             }
 
-            // Create new key record for the rotated key
-            let mut new_managed_key = managed_key.clone();
-            new_managed_key.id = rotated_key.new_key_id.clone();
-            new_managed_key.state = KeyState::Active;
-            new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
-            new_managed_key.lifecycle.next_rotation = self
-                .calculate_next_rotation(&new_managed_key.key_type)
-                .await;
-
-            keys.insert(rotated_key.new_key_id.clone(), new_managed_key);
-        }
-
-        // Schedule next rotation
-        if let Some(next_rotation) = self.calculate_next_rotation(&managed_key.key_type).await {
-            if let Some(scheduler) = &self.rotation_scheduler {
-                // Would schedule rotation here - placeholder
+            // Schedule next rotation
+            if let Some(_next_rotation) = self
+                .managed_keys
+                .read()
+                .await
+                .get(key_id)
+                .and_then(|k| k.lifecycle.next_rotation)
+            {
+                if let Some(_scheduler) = &self.rotation_scheduler {
+                    // Would schedule rotation here - placeholder
+                }
             }
+
+            // Audit log
+            if let Some(_logger) = &self.audit_logger {
+                // Would log key rotation here - placeholder
+            }
+
+            Ok(rotated_key)
+        } else {
+            Err(crate::error::SecretonError::KeyNotFound)
         }
-
-        // Create rotation result
-        let rotation_result = RotationResult {
-            old_key_id: rotated_key.old_key_id.clone(),
-            new_key_id: Some(rotated_key.new_key_id.clone()),
-            status: RotationStatus::Success,
-            error: None,
-            timestamp: rotated_key.rotated_at,
-        };
-
-        // Audit log
-        if let Some(logger) = &self.audit_logger {
-            // Would log key rotation here - placeholder
-        }
-
-        Ok(rotated_key)
     }
 
     /// Get default lifecycle policies
@@ -1284,7 +1284,7 @@ impl ManagedKeysEngine {
     /// Query provider capabilities
     async fn query_provider_capabilities(
         &self,
-        provider_id: &str,
+        _provider_id: &str,
     ) -> SecretonResult<KeyProviderCapabilities> {
         // This would query the actual provider for its capabilities
         // For now, return default capabilities

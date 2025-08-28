@@ -964,7 +964,7 @@ impl NamespacesEngine {
         }
 
         // Set quotas
-        if let Some(quota_manager) = &self.quota_manager {
+        if let Some(_quota_manager) = &self.quota_manager {
             // Would set quota here - placeholder
         }
 
@@ -980,7 +980,7 @@ impl NamespacesEngine {
         self.update_creation_metrics(&namespace).await;
 
         // Audit log
-        if let Some(logger) = &self.audit_logger {
+        if let Some(_logger) = &self.audit_logger {
             // Would log namespace creation here - placeholder
         }
 
@@ -1025,13 +1025,13 @@ impl NamespacesEngine {
     /// Check access to namespace
     pub async fn check_access(
         &self,
-        namespace_id: &NamespaceId,
-        principal: &Principal,
-        resource: &ResourceType,
-        action: &Action,
-        context: &AccessContext,
+        _namespace_id: &NamespaceId,
+        _principal: &Principal,
+        _resource: &ResourceType,
+        _action: &Action,
+        _context: &AccessContext,
     ) -> SecretonResult<AccessDecision> {
-        if let Some(access_control) = &self.access_control {
+        if let Some(_access_control) = &self.access_control {
             // Would check access here - placeholder
             Ok(AccessDecision::Allow)
         } else {

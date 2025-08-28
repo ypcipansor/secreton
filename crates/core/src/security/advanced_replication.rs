@@ -197,12 +197,12 @@ pub struct SecurityConfig {
 /// Encryption Algorithms for Replication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    AES256_GCM,
-    ChaCha20_Poly1305,
-    AES256_GCM_SIV,
-    /// Post-quantum algorithms
-    Kyber1024_AES256,
-    Hybrid_AES256_Kyber768,
+    Aes256Gcm,
+    ChaCha20Poly1305,
+    Aes256GcmSiv,
+    // Post-quantum
+    Kyber1024Aes256,
+    HybridAes256Kyber768,
 }
 
 /// Authentication Methods
@@ -1313,7 +1313,7 @@ impl ReplicationEngine {
     }
 
     /// Join cluster
-    pub async fn join_cluster(&self, cluster_address: &str) -> SecretonResult<()> {
+    pub async fn join_cluster(&self, _cluster_address: &str) -> SecretonResult<()> {
         // Implementation would establish connections to cluster
         // This is a simplified placeholder
 

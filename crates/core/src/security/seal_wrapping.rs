@@ -638,7 +638,7 @@ impl SealWrappingEngine {
 
         // Apply multiple layers of wrapping
         for (i, provider_with_priority) in available_providers.iter().enumerate() {
-            let layer_context = WrapContext {
+            let _layer_context = WrapContext {
                 request_id: format!("{}-layer-{}", context.request_id, i),
                 data_type: context.data_type.clone(),
                 aad: context.aad.clone(),
@@ -735,7 +735,7 @@ impl SealWrappingEngine {
 
             // Unwrap layers in reverse order
             for (i, layer) in multi_seal_data.iter().rev().enumerate() {
-                let layer_context = UnwrapContext {
+                let _layer_context = UnwrapContext {
                     request_id: format!("{}-layer-{}", context.request_id, i),
                     expected_data_type: context.expected_data_type.clone(),
                     caller: context.caller.clone(),
@@ -763,7 +763,7 @@ impl SealWrappingEngine {
     async fn single_seal_unwrap(
         &self,
         wrapped: &WrappedData,
-        context: &UnwrapContext,
+        _context: &UnwrapContext,
     ) -> SecretonResult<Vec<u8>> {
         let providers = self.seal_providers.read().await;
         let _provider = providers
