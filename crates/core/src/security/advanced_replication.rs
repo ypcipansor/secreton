@@ -1433,7 +1433,7 @@ pub enum VectorComparison {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*; // Unused import removed
 
     #[tokio::test]
     async fn test_replication_engine_creation() {

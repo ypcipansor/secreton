@@ -1525,7 +1525,7 @@ impl Default for PerformanceMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*; // Unused import removed
 
     #[tokio::test]
     async fn test_performance_engine_creation() {

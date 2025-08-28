@@ -79,26 +79,26 @@ pub trait SealProvider: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SealAlgorithm {
     // Classical Algorithms
-    AES256_GCM,
-    AES256_GCM_SIV,
-    ChaCha20_Poly1305,
-    XChaCha20_Poly1305,
+    Aes256Gcm,
+    Aes256GcmSiv,
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
 
     // Quantum-Resistant Algorithms
-    Kyber768_AES256,
-    Kyber1024_AES256,
-    FrodoKEM_AES256,
-    SIKE_AES256,
+    Kyber768Aes256,
+    Kyber1024Aes256,
+    FrodoKemAes256,
+    SikeAes256,
 
     // Hybrid Algorithms (Classical + Post-Quantum)
-    Hybrid_RSA4096_Kyber768,
-    Hybrid_ECDSA_P384_Dilithium3,
-    Hybrid_AES256_FrodoKEM,
+    HybridRsa4096Kyber768,
+    HybridEcdsaP384Dilithium3,
+    HybridAes256FrodoKem,
 
     // Advanced Algorithms
-    Noise_XK_AES256,
-    Signal_X3DH_AES256,
-    MLS_TreeKEM_AES256,
+    NoiseXkAes256,
+    SignalX3dhAes256,
+    MlsTreeKemAes256,
 }
 
 /// Data Types for Seal Wrapping
@@ -828,7 +828,7 @@ impl SealWrappingEngine {
         configs.insert(
             DataType::RootKey,
             WrapConfig {
-                algorithm: SealAlgorithm::Hybrid_RSA4096_Kyber768,
+                algorithm: SealAlgorithm::HybridRsa4096Kyber768,
                 min_seals: 3,
                 multi_layer: true,
                 rotation_interval: 90,
@@ -841,7 +841,7 @@ impl SealWrappingEngine {
         configs.insert(
             DataType::MasterKey,
             WrapConfig {
-                algorithm: SealAlgorithm::Kyber1024_AES256,
+                algorithm: SealAlgorithm::Kyber1024Aes256,
                 min_seals: 2,
                 multi_layer: true,
                 rotation_interval: 30,
@@ -855,7 +855,7 @@ impl SealWrappingEngine {
         configs.insert(
             DataType::Secret,
             WrapConfig {
-                algorithm: SealAlgorithm::AES256_GCM,
+                algorithm: SealAlgorithm::Aes256Gcm,
                 min_seals: 1,
                 multi_layer: false,
                 rotation_interval: 365,
@@ -893,7 +893,7 @@ impl Default for MultiSealConfig {
 impl Default for WrapConfig {
     fn default() -> Self {
         Self {
-            algorithm: SealAlgorithm::AES256_GCM,
+            algorithm: SealAlgorithm::Aes256Gcm,
             min_seals: 1,
             multi_layer: false,
             rotation_interval: 365,
@@ -919,7 +919,7 @@ impl Default for SealMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*; // Unused import removed
 
     #[tokio::test]
     async fn test_seal_wrapping_engine_creation() {

@@ -143,9 +143,9 @@ pub enum KeyType {
     RSA2048,
     RSA3072,
     RSA4096,
-    ECC_P256,
-    ECC_P384,
-    ECC_P521,
+    EccP256,
+    EccP384,
+    EccP521,
     Ed25519,
     Ed448,
 
@@ -167,12 +167,12 @@ pub enum KeyType {
     FrodoKEM1344,
 
     // Hybrid Keys
-    RSA_Kyber,
-    ECDSA_Dilithium,
+    RsaKyber,
+    EcdsaDilithium,
 
     // Special Purpose Keys
-    HMAC_SHA256,
-    HMAC_SHA512,
+    HmacSha256,
+    HmacSha512,
     KeyWrap,
     DataEncryption,
 
@@ -230,37 +230,37 @@ pub struct KeyMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyAlgorithm {
     // Signature algorithms
-    RSA_PSS_SHA256,
-    RSA_PSS_SHA384,
-    RSA_PSS_SHA512,
-    ECDSA_SHA256,
-    ECDSA_SHA384,
-    ECDSA_SHA512,
+    RsaPssSha256,
+    RsaPssSha384,
+    RsaPssSha512,
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
     EdDSA,
 
     // Encryption algorithms
-    RSA_OAEP_SHA256,
-    RSA_OAEP_SHA384,
-    RSA_OAEP_SHA512,
-    ECIES_P256,
-    ECIES_P384,
-    ECIES_P521,
+    RsaOaepSha256,
+    RsaOaepSha384,
+    RsaOaepSha512,
+    EciesP256,
+    EciesP384,
+    EciesP521,
 
     // Symmetric algorithms
-    AES_GCM,
-    AES_CBC,
-    AES_CTR,
-    ChaCha20_Poly1305,
+    AesGcm,
+    AesCbc,
+    AesCtr,
+    ChaCha20Poly1305,
 
     // Post-quantum algorithms
-    Kyber_KEM,
-    Dilithium_Signature,
+    KyberKem,
+    DilithiumSignature,
     FrodoKEM,
 
     // HMAC algorithms
-    HMAC_SHA256,
-    HMAC_SHA384,
-    HMAC_SHA512,
+    HmacSha256,
+    HmacSha384,
+    HmacSha512,
 }
 
 /// Key Purposes
@@ -496,12 +496,12 @@ pub struct RotatedKey {
 /// Signature Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureAlgorithm {
-    RSA_PSS_SHA256,
-    RSA_PSS_SHA384,
-    RSA_PSS_SHA512,
-    ECDSA_SHA256,
-    ECDSA_SHA384,
-    ECDSA_SHA512,
+    RsaPssSha256,
+    RsaPssSha384,
+    RsaPssSha512,
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
     EdDSA,
     Dilithium2,
     Dilithium3,
@@ -511,12 +511,12 @@ pub enum SignatureAlgorithm {
 /// Encryption Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    RSA_OAEP_SHA256,
-    RSA_OAEP_SHA384,
-    RSA_OAEP_SHA512,
-    AES_GCM,
-    AES_CBC,
-    ChaCha20_Poly1305,
+    RsaOaepSha256,
+    RsaOaepSha384,
+    RsaOaepSha512,
+    AesGcm,
+    AesCbc,
+    ChaCha20Poly1305,
     Kyber512,
     Kyber768,
     Kyber1024,
@@ -1100,7 +1100,7 @@ impl ManagedKeysEngine {
             metadata: KeyMetadata {
                 created_at: chrono::Utc::now(),
                 modified_at: chrono::Utc::now(),
-                algorithm: KeyAlgorithm::AES_GCM,
+                algorithm: KeyAlgorithm::AesGcm,
                 key_size: 256,
                 purpose: KeyPurpose::Encryption,
                 operations: HashSet::new(),
@@ -1130,7 +1130,7 @@ impl ManagedKeysEngine {
 
         // Schedule rotation if needed
         if let Some(_next_rotation) = managed_key.lifecycle.next_rotation {
-            if let Some(scheduler) = &self.rotation_scheduler {
+            if let Some(_scheduler) = &self.rotation_scheduler {
                 // Would schedule rotation here - placeholder
             }
         }
@@ -1139,7 +1139,7 @@ impl ManagedKeysEngine {
         self.update_generation_metrics().await;
 
         // Audit log
-        if let Some(logger) = &self.audit_logger {
+        if let Some(_logger) = &self.audit_logger {
             // Would log key generation here - placeholder
         }
 
@@ -1363,7 +1363,7 @@ impl Default for KeyMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*; // Unused import removed
 
     #[tokio::test]
     async fn test_managed_keys_engine_creation() {

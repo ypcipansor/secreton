@@ -1212,7 +1212,7 @@ impl Default for NamespaceMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*; // Unused import removed
 
     #[tokio::test]
     async fn test_namespaces_engine_creation() {
