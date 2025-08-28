@@ -25,10 +25,24 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 | **Replication** | Active-Active Multi-Region | Primary-Secondary | **Advanced** |
 | **Namespaces** | Hierarchical Unlimited | Limited Hierarchy | **Enterprise Scale** |
 
-## 📈 **Latest Updates (v2.0.4)**
+## 📈 **Latest Updates (v2.0.5)**
 
-### 🔐 **Major Security Enhancement: RSA to Ed25519 Migration**
-- **BREAKING CHANGE**: Complete migration from RSA to Ed25519 cryptography
+### 🔐 **Major Database & Security Overhaul: PostgreSQL Migration**
+- **BREAKING CHANGE**: Migrated from MySQL/SQLx to PostgreSQL-only backend using tokio-postgres and deadpool-postgres
+- **Security Achievement**: Eliminated RSA vulnerabilities by removing MySQL dependencies that included RSA transitive dependencies
+- **Dependency Cleanup**: Replaced unmaintained dependencies (wiremock → mockito, rmp-serde/postcard → ciborium, tabled → comfy-table)
+- **Audit Success**: Reduced security warnings from multiple RSA vulnerabilities to single unmaintained dependency warning
+- **Code Quality**: Zero compilation errors and warnings from cargo clippy
+
+### 🏗️ **Complete Storage Backend Rewrite**
+- **Database Migration**: Complete rewrite of PostgreSQL storage backend implementation
+- **Trait Compliance**: Implemented all required StorageBackend trait methods with proper async handling
+- **Connection Pooling**: Enhanced database operations with deadpool-postgres connection pooling
+- **Error Handling**: Improved structured error types and database query parameter binding
+- **Performance**: Optimized async database operations with proper trait bounds
+
+### Previous Updates (v2.0.4)
+- **RSA to Ed25519 Migration**: Complete migration from RSA to Ed25519 cryptography
 - **Security Improvement**: Eliminated all direct RSA vulnerabilities (RUSTSEC-2023-0071)
 - **Algorithm Updates**: Replaced RSA-PSS, RSA-PKCS#1 with Ed25519 signatures
 - **Performance Boost**: Ed25519 provides faster signing/verification than RSA

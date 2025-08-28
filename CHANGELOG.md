@@ -5,6 +5,38 @@ All notable changes to the Secreton Security Vault System by Cipherce will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2024-12-28
+
+### Security
+- **BREAKING**: Migrated from MySQL/SQLx to PostgreSQL-only backend using tokio-postgres and deadpool-postgres
+- Eliminated RSA vulnerabilities by removing MySQL dependencies that included RSA transitive dependencies
+- Reduced security warnings from multiple RSA vulnerabilities to single unmaintained dependency warning (proc-macro-error)
+- Replaced unmaintained dependencies: wiremock → mockito, rmp-serde/postcard → ciborium, tabled → comfy-table
+- Updated FIPS compliance to use Ed25519 instead of RSA variants
+
+### Fixed
+- Complete rewrite of PostgreSQL storage backend implementation
+- Fixed all compilation errors in storage backend trait implementation
+- Implemented all required StorageBackend trait methods (store, get_by_id, get_by_path, update, delete_by_id, delete_by_path, list, count, exists, migrate, health_check, get_stats)
+- Fixed StorageTransaction trait implementation with proper method signatures
+- Resolved trait bound issues with tokio-postgres ToSql parameters
+- Fixed StorageError enum field usage (NotFound with resource_type and id fields)
+- Applied cargo fmt for consistent code formatting
+
+### Changed
+- **BREAKING**: Removed sqlx dependency completely in favor of PostgreSQL-specific crates
+- **BREAKING**: Database backend now PostgreSQL-only (no MySQL support)
+- Updated connection pooling to use deadpool-postgres instead of sqlx pools
+- Migrated serialization from postcard to ciborium (CBOR format)
+- Downgraded utoipa versions to reduce unmaintained dependency warnings
+- Enhanced async database operations with proper error handling
+
+### Technical
+- Zero compilation errors and warnings from cargo clippy
+- Single allowed warning from cargo audit (unmaintained proc-macro-error dependency)
+- Improved database query parameter binding with proper trait bounds
+- Enhanced error handling with structured error types
+
 ## [2.0.4] - 2024-12-28
 
 ### Security

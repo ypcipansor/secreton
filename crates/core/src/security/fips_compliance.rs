@@ -47,11 +47,7 @@ pub enum FipsAlgorithm {
     Aes256Cbc,
 
     // Asymmetric Encryption
-    RSA2048,
-    RSA3072,
-    RSA4096,
-    RSA7680,
-    RSA8192,
+    Ed25519,
 
     // Elliptic Curve
     EcdsaP256,
@@ -89,12 +85,8 @@ pub enum FipsAlgorithm {
 /// TLS Cipher Suites approved for FIPS compliance
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FipsTlsCipher {
-    TlsEcdheRsaWithAes128GcmSha256,
-    TlsEcdheRsaWithAes256GcmSha384,
     TlsEcdheEcdsaWithAes128GcmSha256,
     TlsEcdheEcdsaWithAes256GcmSha384,
-    TlsRsaWithAes128GcmSha256,
-    TlsRsaWithAes256GcmSha384,
 }
 
 /// FIPS Compliance Configuration
@@ -705,14 +697,13 @@ impl Default for FipsConfig {
 
         // Add default FIPS-approved algorithms
         approved_algorithms.insert(FipsAlgorithm::Aes256Gcm);
-        approved_algorithms.insert(FipsAlgorithm::RSA2048);
+        approved_algorithms.insert(FipsAlgorithm::Ed25519);
         approved_algorithms.insert(FipsAlgorithm::EcdsaP256);
         approved_algorithms.insert(FipsAlgorithm::SHA256);
         approved_algorithms.insert(FipsAlgorithm::HmacSha256);
 
         let mut approved_tls_ciphers = HashSet::new();
         approved_tls_ciphers.insert(FipsTlsCipher::TlsEcdheEcdsaWithAes256GcmSha384);
-        approved_tls_ciphers.insert(FipsTlsCipher::TlsEcdheRsaWithAes256GcmSha384);
 
         Self {
             enabled: false,
