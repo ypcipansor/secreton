@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 pub mod api;
 pub mod audit;
@@ -98,6 +99,21 @@ impl SecurityLevel {
     /// Check if current level can access target level
     pub fn can_access(&self, target: SecurityLevel) -> bool {
         *self >= target
+    }
+}
+
+impl FromStr for SecurityLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "public" => Ok(SecurityLevel::Public),
+            "internal" => Ok(SecurityLevel::Internal),
+            "confidential" => Ok(SecurityLevel::Confidential),
+            "secret" => Ok(SecurityLevel::Secret),
+            "topsecret" | "top_secret" | "top-secret" => Ok(SecurityLevel::TopSecret),
+            _ => Err(()),
+        }
     }
 }
 

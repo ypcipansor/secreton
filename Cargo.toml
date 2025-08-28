@@ -2,12 +2,12 @@
 resolver = "2"
 members = [
     "crates/core",
-    # "crates/agent", # Temporarily disabled - has missing module issues
+    # "crates/agent", # Temporarily disabled - has module issues
     "crates/ui",
     "crates/crypto",
     "crates/storage",
     "crates/api",
-    "crates/cli", # Re-enabled with simplified implementation
+    "crates/cli"
 ]
 
 [workspace.package]
@@ -103,15 +103,15 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression"] }
 prost = "0.12"
 
-# Database - Using only PostgreSQL backend to avoid MySQL dependencies
-# Version 0.8.1 fixes the binary protocol vulnerability
-# Explicitly disable all database backends except PostgreSQL
-sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+# Database - Using postgres crate for better dependency isolation and security
+# Replaced sqlx with postgres crate to avoid RSA vulnerabilities from sqlx-mysql
+postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+postgres-types = { version = "0.2", features = ["derive"] }
 
-# Database dependencies
-tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-deadpool-postgres = "0.12"
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+# Database dependencies - Updated to latest versions
+tokio-postgres = { version = "0.7.10", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+deadpool-postgres = "0.14"
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 
 # Configuration
 toml = "0.8"

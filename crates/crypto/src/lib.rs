@@ -14,6 +14,7 @@ pub mod error;
 pub mod hashing;
 pub mod key_derivation;
 pub mod kv_engine;
+pub mod quantum_safe_crypto;
 pub mod transit_simple;
 
 pub use encryption::*;
@@ -21,6 +22,7 @@ pub use error::*;
 pub use hashing::*;
 pub use key_derivation::*;
 pub use kv_engine::*;
+pub use quantum_safe_crypto::*;
 pub use transit_simple::*;
 
 // Re-export transit_simple as transit for compatibility

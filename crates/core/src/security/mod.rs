@@ -140,8 +140,10 @@ impl Default for AdvancedSecurityConfig {
 impl AdvancedSecurityConfig {
     /// Create configuration optimized for banking environments
     pub fn banking_grade() -> Self {
-        let mut config = Self::default();
-        config.global_security_level = SecurityLevel::Banking;
+        let mut config = Self {
+            global_security_level: SecurityLevel::Banking,
+            ..Default::default()
+        };
 
         // Enable all advanced features for banking - using available fields
         config.hsm_config.enabled = true;
@@ -451,7 +453,7 @@ impl SecurityHealthReport {
         let weighted_sum: f64 = weights.iter().map(|(score, weight)| score * weight).sum();
         let total_weight: f64 = weights.iter().map(|(_, weight)| weight).sum();
 
-        (weighted_sum / total_weight).min(100.0).max(0.0)
+        (weighted_sum / total_weight).clamp(0.0, 100.0)
     }
 }
 

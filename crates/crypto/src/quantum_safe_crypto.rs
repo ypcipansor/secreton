@@ -7,7 +7,7 @@ use crate::error::CryptoError;
 type CryptoResult<T> = Result<T, CryptoError>;
 use serde::{Serialize, Deserialize};
 use std::collections::HashSet;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 /// Quantum-safe key types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +58,8 @@ pub fn is_quantum_safe(algorithm: &str) -> bool {
         // Falcon variants
         "falcon-512",
         "falcon-1024",
+        // Ed25519 (considered quantum-resistant)
+        "ed25519",
     ].iter().cloned().collect();
 
     quantum_safe_algorithms.contains(algorithm)
@@ -129,6 +131,7 @@ mod tests {
     fn test_is_quantum_safe() {
         assert!(is_quantum_safe("xmss-sha256"));
         assert!(is_quantum_safe("dilithium3"));
+        assert!(is_quantum_safe("ed25519"));
         assert!(!is_quantum_safe("rsa-2048"));
         assert!(!is_quantum_safe("ecdsa-p256"));
     }

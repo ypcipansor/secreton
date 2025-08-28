@@ -582,8 +582,11 @@ pub struct ThreatIntelligenceEngine {
     executors: Arc<RwLock<HashMap<String, Arc<dyn ResponseActionExecutor>>>>,
     indicators: Arc<RwLock<HashMap<String, ThreatIndicator>>>,
     detections: Arc<RwLock<HashMap<String, ThreatDetection>>>,
+    #[allow(unused)]
     anomalies: Arc<RwLock<HashMap<String, BehavioralAnomaly>>>,
+    #[allow(unused)]
     threat_hunts: Arc<RwLock<HashMap<String, ThreatHunt>>>,
+    #[allow(unused)]
     behavior_baselines: Arc<RwLock<HashMap<String, BehaviorBaseline>>>,
     config: ThreatIntelConfig,
     metrics: Arc<Mutex<ThreatIntelMetrics>>,
@@ -1121,7 +1124,7 @@ impl ThreatIntelligenceEngine {
     /// Estimate false positive probability
     fn estimate_false_positive_probability(&self, _event: &SourceEvent, confidence: f64) -> f64 {
         // Simple heuristic - higher confidence means lower false positive probability
-        (1.0 - confidence).max(0.01).min(0.99)
+        (1.0 - confidence).clamp(0.01, 0.99)
     }
 
     /// Execute response actions

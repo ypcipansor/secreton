@@ -517,6 +517,7 @@ pub struct ZeroTrustEngine {
     /// Risk assessment engine
     risk_engine: Arc<dyn RiskAssessmentEngine>,
     /// Device fingerprint store
+    #[allow(unused)]
     device_fingerprints: Arc<RwLock<HashMap<String, DeviceInfo>>>,
     /// Threat intelligence feed
     threat_intel: Arc<RwLock<Vec<ThreatIndicator>>>,

@@ -379,9 +379,9 @@ pub async fn get_key(
     let key = KeyResponse {
         id: key_id,
         name: "example-key".to_string(),
-        key_type: "RSA".to_string(),
-        algorithm: "RS256".to_string(),
-        size: 2048,
+        key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519 for security
+        algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
+        size: 256, // Ed25519 key size
         usage: vec!["sign".to_string(), "verify".to_string()],
         metadata: KeyMetadata::default(),
         version: 1,
@@ -402,9 +402,9 @@ pub async fn list_keys(
         KeyResponse {
             id: "key-1".to_string(),
             name: "signing-key".to_string(),
-            key_type: "RSA".to_string(),
-            algorithm: "RS256".to_string(),
-            size: 2048,
+            key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519
+            algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
+            size: 256, // Ed25519 key size
             usage: vec!["sign".to_string()],
             metadata: KeyMetadata::default(),
             version: 1,
@@ -425,9 +425,9 @@ pub async fn rotate_key(
     let key = KeyResponse {
         id: key_id,
         name: "example-key".to_string(),
-        key_type: "RSA".to_string(),
-        algorithm: "RS256".to_string(),
-        size: 2048,
+        key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519
+        algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
+        size: 256, // Ed25519 key size
         usage: vec!["sign".to_string(), "verify".to_string()],
         metadata: KeyMetadata::default(),
         version: 2, // Incremented version

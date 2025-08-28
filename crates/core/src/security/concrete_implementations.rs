@@ -242,24 +242,28 @@ impl MfaRiskAssessor for ConcreteMfaRiskAssessor {
 
 /// Factory functions for creating concrete implementations
 impl MemoryAuditStorage {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Arc<dyn AuditStorage> {
         Arc::new(Self::default())
     }
 }
 
 impl SimpleAnomalyDetector {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Arc<dyn AnomalyDetector> {
         Arc::new(Self::default())
     }
 }
 
 impl ConcreteRiskAssessmentEngine {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Arc<dyn RiskAssessmentEngine> {
         Arc::new(Self)
     }
 }
 
 impl ConcreteMfaRiskAssessor {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Arc<dyn MfaRiskAssessor> {
         Arc::new(Self)
     }

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 
 /// Version information structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,7 +330,7 @@ pub enum Environment {
 }
 
 impl Environment {
-    /// Parse environment from string
+    /// Parse environment from string (backward compatibility method)
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "dev" | "development" => Some(Environment::Development),
@@ -347,6 +348,19 @@ impl Environment {
     /// Check if debug features should be enabled
     pub fn debug_enabled(&self) -> bool {
         matches!(self, Environment::Development | Environment::Staging)
+    }
+}
+
+impl FromStr for Environment {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "dev" | "development" => Ok(Environment::Development),
+            "stage" | "staging" => Ok(Environment::Staging),
+            "prod" | "production" => Ok(Environment::Production),
+            _ => Err(()),
+        }
     }
 }
 

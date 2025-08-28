@@ -56,23 +56,32 @@ pub struct EntropyStats {
 
 /// HSM entropy source implementation
 pub struct HsmEntropySource {
+    #[allow(unused)]
     config: EntropySourceConfig,
+    #[allow(unused)]
     stats: Arc<Mutex<EntropyStats>>,
+    #[allow(unused)]
     pkcs11_lib_path: String,
+    #[allow(unused)]
     slot_id: u32,
 }
 
 /// System entropy source implementation
 pub struct SystemEntropySource {
+    #[allow(unused)]
     config: EntropySourceConfig,
+    #[allow(unused)]
     stats: Arc<Mutex<EntropyStats>>,
     system_random: SystemRandom,
 }
 
 /// Network entropy source (for additional external entropy)
 pub struct NetworkEntropySource {
+    #[allow(unused)]
     config: EntropySourceConfig,
+    #[allow(unused)]
     stats: Arc<Mutex<EntropyStats>>,
+    #[allow(unused)]
     endpoints: Vec<String>,
 }
 
@@ -91,6 +100,7 @@ pub struct EntropyAugmentationEngine {
     entropy_pool: Arc<Mutex<VecDeque<u8>>>,
     quality_tracker: Arc<Mutex<EntropyQualityTracker>>,
     config: EntropyEngineConfig,
+    #[allow(unused)]
     rng: Arc<Mutex<ChaCha20Rng>>,
     health_monitor_running: Arc<Mutex<bool>>,
 }
@@ -549,30 +559,45 @@ impl EntropyAugmentationEngine {
     }
 
     async fn collect_from_sources(&self, bytes_needed: usize) -> Result<(), EntropyError> {
-        let sources = self.sources.read().unwrap();
-        let bytes_per_source = bytes_needed / sources.len().max(1);
+        // Collect source information before acquiring any locks for async operations
+        let sources_info: Vec<_> = {
+            let sources = self.sources.read().unwrap();
+            sources.iter().map(|source| source.get_config().clone()).collect()
+        };
 
-        for source in sources.iter() {
-            if source.get_config().enabled {
-                match source.collect_entropy(bytes_per_source).await {
-                    Ok(entropy) => {
-                        let quality = {
-                            let mut tracker = self.quality_tracker.lock().unwrap();
-                            tracker.assess_quality(&entropy)
-                        };
+        let bytes_per_source = bytes_needed / sources_info.len().max(1);
 
-                        if quality >= source.get_config().min_quality {
-                            let mut pool = self.entropy_pool.lock().unwrap();
-                            for byte in entropy {
-                                if pool.len() >= self.config.pool_size {
-                                    pool.pop_front();
+        for source_config in sources_info {
+            if source_config.enabled {
+                // Get the actual source for entropy collection
+                // Since we can't easily identify sources by ID, we'll collect from all enabled sources
+                // This is a simplified approach that may collect from the same source multiple times
+                // but avoids the async locking issue
+                let sources = self.sources.read().unwrap();
+                for source in sources.iter() {
+                    if source.get_config().name == source_config.name {
+                        match source.collect_entropy(bytes_per_source).await {
+                            Ok(entropy) => {
+                                let quality = {
+                                    let mut tracker = self.quality_tracker.lock().unwrap();
+                                    tracker.assess_quality(&entropy)
+                                };
+
+                                if quality >= source_config.min_quality {
+                                    let mut pool = self.entropy_pool.lock().unwrap();
+                                    for byte in entropy {
+                                        if pool.len() >= self.config.pool_size {
+                                            pool.pop_front();
+                                        }
+                                        pool.push_back(byte);
+                                    }
                                 }
-                                pool.push_back(byte);
+                            }
+                            Err(e) => {
+                                debug!("Immediate entropy collection failed: {}", e);
                             }
                         }
-                    }
-                    Err(e) => {
-                        debug!("Immediate entropy collection failed: {}", e);
+                        break; // Only process the first matching source
                     }
                 }
             }

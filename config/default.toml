@@ -5,10 +5,19 @@ port = 8080
 log_level = "info"
 storage_path = "./data"
 
-# Database configuration
+# Database configuration - Optimized for PostgreSQL
 [database]
-url = "sqlite:./data/secreton.db"
-max_connections = 5
+# PostgreSQL connection URL (recommended for production)
+url = "postgresql://secreton_user:secure_password@localhost:5432/secreton_db"
+# Optimized connection pool settings for PostgreSQL
+max_connections = 20
+min_connections = 5
+max_lifetime = 1800  # 30 minutes
+idle_timeout = 300   # 5 minutes
+connection_timeout = 10
+# PostgreSQL-specific optimizations
+statement_cache_size = 1000
+prepared_statement_cache_size = 100
 
 # Authentication configuration
 [auth]

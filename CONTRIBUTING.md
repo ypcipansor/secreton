@@ -23,7 +23,7 @@ Thank you for your interest in contributing to Secreton by Cipherce! This docume
 This project adheres to a professional code of conduct. By participating, you agree to:
 
 - **Be respectful and inclusive** in all interactions
-- **Focus on constructive feedback** and collaboration  
+- **Focus on constructive feedback** and collaboration
 - **Prioritize security and quality** in all contributions
 - **Respect intellectual property** and licensing terms
 - **Report security issues responsibly** through proper channels
@@ -36,18 +36,463 @@ This project adheres to a professional code of conduct. By participating, you ag
 **Required Tools:**
 - **Rust 1.70+**: Latest stable recommended (`rustup update`)
 - **Cargo**: Package manager (comes with Rust)
+- **PostgreSQL 13+**: Primary database backend
 - **Git**: Version control system
 - **OpenSSL**: Development libraries (`libssl-dev` on Ubuntu, `openssl-devel` on RHEL)
 
 **Optional Tools:**
 - **Docker**: For containerized development
-- **SQLite3**: For local storage backend testing
+- **cargo-audit**: Security vulnerability scanning (`cargo install cargo-audit`)
+- **cargo-clippy**: Code linting (`rustup component add clippy`)
 - **Postman/curl**: For API testing
 - **jq**: JSON processing for testing scripts
 
 ### Quick Setup
 
 1. **Fork and Clone**:
+```bash
+git clone https://github.com/your-username/secreton.git
+cd secreton
+```
+
+2. **Environment Setup**:
+```bash
+# Install Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Install PostgreSQL
+sudo apt-get install postgresql postgresql-contrib  # Ubuntu/Debian
+# OR
+sudo dnf install postgresql-server postgresql-contrib  # RHEL/Fedora
+
+# Install development tools
+cargo install cargo-audit cargo-watch
+rustup component add clippy rustfmt
+```
+
+3. **Database Setup**:
+```bash
+# Start PostgreSQL service
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+
+3. **Database Setup**:
+```bash
+# Install PostgreSQL
+sudo apt-get install postgresql postgresql-contrib  # Ubuntu/Debian
+
+# Start PostgreSQL service
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+
+# Create database and user
+sudo -u postgres psql
+CREATE DATABASE secreton;
+CREATE USER secreton_user WITH PASSWORD 'your_secure_password';
+GRANT ALL PRIVILEGES ON DATABASE secreton TO secreton_user;
+\q
+
+# Run database migrations
+# Migrations are located in the migrations/ directory
+# The application will automatically run migrations on startup
+```
+
+4. **Environment Configuration**:
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit database connection
+# DATABASE_URL=postgresql://secreton_user:password@localhost/secreton
+```
+```
+
+4. **Build and Test**:
+```bash
+# Build the project
+cargo build --release
+
+# Run security audit
+cargo audit
+
+# Run tests
+cargo test
+
+# Check code quality
+cargo clippy -- -D warnings
+```
+
+## 🔧 Development Environment
+
+### Security-First Development
+
+**Mandatory Security Checks:**
+```bash
+# Security audit (must pass with 0 vulnerabilities)
+cargo audit
+
+# Code quality (must pass with 0 warnings)
+cargo clippy -- -D warnings
+
+# Format code
+cargo fmt
+
+# Run full test suite
+cargo test
+```
+
+### Database Configuration
+
+Create `.env` file in project root:
+```env
+DATABASE_URL=postgresql://secreton_user:password@localhost/secreton
+RUST_LOG=info
+SECRET_KEY=your-256-bit-secret-key-here
+```
+
+### IDE Setup
+
+**VS Code Recommended Extensions:**
+- `rust-lang.rust-analyzer`
+- `ms-vscode.vscode-json`
+- `redhat.vscode-yaml`
+- `ms-vscode.vscode-docker`
+
+## 🏗️ Architecture Overview
+
+### Core Components
+
+```
+secreton/
+├── crates/
+│   ├── core/           # Core security engine
+│   ├── api/            # REST API layer
+│   ├── cli/            # Command-line interface
+│   ├── crypto/         # Cryptographic operations
+│   ├── storage/        # Storage backends
+│   └── ui/             # User interface
+├── docs/               # Documentation
+├── scripts/            # Build and deployment scripts
+└── tests/              # Integration tests
+```
+
+### Security Architecture
+
+- **Zero-Trust Model**: Every request authenticated and authorized
+- **Quantum-Safe Crypto**: Post-quantum cryptographic algorithms
+- **Multi-Layer Encryption**: AES-256-GCM + Post-quantum KEM
+- **Audit Logging**: Comprehensive security event tracking
+- **Compliance Frameworks**: Automated compliance validation
+
+## 🤝 Contributing Process
+
+### Development Workflow
+
+1. **Choose Issue**: Select from [GitHub Issues](https://github.com/cipherce/secreton/issues)
+2. **Create Branch**: `git checkout -b feature/your-feature-name`
+3. **Security Review**: Run `cargo audit` and `cargo clippy`
+4. **Write Tests**: Add comprehensive test coverage
+5. **Commit**: Follow conventional commit format
+6. **Pull Request**: Create PR with detailed description
+7. **Code Review**: Address reviewer feedback
+8. **Merge**: Squash and merge after approval
+
+### Branch Naming Convention
+
+```
+feature/add-new-crypto-algorithm
+bugfix/fix-audit-logging-issue
+security/patch-vulnerability-cve-2023-12345
+docs/update-contributing-guide
+refactor/optimize-database-queries
+```
+
+## 📏 Code Standards
+
+### Rust Code Quality
+
+**Clippy Rules (Enforced):**
+```rust
+// ✅ Good: Use standard library functions
+let clamped = value.clamp(min, max);
+
+// ❌ Bad: Manual implementation
+let clamped = if value < min { min } else if value > max { max } else { value };
+```
+
+**Async Best Practices:**
+```rust
+// ✅ Good: Proper async trait implementation
+#[async_trait]
+impl MyTrait for MyStruct {
+    async fn my_method(&self) -> Result<(), Error> {
+        // Implementation
+    }
+}
+
+// ❌ Bad: Blocking operations in async context
+async fn bad_example() {
+    std::thread::sleep(Duration::from_secs(1)); // Blocks!
+}
+```
+
+### Security Standards
+
+**Cryptographic Requirements:**
+- Use quantum-safe algorithms for new implementations
+- Implement proper key rotation and lifecycle management
+- Use authenticated encryption (AEAD) for data at rest
+- Implement secure random number generation
+- Validate all cryptographic inputs and outputs
+
+**Input Validation:**
+```rust
+// ✅ Good: Comprehensive validation
+pub fn process_secret(&self, secret: &str) -> Result<(), Error> {
+    if secret.is_empty() {
+        return Err(Error::InvalidInput("Secret cannot be empty".to_string()));
+    }
+    if secret.len() > MAX_SECRET_SIZE {
+        return Err(Error::InvalidInput("Secret too large".to_string()));
+    }
+    // Process secret...
+    Ok(())
+}
+```
+
+## 🔒 Security Guidelines
+
+### Security-First Development
+
+**Critical Security Requirements:**
+
+1. **Zero Vulnerability Policy**: All code must pass `cargo audit` with 0 vulnerabilities
+2. **Input Validation**: Validate all inputs at system boundaries
+3. **Secure Defaults**: Implement secure-by-default configurations
+4. **Least Privilege**: Grant minimum required permissions
+5. **Fail-Safe Design**: Default to secure behavior on errors
+
+### Cryptographic Standards
+
+**Algorithm Selection:**
+- **Signatures**: Ed25519 (quantum-resistant)
+- **Encryption**: AES-256-GCM (authenticated encryption)
+- **Key Exchange**: Kyber (post-quantum KEM)
+- **Hashing**: SHA-3-256 or BLAKE3
+
+**Key Management:**
+- Implement automatic key rotation
+- Use hardware security modules (HSM) when available
+- Never log sensitive key material
+- Implement secure key backup and recovery
+
+### Security Testing
+
+**Required Security Tests:**
+```rust
+#[cfg(test)]
+mod security_tests {
+    #[test]
+    fn test_no_timing_attacks() {
+        // Test for timing attack resistance
+    }
+
+    #[test]
+    fn test_input_validation() {
+        // Test input validation boundaries
+    }
+
+    #[test]
+    fn test_secure_defaults() {
+        // Test secure default configurations
+    }
+}
+```
+
+## 🧪 Testing Requirements
+
+### Test Coverage Standards
+
+**Minimum Coverage Requirements:**
+- **Unit Tests**: 80%+ coverage for all modules
+- **Integration Tests**: Full API workflow coverage
+- **Security Tests**: All security-critical paths tested
+- **Performance Tests**: Benchmark critical operations
+
+**Test Organization:**
+```
+tests/
+├── unit/              # Unit tests
+├── integration/       # Integration tests
+├── security/          # Security-specific tests
+└── performance/       # Performance benchmarks
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific test
+cargo test test_name
+
+# Run with coverage
+cargo tarpaulin --out Html
+
+# Run security tests only
+cargo test --test security
+
+# Run performance benchmarks
+cargo bench
+```
+
+## 📚 Documentation
+
+### Documentation Standards
+
+**Code Documentation:**
+```rust
+/// Processes a secret with comprehensive security validation
+///
+/// # Arguments
+/// * `secret` - The secret data to process
+/// * `metadata` - Additional processing metadata
+///
+/// # Returns
+/// Returns `Ok(())` on success, `Err` with detailed error information
+///
+/// # Security Notes
+/// This function implements multiple layers of validation and encryption
+/// to ensure the confidentiality and integrity of secret data.
+///
+/// # Examples
+/// ```
+/// use secreton::vault::process_secret;
+///
+/// let result = process_secret("my-secret", &metadata);
+/// assert!(result.is_ok());
+/// ```
+pub fn process_secret(secret: &str, metadata: &Metadata) -> Result<(), Error> {
+    // Implementation...
+}
+```
+
+**API Documentation:**
+- OpenAPI/Swagger specifications for all endpoints
+- Comprehensive error response documentation
+- Authentication and authorization requirements
+- Rate limiting and usage guidelines
+
+## 📝 Commit Guidelines
+
+### Conventional Commits
+
+Format: `type(scope): description`
+
+**Types:**
+- `feat`: New features
+- `fix`: Bug fixes
+- `security`: Security-related changes
+- `docs`: Documentation updates
+- `refactor`: Code refactoring
+- `test`: Test additions/updates
+- `chore`: Maintenance tasks
+
+**Examples:**
+```
+feat(auth): add multi-factor authentication support
+security(crypto): patch RSA timing vulnerability CVE-2023-12345
+fix(api): resolve memory leak in request handler
+docs(readme): update installation instructions
+refactor(db): optimize query performance
+test(security): add timing attack resistance tests
+```
+
+### Security Commit Requirements
+
+**Security-Related Commits:**
+- Must include CVE reference if applicable
+- Must not disclose vulnerability details in commit message
+- Must reference security advisory or issue number
+- Must be reviewed by security team before merge
+
+## 🔄 Pull Request Process
+
+### PR Template
+
+**Required Information:**
+- Detailed description of changes
+- Security impact assessment
+- Test coverage information
+- Breaking changes documentation
+- Migration guide if applicable
+
+**PR Checklist:**
+- [ ] Security audit passed (`cargo audit`)
+- [ ] Code quality checks passed (`cargo clippy`)
+- [ ] All tests passing (`cargo test`)
+- [ ] Documentation updated
+- [ ] Security review completed
+- [ ] Performance impact assessed
+
+### Review Process
+
+**Review Requirements:**
+1. **Automated Checks**: CI/CD pipeline must pass
+2. **Security Review**: Security team review for security-critical changes
+3. **Code Review**: At least 2 maintainer approvals
+4. **Testing**: All tests must pass in CI environment
+5. **Documentation**: Updated documentation reviewed
+
+## 🚨 Security Reporting
+
+### Responsible Disclosure
+
+**Report Security Issues:**
+- Email: security@cipherce.com
+- PGP Key: Available at https://cipherce.com/security/pgp
+- Response Time: Within 24 hours
+- Disclosure: Coordinated disclosure after fix
+
+**Bug Bounty Program:**
+- Scope: Secreton core components and APIs
+- Rewards: Up to $10,000 for critical vulnerabilities
+- Exclusions: Third-party dependencies, user error
+
+### Security Assessment
+
+**Security Review Checklist:**
+- [ ] Input validation implemented
+- [ ] Output encoding applied
+- [ ] Authentication required
+- [ ] Authorization enforced
+- [ ] Secure session management
+- [ ] CSRF protection implemented
+- [ ] XSS prevention measures
+- [ ] SQL injection prevention
+- [ ] Secure configuration defaults
+- [ ] Error handling doesn't leak information
+- [ ] Logging doesn't expose sensitive data
+
+---
+
+## 📞 Support
+
+**Community Support:**
+- GitHub Discussions: https://github.com/cipherce/secreton/discussions
+- Discord: https://discord.gg/cipherce
+- Documentation: https://docs.cipherce.com/secreton
+
+**Enterprise Support:**
+- Email: enterprise@cipherce.com
+- Phone: +1 (555) 123-4567
+- SLA: 24/7 enterprise support available
+
+---
+
+*Thank you for contributing to Secreton by Cipherce! Your contributions help make enterprise security more accessible and robust.*
    ```bash
    git clone https://github.com/your-username/secreton.git
    cd secreton

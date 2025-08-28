@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
@@ -21,23 +22,24 @@ pub struct ReplicationEngine {
     /// Node configuration
     node_config: Arc<RwLock<NodeConfig>>,
     /// Replication topology
-    topology: Arc<RwLock<ReplicationTopology>>,
+    // topology: Arc<RwLock<ReplicationTopology>>, // TODO: Implement topology management
     /// Active replication streams
     streams: Arc<RwLock<HashMap<ReplicationStreamId, ReplicationStream>>>,
     /// Conflict resolution engine
-    conflict_resolver: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    // conflict_resolver: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>, // TODO: Implement conflict resolver
     /// Disaster recovery coordinator
-    disaster_recovery: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    // disaster_recovery: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>, // TODO: Implement disaster recovery
     /// Replication state manager
-    state_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    // state_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>, // TODO: Implement state manager
     /// Security manager for encrypted replication
-    security_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    // security_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>, // TODO: Implement security manager
     /// Performance monitor
+    #[allow(dead_code)]
     perf_monitor: Arc<RwLock<ReplicationMetrics>>,
     /// Event dispatcher
     event_dispatcher: mpsc::Sender<ReplicationEvent>,
-    /// Audit logger
-    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    // Audit logger - TODO: Implement audit logger
+    // audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
 }
 
 /// Node Configuration
@@ -732,19 +734,19 @@ pub struct StreamMetrics {
 /// Conflict Resolution Trait
 pub trait ConflictResolver: Send + Sync {
     /// Resolve conflict between two versions of the same data
-    async fn resolve_conflict(
+    fn resolve_conflict(
         &self,
         path: &str,
         local_version: &ConflictVersion,
         remote_version: &ConflictVersion,
         context: &ConflictContext,
-    ) -> SecretonResult<ConflictResolution>;
+    ) -> impl Future<Output = SecretonResult<ConflictResolution>> + Send;
 
     /// Get supported conflict resolution methods
     fn supported_methods(&self) -> Vec<ConflictResolutionMethod>;
 
     /// Configure conflict resolution policy
-    async fn configure_policy(&self, policy: ConflictResolutionPolicy) -> SecretonResult<()>;
+    fn configure_policy(&self, policy: ConflictResolutionPolicy) -> impl Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Conflict Version
@@ -839,23 +841,23 @@ pub struct ConflictResolutionPolicy {
 /// Disaster Recovery Coordinator Trait
 pub trait DisasterRecoveryCoordinator: Send + Sync {
     /// Initiate disaster recovery procedure
-    async fn initiate_recovery(&self, scenario: DisasterScenario) -> SecretonResult<RecoveryPlan>;
+    fn initiate_recovery(&self, scenario: DisasterScenario) -> impl Future<Output = SecretonResult<RecoveryPlan>> + Send;
 
     /// Execute recovery plan
-    async fn execute_recovery(&self, plan: &RecoveryPlan) -> SecretonResult<RecoveryResult>;
+    fn execute_recovery(&self, plan: &RecoveryPlan) -> impl Future<Output = SecretonResult<RecoveryResult>> + Send;
 
     /// Monitor recovery progress
-    async fn monitor_recovery(&self, recovery_id: &str) -> SecretonResult<RecoveryStatus>;
+    fn monitor_recovery(&self, recovery_id: &str) -> impl Future<Output = SecretonResult<RecoveryStatus>> + Send;
 
     /// Create backup for disaster recovery
-    async fn create_backup(&self, backup_spec: BackupSpec) -> SecretonResult<Backup>;
+    fn create_backup(&self, backup_spec: BackupSpec) -> impl Future<Output = SecretonResult<Backup>> + Send;
 
     /// Restore from backup
-    async fn restore_from_backup(
+    fn restore_from_backup(
         &self,
         backup: &Backup,
         target_node: &NodeId,
-    ) -> SecretonResult<()>;
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Disaster Scenarios
@@ -1041,23 +1043,23 @@ pub struct Backup {
 /// Replication State Manager Trait
 pub trait ReplicationStateManager: Send + Sync {
     /// Get current replication state
-    async fn get_state(&self, node_id: &NodeId) -> SecretonResult<ReplicationState>;
+    fn get_state(&self, node_id: &NodeId) -> impl Future<Output = SecretonResult<ReplicationState>> + Send;
 
     /// Update replication state
-    async fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> SecretonResult<()>;
+    fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Get replication log position
-    async fn get_position(&self, node_id: &NodeId) -> SecretonResult<ReplicationPosition>;
+    fn get_position(&self, node_id: &NodeId) -> impl Future<Output = SecretonResult<ReplicationPosition>> + Send;
 
     /// Update replication log position
-    async fn update_position(
+    fn update_position(
         &self,
         node_id: &NodeId,
         position: ReplicationPosition,
-    ) -> SecretonResult<()>;
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Persist state to storage
-    async fn persist_state(&self) -> SecretonResult<()>;
+    fn persist_state(&self) -> impl Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Replication State
@@ -1080,27 +1082,27 @@ pub struct ReplicationState {
 /// Replication Security Manager Trait
 pub trait ReplicationSecurityManager: Send + Sync {
     /// Establish secure channel with peer
-    async fn establish_secure_channel(&self, peer_node: &NodeId) -> SecretonResult<SecureChannel>;
+    fn establish_secure_channel(&self, peer_node: &NodeId) -> impl Future<Output = SecretonResult<SecureChannel>> + Send;
 
     /// Encrypt replication data
-    async fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
+    fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> impl Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Decrypt replication data
-    async fn decrypt_data(
+    fn decrypt_data(
         &self,
         encrypted_data: &[u8],
         channel: &SecureChannel,
-    ) -> SecretonResult<Vec<u8>>;
+    ) -> impl Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Rotate encryption keys
-    async fn rotate_keys(&self, channel: &mut SecureChannel) -> SecretonResult<()>;
+    fn rotate_keys(&self, channel: &mut SecureChannel) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Authenticate peer
-    async fn authenticate_peer(
+    fn authenticate_peer(
         &self,
         peer_node: &NodeId,
         credentials: &PeerCredentials,
-    ) -> SecretonResult<bool>;
+    ) -> impl Future<Output = SecretonResult<bool>> + Send;
 }
 
 /// Secure Channel
@@ -1185,19 +1187,19 @@ pub enum ReplicationEvent {
 /// Replication Audit Logger Trait
 pub trait ReplicationAuditLogger: Send + Sync {
     /// Log replication event
-    async fn log_event(&self, event: &ReplicationEvent) -> SecretonResult<()>;
+    fn log_event(&self, event: &ReplicationEvent) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log security event
-    async fn log_security_event(&self, event: &SecurityEvent) -> SecretonResult<()>;
+    fn log_security_event(&self, event: &SecurityEvent) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log performance metrics
-    async fn log_metrics(&self, metrics: &ReplicationMetrics) -> SecretonResult<()>;
+    fn log_metrics(&self, metrics: &ReplicationMetrics) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log disaster recovery operation
-    async fn log_disaster_recovery(
+    fn log_disaster_recovery(
         &self,
         operation: &DisasterRecoveryOperation,
-    ) -> SecretonResult<()>;
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Security Events
@@ -1266,49 +1268,15 @@ impl ReplicationEngine {
 
         Ok(Self {
             node_config: Arc::new(RwLock::new(node_config)),
-            topology: Arc::new(RwLock::new(ReplicationTopology {
-                nodes: HashMap::new(),
-                relationships: Vec::new(),
-                cluster_config: ClusterConfig {
-                    name: "secreton-cluster".to_string(),
-                    quorum: QuorumConfig {
-                        min_nodes: 3,
-                        strategy: QuorumStrategy::Majority,
-                        witness_nodes: Vec::new(),
-                    },
-                    failover: FailoverConfig {
-                        enabled: true,
-                        timeout_seconds: 60,
-                        health_check: HealthCheckConfig {
-                            interval_seconds: 10,
-                            timeout_seconds: 5,
-                            failure_threshold: 3,
-                            success_threshold: 2,
-                        },
-                        promotion_order: Vec::new(),
-                    },
-                    split_brain_prevention: SplitBrainConfig {
-                        enabled: true,
-                        detection_method: SplitBrainDetection::Quorum,
-                        resolution_strategy: SplitBrainResolution::StopOthers,
-                    },
-                },
-                health_status: TopologyHealth {
-                    status: TopologyHealthStatus::Healthy,
-                    healthy_nodes: 0,
-                    total_nodes: 0,
-                    issues: Vec::new(),
-                    last_check: chrono::Utc::now(),
-                },
-            })),
+            // topology: Arc::new(RwLock::new(ReplicationTopology { ... })), // TODO: Implement topology management
             streams: Arc::new(RwLock::new(HashMap::new())),
-            conflict_resolver: None,
-            disaster_recovery: None,
-            state_manager: None,
-            security_manager: None,
+            // conflict_resolver: None, // TODO: Implement conflict resolver
+            // disaster_recovery: None, // TODO: Implement disaster recovery
+            // state_manager: None, // TODO: Implement state manager
+            // security_manager: None, // TODO: Implement security manager
             perf_monitor: Arc::new(RwLock::new(ReplicationMetrics::default())),
             event_dispatcher: event_tx,
-            audit_logger: None,
+            // audit_logger: None, // TODO: Implement audit logger
         })
     }
 

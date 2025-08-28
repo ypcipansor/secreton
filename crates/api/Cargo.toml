@@ -49,9 +49,9 @@ oauth2 = "4.4"
 governor = "0.6"
 headers = "0.4"
 
-# OpenAPI documentation
-utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+# OpenAPI documentation - Updated to latest versions for security
+utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
 
 # Storage
 secreton-storage = { path = "../storage" }
