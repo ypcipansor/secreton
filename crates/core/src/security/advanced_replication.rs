@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Advanced Replication Engine
-//! 
+//!
 //! Enterprise-grade replication system that exceeds HashiCorp Vault's capabilities
 //! with multi-region active-active replication, conflict resolution, disaster recovery,
 //! and quantum-safe synchronization protocols.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, Mutex};
-use serde::{Serialize, Deserialize};
+use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 use crate::error::SecretonResult;
@@ -25,19 +25,19 @@ pub struct ReplicationEngine {
     /// Active replication streams
     streams: Arc<RwLock<HashMap<ReplicationStreamId, ReplicationStream>>>,
     /// Conflict resolution engine
-    conflict_resolver: Arc<dyn ConflictResolver>,
+    conflict_resolver: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Disaster recovery coordinator
-    disaster_recovery: Arc<dyn DisasterRecoveryCoordinator>,
+    disaster_recovery: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Replication state manager
-    state_manager: Arc<dyn ReplicationStateManager>,
+    state_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Security manager for encrypted replication
-    security_manager: Arc<dyn ReplicationSecurityManager>,
+    security_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance monitor
     perf_monitor: Arc<RwLock<ReplicationMetrics>>,
     /// Event dispatcher
     event_dispatcher: mpsc::Sender<ReplicationEvent>,
     /// Audit logger
-    audit_logger: Arc<dyn ReplicationAuditLogger>,
+    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
 }
 
 /// Node Configuration
@@ -451,7 +451,10 @@ pub enum ReplicationFilter {
     /// Exclude by tags
     ExcludeTags(HashMap<String, String>),
     /// Custom filter
-    Custom { name: String, config: serde_json::Value },
+    Custom {
+        name: String,
+        config: serde_json::Value,
+    },
 }
 
 /// Retry Configuration
@@ -736,10 +739,10 @@ pub trait ConflictResolver: Send + Sync {
         remote_version: &ConflictVersion,
         context: &ConflictContext,
     ) -> SecretonResult<ConflictResolution>;
-    
+
     /// Get supported conflict resolution methods
     fn supported_methods(&self) -> Vec<ConflictResolutionMethod>;
-    
+
     /// Configure conflict resolution policy
     async fn configure_policy(&self, policy: ConflictResolutionPolicy) -> SecretonResult<()>;
 }
@@ -837,18 +840,22 @@ pub struct ConflictResolutionPolicy {
 pub trait DisasterRecoveryCoordinator: Send + Sync {
     /// Initiate disaster recovery procedure
     async fn initiate_recovery(&self, scenario: DisasterScenario) -> SecretonResult<RecoveryPlan>;
-    
+
     /// Execute recovery plan
     async fn execute_recovery(&self, plan: &RecoveryPlan) -> SecretonResult<RecoveryResult>;
-    
+
     /// Monitor recovery progress
     async fn monitor_recovery(&self, recovery_id: &str) -> SecretonResult<RecoveryStatus>;
-    
+
     /// Create backup for disaster recovery
     async fn create_backup(&self, backup_spec: BackupSpec) -> SecretonResult<Backup>;
-    
+
     /// Restore from backup
-    async fn restore_from_backup(&self, backup: &Backup, target_node: &NodeId) -> SecretonResult<()>;
+    async fn restore_from_backup(
+        &self,
+        backup: &Backup,
+        target_node: &NodeId,
+    ) -> SecretonResult<()>;
 }
 
 /// Disaster Scenarios
@@ -906,7 +913,10 @@ pub enum RecoveryStepType {
     /// Failover to backup node
     Failover { target_node: NodeId },
     /// Restore data from backup
-    RestoreData { backup_id: String, target_path: String },
+    RestoreData {
+        backup_id: String,
+        target_path: String,
+    },
     /// Reconfigure network
     ReconfigureNetwork { config: NetworkConfig },
     /// Verify data integrity
@@ -914,7 +924,10 @@ pub enum RecoveryStepType {
     /// Notify stakeholders
     Notify { recipients: Vec<String> },
     /// Custom step
-    Custom { action: String, parameters: serde_json::Value },
+    Custom {
+        action: String,
+        parameters: serde_json::Value,
+    },
 }
 
 /// Required Resources
@@ -1029,16 +1042,20 @@ pub struct Backup {
 pub trait ReplicationStateManager: Send + Sync {
     /// Get current replication state
     async fn get_state(&self, node_id: &NodeId) -> SecretonResult<ReplicationState>;
-    
+
     /// Update replication state
     async fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> SecretonResult<()>;
-    
+
     /// Get replication log position
     async fn get_position(&self, node_id: &NodeId) -> SecretonResult<ReplicationPosition>;
-    
+
     /// Update replication log position
-    async fn update_position(&self, node_id: &NodeId, position: ReplicationPosition) -> SecretonResult<()>;
-    
+    async fn update_position(
+        &self,
+        node_id: &NodeId,
+        position: ReplicationPosition,
+    ) -> SecretonResult<()>;
+
     /// Persist state to storage
     async fn persist_state(&self) -> SecretonResult<()>;
 }
@@ -1064,18 +1081,26 @@ pub struct ReplicationState {
 pub trait ReplicationSecurityManager: Send + Sync {
     /// Establish secure channel with peer
     async fn establish_secure_channel(&self, peer_node: &NodeId) -> SecretonResult<SecureChannel>;
-    
+
     /// Encrypt replication data
     async fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
-    
+
     /// Decrypt replication data
-    async fn decrypt_data(&self, encrypted_data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
-    
+    async fn decrypt_data(
+        &self,
+        encrypted_data: &[u8],
+        channel: &SecureChannel,
+    ) -> SecretonResult<Vec<u8>>;
+
     /// Rotate encryption keys
     async fn rotate_keys(&self, channel: &mut SecureChannel) -> SecretonResult<()>;
-    
+
     /// Authenticate peer
-    async fn authenticate_peer(&self, peer_node: &NodeId, credentials: &PeerCredentials) -> SecretonResult<bool>;
+    async fn authenticate_peer(
+        &self,
+        peer_node: &NodeId,
+        credentials: &PeerCredentials,
+    ) -> SecretonResult<bool>;
 }
 
 /// Secure Channel
@@ -1140,7 +1165,10 @@ pub enum ReplicationEvent {
     /// Conflict detected
     ConflictDetected { path: String, nodes: Vec<NodeId> },
     /// Conflict resolved
-    ConflictResolved { path: String, method: ConflictResolutionMethod },
+    ConflictResolved {
+        path: String,
+        method: ConflictResolutionMethod,
+    },
     /// Disaster recovery initiated
     DisasterRecoveryInitiated(DisasterScenario),
     /// Disaster recovery completed
@@ -1148,22 +1176,28 @@ pub enum ReplicationEvent {
     /// Topology changed
     TopologyChanged,
     /// Custom event
-    Custom { event_type: String, data: serde_json::Value },
+    Custom {
+        event_type: String,
+        data: serde_json::Value,
+    },
 }
 
 /// Replication Audit Logger Trait
 pub trait ReplicationAuditLogger: Send + Sync {
     /// Log replication event
     async fn log_event(&self, event: &ReplicationEvent) -> SecretonResult<()>;
-    
+
     /// Log security event
     async fn log_security_event(&self, event: &SecurityEvent) -> SecretonResult<()>;
-    
+
     /// Log performance metrics
     async fn log_metrics(&self, metrics: &ReplicationMetrics) -> SecretonResult<()>;
-    
+
     /// Log disaster recovery operation
-    async fn log_disaster_recovery(&self, operation: &DisasterRecoveryOperation) -> SecretonResult<()>;
+    async fn log_disaster_recovery(
+        &self,
+        operation: &DisasterRecoveryOperation,
+    ) -> SecretonResult<()>;
 }
 
 /// Security Events
@@ -1178,7 +1212,10 @@ pub enum SecurityEvent {
     /// Security policy violation
     PolicyViolation { policy: String, violation: String },
     /// Custom security event
-    Custom { event_type: String, data: serde_json::Value },
+    Custom {
+        event_type: String,
+        data: serde_json::Value,
+    },
 }
 
 /// Disaster Recovery Operations
@@ -1187,7 +1224,10 @@ pub enum DisasterRecoveryOperation {
     /// Backup created
     BackupCreated { backup_id: String },
     /// Backup restored
-    BackupRestored { backup_id: String, target_node: NodeId },
+    BackupRestored {
+        backup_id: String,
+        target_node: NodeId,
+    },
     /// Failover executed
     FailoverExecuted { from_node: NodeId, to_node: NodeId },
     /// Recovery plan created
@@ -1221,16 +1261,9 @@ pub struct ReplicationMetrics {
 
 impl ReplicationEngine {
     /// Create new Replication Engine
-    pub async fn new(
-        node_config: NodeConfig,
-        conflict_resolver: Arc<dyn ConflictResolver>,
-        disaster_recovery: Arc<dyn DisasterRecoveryCoordinator>,
-        state_manager: Arc<dyn ReplicationStateManager>,
-        security_manager: Arc<dyn ReplicationSecurityManager>,
-        audit_logger: Arc<dyn ReplicationAuditLogger>,
-    ) -> SecretonResult<Self> {
+    pub async fn new(node_config: NodeConfig) -> SecretonResult<Self> {
         let (event_tx, _event_rx) = mpsc::channel(1000);
-        
+
         Ok(Self {
             node_config: Arc::new(RwLock::new(node_config)),
             topology: Arc::new(RwLock::new(ReplicationTopology {
@@ -1269,32 +1302,39 @@ impl ReplicationEngine {
                 },
             })),
             streams: Arc::new(RwLock::new(HashMap::new())),
-            conflict_resolver,
-            disaster_recovery,
-            state_manager,
-            security_manager,
+            conflict_resolver: None,
+            disaster_recovery: None,
+            state_manager: None,
+            security_manager: None,
             perf_monitor: Arc::new(RwLock::new(ReplicationMetrics::default())),
             event_dispatcher: event_tx,
-            audit_logger,
+            audit_logger: None,
         })
     }
-    
+
     /// Join cluster
     pub async fn join_cluster(&self, cluster_address: &str) -> SecretonResult<()> {
         // Implementation would establish connections to cluster
         // This is a simplified placeholder
-        
+
         let event = ReplicationEvent::NodeJoined(self.get_node_id().await);
-        self.event_dispatcher.send(event).await.map_err(|_| crate::error::SecretonError::ChannelSend)?;
-        
+        self.event_dispatcher
+            .send(event)
+            .await
+            .map_err(|_| crate::error::SecretonError::ChannelSend)?;
+
         Ok(())
     }
-    
+
     /// Start replication stream
-    pub async fn start_replication_stream(&self, target_node: &NodeId, config: StreamConfig) -> SecretonResult<ReplicationStreamId> {
+    pub async fn start_replication_stream(
+        &self,
+        target_node: &NodeId,
+        config: StreamConfig,
+    ) -> SecretonResult<ReplicationStreamId> {
         let stream_id = Uuid::new_v4().to_string();
         let source_node = self.get_node_id().await;
-        
+
         let stream = ReplicationStream {
             id: stream_id.clone(),
             source_node: source_node.clone(),
@@ -1316,18 +1356,21 @@ impl ReplicationEngine {
             },
             last_activity: chrono::Utc::now(),
         };
-        
+
         {
             let mut streams = self.streams.write().await;
             streams.insert(stream_id.clone(), stream);
         }
-        
+
         let event = ReplicationEvent::StreamStarted(stream_id.clone());
-        self.event_dispatcher.send(event).await.map_err(|_| crate::error::SecretonError::ChannelSend)?;
-        
+        self.event_dispatcher
+            .send(event)
+            .await
+            .map_err(|_| crate::error::SecretonError::ChannelSend)?;
+
         Ok(stream_id)
     }
-    
+
     /// Get current node ID
     async fn get_node_id(&self) -> NodeId {
         let config = self.node_config.read().await;
@@ -1355,21 +1398,21 @@ impl VersionVector {
     /// Compare version vectors for conflict detection
     pub fn compare(&self, other: &VersionVector) -> VectorComparison {
         let all_nodes: HashSet<&NodeId> = self.clocks.keys().chain(other.clocks.keys()).collect();
-        
+
         let mut self_newer = false;
         let mut other_newer = false;
-        
+
         for node in all_nodes {
             let self_clock = self.clocks.get(node).copied().unwrap_or(0);
             let other_clock = other.clocks.get(node).copied().unwrap_or(0);
-            
+
             match self_clock.cmp(&other_clock) {
                 std::cmp::Ordering::Greater => self_newer = true,
                 std::cmp::Ordering::Less => other_newer = true,
-                std::cmp::Ordering::Equal => {},
+                std::cmp::Ordering::Equal => {}
             }
         }
-        
+
         match (self_newer, other_newer) {
             (true, false) => VectorComparison::Greater,
             (false, true) => VectorComparison::Less,
@@ -1391,17 +1434,17 @@ pub enum VectorComparison {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_replication_engine_creation() {
         // Test implementation would go here with mock providers
     }
-    
+
     #[tokio::test]
     async fn test_version_vector_comparison() {
         // Test version vector conflict detection
     }
-    
+
     #[tokio::test]
     async fn test_disaster_recovery() {
         // Test disaster recovery functionality

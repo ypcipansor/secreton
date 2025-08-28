@@ -1,5 +1,5 @@
 //! Zero Trust Architecture Implementation
-//! 
+//!
 //! Implements comprehensive zero trust security model that exceeds typical implementations:
 //! - Continuous verification of all entities (users, devices, services)
 //! - Dynamic policy evaluation with real-time risk assessment
@@ -8,15 +8,15 @@
 //! - Adaptive authentication with ML-based risk scoring
 //! - Never trust, always verify, assume breach principles
 
+use async_trait::async_trait;
+use chrono::{DateTime, Timelike, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Timelike};
 
 /// Trust levels for zero trust evaluation
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -421,31 +421,34 @@ pub struct PolicyException {
 pub enum ZeroTrustError {
     #[error("Entity not found: {id}")]
     EntityNotFound { id: Uuid },
-    
+
     #[error("Trust level insufficient: required {required:?}, current {current:?}")]
-    TrustLevelInsufficient { required: TrustLevel, current: TrustLevel },
-    
+    TrustLevelInsufficient {
+        required: TrustLevel,
+        current: TrustLevel,
+    },
+
     #[error("Risk score too high: {score} > {threshold}")]
     RiskScoreTooHigh { score: u8, threshold: u8 },
-    
+
     #[error("Policy violation: {policy_name}")]
     PolicyViolation { policy_name: String },
-    
+
     #[error("Verification failed: {reason}")]
     VerificationFailed { reason: String },
-    
+
     #[error("Device not trusted: {fingerprint}")]
     DeviceNotTrusted { fingerprint: String },
-    
+
     #[error("Behavioral anomaly detected: {details}")]
     BehavioralAnomaly { details: String },
-    
+
     #[error("Session expired or invalid: {session_id}")]
     SessionInvalid { session_id: Uuid },
-    
+
     #[error("Network location not allowed: {ip}")]
     NetworkLocationDenied { ip: IpAddr },
-    
+
     #[error("Authentication method insufficient: {method:?}")]
     AuthenticationInsufficient { method: AuthType },
 }
@@ -453,9 +456,21 @@ pub enum ZeroTrustError {
 /// Trait for risk assessment engines
 #[async_trait]
 pub trait RiskAssessmentEngine: Send + Sync {
-    async fn calculate_risk_score(&self, entity: &ZeroTrustEntity, context: &AccessContext) -> Result<RiskScore, ZeroTrustError>;
-    async fn update_behavioral_profile(&self, entity: &mut ZeroTrustEntity, activity: &ActivityEvent) -> Result<(), ZeroTrustError>;
-    async fn detect_anomalies(&self, entity: &ZeroTrustEntity, activity: &ActivityEvent) -> Result<Vec<AnomalyDetection>, ZeroTrustError>;
+    async fn calculate_risk_score(
+        &self,
+        entity: &ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<RiskScore, ZeroTrustError>;
+    async fn update_behavioral_profile(
+        &self,
+        entity: &mut ZeroTrustEntity,
+        activity: &ActivityEvent,
+    ) -> Result<(), ZeroTrustError>;
+    async fn detect_anomalies(
+        &self,
+        entity: &ZeroTrustEntity,
+        activity: &ActivityEvent,
+    ) -> Result<Vec<AnomalyDetection>, ZeroTrustError>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -593,7 +608,7 @@ impl ZeroTrustEngine {
     /// Register a new entity in the zero trust system
     pub async fn register_entity(&self, entity: ZeroTrustEntity) -> Result<(), ZeroTrustError> {
         let mut entities = self.entities.write().unwrap();
-        
+
         // Perform initial risk assessment
         let mut entity = entity;
         let initial_context = AccessContext {
@@ -604,8 +619,11 @@ impl ZeroTrustEngine {
             user_agent: None,
             additional_context: HashMap::new(),
         };
-        
-        entity.risk_score = self.risk_engine.calculate_risk_score(&entity, &initial_context).await?;
+
+        entity.risk_score = self
+            .risk_engine
+            .calculate_risk_score(&entity, &initial_context)
+            .await?;
         entity.trust_level = self.determine_trust_level(&entity.risk_score);
         entity.last_verified = Utc::now();
 
@@ -615,28 +633,42 @@ impl ZeroTrustEngine {
     }
 
     /// Evaluate access request using zero trust principles
-    pub async fn evaluate_access(&self, entity_id: Uuid, context: &AccessContext) -> Result<AccessDecision, ZeroTrustError> {
+    pub async fn evaluate_access(
+        &self,
+        entity_id: Uuid,
+        context: &AccessContext,
+    ) -> Result<AccessDecision, ZeroTrustError> {
         let mut entity = {
             let entities = self.entities.read().unwrap();
-            entities.get(&entity_id).cloned()
+            entities
+                .get(&entity_id)
+                .cloned()
                 .ok_or(ZeroTrustError::EntityNotFound { id: entity_id })?
         };
 
         // Continuous verification
         if self.requires_verification(&entity) {
-            let verification_result = self.perform_continuous_verification(&mut entity, context).await?;
+            let verification_result = self
+                .perform_continuous_verification(&mut entity, context)
+                .await?;
             if !matches!(verification_result.result, VerificationResult::Passed) {
-                return Ok(AccessDecision::Deny(format!("Continuous verification failed: {:?}", verification_result.result)));
+                return Ok(AccessDecision::Deny(format!(
+                    "Continuous verification failed: {:?}",
+                    verification_result.result
+                )));
             }
         }
 
         // Risk assessment
-        let current_risk = self.risk_engine.calculate_risk_score(&entity, context).await?;
+        let current_risk = self
+            .risk_engine
+            .calculate_risk_score(&entity, context)
+            .await?;
         entity.risk_score = current_risk.clone();
 
         // Policy evaluation
         let policy_result = self.evaluate_policies(&entity, context).await?;
-        
+
         // Update entity
         {
             let mut entities = self.entities.write().unwrap();
@@ -653,23 +685,32 @@ impl ZeroTrustEngine {
             }
             PolicyDecision::Deny(reason) => Ok(AccessDecision::Deny(reason)),
             PolicyDecision::RequireStepUp(methods) => Ok(AccessDecision::RequireStepUp(methods)),
-            PolicyDecision::RequireApproval(approver) => Ok(AccessDecision::RequireApproval(approver)),
+            PolicyDecision::RequireApproval(approver) => {
+                Ok(AccessDecision::RequireApproval(approver))
+            }
         }
     }
 
     /// Perform continuous verification of entity
-    async fn perform_continuous_verification(&self, entity: &mut ZeroTrustEntity, context: &AccessContext) -> Result<VerificationEvent, ZeroTrustError> {
+    async fn perform_continuous_verification(
+        &self,
+        entity: &mut ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<VerificationEvent, ZeroTrustError> {
         let start_time = Instant::now();
         let old_risk_score = entity.risk_score.total_score;
         let old_trust_level = entity.trust_level;
 
         // Recalculate risk
-        let new_risk = self.risk_engine.calculate_risk_score(entity, context).await?;
+        let new_risk = self
+            .risk_engine
+            .calculate_risk_score(entity, context)
+            .await?;
         let new_trust_level = self.determine_trust_level(&new_risk);
 
         // Check for significant changes
-        let risk_delta = (new_risk.total_score as i16 - old_risk_score as i16).abs() as u8;
-        
+        let risk_delta = (new_risk.total_score as i16 - old_risk_score as i16).unsigned_abs() as u8;
+
         let result = if new_risk.total_score > self.config.max_risk_score {
             VerificationResult::Failed("Risk score too high".to_string())
         } else if risk_delta > 20 {
@@ -693,7 +734,10 @@ impl ZeroTrustEngine {
             trust_level_after: new_trust_level,
             verification_details: {
                 let mut details = HashMap::new();
-                details.insert("duration_ms".to_string(), start_time.elapsed().as_millis().to_string());
+                details.insert(
+                    "duration_ms".to_string(),
+                    start_time.elapsed().as_millis().to_string(),
+                );
                 details.insert("risk_delta".to_string(), risk_delta.to_string());
                 details
             },
@@ -702,17 +746,21 @@ impl ZeroTrustEngine {
         entity.verification_history.push(verification_event.clone());
 
         // Keep only recent history
-        entity.verification_history.retain(|v| {
-            Utc::now().signed_duration_since(v.timestamp).num_hours() < 24
-        });
+        entity
+            .verification_history
+            .retain(|v| Utc::now().signed_duration_since(v.timestamp).num_hours() < 24);
 
         Ok(verification_event)
     }
 
     /// Evaluate policies against entity and context
-    async fn evaluate_policies(&self, entity: &ZeroTrustEntity, context: &AccessContext) -> Result<PolicyDecision, ZeroTrustError> {
+    async fn evaluate_policies(
+        &self,
+        entity: &ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<PolicyDecision, ZeroTrustError> {
         let policies = self.policies.read().unwrap();
-        
+
         for policy in policies.iter() {
             if !policy.enabled {
                 continue;
@@ -721,32 +769,36 @@ impl ZeroTrustEngine {
             let matches = self.evaluate_policy_conditions(&policy.conditions, entity, context)?;
             if matches {
                 debug!("Policy {} matched for entity {}", policy.name, entity.id);
-                
+
                 // Return the first matching policy's action
                 for action in &policy.actions {
                     match action {
                         PolicyAction::Allow => return Ok(PolicyDecision::Allow),
                         PolicyAction::Deny => return Ok(PolicyDecision::Deny(policy.name.clone())),
-                        PolicyAction::RequireStepUp(methods) => return Ok(PolicyDecision::RequireStepUp(methods.clone())),
-                        PolicyAction::RequireApproval(approver) => return Ok(PolicyDecision::RequireApproval(approver.clone())),
+                        PolicyAction::RequireStepUp(methods) => {
+                            return Ok(PolicyDecision::RequireStepUp(methods.clone()))
+                        }
+                        PolicyAction::RequireApproval(approver) => {
+                            return Ok(PolicyDecision::RequireApproval(approver.clone()))
+                        }
                         PolicyAction::Monitor => {
                             debug!("Monitoring access for entity {}", entity.id);
                             continue;
-                        },
+                        }
                         PolicyAction::Alert(message) => {
                             warn!("Policy alert: {} for entity {}", message, entity.id);
                             continue;
-                        },
+                        }
                         PolicyAction::LimitAccess(_duration) => {
                             debug!("Access limited for entity {}", entity.id);
                             continue;
-                        },
+                        }
                         PolicyAction::Isolate => {
                             return Ok(PolicyDecision::Deny("Entity isolated".to_string()));
-                        },
+                        }
                         PolicyAction::Quarantine(_duration) => {
                             return Ok(PolicyDecision::Deny("Entity quarantined".to_string()));
-                        },
+                        }
                     }
                 }
             }
@@ -754,7 +806,9 @@ impl ZeroTrustEngine {
 
         // Default decision based on risk score
         if entity.risk_score.total_score > self.config.max_risk_score {
-            Ok(PolicyDecision::Deny("Risk score exceeds threshold".to_string()))
+            Ok(PolicyDecision::Deny(
+                "Risk score exceeds threshold".to_string(),
+            ))
         } else if entity.risk_score.total_score > self.config.step_up_threshold {
             Ok(PolicyDecision::RequireStepUp(vec![AuthType::Mfa]))
         } else {
@@ -763,11 +817,17 @@ impl ZeroTrustEngine {
     }
 
     /// Evaluate policy conditions against entity and context
-    fn evaluate_policy_conditions(&self, conditions: &[PolicyCondition], entity: &ZeroTrustEntity, context: &AccessContext) -> Result<bool, ZeroTrustError> {
+    fn evaluate_policy_conditions(
+        &self,
+        conditions: &[PolicyCondition],
+        entity: &ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<bool, ZeroTrustError> {
         for condition in conditions {
             let field_value = self.get_field_value(&condition.field, entity, context)?;
-            let condition_met = self.evaluate_condition(&condition.operator, &field_value, &condition.value)?;
-            
+            let condition_met =
+                self.evaluate_condition(&condition.operator, &field_value, &condition.value)?;
+
             if !condition_met {
                 return Ok(false);
             }
@@ -776,7 +836,12 @@ impl ZeroTrustEngine {
     }
 
     /// Get field value for policy evaluation
-    fn get_field_value(&self, field: &str, entity: &ZeroTrustEntity, context: &AccessContext) -> Result<serde_json::Value, ZeroTrustError> {
+    fn get_field_value(
+        &self,
+        field: &str,
+        entity: &ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<serde_json::Value, ZeroTrustError> {
         match field {
             "trust_level" => Ok(serde_json::json!(entity.trust_level as u8)),
             "risk_score" => Ok(serde_json::json!(entity.risk_score.total_score)),
@@ -787,41 +852,38 @@ impl ZeroTrustEngine {
             field if field.starts_with("attribute.") => {
                 let attr_name = &field[10..];
                 Ok(serde_json::json!(entity.attributes.get(attr_name)))
-            },
+            }
             _ => Ok(serde_json::Value::Null),
         }
     }
 
     /// Evaluate a single condition
-    fn evaluate_condition(&self, operator: &ConditionOperator, field_value: &serde_json::Value, condition_value: &serde_json::Value) -> Result<bool, ZeroTrustError> {
+    fn evaluate_condition(
+        &self,
+        operator: &ConditionOperator,
+        field_value: &serde_json::Value,
+        condition_value: &serde_json::Value,
+    ) -> Result<bool, ZeroTrustError> {
         use serde_json::Value;
-        
+
         match operator {
             ConditionOperator::Equals => Ok(field_value == condition_value),
             ConditionOperator::NotEquals => Ok(field_value != condition_value),
-            ConditionOperator::GreaterThan => {
-                match (field_value, condition_value) {
-                    (Value::Number(f), Value::Number(c)) => Ok(f.as_f64() > c.as_f64()),
-                    _ => Ok(false),
-                }
+            ConditionOperator::GreaterThan => match (field_value, condition_value) {
+                (Value::Number(f), Value::Number(c)) => Ok(f.as_f64() > c.as_f64()),
+                _ => Ok(false),
             },
-            ConditionOperator::LessThan => {
-                match (field_value, condition_value) {
-                    (Value::Number(f), Value::Number(c)) => Ok(f.as_f64() < c.as_f64()),
-                    _ => Ok(false),
-                }
+            ConditionOperator::LessThan => match (field_value, condition_value) {
+                (Value::Number(f), Value::Number(c)) => Ok(f.as_f64() < c.as_f64()),
+                _ => Ok(false),
             },
-            ConditionOperator::Contains => {
-                match (field_value, condition_value) {
-                    (Value::String(f), Value::String(c)) => Ok(f.contains(c)),
-                    _ => Ok(false),
-                }
+            ConditionOperator::Contains => match (field_value, condition_value) {
+                (Value::String(f), Value::String(c)) => Ok(f.contains(c)),
+                _ => Ok(false),
             },
-            ConditionOperator::In => {
-                match condition_value {
-                    Value::Array(arr) => Ok(arr.contains(field_value)),
-                    _ => Ok(false),
-                }
+            ConditionOperator::In => match condition_value {
+                Value::Array(arr) => Ok(arr.contains(field_value)),
+                _ => Ok(false),
             },
             // Implement other operators as needed
             _ => Ok(false),
@@ -842,7 +904,9 @@ impl ZeroTrustEngine {
 
     /// Check if entity requires verification
     fn requires_verification(&self, entity: &ZeroTrustEntity) -> bool {
-        let verification_interval = self.config.verification_intervals
+        let verification_interval = self
+            .config
+            .verification_intervals
             .get(&entity.trust_level)
             .copied()
             .unwrap_or(Duration::from_secs(3600));
@@ -863,27 +927,41 @@ impl ZeroTrustEngine {
     }
 
     /// Process activity event for behavioral learning
-    pub async fn process_activity(&self, entity_id: Uuid, activity: ActivityEvent) -> Result<(), ZeroTrustError> {
+    pub async fn process_activity(
+        &self,
+        entity_id: Uuid,
+        activity: ActivityEvent,
+    ) -> Result<(), ZeroTrustError> {
         if !self.config.behavioral_learning_enabled {
             return Ok(());
         }
 
         let mut entity = {
             let entities = self.entities.read().unwrap();
-            entities.get(&entity_id).cloned()
+            entities
+                .get(&entity_id)
+                .cloned()
                 .ok_or(ZeroTrustError::EntityNotFound { id: entity_id })?
         };
 
         // Update behavioral profile
-        self.risk_engine.update_behavioral_profile(&mut entity, &activity).await?;
+        self.risk_engine
+            .update_behavioral_profile(&mut entity, &activity)
+            .await?;
 
         // Detect anomalies
-        let anomalies = self.risk_engine.detect_anomalies(&entity, &activity).await?;
-        
+        let anomalies = self
+            .risk_engine
+            .detect_anomalies(&entity, &activity)
+            .await?;
+
         // Handle anomalies
         for anomaly in anomalies {
             if anomaly.severity > 70 {
-                warn!("High severity behavioral anomaly detected: {}", anomaly.description);
+                warn!(
+                    "High severity behavioral anomaly detected: {}",
+                    anomaly.description
+                );
                 // Trigger additional verification
                 entity.trust_level = TrustLevel::Minimal;
             }
@@ -908,14 +986,17 @@ impl ZeroTrustEngine {
     pub fn update_threat_intel(&self, indicators: Vec<ThreatIndicator>) {
         let mut threat_intel = self.threat_intel.write().unwrap();
         *threat_intel = indicators;
-        info!("Updated threat intelligence with {} indicators", threat_intel.len());
+        info!(
+            "Updated threat intelligence with {} indicators",
+            threat_intel.len()
+        );
     }
 
     /// Get zero trust engine metrics
     pub fn get_metrics(&self) -> ZeroTrustEngineHealthMetrics {
         let entities = self.entities.read().unwrap();
         let _policies = self.policies.read().unwrap();
-        
+
         ZeroTrustEngineHealthMetrics {
             overall_health: 100.0, // Mock value
             active_entities: entities.len(),
@@ -942,10 +1023,9 @@ impl ZeroTrustEngine {
     /// Get detailed health metrics
     pub async fn get_health_metrics(&self) -> ZeroTrustEngineHealthMetrics {
         let entities = self.entities.read().unwrap();
-        let trust_distribution: HashMap<TrustLevel, usize> = entities
-            .values()
-            .fold(HashMap::new(), |mut acc, entity| {
-                *acc.entry(entity.trust_level.clone()).or_insert(0) += 1;
+        let trust_distribution: HashMap<TrustLevel, usize> =
+            entities.values().fold(HashMap::new(), |mut acc, entity| {
+                *acc.entry(entity.trust_level).or_insert(0) += 1;
                 acc
             });
 
@@ -993,7 +1073,11 @@ pub struct SimpleRiskAssessmentEngine;
 
 #[async_trait]
 impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
-    async fn calculate_risk_score(&self, entity: &ZeroTrustEntity, context: &AccessContext) -> Result<RiskScore, ZeroTrustError> {
+    async fn calculate_risk_score(
+        &self,
+        entity: &ZeroTrustEntity,
+        context: &AccessContext,
+    ) -> Result<RiskScore, ZeroTrustError> {
         let mut components = HashMap::new();
         let mut total_score = 0u8;
 
@@ -1010,9 +1094,10 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
 
         // Device trust
         let device_risk = if let Some(device) = &entity.device_info {
-            if device.security_posture.antivirus_enabled && 
-               device.security_posture.firewall_enabled && 
-               device.security_posture.disk_encrypted {
+            if device.security_posture.antivirus_enabled
+                && device.security_posture.firewall_enabled
+                && device.security_posture.disk_encrypted
+            {
                 10
             } else {
                 40
@@ -1025,7 +1110,12 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
 
         // Temporal patterns
         let current_hour = context.timestamp.hour();
-        let temporal_risk = if entity.behavioral_profile.access_patterns.typical_hours.contains(&(current_hour as u8)) {
+        let temporal_risk = if entity
+            .behavioral_profile
+            .access_patterns
+            .typical_hours
+            .contains(&(current_hour as u8))
+        {
             5
         } else {
             30
@@ -1035,7 +1125,9 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
 
         // Authentication strength
         let auth_risk = if entity.active_sessions.iter().any(|s| {
-            s.authentication_methods.iter().any(|m| matches!(m.method_type, AuthType::Mfa | AuthType::Biometric))
+            s.authentication_methods
+                .iter()
+                .any(|m| matches!(m.method_type, AuthType::Mfa | AuthType::Biometric))
         }) {
             5
         } else {
@@ -1052,18 +1144,31 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
         })
     }
 
-    async fn update_behavioral_profile(&self, entity: &mut ZeroTrustEntity, activity: &ActivityEvent) -> Result<(), ZeroTrustError> {
+    async fn update_behavioral_profile(
+        &self,
+        entity: &mut ZeroTrustEntity,
+        activity: &ActivityEvent,
+    ) -> Result<(), ZeroTrustError> {
         // Simple behavioral learning - add current access pattern
         if activity.event_type == "access" {
             let current_hour = activity.timestamp.hour() as u8;
-            if !entity.behavioral_profile.access_patterns.typical_hours.contains(&current_hour) {
-                entity.behavioral_profile.access_patterns.typical_hours.push(current_hour);
+            if !entity
+                .behavioral_profile
+                .access_patterns
+                .typical_hours
+                .contains(&current_hour)
+            {
+                entity
+                    .behavioral_profile
+                    .access_patterns
+                    .typical_hours
+                    .push(current_hour);
             }
         }
 
         // Update usage statistics
         entity.behavioral_profile.usage_stats.total_sessions += 1;
-        
+
         // Update learned behaviors
         let learned_behavior = LearnedBehavior {
             behavior_type: activity.event_type.clone(),
@@ -1072,23 +1177,36 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
             learned_at: Utc::now(),
             validation_count: 1,
         };
-        
-        entity.behavioral_profile.learned_behaviors.push(learned_behavior);
-        
+
+        entity
+            .behavioral_profile
+            .learned_behaviors
+            .push(learned_behavior);
+
         // Keep only recent behaviors
-        entity.behavioral_profile.learned_behaviors.retain(|b| {
-            Utc::now().signed_duration_since(b.learned_at).num_days() < 30
-        });
+        entity
+            .behavioral_profile
+            .learned_behaviors
+            .retain(|b| Utc::now().signed_duration_since(b.learned_at).num_days() < 30);
 
         Ok(())
     }
 
-    async fn detect_anomalies(&self, entity: &ZeroTrustEntity, activity: &ActivityEvent) -> Result<Vec<AnomalyDetection>, ZeroTrustError> {
+    async fn detect_anomalies(
+        &self,
+        entity: &ZeroTrustEntity,
+        activity: &ActivityEvent,
+    ) -> Result<Vec<AnomalyDetection>, ZeroTrustError> {
         let mut anomalies = Vec::new();
 
         // Check for unusual time access
         let current_hour = activity.timestamp.hour() as u8;
-        if !entity.behavioral_profile.access_patterns.typical_hours.contains(&current_hour) {
+        if !entity
+            .behavioral_profile
+            .access_patterns
+            .typical_hours
+            .contains(&current_hour)
+        {
             anomalies.push(AnomalyDetection {
                 anomaly_type: "unusual_time_access".to_string(),
                 severity: 60,
@@ -1099,10 +1217,10 @@ impl RiskAssessmentEngine for SimpleRiskAssessmentEngine {
         }
 
         // Check for rapid successive activities
-        let recent_activities = entity.verification_history.iter()
-            .filter(|v| {
-                Utc::now().signed_duration_since(v.timestamp).num_minutes() < 5
-            })
+        let recent_activities = entity
+            .verification_history
+            .iter()
+            .filter(|v| Utc::now().signed_duration_since(v.timestamp).num_minutes() < 5)
             .count();
 
         if recent_activities > 10 {
@@ -1217,14 +1335,17 @@ mod tests {
             additional_context: HashMap::new(),
         };
 
-        let decision = zt_engine.evaluate_access(entity_id, &context).await.unwrap();
+        let decision = zt_engine
+            .evaluate_access(entity_id, &context)
+            .await
+            .unwrap();
         assert!(matches!(decision, AccessDecision::Allow));
     }
 
     #[tokio::test]
     async fn test_risk_score_calculation() {
         let engine = SimpleRiskAssessmentEngine;
-        
+
         let entity = ZeroTrustEntity {
             id: Uuid::new_v4(),
             entity_type: EntityType::User {
@@ -1287,7 +1408,10 @@ mod tests {
             additional_context: HashMap::new(),
         };
 
-        let risk_score = engine.calculate_risk_score(&entity, &context).await.unwrap();
+        let risk_score = engine
+            .calculate_risk_score(&entity, &context)
+            .await
+            .unwrap();
         assert!(risk_score.total_score <= 100);
         assert!(risk_score.confidence > 0.0);
     }

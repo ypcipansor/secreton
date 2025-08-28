@@ -1,10 +1,13 @@
 //! PostgreSQL storage backend implementation
 
-use crate::{StorageBackend, StorageResult, StorageError, VaultEntry, QueryParams, StorageTransaction, HealthStatus, StorageStats, SecurityLevel};
+use crate::{
+    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction, VaultEntry,
+};
 use async_trait::async_trait;
 use sqlx::{PgPool, Row};
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// PostgreSQL storage backend
 pub struct PostgresBackend {
@@ -14,15 +17,16 @@ pub struct PostgresBackend {
 impl PostgresBackend {
     /// Create a new PostgreSQL backend
     pub async fn new(database_url: &str) -> StorageResult<Self> {
-        let pool = PgPool::connect(database_url)
-            .await
-            .map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to connect to PostgreSQL: {}", e),
-            })?;
-        
+        let pool =
+            PgPool::connect(database_url)
+                .await
+                .map_err(|e| StorageError::ConnectionFailed {
+                    message: format!("Failed to connect to PostgreSQL: {}", e),
+                })?;
+
         Ok(Self { pool })
     }
-    
+
     /// Get the connection pool
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -37,19 +41,22 @@ impl StorageBackend for PostgresBackend {
             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#;
-        
-        let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize encryption metadata: {}", e),
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
             })?;
-        
-        let metadata_json = serde_json::to_value(&entry.metadata)
-            .map_err(|e| StorageError::SerializationError {
+
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
                 message: format!("Failed to serialize metadata: {}", e),
-            })?;
-        
+            }
+        })?;
+
         sqlx::query(query)
-            .bind(&entry.id)
+            .bind(entry.id)
             .bind(&entry.path)
             .bind(&entry.encrypted_data)
             .bind(encryption_metadata_json)
@@ -57,26 +64,26 @@ impl StorageBackend for PostgresBackend {
             .bind(metadata_json)
             .bind(&entry.tags)
             .bind(entry.version as i32)
-            .bind(&entry.owner_id)
-            .bind(&entry.created_at)
-            .bind(&entry.updated_at)
-            .bind(&entry.expires_at)
+            .bind(entry.owner_id)
+            .bind(entry.created_at)
+            .bind(entry.updated_at)
+            .bind(entry.expires_at)
             .execute(&self.pool)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to store vault entry: {}", e),
             })?;
-        
+
         Ok(())
     }
-    
+
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
         let query = r#"
             SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at
             FROM vault_entries 
             WHERE id = $1 AND (expires_at IS NULL OR expires_at > NOW())
         "#;
-        
+
         let row = sqlx::query(query)
             .bind(id)
             .fetch_optional(&self.pool)
@@ -84,7 +91,7 @@ impl StorageBackend for PostgresBackend {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to get vault entry by ID: {}", e),
             })?;
-        
+
         if let Some(row) = row {
             let entry = row_to_vault_entry(row)?;
             Ok(Some(entry))
@@ -92,14 +99,14 @@ impl StorageBackend for PostgresBackend {
             Ok(None)
         }
     }
-    
+
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
         let query = r#"
             SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at
             FROM vault_entries 
             WHERE path = $1 AND (expires_at IS NULL OR expires_at > NOW())
         "#;
-        
+
         let row = sqlx::query(query)
             .bind(path)
             .fetch_optional(&self.pool)
@@ -107,7 +114,7 @@ impl StorageBackend for PostgresBackend {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to get vault entry by path: {}", e),
             })?;
-        
+
         if let Some(row) = row {
             let entry = row_to_vault_entry(row)?;
             Ok(Some(entry))
@@ -115,53 +122,56 @@ impl StorageBackend for PostgresBackend {
             Ok(None)
         }
     }
-    
+
     async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
         let query = r#"
             UPDATE vault_entries 
             SET encrypted_data = $2, encryption_metadata = $3, security_level = $4, metadata = $5, tags = $6, version = $7, updated_at = $8, expires_at = $9
             WHERE id = $1
         "#;
-        
-        let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize encryption metadata: {}", e),
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
             })?;
-        
-        let metadata_json = serde_json::to_value(&entry.metadata)
-            .map_err(|e| StorageError::SerializationError {
+
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
                 message: format!("Failed to serialize metadata: {}", e),
-            })?;
-        
+            }
+        })?;
+
         let result = sqlx::query(query)
-            .bind(&entry.id)
+            .bind(entry.id)
             .bind(&entry.encrypted_data)
             .bind(encryption_metadata_json)
             .bind(entry.security_level as i32)
             .bind(metadata_json)
             .bind(&entry.tags)
             .bind(entry.version as i32)
-            .bind(&entry.updated_at)
-            .bind(&entry.expires_at)
+            .bind(entry.updated_at)
+            .bind(entry.expires_at)
             .execute(&self.pool)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to update vault entry: {}", e),
             })?;
-        
+
         if result.rows_affected() == 0 {
             return Err(StorageError::NotFound {
                 resource_type: "VaultEntry".to_string(),
                 id: entry.id.to_string(),
             });
         }
-        
+
         Ok(())
     }
-    
+
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
         let query = "DELETE FROM vault_entries WHERE id = $1";
-        
+
         let result = sqlx::query(query)
             .bind(id)
             .execute(&self.pool)
@@ -169,13 +179,13 @@ impl StorageBackend for PostgresBackend {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to delete vault entry: {}", e),
             })?;
-        
+
         Ok(result.rows_affected() > 0)
     }
-    
+
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
         let query = "DELETE FROM vault_entries WHERE path = $1";
-        
+
         let result = sqlx::query(query)
             .bind(path)
             .execute(&self.pool)
@@ -183,88 +193,91 @@ impl StorageBackend for PostgresBackend {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to delete vault entry: {}", e),
             })?;
-        
+
         Ok(result.rows_affected() > 0)
     }
-    
+
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
-        let mut query = String::from(r#"
+        let mut query = String::from(
+            r#"
             SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at
             FROM vault_entries 
             WHERE 1=1
-        "#);
-        
+        "#,
+        );
+
         if !params.include_expired {
             query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
         }
-        
+
         if let Some(ref prefix) = params.path_prefix {
             query.push_str(&format!(" AND path LIKE '{}%'", prefix));
         }
-        
+
         if let Some(security_level) = params.security_level {
             query.push_str(&format!(" AND security_level >= {}", security_level as i32));
         }
-        
+
         if let Some(ref owner_id) = params.owner_id {
             query.push_str(&format!(" AND owner_id = '{}'", owner_id));
         }
-        
+
         if let Some(limit) = params.limit {
             query.push_str(&format!(" LIMIT {}", limit));
         }
-        
+
         if let Some(offset) = params.offset {
             query.push_str(&format!(" OFFSET {}", offset));
         }
-        
+
         let rows = sqlx::query(&query)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to list vault entries: {}", e),
             })?;
-        
-        let entries = rows.into_iter()
+
+        let entries = rows
+            .into_iter()
             .map(row_to_vault_entry)
             .collect::<StorageResult<Vec<_>>>()?;
-        
+
         Ok(entries)
     }
-    
+
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         let mut query = String::from("SELECT COUNT(*) FROM vault_entries WHERE 1=1");
-        
+
         if !params.include_expired {
             query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
         }
-        
+
         if let Some(ref prefix) = params.path_prefix {
             query.push_str(&format!(" AND path LIKE '{}%'", prefix));
         }
-        
+
         if let Some(security_level) = params.security_level {
             query.push_str(&format!(" AND security_level >= {}", security_level as i32));
         }
-        
+
         if let Some(ref owner_id) = params.owner_id {
             query.push_str(&format!(" AND owner_id = '{}'", owner_id));
         }
-        
+
         let row = sqlx::query(&query)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to count vault entries: {}", e),
             })?;
-        
+
         let count: i64 = row.get(0);
         Ok(count as u64)
     }
-    
+
     async fn exists(&self, path: &str) -> StorageResult<bool> {
         let query = "SELECT 1 FROM vault_entries WHERE path = $1 AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1";
-        
+
         let row = sqlx::query(query)
             .bind(path)
             .fetch_optional(&self.pool)
@@ -272,29 +285,29 @@ impl StorageBackend for PostgresBackend {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to check entry existence: {}", e),
             })?;
-        
+
         Ok(row.is_some())
     }
-    
+
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        let tx = self.pool.begin()
+        let tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| StorageError::TransactionFailed {
                 message: format!("Failed to begin transaction: {}", e),
             })?;
-        
+
         Ok(Box::new(PostgresTransaction { tx: Some(tx) }))
     }
-    
+
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         let start = std::time::Instant::now();
-        
-        let result = sqlx::query("SELECT 1")
-            .fetch_one(&self.pool)
-            .await;
-        
+
+        let result = sqlx::query("SELECT 1").fetch_one(&self.pool).await;
+
         let response_time_ms = start.elapsed().as_secs_f64() * 1000.0;
-        
+
         match result {
             Ok(_) => Ok(HealthStatus {
                 is_healthy: true,
@@ -314,16 +327,17 @@ impl StorageBackend for PostgresBackend {
             }),
         }
     }
-    
+
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        let total_query = "SELECT COUNT(*), COALESCE(SUM(LENGTH(encrypted_data)), 0) FROM vault_entries";
+        let total_query =
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(encrypted_data)), 0) FROM vault_entries";
         let row = sqlx::query(total_query)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to get stats: {}", e),
             })?;
-        
+
         let total_entries: i64 = row.get(0);
         let total_size_bytes: i64 = row.get(1);
         let average_entry_size = if total_entries > 0 {
@@ -331,7 +345,7 @@ impl StorageBackend for PostgresBackend {
         } else {
             0.0
         };
-        
+
         // This is a simplified implementation - in production, you'd want more detailed statistics
         Ok(StorageStats {
             total_entries: total_entries as u64,
@@ -343,7 +357,7 @@ impl StorageBackend for PostgresBackend {
             expired_entries: 0,
         })
     }
-    
+
     async fn migrate(&self) -> StorageResult<()> {
         let migration_sql = r#"
             CREATE TABLE IF NOT EXISTS vault_entries (
@@ -366,14 +380,14 @@ impl StorageBackend for PostgresBackend {
             CREATE INDEX IF NOT EXISTS idx_vault_entries_security_level ON vault_entries(security_level);
             CREATE INDEX IF NOT EXISTS idx_vault_entries_expires_at ON vault_entries(expires_at) WHERE expires_at IS NOT NULL;
         "#;
-        
+
         sqlx::query(migration_sql)
             .execute(&self.pool)
             .await
             .map_err(|e| StorageError::MigrationError {
                 message: format!("Failed to run migrations: {}", e),
             })?;
-        
+
         Ok(())
     }
 }
@@ -389,25 +403,28 @@ impl StorageTransaction for PostgresTransaction {
         let tx = self.tx.as_mut().ok_or(StorageError::TransactionFailed {
             message: "Transaction already completed".to_string(),
         })?;
-        
+
         let query = r#"
             INSERT INTO vault_entries 
             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#;
-        
-        let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize encryption metadata: {}", e),
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
             })?;
-        
-        let metadata_json = serde_json::to_value(&entry.metadata)
-            .map_err(|e| StorageError::SerializationError {
+
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
                 message: format!("Failed to serialize metadata: {}", e),
-            })?;
-        
+            }
+        })?;
+
         sqlx::query(query)
-            .bind(&entry.id)
+            .bind(entry.id)
             .bind(&entry.path)
             .bind(&entry.encrypted_data)
             .bind(encryption_metadata_json)
@@ -415,73 +432,76 @@ impl StorageTransaction for PostgresTransaction {
             .bind(metadata_json)
             .bind(&entry.tags)
             .bind(entry.version as i32)
-            .bind(&entry.owner_id)
-            .bind(&entry.created_at)
-            .bind(&entry.updated_at)
-            .bind(&entry.expires_at)
+            .bind(entry.owner_id)
+            .bind(entry.created_at)
+            .bind(entry.updated_at)
+            .bind(entry.expires_at)
             .execute(&mut **tx)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to store vault entry in transaction: {}", e),
             })?;
-        
+
         Ok(())
     }
-    
+
     async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
         let tx = self.tx.as_mut().ok_or(StorageError::TransactionFailed {
             message: "Transaction already completed".to_string(),
         })?;
-        
+
         let query = r#"
             UPDATE vault_entries 
             SET encrypted_data = $2, encryption_metadata = $3, security_level = $4, metadata = $5, tags = $6, version = $7, updated_at = $8, expires_at = $9
             WHERE id = $1
         "#;
-        
-        let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize encryption metadata: {}", e),
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
             })?;
-        
-        let metadata_json = serde_json::to_value(&entry.metadata)
-            .map_err(|e| StorageError::SerializationError {
+
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
                 message: format!("Failed to serialize metadata: {}", e),
-            })?;
-        
+            }
+        })?;
+
         let result = sqlx::query(query)
-            .bind(&entry.id)
+            .bind(entry.id)
             .bind(&entry.encrypted_data)
             .bind(encryption_metadata_json)
             .bind(entry.security_level as i32)
             .bind(metadata_json)
             .bind(&entry.tags)
             .bind(entry.version as i32)
-            .bind(&entry.updated_at)
-            .bind(&entry.expires_at)
+            .bind(entry.updated_at)
+            .bind(entry.expires_at)
             .execute(&mut **tx)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to update vault entry in transaction: {}", e),
             })?;
-        
+
         if result.rows_affected() == 0 {
             return Err(StorageError::NotFound {
                 resource_type: "VaultEntry".to_string(),
                 id: entry.id.to_string(),
             });
         }
-        
+
         Ok(())
     }
-    
+
     async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
         let tx = self.tx.as_mut().ok_or(StorageError::TransactionFailed {
             message: "Transaction already completed".to_string(),
         })?;
-        
+
         let query = "DELETE FROM vault_entries WHERE id = $1";
-        
+
         let result = sqlx::query(query)
             .bind(id)
             .execute(&mut **tx)
@@ -489,10 +509,10 @@ impl StorageTransaction for PostgresTransaction {
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to delete vault entry in transaction: {}", e),
             })?;
-        
+
         Ok(result.rows_affected() > 0)
     }
-    
+
     async fn commit(mut self: Box<Self>) -> StorageResult<()> {
         if let Some(tx) = self.tx.take() {
             tx.commit()
@@ -503,7 +523,7 @@ impl StorageTransaction for PostgresTransaction {
         }
         Ok(())
     }
-    
+
     async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
         if let Some(tx) = self.tx.take() {
             tx.rollback()
@@ -519,19 +539,19 @@ impl StorageTransaction for PostgresTransaction {
 /// Convert a database row to a VaultEntry
 fn row_to_vault_entry(row: sqlx::postgres::PgRow) -> StorageResult<VaultEntry> {
     use crate::EncryptionMetadata;
-    
+
     let encryption_metadata_json: serde_json::Value = row.get("encryption_metadata");
     let encryption_metadata: EncryptionMetadata = serde_json::from_value(encryption_metadata_json)
         .map_err(|e| StorageError::SerializationError {
             message: format!("Failed to deserialize encryption metadata: {}", e),
         })?;
-    
+
     let metadata_json: serde_json::Value = row.get("metadata");
-    let metadata: HashMap<String, String> = serde_json::from_value(metadata_json)
-        .map_err(|e| StorageError::SerializationError {
+    let metadata: HashMap<String, String> =
+        serde_json::from_value(metadata_json).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to deserialize metadata: {}", e),
         })?;
-    
+
     let security_level_int: i32 = row.get("security_level");
     let security_level = match security_level_int {
         0 => SecurityLevel::Public,
@@ -541,7 +561,7 @@ fn row_to_vault_entry(row: sqlx::postgres::PgRow) -> StorageResult<VaultEntry> {
         4 => SecurityLevel::TopSecret,
         _ => SecurityLevel::Internal, // Default fallback
     };
-    
+
     Ok(VaultEntry {
         id: row.get("id"),
         path: row.get("path"),

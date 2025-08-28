@@ -1,9 +1,9 @@
 //! Storage models and data structures
 
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// User information for access control
 #[derive(Debug, Clone, Serialize, Deserialize)]

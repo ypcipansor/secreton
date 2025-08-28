@@ -1,9 +1,12 @@
 //! Redis storage backend implementation (simplified)
 
-use crate::{StorageBackend, StorageResult, StorageError, VaultEntry, QueryParams, StorageTransaction, HealthStatus, StorageStats};
+use crate::{
+    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
+    StorageTransaction, VaultEntry,
+};
 use async_trait::async_trait;
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Redis storage backend (simplified implementation)
 pub struct RedisBackend {
@@ -30,49 +33,49 @@ impl StorageBackend for RedisBackend {
             message: "Redis backend not fully implemented yet".to_string(),
         })
     }
-    
+
     async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<VaultEntry>> {
         Ok(None)
     }
-    
+
     async fn get_by_path(&self, _path: &str) -> StorageResult<Option<VaultEntry>> {
         Ok(None)
     }
-    
+
     async fn update(&self, _entry: &VaultEntry) -> StorageResult<()> {
         Err(StorageError::BackendError {
             backend: "Redis".to_string(),
             message: "Redis backend not fully implemented yet".to_string(),
         })
     }
-    
+
     async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
         Ok(false)
     }
-    
+
     async fn delete_by_path(&self, _path: &str) -> StorageResult<bool> {
         Ok(false)
     }
-    
+
     async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
         Ok(Vec::new())
     }
-    
+
     async fn count(&self, _params: &QueryParams) -> StorageResult<u64> {
         Ok(0)
     }
-    
+
     async fn exists(&self, _path: &str) -> StorageResult<bool> {
         Ok(false)
     }
-    
+
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
         Err(StorageError::BackendError {
             backend: "Redis".to_string(),
             message: "Transactions not supported in Redis backend".to_string(),
         })
     }
-    
+
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         Ok(HealthStatus {
             is_healthy: true,
@@ -83,7 +86,7 @@ impl StorageBackend for RedisBackend {
             uptime_seconds: 0,
         })
     }
-    
+
     async fn get_stats(&self) -> StorageResult<StorageStats> {
         Ok(StorageStats {
             total_entries: 0,
@@ -95,7 +98,7 @@ impl StorageBackend for RedisBackend {
             expired_entries: 0,
         })
     }
-    
+
     async fn migrate(&self) -> StorageResult<()> {
         Ok(())
     }

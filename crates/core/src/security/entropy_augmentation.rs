@@ -1,5 +1,5 @@
 //! Entropy Augmentation Module
-//! 
+//!
 //! Provides cryptographically secure entropy augmentation using multiple sources
 //! including hardware security modules (HSM) and external entropy providers.
 //! This exceeds HashiCorp Vault's entropy capabilities by implementing:
@@ -8,16 +8,16 @@
 //! - Quantum-safe entropy preparation
 //! - NIST SP 800-90B compliant entropy validation
 
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::collections::VecDeque;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use sha2::{Sha512, Digest};
-use ring::rand::{SystemRandom, SecureRandom};
-use tokio::time::interval;
+use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, debug};
+use sha2::{Digest, Sha512};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::interval;
+use tracing::{debug, error, info};
 
 /// Entropy quality levels based on NIST SP 800-90B
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
@@ -157,22 +157,22 @@ pub struct EntropyQualityTracker {
 pub enum EntropyError {
     #[error("Insufficient entropy quality: {quality:?}")]
     InsufficientQuality { quality: EntropyQuality },
-    
+
     #[error("Entropy source unavailable: {0}")]
     SourceUnavailable(String),
-    
+
     #[error("Entropy pool depleted")]
     PoolDepleted,
-    
+
     #[error("HSM entropy collection failed: {0}")]
     HsmError(String),
-    
+
     #[error("Network entropy collection failed: {0}")]
     NetworkError(String),
-    
+
     #[error("Biometric entropy collection failed: {0}")]
     BiometricError(String),
-    
+
     #[error("Entropy validation failed: {0}")]
     ValidationFailed(String),
 }
@@ -180,7 +180,7 @@ pub enum EntropyError {
 impl Default for EntropyEngineConfig {
     fn default() -> Self {
         Self {
-            pool_size: 1024 * 1024, // 1MB entropy pool
+            pool_size: 1024 * 1024,   // 1MB entropy pool
             min_pool_size: 64 * 1024, // 64KB minimum
             collection_interval: Duration::from_secs(30),
             quality_check_interval: Duration::from_secs(10),
@@ -217,11 +217,11 @@ impl EntropyQualityTracker {
 
         // Calculate Shannon entropy
         let shannon_entropy = self.calculate_shannon_entropy();
-        
+
         // Perform additional statistical tests
         let passes_chi_square = self.chi_square_test();
         let passes_runs_test = self.runs_test();
-        
+
         // Determine quality based on all tests
         let quality = match shannon_entropy {
             e if e >= 7.9 && passes_chi_square && passes_runs_test => EntropyQuality::High,
@@ -307,7 +307,7 @@ impl EntropyQualityTracker {
         let n = self.samples.len() as f64;
         let p1 = above_median as f64 / n;
         let p2 = below_median as f64 / n;
-        
+
         let expected_runs = 2.0 * n * p1 * p2 + 1.0;
         let variance = (expected_runs - 1.0) * (expected_runs - 2.0) / (n - 1.0);
         let std_dev = variance.sqrt();
@@ -322,7 +322,7 @@ impl EntropyQualityTracker {
 impl EntropySource for SystemEntropySource {
     async fn collect_entropy(&self, bytes_requested: usize) -> Result<Vec<u8>, EntropyError> {
         let mut buffer = vec![0u8; bytes_requested];
-        
+
         match self.system_random.fill(&mut buffer) {
             Ok(_) => {
                 let mut stats = self.stats.lock().unwrap();
@@ -333,7 +333,10 @@ impl EntropySource for SystemEntropySource {
             Err(e) => {
                 let mut stats = self.stats.lock().unwrap();
                 stats.collection_failures += 1;
-                Err(EntropyError::SourceUnavailable(format!("System entropy: {}", e)))
+                Err(EntropyError::SourceUnavailable(format!(
+                    "System entropy: {}",
+                    e
+                )))
             }
         }
     }
@@ -348,17 +351,14 @@ impl EntropySource for SystemEntropySource {
 
     async fn health_check(&self) -> bool {
         // Test collection of small amount of entropy
-        match self.collect_entropy(32).await {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        (self.collect_entropy(32).await).is_ok()
     }
 }
 
 impl EntropyAugmentationEngine {
     pub fn new(config: EntropyEngineConfig) -> Self {
         let rng = ChaCha20Rng::from_entropy();
-        
+
         Self {
             sources: Arc::new(RwLock::new(Vec::new())),
             entropy_pool: Arc::new(Mutex::new(VecDeque::new())),
@@ -378,7 +378,7 @@ impl EntropyAugmentationEngine {
 
         let mut sources = self.sources.write().unwrap();
         sources.push(source);
-        
+
         info!("Entropy source added successfully");
         Ok(())
     }
@@ -395,7 +395,7 @@ impl EntropyAugmentationEngine {
 
         self.start_entropy_collection().await;
         self.start_health_monitoring().await;
-        
+
         info!("Entropy augmentation engine started");
         Ok(())
     }
@@ -427,20 +427,20 @@ impl EntropyAugmentationEngine {
     /// Mix entropy using cryptographic hash function
     fn mix_entropy(&self, entropy: Vec<u8>) -> Vec<u8> {
         let mut hasher = Sha512::new();
-        
+
         // Add timestamp for additional entropy
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
             .to_le_bytes();
-        
+
         hasher.update(&entropy);
         hasher.update(timestamp);
-        
+
         // Mix multiple rounds for enhanced security
         let mut result = hasher.finalize().to_vec();
-        
+
         for _ in 1..self.config.entropy_mixing_rounds {
             let mut hasher = Sha512::new();
             hasher.update(&result);
@@ -461,15 +461,13 @@ impl EntropyAugmentationEngine {
 
         tokio::spawn(async move {
             let mut interval = interval(config.collection_interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Collect source count first
-                let source_count = {
-                    sources.read().unwrap().len()
-                };
-                
+                let source_count = { sources.read().unwrap().len() };
+
                 // Process each source by index to avoid holding locks across awaits
                 for i in 0..source_count {
                     // Simplified approach - collect entropy in a scoped manner
@@ -488,7 +486,7 @@ impl EntropyAugmentationEngine {
                             Err("Source not available")
                         }
                     };
-                    
+
                     if let Ok(entropy_data) = entropy_data {
                         // Store entropy data safely
                         if let Ok(mut pool_guard) = entropy_pool.try_lock() {
@@ -496,7 +494,7 @@ impl EntropyAugmentationEngine {
                         }
                     }
                 }
-                
+
                 // Check if monitoring should continue
                 if let Ok(running) = health_monitor_running.try_lock() {
                     if !*running {
@@ -505,7 +503,7 @@ impl EntropyAugmentationEngine {
                 }
             }
         });
-        
+
         info!("Entropy collection process started");
     }
 
@@ -517,11 +515,11 @@ impl EntropyAugmentationEngine {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(config.quality_check_interval);
-            
+
             loop {
                 interval.tick().await;
-                
-                // Check if monitoring should continue  
+
+                // Check if monitoring should continue
                 if let Ok(running) = health_monitor_running.try_lock() {
                     if !*running {
                         break;
@@ -531,12 +529,15 @@ impl EntropyAugmentationEngine {
                 // Health check all sources - avoid holding lock across await
                 let source_configs: Vec<_> = {
                     if let Ok(sources_guard) = sources.try_read() {
-                        sources_guard.iter().map(|s| s.get_config().clone()).collect()
+                        sources_guard
+                            .iter()
+                            .map(|s| s.get_config().clone())
+                            .collect()
                     } else {
                         Vec::new()
                     }
                 };
-                
+
                 // Perform health checks without holding locks
                 for config in source_configs {
                     if config.enabled {
@@ -550,7 +551,7 @@ impl EntropyAugmentationEngine {
     async fn collect_from_sources(&self, bytes_needed: usize) -> Result<(), EntropyError> {
         let sources = self.sources.read().unwrap();
         let bytes_per_source = bytes_needed / sources.len().max(1);
-        
+
         for source in sources.iter() {
             if source.get_config().enabled {
                 match source.collect_entropy(bytes_per_source).await {
@@ -576,7 +577,7 @@ impl EntropyAugmentationEngine {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -602,7 +603,11 @@ impl EntropyAugmentationEngine {
             },
             overall_health: {
                 let pool = self.entropy_pool.lock().unwrap();
-                if pool.len() > self.config.pool_size / 2 { 100.0 } else { 50.0 }
+                if pool.len() > self.config.pool_size / 2 {
+                    100.0
+                } else {
+                    50.0
+                }
             },
             sources_active: {
                 let sources = self.sources.read().unwrap();
@@ -691,11 +696,14 @@ mod tests {
     #[tokio::test]
     async fn test_entropy_quality_assessment() {
         let mut tracker = EntropyQualityTracker::new(1000);
-        
+
         // Test with good entropy (random bytes)
         let good_entropy: Vec<u8> = (0..1000).map(|_| rand::random()).collect();
         let quality = tracker.assess_quality(&good_entropy);
-        assert!(matches!(quality, EntropyQuality::High | EntropyQuality::Medium));
+        assert!(matches!(
+            quality,
+            EntropyQuality::High | EntropyQuality::Medium
+        ));
 
         // Test with bad entropy (all zeros)
         let bad_entropy = vec![0u8; 1000];
@@ -707,29 +715,29 @@ mod tests {
     async fn test_entropy_engine_basic_functionality() {
         let config = EntropyEngineConfig::default();
         let engine = EntropyAugmentationEngine::new(config);
-        
+
         // Add system entropy source
         let source = create_system_entropy_source();
         engine.add_source(source).await.unwrap();
-        
+
         // Start engine
         engine.start().await.unwrap();
-        
+
         // Wait a bit for collection
         sleep(Duration::from_millis(200)).await;
-        
+
         // Add some entropy manually to ensure pool has data
         {
             let mut pool = engine.entropy_pool.lock().unwrap();
             // Add some test entropy data
-            for byte in &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
-                         11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-                         21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-                         33, 34, 35, 36, 37, 38, 39, 40] {
+            for byte in &[
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+            ] {
                 pool.push_back(*byte);
             }
         }
-        
+
         // Collect entropy
         let entropy = engine.collect_entropy(32).await.unwrap();
         assert_eq!(entropy.len(), 32);
@@ -739,11 +747,11 @@ mod tests {
     fn test_entropy_mixing() {
         let config = EntropyEngineConfig::default();
         let engine = EntropyAugmentationEngine::new(config);
-        
+
         let input = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let mixed1 = engine.mix_entropy(input.clone());
         let mixed2 = engine.mix_entropy(input);
-        
+
         // Should be deterministic but different from input
         assert_ne!(mixed1, vec![1, 2, 3, 4, 5, 6, 7, 8]);
         // But should be different due to timestamp

@@ -1,11 +1,11 @@
 //! Storage backend implementations
 
-pub mod postgres;
-pub mod redis;
 pub mod file;
+pub mod postgres;
 pub mod raft;
+pub mod redis;
 
-pub use postgres::PostgresBackend;
-pub use redis::RedisBackend;
 pub use file::FileBackend;
-pub use raft::{RaftStorageBackend, RaftConfig};
+pub use postgres::PostgresBackend;
+pub use raft::{RaftConfig, RaftStorageBackend};
+pub use redis::RedisBackend;

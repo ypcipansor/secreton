@@ -3,25 +3,25 @@
 //! High-performance, secure cryptographic primitives and protocols
 //! with comprehensive RustCrypto integration and transit engine support.
 
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
-use rand::{RngCore};
-use rand::rngs::OsRng;
 
 pub mod encryption;
+pub mod error;
 pub mod hashing;
 pub mod key_derivation;
-pub mod transit_simple;
 pub mod kv_engine;
-pub mod error;
+pub mod transit_simple;
 
 pub use encryption::*;
+pub use error::*;
 pub use hashing::*;
 pub use key_derivation::*;
-pub use transit_simple::*;
 pub use kv_engine::*;
-pub use error::*;
+pub use transit_simple::*;
 
 // Re-export transit_simple as transit for compatibility
 pub mod transit {
@@ -33,22 +33,22 @@ pub mod transit {
 pub enum CryptoError {
     #[error("Invalid key length: expected {expected}, got {actual}")]
     InvalidKeyLength { expected: usize, actual: usize },
-    
+
     #[error("Encryption failed: {reason}")]
     EncryptionFailed { reason: String },
-    
+
     #[error("Decryption failed: {reason}")]
     DecryptionFailed { reason: String },
-    
+
     #[error("Key generation failed: {reason}")]
     KeyGenerationFailed { reason: String },
-    
+
     #[error("Hash operation failed: {reason}")]
     HashFailed { reason: String },
-    
+
     #[error("Invalid nonce/IV length")]
     InvalidNonceLength,
-    
+
     #[error("Random generation failed")]
     RandomGenerationFailed,
 }
@@ -62,12 +62,12 @@ pub enum AlgorithmId {
     // Symmetric encryption
     Aes256Gcm,
     ChaCha20Poly1305,
-    
+
     // Hash functions
     Sha256,
     Sha3_256,
     Blake3,
-    
+
     // Key derivation
     Pbkdf2,
     Argon2id,
@@ -77,7 +77,7 @@ impl fmt::Display for AlgorithmId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let name = match self {
             AlgorithmId::Aes256Gcm => "AES-256-GCM",
-            AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305", 
+            AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305",
             AlgorithmId::Sha256 => "SHA-256",
             AlgorithmId::Sha3_256 => "SHA3-256",
             AlgorithmId::Blake3 => "BLAKE3",
@@ -109,7 +109,7 @@ impl SecurityParams {
             AlgorithmId::Pbkdf2 => (32, Some(100_000), Some(16)),
             AlgorithmId::Argon2id => (32, Some(3), Some(16)),
         };
-        
+
         Self {
             algorithm,
             key_size,
@@ -117,19 +117,13 @@ impl SecurityParams {
             salt_size,
         }
     }
-    
+
     /// Check if parameters are secure for production use
     pub fn is_secure(&self) -> bool {
         match self.algorithm {
-            AlgorithmId::Aes256Gcm | AlgorithmId::ChaCha20Poly1305 => {
-                self.key_size >= 32
-            }
-            AlgorithmId::Pbkdf2 => {
-                self.iterations.unwrap_or(0) >= 100_000 && self.key_size >= 32
-            }
-            AlgorithmId::Argon2id => {
-                self.iterations.unwrap_or(0) >= 3 && self.key_size >= 32
-            }
+            AlgorithmId::Aes256Gcm | AlgorithmId::ChaCha20Poly1305 => self.key_size >= 32,
+            AlgorithmId::Pbkdf2 => self.iterations.unwrap_or(0) >= 100_000 && self.key_size >= 32,
+            AlgorithmId::Argon2id => self.iterations.unwrap_or(0) >= 3 && self.key_size >= 32,
             _ => true,
         }
     }
@@ -138,7 +132,8 @@ impl SecurityParams {
 /// Generate cryptographically secure random bytes
 pub fn generate_random_bytes(len: usize) -> CryptoResult<Vec<u8>> {
     let mut bytes = vec![0u8; len];
-    OsRng.try_fill_bytes(&mut bytes)
+    OsRng
+        .try_fill_bytes(&mut bytes)
         .map_err(|_| CryptoError::RandomGenerationFailed)?;
     Ok(bytes)
 }

@@ -1,5 +1,5 @@
 //! Quantum-Safe Cryptography Module
-//! 
+//!
 //! Implements post-quantum cryptographic algorithms and hybrid classical-quantum security:
 //! - Post-quantum key encapsulation mechanisms (KEMs)
 //! - Post-quantum digital signatures
@@ -9,29 +9,31 @@
 //! - Quantum-safe certificate management
 //! - Migration tools for transitioning from classical to quantum-safe algorithms
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Mutex};
-use std::time::Duration;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tracing::{info, error};
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Datelike};
+use chrono::{DateTime, Datelike, Utc};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+use tracing::{error, info};
+use uuid::Uuid;
 
 /// Base64 serialization module for secure data
 mod base64_serde {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use serde::{self, Deserialize, Deserializer, Serializer};
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer,
+    where
+        S: Serializer,
     {
         serializer.serialize_str(&STANDARD.encode(bytes))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         STANDARD.decode(s).map_err(serde::de::Error::custom)
@@ -42,39 +44,38 @@ mod base64_serde {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PostQuantumAlgorithm {
     /// NIST PQC Selected Algorithms
-    
     // Key Encapsulation Mechanisms
     Kyber512,
     Kyber768,
     Kyber1024,
-    
-    // Digital Signatures  
+
+    // Digital Signatures
     Dilithium2,
     Dilithium3,
     Dilithium5,
-    
+
     Falcon512,
     Falcon1024,
-    
+
     Sphincs128f,
     Sphincs128s,
     Sphincs192f,
     Sphincs192s,
     Sphincs256f,
     Sphincs256s,
-    
+
     /// Alternative Round 4 Candidates
     Bike,
     ClassicMcEliece,
     HQC,
     SIKE, // Note: Broken but kept for compatibility
-    
+
     /// Hybrid Algorithms (Classical + Post-Quantum)
     HybridRsaKyber768,
     HybridEcdsaDilithium3,
     HybridEcdhKyber1024,
     HybridAesKyber512,
-    
+
     /// Custom implementations
     Custom(String),
 }
@@ -242,12 +243,12 @@ pub struct QuantumThreatAssessment {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum ThreatLevel {
-    Minimal,    // >20 years to CRQC
-    Low,        // 15-20 years
-    Moderate,   // 10-15 years  
-    High,       // 5-10 years
-    Critical,   // <5 years
-    Imminent,   // CRQC exists
+    Minimal,  // >20 years to CRQC
+    Low,      // 15-20 years
+    Moderate, // 10-15 years
+    High,     // 5-10 years
+    Critical, // <5 years
+    Imminent, // CRQC exists
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,40 +275,40 @@ pub enum MigrationPriority {
 pub enum QuantumCryptoError {
     #[error("Unsupported algorithm: {algorithm}")]
     UnsupportedAlgorithm { algorithm: String },
-    
+
     #[error("Key generation failed: {reason}")]
     KeyGenerationFailed { reason: String },
-    
+
     #[error("Encryption failed: {reason}")]
     EncryptionFailed { reason: String },
-    
+
     #[error("Decryption failed: {reason}")]
     DecryptionFailed { reason: String },
-    
+
     #[error("Signature generation failed: {reason}")]
     SignatureGenerationFailed { reason: String },
-    
+
     #[error("Signature verification failed: {reason}")]
     SignatureVerificationFailed { reason: String },
-    
+
     #[error("Key encapsulation failed: {reason}")]
     KeyEncapsulationFailed { reason: String },
-    
+
     #[error("Key decapsulation failed: {reason}")]
     KeyDecapsulationFailed { reason: String },
-    
+
     #[error("QKD session error: {reason}")]
     QKDSessionError { reason: String },
-    
+
     #[error("Hybrid crypto error: {reason}")]
     HybridCryptoError { reason: String },
-    
+
     #[error("Migration error: {reason}")]
     MigrationError { reason: String },
-    
+
     #[error("Invalid security level: {level}")]
     InvalidSecurityLevel { level: String },
-    
+
     #[error("Quantum RNG error: {reason}")]
     QuantumRngError { reason: String },
 }
@@ -315,13 +316,41 @@ pub enum QuantumCryptoError {
 /// Trait for post-quantum cryptographic operations
 #[async_trait]
 pub trait PostQuantumCrypto: Send + Sync {
-    async fn generate_keypair(&self, algorithm: &PostQuantumAlgorithm, security_level: QuantumSecurityLevel) -> Result<PostQuantumKeyPair, QuantumCryptoError>;
-    async fn encrypt(&self, data: &[u8], public_key: &PostQuantumKeyPair) -> Result<QuantumEncryptedData, QuantumCryptoError>;
-    async fn decrypt(&self, encrypted_data: &QuantumEncryptedData, private_key: &PostQuantumKeyPair) -> Result<Vec<u8>, QuantumCryptoError>;
-    async fn sign(&self, data: &[u8], private_key: &PostQuantumKeyPair) -> Result<QuantumSignature, QuantumCryptoError>;
-    async fn verify(&self, data: &[u8], signature: &QuantumSignature, public_key: &PostQuantumKeyPair) -> Result<bool, QuantumCryptoError>;
-    async fn key_encapsulation(&self, public_key: &PostQuantumKeyPair) -> Result<(Vec<u8>, Vec<u8>), QuantumCryptoError>; // (shared_secret, encapsulated_key)
-    async fn key_decapsulation(&self, encapsulated_key: &[u8], private_key: &PostQuantumKeyPair) -> Result<Vec<u8>, QuantumCryptoError>;
+    async fn generate_keypair(
+        &self,
+        algorithm: &PostQuantumAlgorithm,
+        security_level: QuantumSecurityLevel,
+    ) -> Result<PostQuantumKeyPair, QuantumCryptoError>;
+    async fn encrypt(
+        &self,
+        data: &[u8],
+        public_key: &PostQuantumKeyPair,
+    ) -> Result<QuantumEncryptedData, QuantumCryptoError>;
+    async fn decrypt(
+        &self,
+        encrypted_data: &QuantumEncryptedData,
+        private_key: &PostQuantumKeyPair,
+    ) -> Result<Vec<u8>, QuantumCryptoError>;
+    async fn sign(
+        &self,
+        data: &[u8],
+        private_key: &PostQuantumKeyPair,
+    ) -> Result<QuantumSignature, QuantumCryptoError>;
+    async fn verify(
+        &self,
+        data: &[u8],
+        signature: &QuantumSignature,
+        public_key: &PostQuantumKeyPair,
+    ) -> Result<bool, QuantumCryptoError>;
+    async fn key_encapsulation(
+        &self,
+        public_key: &PostQuantumKeyPair,
+    ) -> Result<(Vec<u8>, Vec<u8>), QuantumCryptoError>; // (shared_secret, encapsulated_key)
+    async fn key_decapsulation(
+        &self,
+        encapsulated_key: &[u8],
+        private_key: &PostQuantumKeyPair,
+    ) -> Result<Vec<u8>, QuantumCryptoError>;
     fn get_supported_algorithms(&self) -> Vec<PostQuantumAlgorithm>;
     fn get_algorithm_info(&self, algorithm: &PostQuantumAlgorithm) -> Option<AlgorithmInfo>;
 }
@@ -461,18 +490,25 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Generate post-quantum key pair
-    pub async fn generate_keypair(&self, algorithm: PostQuantumAlgorithm, usage: Vec<KeyUsage>) -> Result<PostQuantumKeyPair, QuantumCryptoError> {
+    pub async fn generate_keypair(
+        &self,
+        algorithm: PostQuantumAlgorithm,
+        usage: Vec<KeyUsage>,
+    ) -> Result<PostQuantumKeyPair, QuantumCryptoError> {
         let provider = {
             let providers = self.crypto_providers.read().unwrap();
-            providers.values()
+            providers
+                .values()
                 .find(|p| p.get_supported_algorithms().contains(&algorithm))
                 .cloned()
-                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm { 
-                    algorithm: format!("{:?}", algorithm) 
+                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm {
+                    algorithm: format!("{:?}", algorithm),
                 })?
         };
 
-        let mut keypair = provider.generate_keypair(&algorithm, self.config.security_level.clone()).await?;
+        let mut keypair = provider
+            .generate_keypair(&algorithm, self.config.security_level.clone())
+            .await?;
         keypair.usage = usage;
         keypair.key_id = Uuid::new_v4().to_string();
         keypair.created_at = Utc::now();
@@ -487,30 +523,42 @@ impl QuantumSafeCryptoEngine {
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.key_generations += 1;
-            *metrics.operations_performed.entry(format!("{:?}", algorithm)).or_insert(0) += 1;
+            *metrics
+                .operations_performed
+                .entry(format!("{:?}", algorithm))
+                .or_insert(0) += 1;
         }
 
-        info!("Generated post-quantum key pair with algorithm {:?}", algorithm);
+        info!(
+            "Generated post-quantum key pair with algorithm {:?}",
+            algorithm
+        );
         Ok(keypair)
     }
 
     /// Encrypt data using post-quantum cryptography
-    pub async fn encrypt(&self, data: &[u8], recipient_key_id: &str) -> Result<QuantumEncryptedData, QuantumCryptoError> {
+    pub async fn encrypt(
+        &self,
+        data: &[u8],
+        recipient_key_id: &str,
+    ) -> Result<QuantumEncryptedData, QuantumCryptoError> {
         let key_pair = {
             let key_store = self.key_store.read().unwrap();
-            key_store.get(recipient_key_id).cloned()
-                .ok_or_else(|| QuantumCryptoError::EncryptionFailed { 
-                    reason: "Recipient key not found".to_string() 
-                })?
+            key_store.get(recipient_key_id).cloned().ok_or_else(|| {
+                QuantumCryptoError::EncryptionFailed {
+                    reason: "Recipient key not found".to_string(),
+                }
+            })?
         };
 
         let provider = {
             let providers = self.crypto_providers.read().unwrap();
-            providers.values()
+            providers
+                .values()
                 .find(|p| p.get_supported_algorithms().contains(&key_pair.algorithm))
                 .cloned()
-                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm { 
-                    algorithm: format!("{:?}", key_pair.algorithm) 
+                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm {
+                    algorithm: format!("{:?}", key_pair.algorithm),
                 })?
         };
 
@@ -530,27 +578,38 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Decrypt data using post-quantum cryptography
-    pub async fn decrypt(&self, encrypted_data: &QuantumEncryptedData, key_id: &str) -> Result<Vec<u8>, QuantumCryptoError> {
+    pub async fn decrypt(
+        &self,
+        encrypted_data: &QuantumEncryptedData,
+        key_id: &str,
+    ) -> Result<Vec<u8>, QuantumCryptoError> {
         let key_pair = {
             let key_store = self.key_store.read().unwrap();
-            key_store.get(key_id).cloned()
-                .ok_or_else(|| QuantumCryptoError::DecryptionFailed { 
-                    reason: "Decryption key not found".to_string() 
+            key_store
+                .get(key_id)
+                .cloned()
+                .ok_or_else(|| QuantumCryptoError::DecryptionFailed {
+                    reason: "Decryption key not found".to_string(),
                 })?
         };
 
         let provider = {
             let providers = self.crypto_providers.read().unwrap();
-            providers.values()
-                .find(|p| p.get_supported_algorithms().contains(&encrypted_data.algorithm))
+            providers
+                .values()
+                .find(|p| {
+                    p.get_supported_algorithms()
+                        .contains(&encrypted_data.algorithm)
+                })
                 .cloned()
-                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm { 
-                    algorithm: format!("{:?}", encrypted_data.algorithm) 
+                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm {
+                    algorithm: format!("{:?}", encrypted_data.algorithm),
                 })?
         };
 
         let decrypted_data = if self.config.hybrid_mode_enabled {
-            self.hybrid_decrypt(encrypted_data, &key_pair, &provider).await?
+            self.hybrid_decrypt(encrypted_data, &key_pair, &provider)
+                .await?
         } else {
             provider.decrypt(encrypted_data, &key_pair).await?
         };
@@ -565,28 +624,34 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Sign data using post-quantum digital signatures
-    pub async fn sign(&self, data: &[u8], signer_key_id: &str) -> Result<QuantumSignature, QuantumCryptoError> {
+    pub async fn sign(
+        &self,
+        data: &[u8],
+        signer_key_id: &str,
+    ) -> Result<QuantumSignature, QuantumCryptoError> {
         let key_pair = {
             let key_store = self.key_store.read().unwrap();
-            key_store.get(signer_key_id).cloned()
-                .ok_or_else(|| QuantumCryptoError::SignatureGenerationFailed { 
-                    reason: "Signer key not found".to_string() 
-                })?
+            key_store.get(signer_key_id).cloned().ok_or_else(|| {
+                QuantumCryptoError::SignatureGenerationFailed {
+                    reason: "Signer key not found".to_string(),
+                }
+            })?
         };
 
         if !key_pair.usage.contains(&KeyUsage::Signing) {
-            return Err(QuantumCryptoError::SignatureGenerationFailed { 
-                reason: "Key not authorized for signing".to_string() 
+            return Err(QuantumCryptoError::SignatureGenerationFailed {
+                reason: "Key not authorized for signing".to_string(),
             });
         }
 
         let provider = {
             let providers = self.crypto_providers.read().unwrap();
-            providers.values()
+            providers
+                .values()
                 .find(|p| p.get_supported_algorithms().contains(&key_pair.algorithm))
                 .cloned()
-                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm { 
-                    algorithm: format!("{:?}", key_pair.algorithm) 
+                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm {
+                    algorithm: format!("{:?}", key_pair.algorithm),
                 })?
         };
 
@@ -606,22 +671,29 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Verify post-quantum digital signature
-    pub async fn verify(&self, data: &[u8], signature: &QuantumSignature) -> Result<bool, QuantumCryptoError> {
+    pub async fn verify(
+        &self,
+        data: &[u8],
+        signature: &QuantumSignature,
+    ) -> Result<bool, QuantumCryptoError> {
         let key_pair = {
             let key_store = self.key_store.read().unwrap();
-            key_store.get(&signature.public_key_id).cloned()
-                .ok_or_else(|| QuantumCryptoError::SignatureVerificationFailed { 
-                    reason: "Public key not found".to_string() 
+            key_store
+                .get(&signature.public_key_id)
+                .cloned()
+                .ok_or_else(|| QuantumCryptoError::SignatureVerificationFailed {
+                    reason: "Public key not found".to_string(),
                 })?
         };
 
         let provider = {
             let providers = self.crypto_providers.read().unwrap();
-            providers.values()
+            providers
+                .values()
                 .find(|p| p.get_supported_algorithms().contains(&signature.algorithm))
                 .cloned()
-                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm { 
-                    algorithm: format!("{:?}", signature.algorithm) 
+                .ok_or_else(|| QuantumCryptoError::UnsupportedAlgorithm {
+                    algorithm: format!("{:?}", signature.algorithm),
                 })?
         };
 
@@ -637,7 +709,12 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Hybrid encryption combining classical and post-quantum
-    async fn hybrid_encrypt(&self, data: &[u8], key_pair: &PostQuantumKeyPair, provider: &Arc<dyn PostQuantumCrypto>) -> Result<QuantumEncryptedData, QuantumCryptoError> {
+    async fn hybrid_encrypt(
+        &self,
+        data: &[u8],
+        key_pair: &PostQuantumKeyPair,
+        provider: &Arc<dyn PostQuantumCrypto>,
+    ) -> Result<QuantumEncryptedData, QuantumCryptoError> {
         // Generate a symmetric key for data encryption
         let mut symmetric_key = vec![0u8; 32]; // AES-256 key
         let mut rng = rand::thread_rng();
@@ -670,14 +747,22 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Hybrid decryption
-    async fn hybrid_decrypt(&self, encrypted_data: &QuantumEncryptedData, key_pair: &PostQuantumKeyPair, provider: &Arc<dyn PostQuantumCrypto>) -> Result<Vec<u8>, QuantumCryptoError> {
-        let encapsulated_key = encrypted_data.encapsulated_key.as_ref()
-            .ok_or_else(|| QuantumCryptoError::DecryptionFailed { 
-                reason: "Missing encapsulated key for hybrid decryption".to_string() 
-            })?;
+    async fn hybrid_decrypt(
+        &self,
+        encrypted_data: &QuantumEncryptedData,
+        key_pair: &PostQuantumKeyPair,
+        provider: &Arc<dyn PostQuantumCrypto>,
+    ) -> Result<Vec<u8>, QuantumCryptoError> {
+        let encapsulated_key = encrypted_data.encapsulated_key.as_ref().ok_or_else(|| {
+            QuantumCryptoError::DecryptionFailed {
+                reason: "Missing encapsulated key for hybrid decryption".to_string(),
+            }
+        })?;
 
         // Decapsulate to get shared secret
-        let shared_secret = provider.key_decapsulation(encapsulated_key, key_pair).await?;
+        let shared_secret = provider
+            .key_decapsulation(encapsulated_key, key_pair)
+            .await?;
 
         // This is a simplified implementation - in reality we would need to properly
         // reconstruct the symmetric key and derive the hybrid key
@@ -703,25 +788,31 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Derive hybrid key from post-quantum shared secret and classical key
-    fn derive_hybrid_key(&self, pq_secret: &[u8], classical_key: &[u8]) -> Result<Vec<u8>, QuantumCryptoError> {
+    fn derive_hybrid_key(
+        &self,
+        pq_secret: &[u8],
+        classical_key: &[u8],
+    ) -> Result<Vec<u8>, QuantumCryptoError> {
         // Simple key derivation using HKDF (mock implementation)
         let mut hybrid_key = vec![0u8; 32];
-        
+
         for i in 0..32 {
             hybrid_key[i] = pq_secret[i % pq_secret.len()] ^ classical_key[i % classical_key.len()];
         }
-        
+
         Ok(hybrid_key)
     }
 
     /// Perform quantum threat assessment
-    pub async fn assess_quantum_threat(&self) -> Result<QuantumThreatAssessment, QuantumCryptoError> {
+    pub async fn assess_quantum_threat(
+        &self,
+    ) -> Result<QuantumThreatAssessment, QuantumCryptoError> {
         let assessment_id = Uuid::new_v4().to_string();
-        
+
         // Analyze current cryptographic algorithms in use
         let key_store = self.key_store.read().unwrap();
         let mut vulnerable_algorithms = Vec::new();
-        
+
         for key_pair in key_store.values() {
             if self.is_quantum_vulnerable(&key_pair.algorithm) {
                 vulnerable_algorithms.push(format!("{:?}", key_pair.algorithm));
@@ -744,46 +835,59 @@ impl QuantumSafeCryptoEngine {
             vulnerable_algorithms,
             recommended_migrations: recommendations,
             timeline_estimates: HashMap::from([
-                ("small_scale_qc".to_string(), Utc::now() + chrono::Duration::days(365 * 5)),
-                ("cryptographically_relevant_qc".to_string(), Utc::now() + chrono::Duration::days(365 * 10)),
-                ("full_scale_qc".to_string(), Utc::now() + chrono::Duration::days(365 * 15)),
+                (
+                    "small_scale_qc".to_string(),
+                    Utc::now() + chrono::Duration::days(365 * 5),
+                ),
+                (
+                    "cryptographically_relevant_qc".to_string(),
+                    Utc::now() + chrono::Duration::days(365 * 10),
+                ),
+                (
+                    "full_scale_qc".to_string(),
+                    Utc::now() + chrono::Duration::days(365 * 15),
+                ),
             ]),
             assessed_at: Utc::now(),
-            next_assessment: Utc::now() + chrono::Duration::from_std(self.config.threat_assessment_frequency).unwrap(),
+            next_assessment: Utc::now()
+                + chrono::Duration::from_std(self.config.threat_assessment_frequency).unwrap(),
         };
 
         // Store assessment
         {
             let mut assessments = self.threat_assessments.write().unwrap();
             assessments.push(assessment.clone());
-            
+
             // Keep only last 10 assessments
             if assessments.len() > 10 {
                 assessments.remove(0);
             }
         }
 
-        info!("Quantum threat assessment completed: {:?} threat level", assessment.quantum_computer_threat_level);
+        info!(
+            "Quantum threat assessment completed: {:?} threat level",
+            assessment.quantum_computer_threat_level
+        );
         Ok(assessment)
     }
 
     /// Check if algorithm is vulnerable to quantum attacks
     fn is_quantum_vulnerable(&self, algorithm: &PostQuantumAlgorithm) -> bool {
         match algorithm {
-            PostQuantumAlgorithm::Kyber512 | 
-            PostQuantumAlgorithm::Kyber768 | 
-            PostQuantumAlgorithm::Kyber1024 |
-            PostQuantumAlgorithm::Dilithium2 |
-            PostQuantumAlgorithm::Dilithium3 |
-            PostQuantumAlgorithm::Dilithium5 |
-            PostQuantumAlgorithm::Falcon512 |
-            PostQuantumAlgorithm::Falcon1024 => false, // Post-quantum algorithms
-            
-            PostQuantumAlgorithm::HybridRsaKyber768 |
-            PostQuantumAlgorithm::HybridEcdsaDilithium3 |
-            PostQuantumAlgorithm::HybridEcdhKyber1024 |
-            PostQuantumAlgorithm::HybridAesKyber512 => false, // Hybrid provides quantum resistance
-            
+            PostQuantumAlgorithm::Kyber512
+            | PostQuantumAlgorithm::Kyber768
+            | PostQuantumAlgorithm::Kyber1024
+            | PostQuantumAlgorithm::Dilithium2
+            | PostQuantumAlgorithm::Dilithium3
+            | PostQuantumAlgorithm::Dilithium5
+            | PostQuantumAlgorithm::Falcon512
+            | PostQuantumAlgorithm::Falcon1024 => false, // Post-quantum algorithms
+
+            PostQuantumAlgorithm::HybridRsaKyber768
+            | PostQuantumAlgorithm::HybridEcdsaDilithium3
+            | PostQuantumAlgorithm::HybridEcdhKyber1024
+            | PostQuantumAlgorithm::HybridAesKyber512 => false, // Hybrid provides quantum resistance
+
             _ => true, // Conservative approach for unknown algorithms
         }
     }
@@ -792,70 +896,87 @@ impl QuantumSafeCryptoEngine {
     fn calculate_crypto_agility_score(&self) -> f64 {
         let key_store = self.key_store.read().unwrap();
         let total_keys = key_store.len() as f64;
-        
+
         if total_keys == 0.0 {
             return 0.0;
         }
-        
+
         let mut post_quantum_keys = 0.0;
         let mut hybrid_keys = 0.0;
         let mut recent_keys = 0.0; // Keys generated in last 90 days
-        
+
         let ninety_days_ago = Utc::now() - chrono::Duration::days(90);
-        
+
         for key_pair in key_store.values() {
             if !self.is_quantum_vulnerable(&key_pair.algorithm) {
                 post_quantum_keys += 1.0;
             }
-            
+
             if format!("{:?}", key_pair.algorithm).contains("Hybrid") {
                 hybrid_keys += 1.0;
             }
-            
+
             if key_pair.created_at > ninety_days_ago {
                 recent_keys += 1.0;
             }
         }
-        
+
         // Score components
         let pq_ratio = (post_quantum_keys / total_keys) * 40.0; // 40% weight
-        let hybrid_ratio = (hybrid_keys / total_keys) * 30.0;   // 30% weight
-        let recency_ratio = (recent_keys / total_keys) * 30.0;  // 30% weight
-        
+        let hybrid_ratio = (hybrid_keys / total_keys) * 30.0; // 30% weight
+        let recency_ratio = (recent_keys / total_keys) * 30.0; // 30% weight
+
         pq_ratio + hybrid_ratio + recency_ratio
     }
 
     /// Generate migration recommendations
-    fn generate_migration_recommendations(&self, vulnerable_algorithms: &[String]) -> Vec<MigrationRecommendation> {
+    fn generate_migration_recommendations(
+        &self,
+        vulnerable_algorithms: &[String],
+    ) -> Vec<MigrationRecommendation> {
         let mut recommendations = Vec::new();
-        
+
         for algorithm in vulnerable_algorithms {
             let (replacement, priority, effort) = match algorithm.as_str() {
-                "RSA-2048" | "RSA-3072" | "RSA-4096" => {
-                    (PostQuantumAlgorithm::HybridRsaKyber768, MigrationPriority::High, Duration::from_secs(86400 * 30))
-                }
-                "ECDSA" | "ECDH" => {
-                    (PostQuantumAlgorithm::HybridEcdsaDilithium3, MigrationPriority::High, Duration::from_secs(86400 * 45))
-                }
-                "AES-128" => {
-                    (PostQuantumAlgorithm::HybridAesKyber512, MigrationPriority::Medium, Duration::from_secs(86400 * 60))
-                }
-                _ => {
-                    (PostQuantumAlgorithm::Kyber768, MigrationPriority::Medium, Duration::from_secs(86400 * 90))
-                }
+                "RSA-2048" | "RSA-3072" | "RSA-4096" => (
+                    PostQuantumAlgorithm::HybridRsaKyber768,
+                    MigrationPriority::High,
+                    Duration::from_secs(86400 * 30),
+                ),
+                "ECDSA" | "ECDH" => (
+                    PostQuantumAlgorithm::HybridEcdsaDilithium3,
+                    MigrationPriority::High,
+                    Duration::from_secs(86400 * 45),
+                ),
+                "AES-128" => (
+                    PostQuantumAlgorithm::HybridAesKyber512,
+                    MigrationPriority::Medium,
+                    Duration::from_secs(86400 * 60),
+                ),
+                _ => (
+                    PostQuantumAlgorithm::Kyber768,
+                    MigrationPriority::Medium,
+                    Duration::from_secs(86400 * 90),
+                ),
             };
-            
+
             recommendations.push(MigrationRecommendation {
                 algorithm: algorithm.clone(),
                 replacement,
                 priority,
                 estimated_effort: effort,
                 dependencies: vec!["key_management_update".to_string()],
-                risks: vec!["performance_impact".to_string(), "compatibility_issues".to_string()],
-                benefits: vec!["quantum_resistance".to_string(), "future_proofing".to_string()],
+                risks: vec![
+                    "performance_impact".to_string(),
+                    "compatibility_issues".to_string(),
+                ],
+                benefits: vec![
+                    "quantum_resistance".to_string(),
+                    "future_proofing".to_string(),
+                ],
             });
         }
-        
+
         recommendations
     }
 
@@ -863,12 +984,12 @@ impl QuantumSafeCryptoEngine {
     fn estimate_quantum_threat_level(&self) -> ThreatLevel {
         // This would integrate with quantum computing research tracking services
         // For now, we'll use a conservative estimate
-        
+
         let current_year = Utc::now().year();
-        
+
         match current_year {
             2025..=2027 => ThreatLevel::Low,
-            2028..=2032 => ThreatLevel::Moderate, 
+            2028..=2032 => ThreatLevel::Moderate,
             2033..=2037 => ThreatLevel::High,
             2038.. => ThreatLevel::Critical,
             _ => ThreatLevel::Minimal,
@@ -876,56 +997,75 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Rotate keys based on quantum threat level
-    pub async fn emergency_key_rotation(&self, threat_trigger: &str) -> Result<usize, QuantumCryptoError> {
+    pub async fn emergency_key_rotation(
+        &self,
+        threat_trigger: &str,
+    ) -> Result<usize, QuantumCryptoError> {
         info!("Emergency key rotation triggered by: {}", threat_trigger);
-        
+
         let key_ids: Vec<String> = {
             let key_store = self.key_store.read().unwrap();
             key_store.keys().cloned().collect()
         };
-        
+
         let mut rotated_count = 0;
-        
+
         for key_id in key_ids {
-            if let Ok(key_pair) = self.key_store.read().unwrap().get(&key_id).cloned().ok_or(QuantumCryptoError::KeyGenerationFailed { reason: "Key not found".to_string() }) {
+            if let Ok(key_pair) = self.key_store.read().unwrap().get(&key_id).cloned().ok_or(
+                QuantumCryptoError::KeyGenerationFailed {
+                    reason: "Key not found".to_string(),
+                },
+            ) {
                 if self.is_quantum_vulnerable(&key_pair.algorithm) {
                     // Generate new post-quantum key pair
                     let new_algorithm = self.select_replacement_algorithm(&key_pair.algorithm);
                     let new_keypair = self.generate_keypair(new_algorithm, key_pair.usage).await?;
-                    
+
                     // Remove old key
                     {
                         let mut key_store = self.key_store.write().unwrap();
                         key_store.remove(&key_id);
                     }
-                    
+
                     rotated_count += 1;
-                    info!("Rotated key {} from {:?} to {:?}", key_id, key_pair.algorithm, new_keypair.algorithm);
+                    info!(
+                        "Rotated key {} from {:?} to {:?}",
+                        key_id, key_pair.algorithm, new_keypair.algorithm
+                    );
                 }
             }
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.migration_operations += rotated_count as u64;
         }
-        
-        info!("Emergency key rotation completed: {} keys rotated", rotated_count);
+
+        info!(
+            "Emergency key rotation completed: {} keys rotated",
+            rotated_count
+        );
         Ok(rotated_count)
     }
 
     /// Select replacement algorithm for migration
-    fn select_replacement_algorithm(&self, old_algorithm: &PostQuantumAlgorithm) -> PostQuantumAlgorithm {
+    fn select_replacement_algorithm(
+        &self,
+        old_algorithm: &PostQuantumAlgorithm,
+    ) -> PostQuantumAlgorithm {
         match old_algorithm {
             // Already post-quantum, choose stronger variant
             PostQuantumAlgorithm::Kyber512 => PostQuantumAlgorithm::Kyber768,
             PostQuantumAlgorithm::Kyber768 => PostQuantumAlgorithm::Kyber1024,
             PostQuantumAlgorithm::Dilithium2 => PostQuantumAlgorithm::Dilithium3,
             PostQuantumAlgorithm::Dilithium3 => PostQuantumAlgorithm::Dilithium5,
-            
+
             // Default to recommended algorithms
-            _ => self.config.default_algorithms.get("kem")
+            _ => self
+                .config
+                .default_algorithms
+                .get("kem")
                 .unwrap_or(&PostQuantumAlgorithm::Kyber768)
                 .clone(),
         }
@@ -957,10 +1097,10 @@ impl QuantumSafeCryptoEngine {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(frequency);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 info!("Running scheduled quantum threat assessment");
                 if let Err(e) = engine.assess_quantum_threat().await {
                     error!("Quantum threat assessment failed: {}", e);
@@ -977,7 +1117,11 @@ pub struct MockPostQuantumCrypto;
 
 #[async_trait]
 impl PostQuantumCrypto for MockPostQuantumCrypto {
-    async fn generate_keypair(&self, algorithm: &PostQuantumAlgorithm, security_level: QuantumSecurityLevel) -> Result<PostQuantumKeyPair, QuantumCryptoError> {
+    async fn generate_keypair(
+        &self,
+        algorithm: &PostQuantumAlgorithm,
+        security_level: QuantumSecurityLevel,
+    ) -> Result<PostQuantumKeyPair, QuantumCryptoError> {
         // Mock key generation
         let mut rng = rand::thread_rng();
         let public_key = (0..1024).map(|_| rng.next_u32() as u8).collect();
@@ -985,7 +1129,7 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         let private_key = SecurePrivateKey {
             key_material: private_key_material,
         };
-        
+
         Ok(PostQuantumKeyPair {
             algorithm: algorithm.clone(),
             security_level,
@@ -999,13 +1143,17 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         })
     }
 
-    async fn encrypt(&self, data: &[u8], _public_key: &PostQuantumKeyPair) -> Result<QuantumEncryptedData, QuantumCryptoError> {
+    async fn encrypt(
+        &self,
+        data: &[u8],
+        _public_key: &PostQuantumKeyPair,
+    ) -> Result<QuantumEncryptedData, QuantumCryptoError> {
         // Mock encryption
         let mut ciphertext = data.to_vec();
         for byte in ciphertext.iter_mut() {
             *byte = byte.wrapping_add(42); // Simple transformation
         }
-        
+
         Ok(QuantumEncryptedData {
             algorithm: PostQuantumAlgorithm::Kyber768,
             ciphertext,
@@ -1017,27 +1165,35 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         })
     }
 
-    async fn decrypt(&self, encrypted_data: &QuantumEncryptedData, _private_key: &PostQuantumKeyPair) -> Result<Vec<u8>, QuantumCryptoError> {
+    async fn decrypt(
+        &self,
+        encrypted_data: &QuantumEncryptedData,
+        _private_key: &PostQuantumKeyPair,
+    ) -> Result<Vec<u8>, QuantumCryptoError> {
         // Mock decryption (reverse of encryption)
         let mut plaintext = encrypted_data.ciphertext.clone();
         for byte in plaintext.iter_mut() {
             *byte = byte.wrapping_sub(42);
         }
-        
+
         Ok(plaintext)
     }
 
-    async fn sign(&self, data: &[u8], _private_key: &PostQuantumKeyPair) -> Result<QuantumSignature, QuantumCryptoError> {
+    async fn sign(
+        &self,
+        data: &[u8],
+        _private_key: &PostQuantumKeyPair,
+    ) -> Result<QuantumSignature, QuantumCryptoError> {
         // Mock signing
         let mut signature_data = vec![0u8; 256]; // Mock signature size
         let mut rng = rand::thread_rng();
         rng.fill_bytes(&mut signature_data);
-        
+
         // Include data hash in signature (simplified)
         for (i, byte) in data.iter().enumerate().take(16) {
             signature_data[i] ^= *byte;
         }
-        
+
         Ok(QuantumSignature {
             algorithm: PostQuantumAlgorithm::Dilithium3,
             signature: signature_data,
@@ -1047,7 +1203,12 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         })
     }
 
-    async fn verify(&self, data: &[u8], signature: &QuantumSignature, _public_key: &PostQuantumKeyPair) -> Result<bool, QuantumCryptoError> {
+    async fn verify(
+        &self,
+        data: &[u8],
+        signature: &QuantumSignature,
+        _public_key: &PostQuantumKeyPair,
+    ) -> Result<bool, QuantumCryptoError> {
         // Mock verification - check if data hash matches signature prefix (simplified)
         for (i, byte) in data.iter().enumerate().take(16) {
             if signature.signature.get(i).unwrap_or(&0) ^ byte != 0 {
@@ -1057,16 +1218,23 @@ impl PostQuantumCrypto for MockPostQuantumCrypto {
         Ok(true)
     }
 
-    async fn key_encapsulation(&self, _public_key: &PostQuantumKeyPair) -> Result<(Vec<u8>, Vec<u8>), QuantumCryptoError> {
+    async fn key_encapsulation(
+        &self,
+        _public_key: &PostQuantumKeyPair,
+    ) -> Result<(Vec<u8>, Vec<u8>), QuantumCryptoError> {
         // Mock KEM
         let mut rng = rand::thread_rng();
         let shared_secret = (0..32).map(|_| rng.next_u32() as u8).collect();
         let encapsulated_key = (0..1024).map(|_| rng.next_u32() as u8).collect();
-        
+
         Ok((shared_secret, encapsulated_key))
     }
 
-    async fn key_decapsulation(&self, _encapsulated_key: &[u8], _private_key: &PostQuantumKeyPair) -> Result<Vec<u8>, QuantumCryptoError> {
+    async fn key_decapsulation(
+        &self,
+        _encapsulated_key: &[u8],
+        _private_key: &PostQuantumKeyPair,
+    ) -> Result<Vec<u8>, QuantumCryptoError> {
         // Mock decapsulation - return fixed shared secret for simplicity
         Ok(vec![42u8; 32])
     }
@@ -1119,7 +1287,7 @@ mod tests {
     async fn test_quantum_crypto_engine_creation() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         assert!(engine.key_store.read().unwrap().is_empty());
         assert!(engine.crypto_providers.read().unwrap().is_empty());
     }
@@ -1128,17 +1296,17 @@ mod tests {
     async fn test_key_generation() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         // Register mock provider
         let provider = Arc::new(MockPostQuantumCrypto);
         engine.register_crypto_provider("mock".to_string(), provider);
-        
+
         // Generate key pair
-        let keypair = engine.generate_keypair(
-            PostQuantumAlgorithm::Kyber768, 
-            vec![KeyUsage::Encryption]
-        ).await.unwrap();
-        
+        let keypair = engine
+            .generate_keypair(PostQuantumAlgorithm::Kyber768, vec![KeyUsage::Encryption])
+            .await
+            .unwrap();
+
         assert_eq!(keypair.algorithm, PostQuantumAlgorithm::Kyber768);
         assert!(keypair.usage.contains(&KeyUsage::Encryption));
         assert!(!keypair.key_id.is_empty());
@@ -1148,26 +1316,29 @@ mod tests {
     async fn test_encryption_decryption() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         // Register mock provider
         let provider = Arc::new(MockPostQuantumCrypto);
         engine.register_crypto_provider("mock".to_string(), provider);
-        
+
         // Generate key pair
-        let keypair = engine.generate_keypair(
-            PostQuantumAlgorithm::Kyber768,
-            vec![KeyUsage::Encryption]
-        ).await.unwrap();
-        
+        let keypair = engine
+            .generate_keypair(PostQuantumAlgorithm::Kyber768, vec![KeyUsage::Encryption])
+            .await
+            .unwrap();
+
         // Test data
         let plaintext = b"Hello, post-quantum world!";
-        
+
         // Encrypt
         let encrypted_data = engine.encrypt(plaintext, &keypair.key_id).await.unwrap();
         assert_eq!(encrypted_data.algorithm, PostQuantumAlgorithm::Kyber768);
-        
+
         // Decrypt
-        let decrypted_data = engine.decrypt(&encrypted_data, &keypair.key_id).await.unwrap();
+        let decrypted_data = engine
+            .decrypt(&encrypted_data, &keypair.key_id)
+            .await
+            .unwrap();
         assert_eq!(decrypted_data, plaintext);
     }
 
@@ -1175,24 +1346,24 @@ mod tests {
     async fn test_signing_verification() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         // Register mock provider
         let provider = Arc::new(MockPostQuantumCrypto);
         engine.register_crypto_provider("mock".to_string(), provider);
-        
+
         // Generate signing key pair
-        let keypair = engine.generate_keypair(
-            PostQuantumAlgorithm::Dilithium3,
-            vec![KeyUsage::Signing]
-        ).await.unwrap();
-        
+        let keypair = engine
+            .generate_keypair(PostQuantumAlgorithm::Dilithium3, vec![KeyUsage::Signing])
+            .await
+            .unwrap();
+
         // Test data
         let message = b"Sign this message";
-        
+
         // Sign
         let signature = engine.sign(message, &keypair.key_id).await.unwrap();
         assert_eq!(signature.algorithm, PostQuantumAlgorithm::Dilithium3);
-        
+
         // Verify
         let is_valid = engine.verify(message, &signature).await.unwrap();
         assert!(is_valid);
@@ -1202,17 +1373,20 @@ mod tests {
     async fn test_quantum_threat_assessment() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         // Register mock provider
         let provider = Arc::new(MockPostQuantumCrypto);
         engine.register_crypto_provider("mock".to_string(), provider);
-        
+
         // Generate some keys for assessment
-        engine.generate_keypair(PostQuantumAlgorithm::Kyber768, vec![KeyUsage::Encryption]).await.unwrap();
-        
+        engine
+            .generate_keypair(PostQuantumAlgorithm::Kyber768, vec![KeyUsage::Encryption])
+            .await
+            .unwrap();
+
         // Perform threat assessment
         let assessment = engine.assess_quantum_threat().await.unwrap();
-        
+
         assert!(!assessment.assessment_id.is_empty());
         assert!(assessment.cryptographic_agility_score >= 0.0);
         assert!(assessment.cryptographic_agility_score <= 100.0);
@@ -1222,12 +1396,12 @@ mod tests {
     fn test_algorithm_vulnerability_check() {
         let config = QuantumCryptoConfig::default();
         let engine = QuantumSafeCryptoEngine::new(config);
-        
+
         // Post-quantum algorithms should not be vulnerable
         assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Kyber768));
         assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Dilithium3));
         assert!(!engine.is_quantum_vulnerable(&PostQuantumAlgorithm::HybridRsaKyber768));
-        
+
         // Custom algorithms should be considered vulnerable by default
         assert!(engine.is_quantum_vulnerable(&PostQuantumAlgorithm::Custom("RSA-2048".to_string())));
     }

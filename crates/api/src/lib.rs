@@ -1,21 +1,17 @@
 //! Brankas API Library
-//! 
+//!
 //! Simple HTTP API for the Brankas transit engine
 
-use axum::{
-    response::Json,
-    routing::get,
-    Router,
-};
+use axum::{response::Json, routing::get, Router};
 use serde::Serialize;
 
-pub mod transit;
-pub mod kv;
 pub mod auth;
+pub mod kv;
 pub mod middleware;
+pub mod transit;
 
-pub use transit::{TransitApiState, create_transit_router};
-pub use kv::{KVApiState, create_kv_router};
+pub use kv::{create_kv_router, KVApiState};
+pub use transit::{create_transit_router, TransitApiState};
 
 // Simple API state
 #[derive(Clone)]
@@ -59,10 +55,11 @@ pub fn create_api_router(state: ApiState) -> Router {
         // System endpoints
         .route("/health", get(health_check))
         .route("/version", get(get_version))
-        
         // Transit engine endpoints
-        .nest("/v1/transit", create_transit_router().with_state(state.transit.clone()))
-        
+        .nest(
+            "/v1/transit",
+            create_transit_router().with_state(state.transit.clone()),
+        )
         // KV secrets engine endpoints
         .nest("/v1", create_kv_router(state.kv.clone()))
 }

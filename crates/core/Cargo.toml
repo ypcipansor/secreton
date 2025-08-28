@@ -23,7 +23,7 @@ async-trait.workspace = true
 futures = "0.3"
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "migrate", "chrono", "json"] }
+sqlx.workspace = true
 
 # Security dependencies for advanced features
 rand = "0.8"
@@ -58,6 +58,7 @@ chacha20poly1305 = "0.10"
 
 # HTTP API
 warp = "0.3"
+flate2 = "1.0"
 
 [features]
 default = ["postgres", "redis"]

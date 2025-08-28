@@ -1,5 +1,5 @@
 //! Hardware Security Module (HSM) Integration
-//! 
+//!
 //! Provides comprehensive HSM support exceeding HashiCorp Vault's capabilities:
 //! - Multi-vendor HSM support (PKCS#11, Azure Key Vault, AWS CloudHSM, etc.)
 //! - Automatic failover between HSMs
@@ -9,13 +9,12 @@
 //! - Quantum-safe key generation
 //! - Hardware attestation and verification
 
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
-
+use tracing::{debug, error, info, warn};
 
 /// HSM configuration for different vendors
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,34 +185,34 @@ pub struct HsmMetrics {
 pub enum HsmError {
     #[error("HSM connection failed: {message}")]
     ConnectionFailed { message: String },
-    
+
     #[error("HSM authentication failed: {hsm_name}")]
     AuthenticationFailed { hsm_name: String },
-    
+
     #[error("Key not found in HSM: {key_id}")]
     KeyNotFound { key_id: String },
-    
+
     #[error("HSM operation timeout: {operation}")]
     OperationTimeout { operation: String },
-    
+
     #[error("Insufficient HSM permissions: {required_permission}")]
     InsufficientPermissions { required_permission: String },
-    
+
     #[error("HSM hardware error: {error_code}")]
     HardwareError { error_code: u32 },
-    
+
     #[error("Key generation failed: {reason}")]
     KeyGenerationFailed { reason: String },
-    
+
     #[error("Cryptographic operation failed: {operation}")]
     CryptographicOperationFailed { operation: String },
-    
+
     #[error("HSM configuration error: {message}")]
     ConfigurationError { message: String },
 
     #[error("No healthy HSM available")]
     NoHealthyHsm,
-    
+
     #[error("HSM capacity exceeded")]
     CapacityExceeded,
 }
@@ -223,49 +222,84 @@ pub enum HsmError {
 pub trait HsmProvider: Send + Sync {
     /// Initialize connection to HSM
     async fn initialize(&mut self, config: &HsmConfig) -> Result<(), HsmError>;
-    
+
     /// Generate a new key in the HSM
-    async fn generate_key(&self, key_type: HsmKeyType, key_length: u32, key_id: &str) -> Result<HsmKeyMetadata, HsmError>;
-    
+    async fn generate_key(
+        &self,
+        key_type: HsmKeyType,
+        key_length: u32,
+        key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError>;
+
     /// Import a key into the HSM
-    async fn import_key(&self, key_data: &[u8], key_type: HsmKeyType, key_id: &str) -> Result<HsmKeyMetadata, HsmError>;
-    
+    async fn import_key(
+        &self,
+        key_data: &[u8],
+        key_type: HsmKeyType,
+        key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError>;
+
     /// Delete a key from the HSM
     async fn delete_key(&self, key_id: &str) -> Result<(), HsmError>;
-    
+
     /// Encrypt data using HSM key
-    async fn encrypt(&self, key_id: &str, plaintext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError>;
-    
+    async fn encrypt(
+        &self,
+        key_id: &str,
+        plaintext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError>;
+
     /// Decrypt data using HSM key
-    async fn decrypt(&self, key_id: &str, ciphertext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError>;
-    
+    async fn decrypt(
+        &self,
+        key_id: &str,
+        ciphertext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError>;
+
     /// Sign data using HSM key
     async fn sign(&self, key_id: &str, data: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError>;
-    
+
     /// Verify signature using HSM key
-    async fn verify(&self, key_id: &str, data: &[u8], signature: &[u8], algorithm: &str) -> Result<bool, HsmError>;
-    
+    async fn verify(
+        &self,
+        key_id: &str,
+        data: &[u8],
+        signature: &[u8],
+        algorithm: &str,
+    ) -> Result<bool, HsmError>;
+
     /// Generate random bytes using HSM's TRNG
     async fn generate_random(&self, byte_count: usize) -> Result<Vec<u8>, HsmError>;
-    
+
     /// Wrap a key using another HSM key
-    async fn wrap_key(&self, wrapping_key_id: &str, key_to_wrap_id: &str) -> Result<Vec<u8>, HsmError>;
-    
+    async fn wrap_key(
+        &self,
+        wrapping_key_id: &str,
+        key_to_wrap_id: &str,
+    ) -> Result<Vec<u8>, HsmError>;
+
     /// Unwrap a key using HSM key
-    async fn unwrap_key(&self, wrapping_key_id: &str, wrapped_key: &[u8], target_key_id: &str) -> Result<HsmKeyMetadata, HsmError>;
-    
+    async fn unwrap_key(
+        &self,
+        wrapping_key_id: &str,
+        wrapped_key: &[u8],
+        target_key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError>;
+
     /// Get HSM health status
     async fn health_check(&self) -> Result<HsmHealthStatus, HsmError>;
-    
+
     /// List all keys in the HSM
     async fn list_keys(&self) -> Result<Vec<HsmKeyMetadata>, HsmError>;
-    
+
     /// Get key metadata
     async fn get_key_metadata(&self, key_id: &str) -> Result<HsmKeyMetadata, HsmError>;
-    
+
     /// Perform hardware attestation
     async fn attest_hardware(&self) -> Result<Vec<u8>, HsmError>;
-    
+
     /// Get HSM capabilities
     fn get_capabilities(&self) -> HsmCapabilities;
 }
@@ -292,6 +326,12 @@ pub struct HsmManager {
     seal_keys: Arc<Mutex<HashMap<String, String>>>, // seal_name -> hsm_key_id
 }
 
+impl Default for HsmManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HsmManager {
     pub fn new() -> Self {
         Self {
@@ -304,25 +344,30 @@ impl HsmManager {
     }
 
     /// Add an HSM provider
-    pub async fn add_provider(&self, name: String, provider: Box<dyn HsmProvider>, config: HsmConfig) -> Result<(), HsmError> {
+    pub async fn add_provider(
+        &self,
+        name: String,
+        provider: Box<dyn HsmProvider>,
+        config: HsmConfig,
+    ) -> Result<(), HsmError> {
         // Initialize the provider
         let mut provider_mut = provider;
         provider_mut.initialize(&config).await?;
-        
+
         // Store the provider and config
         {
             let mut providers = self.providers.write().unwrap();
             providers.insert(name.clone(), provider_mut);
         }
-        
+
         {
             let mut configs = self.configs.write().unwrap();
             configs.insert(name.clone(), config);
         }
-        
+
         // Perform initial health check
         self.check_provider_health(&name).await?;
-        
+
         // Set as active if it's the first healthy provider
         {
             let mut active = self.active_provider.lock().unwrap();
@@ -331,12 +376,12 @@ impl HsmManager {
                 info!("Set {} as active HSM provider", name);
             }
         }
-        
+
         info!("HSM provider {} added successfully", name);
         Ok(())
     }
 
-        /// Start health monitoring for all providers
+    /// Start health monitoring for all providers
     pub async fn start_health_monitoring(&self) {
         let providers = self.providers.clone();
         let health_status = self.health_status.clone();
@@ -344,15 +389,14 @@ impl HsmManager {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
-            
+
             loop {
                 interval.tick().await;
-                
-                // Get provider names without holding locks  
-                let provider_names: Vec<String> = {
-                    providers.read().unwrap().keys().cloned().collect()
-                };
-                
+
+                // Get provider names without holding locks
+                let provider_names: Vec<String> =
+                    { providers.read().unwrap().keys().cloned().collect() };
+
                 // Process each provider - simplified approach to avoid Send issues
                 for name in provider_names {
                     // Quick health check - for production this would be more sophisticated
@@ -367,7 +411,7 @@ impl HsmManager {
                         temperature: Some(45.0),
                         available_storage: Some(1024 * 1024 * 1024), // 1GB
                     });
-                    
+
                     match health_result {
                         Ok(health) => {
                             let mut health_map = health_status.lock().unwrap();
@@ -395,19 +439,21 @@ impl HsmManager {
             let active = self.active_provider.lock().unwrap();
             active.clone().ok_or(HsmError::NoHealthyHsm)?
         };
-        
+
         let key_id = format!("brankas_seal_key_{}", seal_name);
-        
+
         let providers = self.providers.read().unwrap();
         if let Some(provider) = providers.get(&active_name) {
-            let _metadata = provider.generate_key(HsmKeyType::SealMaster, 256, &key_id).await?;
-            
+            let _metadata = provider
+                .generate_key(HsmKeyType::SealMaster, 256, &key_id)
+                .await?;
+
             // Store the mapping
             {
                 let mut seal_keys = self.seal_keys.lock().unwrap();
                 seal_keys.insert(seal_name.to_string(), key_id.clone());
             }
-            
+
             info!("Generated seal key {} in HSM {}", key_id, active_name);
             Ok(key_id)
         } else {
@@ -416,38 +462,61 @@ impl HsmManager {
     }
 
     /// Seal operation using HSM
-    pub async fn seal_operation(&self, seal_name: &str, plaintext: &[u8]) -> Result<Vec<u8>, HsmError> {
+    pub async fn seal_operation(
+        &self,
+        seal_name: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, HsmError> {
         let key_id = {
             let seal_keys = self.seal_keys.lock().unwrap();
-            seal_keys.get(seal_name).cloned()
-                .ok_or_else(|| HsmError::KeyNotFound { key_id: seal_name.to_string() })?
+            seal_keys
+                .get(seal_name)
+                .cloned()
+                .ok_or_else(|| HsmError::KeyNotFound {
+                    key_id: seal_name.to_string(),
+                })?
         };
-        
-        self.encrypt_with_active_hsm(&key_id, plaintext, "AES-GCM").await
+
+        self.encrypt_with_active_hsm(&key_id, plaintext, "AES-GCM")
+            .await
     }
 
     /// Unseal operation using HSM
-    pub async fn unseal_operation(&self, seal_name: &str, ciphertext: &[u8]) -> Result<Vec<u8>, HsmError> {
+    pub async fn unseal_operation(
+        &self,
+        seal_name: &str,
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, HsmError> {
         let key_id = {
             let seal_keys = self.seal_keys.lock().unwrap();
-            seal_keys.get(seal_name).cloned()
-                .ok_or_else(|| HsmError::KeyNotFound { key_id: seal_name.to_string() })?
+            seal_keys
+                .get(seal_name)
+                .cloned()
+                .ok_or_else(|| HsmError::KeyNotFound {
+                    key_id: seal_name.to_string(),
+                })?
         };
-        
-        self.decrypt_with_active_hsm(&key_id, ciphertext, "AES-GCM").await
+
+        self.decrypt_with_active_hsm(&key_id, ciphertext, "AES-GCM")
+            .await
     }
 
     /// Encrypt with active HSM (with automatic failover)
-    pub async fn encrypt_with_active_hsm(&self, key_id: &str, plaintext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError> {
+    pub async fn encrypt_with_active_hsm(
+        &self,
+        key_id: &str,
+        plaintext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError> {
         let mut attempts = 0;
         let max_attempts = 3;
-        
+
         while attempts < max_attempts {
             let active_name = {
                 let active = self.active_provider.lock().unwrap();
                 active.clone().ok_or(HsmError::NoHealthyHsm)?
             };
-            
+
             let result = {
                 let providers = self.providers.read().unwrap();
                 if let Some(provider) = providers.get(&active_name) {
@@ -456,33 +525,38 @@ impl HsmManager {
                     return Err(HsmError::NoHealthyHsm);
                 }
             };
-            
+
             match result {
                 Ok(ciphertext) => return Ok(ciphertext),
                 Err(e) => {
                     error!("Encryption failed with HSM {}: {}", active_name, e);
-                    
+
                     // Trigger failover
                     Self::trigger_failover(&self.active_provider, &self.health_status).await?;
                     attempts += 1;
                 }
             }
         }
-        
+
         Err(HsmError::NoHealthyHsm)
     }
 
     /// Decrypt with active HSM (with automatic failover)
-    pub async fn decrypt_with_active_hsm(&self, key_id: &str, ciphertext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError> {
+    pub async fn decrypt_with_active_hsm(
+        &self,
+        key_id: &str,
+        ciphertext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError> {
         let mut attempts = 0;
         let max_attempts = 3;
-        
+
         while attempts < max_attempts {
             let active_name = {
                 let active = self.active_provider.lock().unwrap();
                 active.clone().ok_or(HsmError::NoHealthyHsm)?
             };
-            
+
             let result = {
                 let providers = self.providers.read().unwrap();
                 if let Some(provider) = providers.get(&active_name) {
@@ -491,36 +565,39 @@ impl HsmManager {
                     return Err(HsmError::NoHealthyHsm);
                 }
             };
-            
+
             match result {
                 Ok(plaintext) => return Ok(plaintext),
                 Err(e) => {
                     error!("Decryption failed with HSM {}: {}", active_name, e);
-                    
+
                     // Trigger failover
                     Self::trigger_failover(&self.active_provider, &self.health_status).await?;
                     attempts += 1;
                 }
             }
         }
-        
+
         Err(HsmError::NoHealthyHsm)
     }
 
     /// Generate quantum-safe random bytes using HSM
-    pub async fn generate_quantum_safe_random(&self, byte_count: usize) -> Result<Vec<u8>, HsmError> {
+    pub async fn generate_quantum_safe_random(
+        &self,
+        byte_count: usize,
+    ) -> Result<Vec<u8>, HsmError> {
         let active_name = {
             let active = self.active_provider.lock().unwrap();
             active.clone().ok_or(HsmError::NoHealthyHsm)?
         };
-        
+
         let providers = self.providers.read().unwrap();
         if let Some(provider) = providers.get(&active_name) {
             let capabilities = provider.get_capabilities();
             if !capabilities.quantum_safe_support {
                 warn!("Active HSM does not support quantum-safe operations");
             }
-            
+
             provider.generate_random(byte_count).await
         } else {
             Err(HsmError::NoHealthyHsm)
@@ -533,8 +610,8 @@ impl HsmManager {
         if let Some(provider) = providers.get(hsm_name) {
             provider.attest_hardware().await
         } else {
-            Err(HsmError::ConnectionFailed { 
-                message: format!("HSM {} not found", hsm_name) 
+            Err(HsmError::ConnectionFailed {
+                message: format!("HSM {} not found", hsm_name),
             })
         }
     }
@@ -547,8 +624,8 @@ impl HsmManager {
             health_map.insert(name.to_string(), health);
             Ok(())
         } else {
-            Err(HsmError::ConnectionFailed { 
-                message: format!("Provider {} not found", name) 
+            Err(HsmError::ConnectionFailed {
+                message: format!("Provider {} not found", name),
             })
         }
     }
@@ -558,22 +635,24 @@ impl HsmManager {
         health_status: &Arc<Mutex<HashMap<String, HsmHealthStatus>>>,
     ) -> Result<(), HsmError> {
         let health_map = health_status.lock().unwrap();
-        
+
         // Find the highest priority healthy HSM
         let healthy_hsm = health_map
             .iter()
             .filter(|(_, status)| status.healthy)
             .min_by_key(|(_, status)| status.consecutive_failures)
             .map(|(name, _)| name.clone());
-        
+
         if let Some(new_active) = healthy_hsm {
             let mut active = active_provider.lock().unwrap();
             let old_active = active.clone();
             *active = Some(new_active.clone());
-            
-            warn!("HSM failover: {} -> {}", 
-                  old_active.unwrap_or_else(|| "none".to_string()), 
-                  new_active);
+
+            warn!(
+                "HSM failover: {} -> {}",
+                old_active.unwrap_or_else(|| "none".to_string()),
+                new_active
+            );
             Ok(())
         } else {
             error!("No healthy HSM available for failover");
@@ -597,7 +676,7 @@ impl HsmManager {
     pub fn get_metrics(&self) -> HsmHealthStatus {
         let health = self.health_status.lock().unwrap();
         let active = self.active_provider.lock().unwrap();
-        
+
         if let Some(active_name) = &*active {
             if let Some(status) = health.get(active_name) {
                 status.clone()
@@ -643,6 +722,12 @@ pub struct Pkcs11Provider {
     capabilities: HsmCapabilities,
 }
 
+impl Default for Pkcs11Provider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pkcs11Provider {
     pub fn new() -> Self {
         Self {
@@ -684,12 +769,17 @@ impl HsmProvider for Pkcs11Provider {
         // This is a mock implementation
         self.config = Some(config.clone());
         self.session_handle = Some(12345);
-        
+
         info!("PKCS#11 HSM provider initialized");
         Ok(())
     }
 
-    async fn generate_key(&self, key_type: HsmKeyType, key_length: u32, key_id: &str) -> Result<HsmKeyMetadata, HsmError> {
+    async fn generate_key(
+        &self,
+        key_type: HsmKeyType,
+        key_length: u32,
+        key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError> {
         // Mock implementation - would call PKCS#11 C_GenerateKey
         let metadata = HsmKeyMetadata {
             key_id: key_id.to_string(),
@@ -708,15 +798,26 @@ impl HsmProvider for Pkcs11Provider {
             usage_count: 0,
             extractable: false,
             wrapping_capable: matches!(key_type, HsmKeyType::KeyWrapping | HsmKeyType::SealMaster),
-            signing_capable: matches!(key_type, HsmKeyType::Rsa | HsmKeyType::Ecdsa | HsmKeyType::Hmac),
-            encryption_capable: matches!(key_type, HsmKeyType::Aes | HsmKeyType::Rsa | HsmKeyType::SealMaster),
+            signing_capable: matches!(
+                key_type,
+                HsmKeyType::Rsa | HsmKeyType::Ecdsa | HsmKeyType::Hmac
+            ),
+            encryption_capable: matches!(
+                key_type,
+                HsmKeyType::Aes | HsmKeyType::Rsa | HsmKeyType::SealMaster
+            ),
         };
-        
+
         debug!("Generated key {} in PKCS#11 HSM", key_id);
         Ok(metadata)
     }
 
-    async fn import_key(&self, _key_data: &[u8], key_type: HsmKeyType, key_id: &str) -> Result<HsmKeyMetadata, HsmError> {
+    async fn import_key(
+        &self,
+        _key_data: &[u8],
+        key_type: HsmKeyType,
+        key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError> {
         // Mock implementation
         Ok(HsmKeyMetadata {
             key_id: key_id.to_string(),
@@ -738,40 +839,68 @@ impl HsmProvider for Pkcs11Provider {
         Ok(())
     }
 
-    async fn encrypt(&self, key_id: &str, plaintext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError> {
+    async fn encrypt(
+        &self,
+        key_id: &str,
+        plaintext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError> {
         // Mock implementation - would use PKCS#11 C_Encrypt
-        debug!("Encrypted data with key {} using algorithm {}", key_id, algorithm);
-        
+        debug!(
+            "Encrypted data with key {} using algorithm {}",
+            key_id, algorithm
+        );
+
         // Simple mock encryption (DO NOT USE IN PRODUCTION)
         let mut ciphertext = plaintext.to_vec();
         for byte in &mut ciphertext {
             *byte = byte.wrapping_add(1);
         }
-        
+
         Ok(ciphertext)
     }
 
-    async fn decrypt(&self, key_id: &str, ciphertext: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError> {
+    async fn decrypt(
+        &self,
+        key_id: &str,
+        ciphertext: &[u8],
+        algorithm: &str,
+    ) -> Result<Vec<u8>, HsmError> {
         // Mock implementation - would use PKCS#11 C_Decrypt
-        debug!("Decrypted data with key {} using algorithm {}", key_id, algorithm);
-        
+        debug!(
+            "Decrypted data with key {} using algorithm {}",
+            key_id, algorithm
+        );
+
         // Simple mock decryption (DO NOT USE IN PRODUCTION)
         let mut plaintext = ciphertext.to_vec();
         for byte in &mut plaintext {
             *byte = byte.wrapping_sub(1);
         }
-        
+
         Ok(plaintext)
     }
 
     async fn sign(&self, key_id: &str, _data: &[u8], algorithm: &str) -> Result<Vec<u8>, HsmError> {
-        debug!("Signed data with key {} using algorithm {}", key_id, algorithm);
+        debug!(
+            "Signed data with key {} using algorithm {}",
+            key_id, algorithm
+        );
         // Mock signature
         Ok(vec![0xDE, 0xAD, 0xBE, 0xEF])
     }
 
-    async fn verify(&self, key_id: &str, _data: &[u8], _signature: &[u8], algorithm: &str) -> Result<bool, HsmError> {
-        debug!("Verified signature with key {} using algorithm {}", key_id, algorithm);
+    async fn verify(
+        &self,
+        key_id: &str,
+        _data: &[u8],
+        _signature: &[u8],
+        algorithm: &str,
+    ) -> Result<bool, HsmError> {
+        debug!(
+            "Verified signature with key {} using algorithm {}",
+            key_id, algorithm
+        );
         Ok(true)
     }
 
@@ -781,20 +910,35 @@ impl HsmProvider for Pkcs11Provider {
         let mut rng = rand::thread_rng();
         let mut random_bytes = vec![0u8; byte_count];
         rng.fill_bytes(&mut random_bytes);
-        
+
         debug!("Generated {} random bytes from PKCS#11 HSM", byte_count);
         Ok(random_bytes)
     }
 
-    async fn wrap_key(&self, wrapping_key_id: &str, key_to_wrap_id: &str) -> Result<Vec<u8>, HsmError> {
-        debug!("Wrapped key {} with key {}", key_to_wrap_id, wrapping_key_id);
+    async fn wrap_key(
+        &self,
+        wrapping_key_id: &str,
+        key_to_wrap_id: &str,
+    ) -> Result<Vec<u8>, HsmError> {
+        debug!(
+            "Wrapped key {} with key {}",
+            key_to_wrap_id, wrapping_key_id
+        );
         // Mock wrapped key
         Ok(vec![0x12, 0x34, 0x56, 0x78])
     }
 
-    async fn unwrap_key(&self, wrapping_key_id: &str, _wrapped_key: &[u8], target_key_id: &str) -> Result<HsmKeyMetadata, HsmError> {
-        debug!("Unwrapped key {} with key {}", target_key_id, wrapping_key_id);
-        
+    async fn unwrap_key(
+        &self,
+        wrapping_key_id: &str,
+        _wrapped_key: &[u8],
+        target_key_id: &str,
+    ) -> Result<HsmKeyMetadata, HsmError> {
+        debug!(
+            "Unwrapped key {} with key {}",
+            target_key_id, wrapping_key_id
+        );
+
         Ok(HsmKeyMetadata {
             key_id: target_key_id.to_string(),
             key_type: HsmKeyType::Aes,
@@ -812,12 +956,12 @@ impl HsmProvider for Pkcs11Provider {
 
     async fn health_check(&self) -> Result<HsmHealthStatus, HsmError> {
         let start = SystemTime::now();
-        
+
         // Mock health check - would test HSM connection and basic operations
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         let latency = start.elapsed().unwrap_or_default();
-        
+
         Ok(HsmHealthStatus {
             hsm_name: "PKCS11_HSM".to_string(),
             healthy: true,
@@ -871,7 +1015,7 @@ mod tests {
     #[tokio::test]
     async fn test_hsm_manager_basic_operations() {
         let manager = HsmManager::new();
-        
+
         // Create mock HSM config
         let config = HsmConfig {
             name: "test_hsm".to_string(),
@@ -888,27 +1032,33 @@ mod tests {
             health_check_interval: Duration::from_secs(60),
             vendor_specific: HashMap::new(),
         };
-        
+
         // Add provider
         let provider = Box::new(Pkcs11Provider::new());
-        manager.add_provider("test_hsm".to_string(), provider, config).await.unwrap();
-        
+        manager
+            .add_provider("test_hsm".to_string(), provider, config)
+            .await
+            .unwrap();
+
         // Generate seal key
         let key_id = manager.generate_seal_key("master").await.unwrap();
         assert!(!key_id.is_empty());
-        
+
         // Test seal/unseal operations
         let plaintext = b"sensitive_data";
         let ciphertext = manager.seal_operation("master", plaintext).await.unwrap();
-        let decrypted = manager.unseal_operation("master", &ciphertext).await.unwrap();
-        
+        let decrypted = manager
+            .unseal_operation("master", &ciphertext)
+            .await
+            .unwrap();
+
         assert_eq!(decrypted, plaintext);
     }
 
     #[tokio::test]
     async fn test_pkcs11_provider() {
         let mut provider = Pkcs11Provider::new();
-        
+
         let config = HsmConfig {
             name: "test".to_string(),
             hsm_type: HsmType::Pkcs11 {
@@ -924,14 +1074,17 @@ mod tests {
             health_check_interval: Duration::from_secs(60),
             vendor_specific: HashMap::new(),
         };
-        
+
         provider.initialize(&config).await.unwrap();
-        
+
         // Test key generation
-        let metadata = provider.generate_key(HsmKeyType::Aes, 256, "test_key").await.unwrap();
+        let metadata = provider
+            .generate_key(HsmKeyType::Aes, 256, "test_key")
+            .await
+            .unwrap();
         assert_eq!(metadata.key_id, "test_key");
         assert_eq!(metadata.key_length, 256);
-        
+
         // Test health check
         let health = provider.health_check().await.unwrap();
         assert!(health.healthy);

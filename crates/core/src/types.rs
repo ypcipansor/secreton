@@ -61,9 +61,15 @@ impl Version {
             return Err("Version must have at least major.minor.patch".to_string());
         }
 
-        let major = parts[0].parse::<u32>().map_err(|_| "Invalid major version")?;
-        let minor = parts[1].parse::<u32>().map_err(|_| "Invalid minor version")?;
-        let patch = parts[2].parse::<u32>().map_err(|_| "Invalid patch version")?;
+        let major = parts[0]
+            .parse::<u32>()
+            .map_err(|_| "Invalid major version")?;
+        let minor = parts[1]
+            .parse::<u32>()
+            .map_err(|_| "Invalid minor version")?;
+        let patch = parts[2]
+            .parse::<u32>()
+            .map_err(|_| "Invalid patch version")?;
 
         Ok(Self {
             major,
@@ -94,15 +100,15 @@ impl Version {
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
-        
+
         if let Some(ref pre_release) = self.pre_release {
             write!(f, "-{}", pre_release)?;
         }
-        
+
         if let Some(ref build) = self.build {
             write!(f, "+{}", build)?;
         }
-        
+
         Ok(())
     }
 }
@@ -110,10 +116,12 @@ impl fmt::Display for Version {
 /// Health status enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum HealthStatus {
     Healthy,
     Degraded,
     Unhealthy,
+    #[default]
     Unknown,
 }
 
@@ -140,12 +148,6 @@ impl HealthStatus {
         } else {
             other
         }
-    }
-}
-
-impl Default for HealthStatus {
-    fn default() -> Self {
-        HealthStatus::Unknown
     }
 }
 
@@ -270,7 +272,7 @@ impl Pagination {
             if self.limit == 0 {
                 0
             } else {
-                ((total as u32 + self.limit - 1) / self.limit).max(1)
+                (total as u32).div_ceil(self.limit).max(1)
             }
         })
     }
@@ -318,7 +320,9 @@ impl Pagination {
 /// Environment type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Environment {
+    #[default]
     Development,
     Staging,
     Production,
@@ -343,12 +347,6 @@ impl Environment {
     /// Check if debug features should be enabled
     pub fn debug_enabled(&self) -> bool {
         matches!(self, Environment::Development | Environment::Staging)
-    }
-}
-
-impl Default for Environment {
-    fn default() -> Self {
-        Environment::Development
     }
 }
 
@@ -441,7 +439,10 @@ mod tests {
     #[test]
     fn test_environment() {
         assert_eq!(Environment::from_str("dev"), Some(Environment::Development));
-        assert_eq!(Environment::from_str("production"), Some(Environment::Production));
+        assert_eq!(
+            Environment::from_str("production"),
+            Some(Environment::Production)
+        );
         assert_eq!(Environment::from_str("invalid"), None);
 
         assert!(!Environment::Development.is_production());

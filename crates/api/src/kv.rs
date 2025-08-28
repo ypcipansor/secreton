@@ -11,7 +11,95 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-use brankas_crypto::{KVEngine, SecretMetadata};
+// TODO: Replace with actual KV engine implementation
+// use brankas_crypto::{KVEngine, SecretMetadata};
+
+// Placeholder types until brankas_crypto is available
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretMetadata {
+    pub created_time: chrono::DateTime<chrono::Utc>,
+    pub updated_time: chrono::DateTime<chrono::Utc>,
+    pub version: u64,
+}
+
+impl std::fmt::Display for SecretMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "v{}", self.version)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KVEngine {
+    // Placeholder implementation
+}
+
+impl Default for KVEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KVEngine {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub async fn put_secret(
+        &self,
+        _path: &str,
+        _data: serde_json::Value,
+    ) -> Result<SecretMetadata, Box<dyn std::error::Error + Send + Sync>> {
+        // Placeholder implementation
+        Ok(SecretMetadata {
+            created_time: chrono::Utc::now(),
+            updated_time: chrono::Utc::now(),
+            version: 1,
+        })
+    }
+
+    pub async fn get_secret(
+        &self,
+        _path: &str,
+        _version: Option<u64>,
+    ) -> Result<Option<(serde_json::Value, SecretMetadata)>, Box<dyn std::error::Error + Send + Sync>>
+    {
+        // Placeholder implementation
+        Ok(None)
+    }
+
+    pub async fn delete_secret(
+        &self,
+        _path: &str,
+        _version: Option<u64>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Placeholder implementation
+        Ok(())
+    }
+
+    pub async fn list_secrets(
+        &self,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        // Placeholder implementation
+        Ok(vec![])
+    }
+
+    pub async fn get_metadata(
+        &self,
+        _path: &str,
+    ) -> Result<Option<SecretMetadata>, Box<dyn std::error::Error + Send + Sync>> {
+        // Placeholder implementation
+        Ok(None)
+    }
+
+    pub async fn destroy_secret(
+        &self,
+        _path: &str,
+        _version: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Placeholder implementation
+        Ok(())
+    }
+}
 
 /// API state for KV engine
 #[derive(Clone)]
@@ -22,13 +110,13 @@ pub struct KVApiState {
 /// Request to create/update a secret
 #[derive(Debug, Deserialize)]
 pub struct CreateSecretRequest {
-    pub data: HashMap<String, String>,
+    pub data: serde_json::Value,
 }
 
 /// Response for secret creation
 #[derive(Debug, Serialize)]
 pub struct CreateSecretResponse {
-    pub version: u32,
+    pub version: SecretMetadata,
     pub created_time: String,
 }
 
@@ -75,10 +163,13 @@ pub fn create_kv_router(state: KVApiState) -> Router {
 pub async fn list_secrets(
     State(state): State<KVApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    let keys = state.engine.list_secrets().await;
-    
+    let keys = match state.engine.list_secrets().await {
+        Ok(keys) => keys,
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
     info!("Listed {} secret paths", keys.len());
-    
+
     Ok(Json(ListSecretsResponse { keys }))
 }
 
@@ -91,12 +182,15 @@ pub async fn put_secret(
 ) -> Result<Json<CreateSecretResponse>, StatusCode> {
     match state.engine.put_secret(&path, request.data).await {
         Ok(version) => {
-            info!("Created secret at path '{}' version {}", path, version);
+            info!(
+                "Created secret at path '{}' version {}",
+                path, version.version
+            );
             Ok(Json(CreateSecretResponse {
                 version,
                 created_time: chrono::Utc::now().to_rfc3339(),
             }))
-        },
+        }
         Err(e) => {
             warn!("Failed to create secret at path '{}': {:?}", path, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -111,16 +205,26 @@ pub async fn get_secret(
     Path(path): Path<String>,
 ) -> Result<Json<GetSecretResponse>, StatusCode> {
     match state.engine.get_secret(&path, None).await {
-        Ok(secret_data) => {
-            info!("Retrieved secret from path '{}'", path);
+        Ok(Some((data, metadata))) => {
+            info!("Retrieved secret at path '{}'", path);
+            let data_map = match data {
+                serde_json::Value::Object(map) => {
+                    map.into_iter().map(|(k, v)| (k, v.to_string())).collect()
+                }
+                _ => HashMap::new(),
+            };
             Ok(Json(GetSecretResponse {
-                data: secret_data.data,
-                metadata: secret_data.metadata,
+                data: data_map,
+                metadata,
             }))
-        },
-        Err(_) => {
+        }
+        Ok(None) => {
             warn!("Secret not found at path '{}'", path);
             Err(StatusCode::NOT_FOUND)
+        }
+        Err(_) => {
+            warn!("Error retrieving secret at path '{}'", path);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
 }
@@ -138,7 +242,7 @@ pub async fn delete_secret(
                 success: true,
                 message: format!("Secret '{}' deleted", path),
             }))
-        },
+        }
         Err(_) => {
             warn!("Failed to delete secret at path '{}'", path);
             Err(StatusCode::NOT_FOUND)
@@ -153,10 +257,16 @@ pub async fn get_metadata(
     Path(path): Path<String>,
 ) -> Result<Json<MetadataResponse>, StatusCode> {
     match state.engine.get_metadata(&path).await {
-        Ok(versions) => {
+        Ok(Some(metadata)) => {
             info!("Retrieved metadata for path '{}'", path);
+            let mut versions = HashMap::new();
+            versions.insert(metadata.version as u32, metadata);
             Ok(Json(MetadataResponse { versions }))
-        },
+        }
+        Ok(None) => {
+            warn!("Secret metadata not found at path '{}'", path);
+            Err(StatusCode::NOT_FOUND)
+        }
         Err(_) => {
             warn!("Secret metadata not found at path '{}'", path);
             Err(StatusCode::NOT_FOUND)
@@ -170,14 +280,20 @@ pub async fn destroy_secret(
     State(state): State<KVApiState>,
     Path((path, version)): Path<(String, u32)>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.engine.destroy_secret(&path, version).await {
+    match state.engine.destroy_secret(&path, version as u64).await {
         Ok(_) => {
-            info!("Permanently destroyed secret '{}' version {}", path, version);
+            info!(
+                "Permanently destroyed secret '{}' version {}",
+                path, version
+            );
             Ok(Json(DeleteResponse {
                 success: true,
-                message: format!("Secret '{}' version {} permanently destroyed", path, version),
+                message: format!(
+                    "Secret '{}' version {} permanently destroyed",
+                    path, version
+                ),
             }))
-        },
+        }
         Err(_) => {
             warn!("Failed to destroy secret '{}' version {}", path, version);
             Err(StatusCode::NOT_FOUND)

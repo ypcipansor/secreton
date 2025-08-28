@@ -1,5 +1,5 @@
 //! # Brankas Core
-//! 
+//!
 //! Core types, traits, and utilities shared across the Brankas security system.
 //! Provides foundational abstractions for security levels, audit logging,
 //! error handling, and common data structures.
@@ -7,52 +7,66 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod api;
 pub mod audit;
 pub mod error;
-pub mod types;
 pub mod security;
-pub mod api;
+pub mod types;
 
-pub use error::{CoreError};
+pub use api::{start_security_server, SecurityAPI};
 pub use audit::{AuditEntry, AuditLogger, AuditStorage};
+pub use error::CoreError;
 pub use security::{
+    // Audit Systems
+    AdvancedAuditSystem,
+    // Advanced MFA
+    AdvancedMfaEngine,
     // Core Security Components
     AdvancedSecurityConfig,
+    AuditEvent,
+    ComplianceFramework,
+    // Compliance & Governance
+    ComplianceGovernanceEngine,
+    ComplianceReport,
+    ComplianceRequirement,
     // Entropy & Randomness
-    EntropyAugmentationEngine, EntropySource, EntropyQuality,
+    EntropyAugmentationEngine,
+    EntropyQuality,
+    EntropySource,
     // HSM Integration
-    HsmManager, HsmProvider,
-    // Audit Systems
-    AdvancedAuditSystem, AuditEvent, ComplianceReport,
+    HsmManager,
+    HsmProvider,
+    MfaAuthResult,
+    MfaChallengeType,
+    PostQuantumAlgorithm,
+    // Post-Quantum Cryptography
+    QuantumSafeCryptoEngine,
+    QuantumSecurityLevel,
+    ThreatDetection,
+    ThreatIndicator,
+    // Threat Intelligence
+    ThreatIntelligenceEngine,
     // Zero Trust Architecture
     ZeroTrustEngine,
-    // Advanced MFA
-    AdvancedMfaEngine, MfaChallengeType, MfaAuthResult,
-    // Compliance & Governance
-    ComplianceGovernanceEngine, ComplianceFramework, ComplianceRequirement,
-    // Post-Quantum Cryptography
-    QuantumSafeCryptoEngine, PostQuantumAlgorithm, QuantumSecurityLevel,
-    // Threat Intelligence
-    ThreatIntelligenceEngine, ThreatIndicator, ThreatDetection
 };
-pub use api::{SecurityAPI, start_security_server};
-pub use types::{Version, HealthStatus, TimeRange, Pagination, Environment};
+pub use types::{Environment, HealthStatus, Pagination, TimeRange, Version};
 
 /// Security classification levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum SecurityLevel {
     /// Public information - no security controls required
     Public = 0,
-    
+
     /// Internal use - basic access controls
+    #[default]
     Internal = 1,
-    
+
     /// Confidential - restricted access
     Confidential = 2,
-    
+
     /// Secret - highly restricted access
     Secret = 3,
-    
+
     /// Top Secret - maximum security controls
     TopSecret = 4,
 }
@@ -62,7 +76,7 @@ impl SecurityLevel {
     pub fn name(&self) -> &'static str {
         match self {
             SecurityLevel::Public => "Public",
-            SecurityLevel::Internal => "Internal", 
+            SecurityLevel::Internal => "Internal",
             SecurityLevel::Confidential => "Confidential",
             SecurityLevel::Secret => "Secret",
             SecurityLevel::TopSecret => "Top Secret",
@@ -84,12 +98,6 @@ impl SecurityLevel {
     /// Check if current level can access target level
     pub fn can_access(&self, target: SecurityLevel) -> bool {
         *self >= target
-    }
-}
-
-impl Default for SecurityLevel {
-    fn default() -> Self {
-        SecurityLevel::Internal
     }
 }
 
@@ -129,7 +137,8 @@ impl Metadata {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.fields.get(key)
+        self.fields
+            .get(key)
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
@@ -272,16 +281,25 @@ mod tests {
         assert!(SecurityLevel::Secret > SecurityLevel::Confidential);
         assert!(SecurityLevel::Confidential > SecurityLevel::Internal);
         assert!(SecurityLevel::Internal > SecurityLevel::Public);
-        
+
         assert!(SecurityLevel::TopSecret.can_access(SecurityLevel::Public));
         assert!(!SecurityLevel::Public.can_access(SecurityLevel::Secret));
     }
 
     #[test]
     fn test_security_level_from_string() {
-        assert_eq!(SecurityLevel::from_str("public"), Some(SecurityLevel::Public));
-        assert_eq!(SecurityLevel::from_str("CONFIDENTIAL"), Some(SecurityLevel::Confidential));
-        assert_eq!(SecurityLevel::from_str("top-secret"), Some(SecurityLevel::TopSecret));
+        assert_eq!(
+            SecurityLevel::from_str("public"),
+            Some(SecurityLevel::Public)
+        );
+        assert_eq!(
+            SecurityLevel::from_str("CONFIDENTIAL"),
+            Some(SecurityLevel::Confidential)
+        );
+        assert_eq!(
+            SecurityLevel::from_str("top-secret"),
+            Some(SecurityLevel::TopSecret)
+        );
         assert_eq!(SecurityLevel::from_str("invalid"), None);
     }
 
@@ -289,13 +307,16 @@ mod tests {
     fn test_metadata() {
         let mut metadata = Metadata::new();
         assert!(metadata.is_empty());
-        
+
         metadata.set("key1", "value1");
         metadata.set("key2", 42);
-        
+
         assert_eq!(metadata.len(), 2);
         assert!(metadata.contains_key("key1"));
-        assert_eq!(metadata.get_typed::<String>("key1"), Some("value1".to_string()));
+        assert_eq!(
+            metadata.get_typed::<String>("key1"),
+            Some("value1".to_string())
+        );
         assert_eq!(metadata.get_typed::<i32>("key2"), Some(42));
     }
 
@@ -303,16 +324,16 @@ mod tests {
     fn test_tags() {
         let mut tags = Tags::new();
         assert!(tags.is_empty());
-        
+
         tags.add("important");
         tags.add("secure");
         tags.add("important"); // Should not duplicate
-        
+
         assert_eq!(tags.len(), 2);
         assert!(tags.contains("important"));
         assert!(tags.contains("secure"));
         assert!(!tags.contains("other"));
-        
+
         tags.remove("important");
         assert_eq!(tags.len(), 1);
         assert!(!tags.contains("important"));

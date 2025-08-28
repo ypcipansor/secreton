@@ -1,5 +1,5 @@
 //! Real-Time Threat Intelligence and Response System
-//! 
+//!
 //! Provides comprehensive threat intelligence integration and automated response:
 //! - Multi-source threat intelligence feeds (commercial, open source, government)
 //! - Real-time threat correlation and analysis
@@ -10,40 +10,40 @@
 //! - Threat intelligence sharing and collaboration
 //! - Predictive threat modeling and risk assessment
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, RwLock, Mutex};
-use std::time::Duration;
 use async_trait::async_trait;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration as ChronoDuration};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use tokio::time::interval;
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 /// Threat intelligence sources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ThreatIntelSource {
     /// Commercial threat intelligence feeds
     Commercial(String), // e.g., "Mandiant", "CrowdStrike", "Recorded Future"
-    
+
     /// Government and public sector feeds
     Government(String), // e.g., "US-CERT", "NCSC", "CISA"
-    
+
     /// Open source intelligence
     OpenSource(String), // e.g., "MISP", "AlienVault OTX", "VirusTotal"
-    
+
     /// Internal threat intelligence
     Internal(String), // e.g., "SOC", "Incident Response", "Threat Hunting"
-    
+
     /// Industry sharing groups
     IndustrySharing(String), // e.g., "FS-ISAC", "E-ISAC", "H-ISAC"
-    
+
     /// Dark web monitoring
     DarkWeb(String),
-    
+
     /// Social media monitoring
     SocialMedia(String),
-    
+
     /// Custom sources
     Custom(String),
 }
@@ -77,39 +77,39 @@ pub enum IndicatorType {
     Url,
     EmailAddress,
     NetworkSignature,
-    
+
     /// File indicators
     FileHash(HashType),
     FileName,
     FilePath,
     FileSignature,
-    
+
     /// Registry indicators
     RegistryKey,
     RegistryValue,
-    
+
     /// Process indicators
     ProcessName,
     CommandLine,
-    
+
     /// Email indicators
     EmailSubject,
     EmailSender,
     EmailAttachment,
-    
+
     /// Behavioral indicators
     UserBehavior,
     NetworkBehavior,
     SystemBehavior,
-    
+
     /// Cryptocurrency indicators
     BitcoinAddress,
     EthereumAddress,
-    
+
     /// Certificate indicators
     CertificateHash,
     CertificateSerial,
-    
+
     /// Custom indicators
     Custom(String),
 }
@@ -311,36 +311,36 @@ pub enum ResponseActionType {
     BlockDomain,
     IsolateHost,
     UpdateFirewallRules,
-    
+
     /// Endpoint actions
     QuarantineFile,
     KillProcess,
     DisableUser,
     ForcePasswordReset,
-    
+
     /// Email actions
     QuarantineEmail,
     BlockSender,
-    
+
     /// Access control actions
     RevokeAccess,
     RequireAdditionalAuth,
-    
+
     /// Monitoring actions
     IncreaseLogging,
     DeployHoneypot,
-    
+
     /// Communication actions
     NotifySOC,
     NotifyIncidentResponse,
     NotifyManagement,
     NotifyExternal,
-    
+
     /// Investigation actions
     CollectForensics,
     CreateTicket,
     StartInvestigation,
-    
+
     /// Custom actions
     Custom(String),
 }
@@ -496,8 +496,8 @@ pub struct Evidence {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceUsage {
     pub cpu_time: Duration,
-    pub memory_usage: u64, // bytes
-    pub storage_scanned: u64, // bytes
+    pub memory_usage: u64,      // bytes
+    pub storage_scanned: u64,   // bytes
     pub network_bandwidth: u64, // bytes
     pub compute_cost: Option<f64>,
 }
@@ -506,28 +506,28 @@ pub struct ResourceUsage {
 pub enum ThreatIntelError {
     #[error("Source connection failed: {0} - {1}")]
     SourceConnectionFailed(String, String),
-    
+
     #[error("Indicator parsing failed: {0}")]
     IndicatorParsingFailed(String),
-    
+
     #[error("Detection analysis failed: {0}")]
     DetectionAnalysisFailed(String),
-    
+
     #[error("Response action failed: {0} - {1}")]
     ResponseActionFailed(String, String),
-    
+
     #[error("Behavioral analysis failed: {0}")]
     BehavioralAnalysisFailed(String),
-    
+
     #[error("Threat hunt failed: {0} - {1}")]
     ThreatHuntFailed(String, String),
-    
+
     #[error("Integration error: {0} - {1}")]
     IntegrationError(String, String),
-    
+
     #[error("Database error: {0}")]
     DatabaseError(String),
-    
+
     #[error("Configuration error: {0} - {1}")]
     ConfigurationError(String, String),
 }
@@ -535,8 +535,14 @@ pub enum ThreatIntelError {
 /// Trait for threat intelligence sources
 #[async_trait]
 pub trait ThreatIntelligenceSource: Send + Sync {
-    async fn fetch_indicators(&self, since: Option<DateTime<Utc>>) -> Result<Vec<ThreatIndicator>, ThreatIntelError>;
-    async fn query_indicator(&self, indicator_value: &str) -> Result<Option<ThreatIndicator>, ThreatIntelError>;
+    async fn fetch_indicators(
+        &self,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<ThreatIndicator>, ThreatIntelError>;
+    async fn query_indicator(
+        &self,
+        indicator_value: &str,
+    ) -> Result<Option<ThreatIndicator>, ThreatIntelError>;
     async fn submit_indicator(&self, indicator: &ThreatIndicator) -> Result<(), ThreatIntelError>;
     fn get_source_info(&self) -> ThreatIntelSource;
     fn get_supported_indicator_types(&self) -> Vec<IndicatorType>;
@@ -546,8 +552,16 @@ pub trait ThreatIntelligenceSource: Send + Sync {
 /// Trait for response action executors
 #[async_trait]
 pub trait ResponseActionExecutor: Send + Sync {
-    async fn execute_action(&self, action: &ResponseAction, context: &HashMap<String, String>) -> Result<ExecutionResult, ThreatIntelError>;
-    async fn rollback_action(&self, action: &ResponseAction, execution_result: &ExecutionResult) -> Result<(), ThreatIntelError>;
+    async fn execute_action(
+        &self,
+        action: &ResponseAction,
+        context: &HashMap<String, String>,
+    ) -> Result<ExecutionResult, ThreatIntelError>;
+    async fn rollback_action(
+        &self,
+        action: &ResponseAction,
+        execution_result: &ExecutionResult,
+    ) -> Result<(), ThreatIntelError>;
     fn get_supported_actions(&self) -> Vec<ResponseActionType>;
     async fn validate_action(&self, action: &ResponseAction) -> Result<bool, ThreatIntelError>;
 }
@@ -633,26 +647,28 @@ impl Default for ThreatIntelConfig {
     fn default() -> Self {
         Self {
             indicator_refresh_interval: Duration::from_secs(300), // 5 minutes
-            detection_threshold: 0.7, // 70% confidence threshold
+            detection_threshold: 0.7,                             // 70% confidence threshold
             auto_response_enabled: true,
             false_positive_threshold: 0.1, // 10% false positive threshold
             behavioral_analysis_enabled: true,
             threat_hunting_enabled: true,
             data_retention_period: Duration::from_secs(86400 * 365), // 1 year
-            correlation_time_window: Duration::from_secs(3600), // 1 hour
+            correlation_time_window: Duration::from_secs(3600),      // 1 hour
             machine_learning_enabled: true,
             external_sharing_enabled: false, // Requires careful configuration
             notification_settings: ThreatNotificationSettings {
                 critical_alerts_immediate: true,
                 high_alerts_within: Duration::from_secs(900), // 15 minutes
-                notification_channels: vec!["email".to_string(), "slack".to_string(), "siem".to_string()],
-                escalation_rules: vec![
-                    EscalationRule {
-                        condition: "critical_unacknowledged_30min".to_string(),
-                        escalation_target: "security_manager".to_string(),
-                        escalation_delay: Duration::from_secs(1800), // 30 minutes
-                    }
+                notification_channels: vec![
+                    "email".to_string(),
+                    "slack".to_string(),
+                    "siem".to_string(),
                 ],
+                escalation_rules: vec![EscalationRule {
+                    condition: "critical_unacknowledged_30min".to_string(),
+                    escalation_target: "security_manager".to_string(),
+                    escalation_delay: Duration::from_secs(1800), // 30 minutes
+                }],
                 alert_suppression: AlertSuppression {
                     enabled: true,
                     suppression_window: Duration::from_secs(300), // 5 minutes
@@ -695,7 +711,7 @@ impl ThreatIntelligenceEngine {
     pub async fn ingest_threat_indicators(&self) -> Result<usize, ThreatIntelError> {
         let sources = self.sources.read().unwrap().clone();
         let mut total_indicators = 0;
-        
+
         for (source_name, source) in sources {
             match source.fetch_indicators(None).await {
                 Ok(indicators) => {
@@ -723,67 +739,86 @@ impl ThreatIntelligenceEngine {
     }
 
     /// Store threat indicator
-    async fn store_indicator(&self, mut indicator: ThreatIndicator) -> Result<(), ThreatIntelError> {
+    async fn store_indicator(
+        &self,
+        mut indicator: ThreatIndicator,
+    ) -> Result<(), ThreatIntelError> {
         // Check for duplicates and merge if necessary
         {
             let mut indicators = self.indicators.write().unwrap();
-            
+
             if let Some(existing) = indicators.get(&indicator.id) {
                 // Update existing indicator with new information
                 indicator = self.merge_indicators(existing, &indicator);
             }
-            
+
             indicators.insert(indicator.id.clone(), indicator.clone());
         }
 
         // Update severity metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
-            *metrics.indicators_by_severity.entry(indicator.severity).or_insert(0) += 1;
+            *metrics
+                .indicators_by_severity
+                .entry(indicator.severity)
+                .or_insert(0) += 1;
         }
 
         Ok(())
     }
 
     /// Merge two indicators
-    fn merge_indicators(&self, existing: &ThreatIndicator, new: &ThreatIndicator) -> ThreatIndicator {
+    fn merge_indicators(
+        &self,
+        existing: &ThreatIndicator,
+        new: &ThreatIndicator,
+    ) -> ThreatIndicator {
         let mut merged = existing.clone();
-        
+
         // Take the higher confidence
         if new.confidence > existing.confidence {
             merged.confidence = new.confidence.clone();
         }
-        
+
         // Take the higher severity
         if new.severity > existing.severity {
             merged.severity = new.severity.clone();
         }
-        
+
         // Merge tags
         merged.tags.extend(new.tags.clone());
-        
+
         // Update last seen
         if new.last_seen.is_some() {
             merged.last_seen = new.last_seen;
         }
-        
+
         // Merge context
         if let Some(new_campaign) = &new.context.campaign {
             merged.context.campaign = Some(new_campaign.clone());
         }
-        
-        merged.context.attack_patterns.extend(new.context.attack_patterns.clone());
-        merged.context.vulnerabilities.extend(new.context.vulnerabilities.clone());
-        
+
+        merged
+            .context
+            .attack_patterns
+            .extend(new.context.attack_patterns.clone());
+        merged
+            .context
+            .vulnerabilities
+            .extend(new.context.vulnerabilities.clone());
+
         merged
     }
 
     /// Analyze event for threat indicators
-    pub async fn analyze_event(&self, event: &SourceEvent) -> Result<Option<ThreatDetection>, ThreatIntelError> {
+    pub async fn analyze_event(
+        &self,
+        event: &SourceEvent,
+    ) -> Result<Option<ThreatDetection>, ThreatIntelError> {
         let indicators = self.indicators.read().unwrap();
         let mut matched_indicators = Vec::new();
         let mut total_risk_score = 0.0;
-        
+
         // Check event data against all indicators
         for indicator in indicators.values() {
             if self.match_indicator_to_event(indicator, event) {
@@ -791,20 +826,20 @@ impl ThreatIntelligenceEngine {
                 total_risk_score += self.calculate_indicator_risk_score(indicator);
             }
         }
-        
+
         if matched_indicators.is_empty() {
             return Ok(None);
         }
-        
+
         // Calculate overall confidence and risk
         let confidence = self.calculate_detection_confidence(&matched_indicators, event);
         let risk_score = total_risk_score / matched_indicators.len() as f64;
-        
+
         // Check if detection meets threshold
         if confidence < self.config.detection_threshold {
             return Ok(None);
         }
-        
+
         // Create detection
         let detection = ThreatDetection {
             detection_id: Uuid::new_v4().to_string(),
@@ -821,57 +856,60 @@ impl ThreatIntelligenceEngine {
             assigned_analyst: None,
             false_positive_probability: self.estimate_false_positive_probability(event, confidence),
         };
-        
+
         // Store detection
         {
             let mut detections = self.detections.write().unwrap();
             detections.insert(detection.detection_id.clone(), detection.clone());
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.detections_generated += 1;
-            *metrics.detections_by_source.entry(event.source_system.clone()).or_insert(0) += 1;
+            *metrics
+                .detections_by_source
+                .entry(event.source_system.clone())
+                .or_insert(0) += 1;
         }
-        
-        info!("Threat detection created: {} (confidence: {:.2}, risk: {:.2})", 
-              detection.detection_id, confidence, risk_score);
-        
+
+        info!(
+            "Threat detection created: {} (confidence: {:.2}, risk: {:.2})",
+            detection.detection_id, confidence, risk_score
+        );
+
         Ok(Some(detection))
     }
 
     /// Match indicator to event
     fn match_indicator_to_event(&self, indicator: &ThreatIndicator, event: &SourceEvent) -> bool {
         match &indicator.indicator_type {
-            IndicatorType::IpAddress => {
-                event.normalized_data.values().any(|value| value == &indicator.value)
-            }
-            IndicatorType::Domain => {
-                event.normalized_data.values().any(|value| {
-                    value.contains(&indicator.value) || value.ends_with(&format!(".{}", indicator.value))
-                })
-            }
-            IndicatorType::FileHash(_) => {
-                event.normalized_data.values().any(|value| {
-                    value.to_lowercase() == indicator.value.to_lowercase()
-                })
-            }
-            IndicatorType::EmailAddress => {
-                event.normalized_data.values().any(|value| {
-                    value.to_lowercase() == indicator.value.to_lowercase()
-                })
-            }
-            IndicatorType::ProcessName => {
-                event.normalized_data.get("process_name")
-                    .map(|p| p.contains(&indicator.value))
-                    .unwrap_or(false)
-            }
-            IndicatorType::CommandLine => {
-                event.normalized_data.get("command_line")
-                    .map(|cmd| cmd.contains(&indicator.value))
-                    .unwrap_or(false)
-            }
+            IndicatorType::IpAddress => event
+                .normalized_data
+                .values()
+                .any(|value| value == &indicator.value),
+            IndicatorType::Domain => event.normalized_data.values().any(|value| {
+                value.contains(&indicator.value)
+                    || value.ends_with(&format!(".{}", indicator.value))
+            }),
+            IndicatorType::FileHash(_) => event
+                .normalized_data
+                .values()
+                .any(|value| value.to_lowercase() == indicator.value.to_lowercase()),
+            IndicatorType::EmailAddress => event
+                .normalized_data
+                .values()
+                .any(|value| value.to_lowercase() == indicator.value.to_lowercase()),
+            IndicatorType::ProcessName => event
+                .normalized_data
+                .get("process_name")
+                .map(|p| p.contains(&indicator.value))
+                .unwrap_or(false),
+            IndicatorType::CommandLine => event
+                .normalized_data
+                .get("command_line")
+                .map(|cmd| cmd.contains(&indicator.value))
+                .unwrap_or(false),
             _ => false, // TODO: Implement other indicator types
         }
     }
@@ -885,16 +923,19 @@ impl ThreatIntelligenceEngine {
             ThreatSeverity::Low => 0.4,
             ThreatSeverity::Info => 0.2,
         };
-        
+
         let confidence_weight = match indicator.confidence {
             ConfidenceLevel::VeryHigh => 1.0,
             ConfidenceLevel::High => 0.8,
             ConfidenceLevel::Medium => 0.6,
             ConfidenceLevel::Low => 0.4,
         };
-        
+
         // Age factor - newer indicators are generally more relevant
-        let age_factor = if let Some(created) = indicator.created_at.checked_add_signed(chrono::Duration::days(30)) {
+        let age_factor = if let Some(created) = indicator
+            .created_at
+            .checked_add_signed(chrono::Duration::days(30))
+        {
             if Utc::now() < created {
                 1.0 // Fresh indicator
             } else {
@@ -903,17 +944,22 @@ impl ThreatIntelligenceEngine {
         } else {
             0.5
         };
-        
+
         (severity_weight * confidence_weight * age_factor) * 100.0
     }
 
     /// Calculate detection confidence
-    fn calculate_detection_confidence(&self, indicators: &[ThreatIndicator], _event: &SourceEvent) -> f64 {
+    fn calculate_detection_confidence(
+        &self,
+        indicators: &[ThreatIndicator],
+        _event: &SourceEvent,
+    ) -> f64 {
         if indicators.is_empty() {
             return 0.0;
         }
-        
-        let total_confidence: f64 = indicators.iter()
+
+        let total_confidence: f64 = indicators
+            .iter()
             .map(|i| match i.confidence {
                 ConfidenceLevel::VeryHigh => 0.95,
                 ConfidenceLevel::High => 0.75,
@@ -921,7 +967,7 @@ impl ThreatIntelligenceEngine {
                 ConfidenceLevel::Low => 0.25,
             })
             .sum();
-        
+
         (total_confidence / indicators.len() as f64).min(1.0)
     }
 
@@ -945,7 +991,7 @@ impl ThreatIntelligenceEngine {
             score if score >= 30.0 => ImpactLevel::Low,
             _ => ImpactLevel::None,
         };
-        
+
         ImpactAssessment {
             confidentiality_impact: impact_level.clone(),
             integrity_impact: impact_level.clone(),
@@ -960,9 +1006,13 @@ impl ThreatIntelligenceEngine {
     }
 
     /// Generate response actions
-    fn generate_response_actions(&self, risk_score: f64, event: &SourceEvent) -> Vec<ResponseAction> {
+    fn generate_response_actions(
+        &self,
+        risk_score: f64,
+        event: &SourceEvent,
+    ) -> Vec<ResponseAction> {
         let mut actions = Vec::new();
-        
+
         // Always create investigation ticket
         actions.push(ResponseAction {
             action_id: Uuid::new_v4().to_string(),
@@ -981,7 +1031,7 @@ impl ThreatIntelligenceEngine {
             rollback_procedure: Some("Close ticket".to_string()),
             approval_required: false,
         });
-        
+
         // High-risk actions
         if risk_score >= 70.0 {
             // Block IP if available
@@ -1004,7 +1054,7 @@ impl ThreatIntelligenceEngine {
                     approval_required: true,
                 });
             }
-            
+
             // Isolate host if available
             if let Some(host) = event.normalized_data.get("hostname") {
                 actions.push(ResponseAction {
@@ -1026,7 +1076,7 @@ impl ThreatIntelligenceEngine {
                 });
             }
         }
-        
+
         // Critical risk actions
         if risk_score >= 90.0 {
             actions.push(ResponseAction {
@@ -1047,14 +1097,18 @@ impl ThreatIntelligenceEngine {
                 approval_required: false,
             });
         }
-        
+
         actions
     }
 
     /// Calculate investigation priority
-    fn calculate_investigation_priority(&self, risk_score: f64, confidence: f64) -> InvestigationPriority {
+    fn calculate_investigation_priority(
+        &self,
+        risk_score: f64,
+        confidence: f64,
+    ) -> InvestigationPriority {
         let combined_score = (risk_score * confidence) / 100.0;
-        
+
         match combined_score {
             score if score >= 80.0 => InvestigationPriority::P1,
             score if score >= 60.0 => InvestigationPriority::P2,
@@ -1071,17 +1125,25 @@ impl ThreatIntelligenceEngine {
     }
 
     /// Execute response actions
-    pub async fn execute_response_actions(&self, detection_id: &str) -> Result<usize, ThreatIntelError> {
+    pub async fn execute_response_actions(
+        &self,
+        detection_id: &str,
+    ) -> Result<usize, ThreatIntelError> {
         let detection = {
             let detections = self.detections.read().unwrap();
-            detections.get(detection_id).cloned()
-                .ok_or_else(|| ThreatIntelError::DetectionAnalysisFailed(
-                    format!("Detection {} not found", detection_id)
-                ))?
+            detections.get(detection_id).cloned().ok_or_else(|| {
+                ThreatIntelError::DetectionAnalysisFailed(format!(
+                    "Detection {} not found",
+                    detection_id
+                ))
+            })?
         };
 
         if !self.config.auto_response_enabled {
-            info!("Auto-response disabled, skipping action execution for detection {}", detection_id);
+            info!(
+                "Auto-response disabled, skipping action execution for detection {}",
+                detection_id
+            );
             return Ok(0);
         }
 
@@ -1093,23 +1155,33 @@ impl ThreatIntelligenceEngine {
         for action in &detection.recommended_actions {
             // Check if action requires approval
             if action.approval_required && action.automation_level != AutomationLevel::Automatic {
-                info!("Action {} requires approval, skipping automatic execution", action.action_id);
+                info!(
+                    "Action {} requires approval, skipping automatic execution",
+                    action.action_id
+                );
                 continue;
             }
 
             // Find appropriate executor
             let mut executor_found = false;
             for (executor_name, executor) in &executors {
-                if executor.get_supported_actions().contains(&action.action_type) {
+                if executor
+                    .get_supported_actions()
+                    .contains(&action.action_type)
+                {
                     match executor.execute_action(action, &context).await {
                         Ok(result) => {
                             if result.success {
-                                info!("Successfully executed action {} using executor {}", 
-                                      action.action_id, executor_name);
+                                info!(
+                                    "Successfully executed action {} using executor {}",
+                                    action.action_id, executor_name
+                                );
                                 executed_count += 1;
                             } else {
-                                warn!("Action execution failed: {}", 
-                                      result.error_message.unwrap_or_default());
+                                warn!(
+                                    "Action execution failed: {}",
+                                    result.error_message.unwrap_or_default()
+                                );
                             }
                             executor_found = true;
                             break;
@@ -1123,7 +1195,10 @@ impl ThreatIntelligenceEngine {
             }
 
             if !executor_found {
-                warn!("No executor found for action type: {:?}", action.action_type);
+                warn!(
+                    "No executor found for action type: {:?}",
+                    action.action_type
+                );
             }
         }
 
@@ -1133,7 +1208,10 @@ impl ThreatIntelligenceEngine {
             metrics.response_actions_executed += executed_count as u64;
         }
 
-        info!("Executed {} response actions for detection {}", executed_count, detection_id);
+        info!(
+            "Executed {} response actions for detection {}",
+            executed_count, detection_id
+        );
         Ok(executed_count)
     }
 
@@ -1144,10 +1222,10 @@ impl ThreatIntelligenceEngine {
 
         tokio::spawn(async move {
             let mut interval = interval(refresh_interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 info!("Starting threat intelligence refresh");
                 if let Err(e) = engine.ingest_threat_indicators().await {
                     error!("Threat intelligence refresh failed: {}", e);
@@ -1184,41 +1262,45 @@ pub struct MockThreatIntelSource {
 
 #[async_trait]
 impl ThreatIntelligenceSource for MockThreatIntelSource {
-    async fn fetch_indicators(&self, _since: Option<DateTime<Utc>>) -> Result<Vec<ThreatIndicator>, ThreatIntelError> {
+    async fn fetch_indicators(
+        &self,
+        _since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<ThreatIndicator>, ThreatIntelError> {
         // Generate mock indicators
-        Ok(vec![
-            ThreatIndicator {
-                id: Uuid::new_v4().to_string(),
-                indicator_type: IndicatorType::IpAddress,
-                value: "192.168.1.100".to_string(),
-                confidence: ConfidenceLevel::High,
-                severity: ThreatSeverity::High,
-                source: self.source_info.clone(),
-                tags: HashSet::from(["malware".to_string(), "c2".to_string()]),
-                created_at: Utc::now(),
-                expires_at: Some(Utc::now() + ChronoDuration::days(30)),
-                last_seen: Some(Utc::now()),
-                description: "Known malware C2 server".to_string(),
-                context: ThreatContext {
-                    campaign: Some("APT-TEST".to_string()),
-                    malware_family: Some("TestMalware".to_string()),
-                    attack_patterns: vec!["T1071.001".to_string()],
-                    vulnerabilities: Vec::new(),
-                    targeted_sectors: vec!["finance".to_string()],
-                    targeted_regions: vec!["global".to_string()],
-                    first_seen: Some(Utc::now() - ChronoDuration::days(7)),
-                    last_activity: Some(Utc::now()),
-                    additional_context: HashMap::new(),
-                },
-                kill_chain_phases: vec![KillChainPhase::CommandAndControl],
-                attributed_actors: Vec::new(),
-                related_indicators: Vec::new(),
-                metadata: HashMap::new(),
-            }
-        ])
+        Ok(vec![ThreatIndicator {
+            id: Uuid::new_v4().to_string(),
+            indicator_type: IndicatorType::IpAddress,
+            value: "192.168.1.100".to_string(),
+            confidence: ConfidenceLevel::High,
+            severity: ThreatSeverity::High,
+            source: self.source_info.clone(),
+            tags: HashSet::from(["malware".to_string(), "c2".to_string()]),
+            created_at: Utc::now(),
+            expires_at: Some(Utc::now() + ChronoDuration::days(30)),
+            last_seen: Some(Utc::now()),
+            description: "Known malware C2 server".to_string(),
+            context: ThreatContext {
+                campaign: Some("APT-TEST".to_string()),
+                malware_family: Some("TestMalware".to_string()),
+                attack_patterns: vec!["T1071.001".to_string()],
+                vulnerabilities: Vec::new(),
+                targeted_sectors: vec!["finance".to_string()],
+                targeted_regions: vec!["global".to_string()],
+                first_seen: Some(Utc::now() - ChronoDuration::days(7)),
+                last_activity: Some(Utc::now()),
+                additional_context: HashMap::new(),
+            },
+            kill_chain_phases: vec![KillChainPhase::CommandAndControl],
+            attributed_actors: Vec::new(),
+            related_indicators: Vec::new(),
+            metadata: HashMap::new(),
+        }])
     }
 
-    async fn query_indicator(&self, indicator_value: &str) -> Result<Option<ThreatIndicator>, ThreatIntelError> {
+    async fn query_indicator(
+        &self,
+        indicator_value: &str,
+    ) -> Result<Option<ThreatIndicator>, ThreatIntelError> {
         if indicator_value == "192.168.1.100" {
             let indicators = self.fetch_indicators(None).await?;
             Ok(indicators.into_iter().find(|i| i.value == indicator_value))
@@ -1236,7 +1318,11 @@ impl ThreatIntelligenceSource for MockThreatIntelSource {
     }
 
     fn get_supported_indicator_types(&self) -> Vec<IndicatorType> {
-        vec![IndicatorType::IpAddress, IndicatorType::Domain, IndicatorType::FileHash(HashType::SHA256)]
+        vec![
+            IndicatorType::IpAddress,
+            IndicatorType::Domain,
+            IndicatorType::FileHash(HashType::SHA256),
+        ]
     }
 
     async fn test_connection(&self) -> Result<bool, ThreatIntelError> {
@@ -1252,7 +1338,7 @@ mod tests {
     async fn test_threat_intel_engine_creation() {
         let config = ThreatIntelConfig::default();
         let engine = ThreatIntelligenceEngine::new(config);
-        
+
         assert!(engine.sources.read().unwrap().is_empty());
         assert!(engine.indicators.read().unwrap().is_empty());
     }
@@ -1261,16 +1347,16 @@ mod tests {
     async fn test_indicator_ingestion() {
         let config = ThreatIntelConfig::default();
         let engine = ThreatIntelligenceEngine::new(config);
-        
+
         let source = Arc::new(MockThreatIntelSource {
             source_info: ThreatIntelSource::OpenSource("mock".to_string()),
         });
-        
+
         engine.register_source("mock".to_string(), source);
-        
+
         let count = engine.ingest_threat_indicators().await.unwrap();
         assert!(count > 0);
-        
+
         let indicators = engine.indicators.read().unwrap();
         assert!(!indicators.is_empty());
     }
@@ -1279,14 +1365,14 @@ mod tests {
     async fn test_event_analysis() {
         let config = ThreatIntelConfig::default();
         let engine = ThreatIntelligenceEngine::new(config);
-        
+
         // Ingest test indicators
         let source = Arc::new(MockThreatIntelSource {
             source_info: ThreatIntelSource::OpenSource("mock".to_string()),
         });
         engine.register_source("mock".to_string(), source);
         engine.ingest_threat_indicators().await.unwrap();
-        
+
         // Create test event
         let event = SourceEvent {
             event_id: "test-event".to_string(),
@@ -1300,10 +1386,10 @@ mod tests {
             ]),
             correlation_id: None,
         };
-        
+
         let detection = engine.analyze_event(&event).await.unwrap();
         assert!(detection.is_some());
-        
+
         let detection = detection.unwrap();
         assert!(!detection.matched_indicators.is_empty());
         assert!(detection.risk_score > 0.0);
@@ -1313,7 +1399,7 @@ mod tests {
     fn test_risk_score_calculation() {
         let config = ThreatIntelConfig::default();
         let engine = ThreatIntelligenceEngine::new(config);
-        
+
         let indicator = ThreatIndicator {
             id: "test".to_string(),
             indicator_type: IndicatorType::IpAddress,
@@ -1342,7 +1428,7 @@ mod tests {
             related_indicators: Vec::new(),
             metadata: HashMap::new(),
         };
-        
+
         let risk_score = engine.calculate_indicator_risk_score(&indicator);
         assert!(risk_score > 50.0); // Critical + High confidence should be high risk
     }

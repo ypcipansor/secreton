@@ -12,8 +12,12 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn format<T: Serialize + std::fmt::Debug>(&self, data: &T) -> String {
         match self {
-            OutputFormat::Json => serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string()),
-            OutputFormat::Table => serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string()), // Simple fallback
+            OutputFormat::Json => {
+                serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string())
+            }
+            OutputFormat::Table => {
+                serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string())
+            } // Simple fallback
             OutputFormat::Text => format!("{:?}", data),
         }
     }

@@ -1,18 +1,18 @@
 //! Concrete implementations for abstract security interfaces
-//! 
+//!
 //! This module provides production-ready concrete implementations
 //! for all the abstract trait interfaces used throughout the security system
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, Duration};
+use super::{
+    advanced_mfa::{MfaRiskAssessment, MfaRiskAssessor},
+    audit::{AnomalyDetector, AuditError, AuditEvent, AuditStorage, SignedAuditEntry},
+    zero_trust::{AccessContext, RiskAssessmentEngine, RiskScore, ZeroTrustEntity, ZeroTrustError},
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use super::{
-    audit::{AuditStorage, AuditEvent, SignedAuditEntry, AnomalyDetector, AuditError},
-    zero_trust::{RiskAssessmentEngine, ZeroTrustEntity, AccessContext, RiskScore, ZeroTrustError},
-    advanced_mfa::{MfaRiskAssessor, MfaRiskAssessment}
-};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 /// Memory-based audit storage implementation
 /// Production systems should use persistent storage (PostgreSQL, etc.)
@@ -29,23 +29,32 @@ impl AuditStorage for MemoryAuditStorage {
         entries.push(entry.clone());
         Ok(())
     }
-    
-    async fn retrieve_entries(&self, start_sequence: u64, end_sequence: u64) -> Result<Vec<SignedAuditEntry>, AuditError> {
+
+    async fn retrieve_entries(
+        &self,
+        start_sequence: u64,
+        end_sequence: u64,
+    ) -> Result<Vec<SignedAuditEntry>, AuditError> {
         let entries = self.entries.lock().unwrap();
-        Ok(entries.iter()
+        Ok(entries
+            .iter()
             .filter(|e| e.sequence_number >= start_sequence && e.sequence_number <= end_sequence)
             .cloned()
             .collect())
     }
-    
+
     async fn get_latest_sequence(&self) -> Result<u64, AuditError> {
         let counter = self.sequence_counter.lock().unwrap();
         Ok(*counter)
     }
-    
-    async fn search_entries(&self, query: &super::audit::AuditQuery) -> Result<Vec<SignedAuditEntry>, AuditError> {
+
+    async fn search_entries(
+        &self,
+        query: &super::audit::AuditQuery,
+    ) -> Result<Vec<SignedAuditEntry>, AuditError> {
         let entries = self.entries.lock().unwrap();
-        Ok(entries.iter()
+        Ok(entries
+            .iter()
             .filter(|_e| {
                 // Simple filtering - production would be more sophisticated
                 // For now, return all entries
@@ -55,13 +64,21 @@ impl AuditStorage for MemoryAuditStorage {
             .cloned()
             .collect())
     }
-    
-    async fn verify_chain_integrity(&self, _start_sequence: u64, _end_sequence: u64) -> Result<bool, AuditError> {
+
+    async fn verify_chain_integrity(
+        &self,
+        _start_sequence: u64,
+        _end_sequence: u64,
+    ) -> Result<bool, AuditError> {
         // Mock implementation - would verify cryptographic chain
         Ok(true)
     }
-    
-    async fn archive_entries(&self, _before_sequence: u64, _archive_location: &str) -> Result<u64, AuditError> {
+
+    async fn archive_entries(
+        &self,
+        _before_sequence: u64,
+        _archive_location: &str,
+    ) -> Result<u64, AuditError> {
         // Mock implementation - would archive old entries
         Ok(0)
     }
@@ -76,12 +93,20 @@ pub struct SimpleAnomalyDetector {
 
 #[async_trait]
 impl AnomalyDetector for SimpleAnomalyDetector {
-    async fn detect_anomalies(&self, _event: &AuditEvent, _pattern: Option<&super::audit::BehavioralPattern>) -> Result<Vec<super::audit::AnomalyResult>, AuditError> {
+    async fn detect_anomalies(
+        &self,
+        _event: &AuditEvent,
+        _pattern: Option<&super::audit::BehavioralPattern>,
+    ) -> Result<Vec<super::audit::AnomalyResult>, AuditError> {
         // Simple implementation - no anomalies detected
         Ok(vec![])
     }
-    
-    async fn update_behavioral_pattern(&self, user_id: &str, _event: &AuditEvent) -> Result<super::audit::BehavioralPattern, AuditError> {
+
+    async fn update_behavioral_pattern(
+        &self,
+        user_id: &str,
+        _event: &AuditEvent,
+    ) -> Result<super::audit::BehavioralPattern, AuditError> {
         // Mock behavioral pattern update
         Ok(super::audit::BehavioralPattern {
             user_id: user_id.to_string(),
@@ -94,7 +119,7 @@ impl AnomalyDetector for SimpleAnomalyDetector {
             confidence_level: 0.8,
         })
     }
-    
+
     fn get_baseline_metrics(&self, user_id: &str) -> Option<HashMap<String, f64>> {
         let baselines = self.baseline_metrics.lock().unwrap();
         baselines.get(user_id).cloned()
@@ -107,12 +132,16 @@ pub struct ConcreteRiskAssessmentEngine;
 
 #[async_trait]
 impl RiskAssessmentEngine for ConcreteRiskAssessmentEngine {
-    async fn calculate_risk_score(&self, entity: &ZeroTrustEntity, _context: &AccessContext) -> Result<RiskScore, ZeroTrustError> {
+    async fn calculate_risk_score(
+        &self,
+        entity: &ZeroTrustEntity,
+        _context: &AccessContext,
+    ) -> Result<RiskScore, ZeroTrustError> {
         use super::zero_trust::{RiskComponent, TrustLevel};
         use chrono::Utc;
-        
+
         let mut components = HashMap::new();
-        
+
         // Simple risk calculation based on trust level
         let trust_risk = match entity.trust_level {
             TrustLevel::None => 90,
@@ -122,9 +151,9 @@ impl RiskAssessmentEngine for ConcreteRiskAssessmentEngine {
             TrustLevel::High => 15,
             TrustLevel::Maximum => 5,
         };
-        
+
         components.insert(RiskComponent::BehavioralAnomaly, trust_risk);
-        
+
         Ok(RiskScore {
             total_score: trust_risk,
             components,
@@ -132,13 +161,21 @@ impl RiskAssessmentEngine for ConcreteRiskAssessmentEngine {
             confidence: 0.85, // Mock confidence level
         })
     }
-    
-    async fn update_behavioral_profile(&self, _entity: &mut ZeroTrustEntity, _activity: &super::zero_trust::ActivityEvent) -> Result<(), ZeroTrustError> {
+
+    async fn update_behavioral_profile(
+        &self,
+        _entity: &mut ZeroTrustEntity,
+        _activity: &super::zero_trust::ActivityEvent,
+    ) -> Result<(), ZeroTrustError> {
         // Mock implementation - would update behavioral patterns
         Ok(())
     }
-    
-    async fn detect_anomalies(&self, _entity: &ZeroTrustEntity, _activity: &super::zero_trust::ActivityEvent) -> Result<Vec<super::zero_trust::AnomalyDetection>, ZeroTrustError> {
+
+    async fn detect_anomalies(
+        &self,
+        _entity: &ZeroTrustEntity,
+        _activity: &super::zero_trust::ActivityEvent,
+    ) -> Result<Vec<super::zero_trust::AnomalyDetection>, ZeroTrustError> {
         // Mock implementation - no anomalies detected
         Ok(vec![])
     }
@@ -150,36 +187,54 @@ pub struct ConcreteMfaRiskAssessor;
 
 #[async_trait]
 impl MfaRiskAssessor for ConcreteMfaRiskAssessor {
-    async fn assess_risk(&self, user_id: &str, context: &HashMap<String, String>) -> Result<MfaRiskAssessment, super::advanced_mfa::MfaError> {
-        use super::advanced_mfa::{RiskFactor};
+    async fn assess_risk(
+        &self,
+        user_id: &str,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaRiskAssessment, super::advanced_mfa::MfaError> {
+        use super::advanced_mfa::RiskFactor;
         use chrono::Utc;
-        
+
         // Simple risk assessment based on context
         let risk_score = match context.get("source_ip") {
             Some(ip) if ip.starts_with("192.168.") => 20, // Internal network
             Some(ip) if ip.starts_with("10.") => 25,      // Internal network
-            _ => 60, // External/unknown network
+            _ => 60,                                      // External/unknown network
         };
-        
+
         let mut risk_factors = HashMap::new();
-        if !context.get("source_ip").unwrap_or(&String::new()).starts_with("192.168.") {
+        if !context
+            .get("source_ip")
+            .unwrap_or(&String::new())
+            .starts_with("192.168.")
+        {
             risk_factors.insert(RiskFactor::UnknownLocation, 30);
         }
         if context.contains_key("failed_attempts") {
             risk_factors.insert(RiskFactor::FailedAttempts, 40);
         }
-        
+
         Ok(MfaRiskAssessment {
             user_id: user_id.to_string(),
-            session_id: format!("session_{}", SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()),
+            session_id: format!(
+                "session_{}",
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            ),
             risk_score: risk_score as u8,
             risk_factors,
             recommended_factors: vec!["totp".to_string()],
             assessment_time: Utc::now(),
         })
     }
-    
-    async fn update_behavioral_profile(&self, _user_id: &str, _auth_data: &super::advanced_mfa::MfaAuthResult) -> Result<(), super::advanced_mfa::MfaError> {
+
+    async fn update_behavioral_profile(
+        &self,
+        _user_id: &str,
+        _auth_data: &super::advanced_mfa::MfaAuthResult,
+    ) -> Result<(), super::advanced_mfa::MfaError> {
         // Mock implementation - would update behavioral patterns
         Ok(())
     }
@@ -200,12 +255,12 @@ impl SimpleAnomalyDetector {
 
 impl ConcreteRiskAssessmentEngine {
     pub fn new() -> Arc<dyn RiskAssessmentEngine> {
-        Arc::new(Self::default())
+        Arc::new(Self)
     }
 }
 
 impl ConcreteMfaRiskAssessor {
     pub fn new() -> Arc<dyn MfaRiskAssessor> {
-        Arc::new(Self::default())
+        Arc::new(Self)
     }
 }

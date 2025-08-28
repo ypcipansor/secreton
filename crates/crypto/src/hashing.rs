@@ -1,11 +1,11 @@
 //! Cryptographic hash functions and message authentication
 
 use crate::{AlgorithmId, CryptoError, CryptoResult};
-use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest as Sha2Digest};
-use sha3::Sha3_256;
-use blake3::{Hasher as Blake3Hasher};
+use blake3::Hasher as Blake3Hasher;
 use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as Sha2Digest, Sha256};
+use sha3::Sha3_256;
 
 /// Hash result container
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ impl HashResult {
             hex,
         }
     }
-    
+
     /// Verify if data matches this hash
     pub fn verify(&self, data: &[u8]) -> CryptoResult<bool> {
         let computed = compute_hash(self.algorithm, data)?;
@@ -47,7 +47,7 @@ impl HashFunction for Sha256Hash {
         hasher.update(data);
         Ok(hasher.finalize().to_vec())
     }
-    
+
     fn hash_multiple(&self, data_chunks: &[&[u8]]) -> CryptoResult<Vec<u8>> {
         let mut hasher = Sha256::new();
         for chunk in data_chunks {
@@ -66,7 +66,7 @@ impl HashFunction for Sha3_256Hash {
         hasher.update(data);
         Ok(hasher.finalize().to_vec())
     }
-    
+
     fn hash_multiple(&self, data_chunks: &[&[u8]]) -> CryptoResult<Vec<u8>> {
         let mut hasher = Sha3_256::new();
         for chunk in data_chunks {
@@ -85,7 +85,7 @@ impl HashFunction for Blake3Hash {
         hasher.update(data);
         Ok(hasher.finalize().as_bytes().to_vec())
     }
-    
+
     fn hash_multiple(&self, data_chunks: &[&[u8]]) -> CryptoResult<Vec<u8>> {
         let mut hasher = Blake3Hasher::new();
         for chunk in data_chunks {
@@ -116,12 +116,15 @@ pub fn compute_hash(algorithm: AlgorithmId, data: &[u8]) -> CryptoResult<HashRes
             });
         }
     };
-    
+
     Ok(HashResult::new(algorithm, hash))
 }
 
 /// Compute hash for multiple data chunks
-pub fn compute_hash_multiple(algorithm: AlgorithmId, data_chunks: &[&[u8]]) -> CryptoResult<HashResult> {
+pub fn compute_hash_multiple(
+    algorithm: AlgorithmId,
+    data_chunks: &[&[u8]],
+) -> CryptoResult<HashResult> {
     let hash = match algorithm {
         AlgorithmId::Sha256 => {
             let hasher = Sha256Hash;
@@ -141,7 +144,7 @@ pub fn compute_hash_multiple(algorithm: AlgorithmId, data_chunks: &[&[u8]]) -> C
             });
         }
     };
-    
+
     Ok(HashResult::new(algorithm, hash))
 }
 
@@ -150,11 +153,10 @@ pub type HmacSha256 = Hmac<Sha256>;
 
 /// Compute HMAC-SHA256
 pub fn compute_hmac_sha256(key: &[u8], data: &[u8]) -> CryptoResult<Vec<u8>> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|e| CryptoError::HashFailed {
-            reason: format!("HMAC key initialization failed: {}", e),
-        })?;
-    
+    let mut mac = HmacSha256::new_from_slice(key).map_err(|e| CryptoError::HashFailed {
+        reason: format!("HMAC key initialization failed: {}", e),
+    })?;
+
     mac.update(data);
     Ok(mac.finalize().into_bytes().to_vec())
 }
@@ -168,10 +170,13 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], expected_mac: &[u8]) -> Crypt
 /// Password hashing utilities
 pub mod password {
     use super::*;
-    use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::{SaltString, rand_core::OsRng}};
-    use pbkdf2::{pbkdf2_hmac};
+    use argon2::{
+        password_hash::{rand_core::OsRng, SaltString},
+        Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    };
+    use pbkdf2::pbkdf2_hmac;
     use sha2::Sha256;
-    
+
     /// Password hash result
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct PasswordHashResult {
@@ -180,18 +185,18 @@ pub mod password {
         pub salt: Vec<u8>,
         pub iterations: u32,
     }
-    
+
     /// Hash password with Argon2id
     pub fn hash_password_argon2(password: &str) -> CryptoResult<PasswordHashResult> {
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        
+
         let password_hash = argon2
             .hash_password(password.as_bytes(), &salt)
             .map_err(|e| CryptoError::HashFailed {
                 reason: format!("Argon2 password hashing failed: {}", e),
             })?;
-        
+
         Ok(PasswordHashResult {
             algorithm: AlgorithmId::Argon2id,
             hash: password_hash.to_string(),
@@ -199,26 +204,29 @@ pub mod password {
             iterations: 3, // Default Argon2 iterations
         })
     }
-    
+
     /// Verify password with Argon2id
     pub fn verify_password_argon2(password: &str, hash: &str) -> CryptoResult<bool> {
-        let parsed_hash = PasswordHash::new(hash)
-            .map_err(|e| CryptoError::HashFailed {
-                reason: format!("Invalid password hash format: {}", e),
-            })?;
-        
+        let parsed_hash = PasswordHash::new(hash).map_err(|e| CryptoError::HashFailed {
+            reason: format!("Invalid password hash format: {}", e),
+        })?;
+
         let argon2 = Argon2::default();
         match argon2.verify_password(password.as_bytes(), &parsed_hash) {
             Ok(()) => Ok(true),
             Err(_) => Ok(false),
         }
     }
-    
+
     /// Hash password with PBKDF2
-    pub fn hash_password_pbkdf2(password: &str, salt: &[u8], iterations: u32) -> CryptoResult<Vec<u8>> {
+    pub fn hash_password_pbkdf2(
+        password: &str,
+        salt: &[u8],
+        iterations: u32,
+    ) -> CryptoResult<Vec<u8>> {
         const KEY_LENGTH: usize = 32;
         let mut key = vec![0u8; KEY_LENGTH];
-        
+
         pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, iterations, &mut key);
         Ok(key)
     }
@@ -227,73 +235,73 @@ pub mod password {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_sha256_hash() {
         let data = b"Hello, Brankas!";
         let result = compute_hash(AlgorithmId::Sha256, data).unwrap();
-        
+
         assert_eq!(result.algorithm, AlgorithmId::Sha256);
         assert_eq!(result.hash.len(), 32); // SHA-256 produces 32-byte hash
         assert!(!result.hex.is_empty());
-        
+
         // Verify hash matches
         assert!(result.verify(data).unwrap());
         assert!(!result.verify(b"Different data").unwrap());
     }
-    
+
     #[test]
     fn test_sha3_256_hash() {
         let data = b"SHA3 test data";
         let result = compute_hash(AlgorithmId::Sha3_256, data).unwrap();
-        
+
         assert_eq!(result.algorithm, AlgorithmId::Sha3_256);
         assert_eq!(result.hash.len(), 32);
         assert!(result.verify(data).unwrap());
     }
-    
+
     #[test]
     fn test_blake3_hash() {
         let data = b"BLAKE3 test data";
         let result = compute_hash(AlgorithmId::Blake3, data).unwrap();
-        
+
         assert_eq!(result.algorithm, AlgorithmId::Blake3);
         assert_eq!(result.hash.len(), 32);
         assert!(result.verify(data).unwrap());
     }
-    
+
     #[test]
     fn test_hmac_sha256() {
         let key = b"secret_key";
         let data = b"message to authenticate";
-        
+
         let mac1 = compute_hmac_sha256(key, data).unwrap();
         let mac2 = compute_hmac_sha256(key, data).unwrap();
-        
+
         assert_eq!(mac1, mac2); // Same input should produce same MAC
         assert!(verify_hmac_sha256(key, data, &mac1).unwrap());
         assert!(!verify_hmac_sha256(b"wrong_key", data, &mac1).unwrap());
     }
-    
+
     #[test]
     fn test_multiple_chunks_hash() {
         let chunks = [b"Hello, ".as_slice(), b"World!".as_slice()];
         let combined = b"Hello, World!";
-        
+
         let result1 = compute_hash_multiple(AlgorithmId::Sha256, &chunks).unwrap();
         let result2 = compute_hash(AlgorithmId::Sha256, combined).unwrap();
-        
+
         assert_eq!(result1.hash, result2.hash);
     }
-    
+
     #[test]
     fn test_password_hashing_argon2() {
         let password = "secure_password_123";
         let hash_result = password::hash_password_argon2(password).unwrap();
-        
+
         assert_eq!(hash_result.algorithm, AlgorithmId::Argon2id);
         assert!(!hash_result.hash.is_empty());
-        
+
         // Verify password
         assert!(password::verify_password_argon2(password, &hash_result.hash).unwrap());
         assert!(!password::verify_password_argon2("wrong_password", &hash_result.hash).unwrap());

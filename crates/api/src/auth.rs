@@ -3,30 +3,32 @@
 //! Provides JWT-based authentication, role-based access control,
 //! and integration with external identity providers.
 
-use serde::{Deserialize, Serialize};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation, Algorithm};
 use axum::{
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
-use tracing::{warn, error};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::{
+    decode, encode, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation,
+};
+use serde::{Deserialize, Serialize};
+use tracing::{error, warn};
 use uuid::Uuid;
 
 /// JWT claims structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,          // Subject (user ID)
-    pub name: String,         // User name
-    pub email: String,        // User email
-    pub roles: Vec<String>,   // User roles
+    pub sub: String,              // Subject (user ID)
+    pub name: String,             // User name
+    pub email: String,            // User email
+    pub roles: Vec<String>,       // User roles
     pub permissions: Vec<String>, // Specific permissions
-    pub exp: usize,           // Expiration time
-    pub iat: usize,           // Issued at
-    pub iss: String,          // Issuer
-    pub aud: String,          // Audience
-    pub jti: String,          // JWT ID
+    pub exp: usize,               // Expiration time
+    pub iat: usize,               // Issued at
+    pub iss: String,              // Issuer
+    pub aud: String,              // Audience
+    pub jti: String,              // JWT ID
 }
 
 /// Authentication configuration
@@ -73,7 +75,7 @@ impl UserRole {
             UserRole::ReadOnly => "read-only".to_string(),
         }
     }
-    
+
     pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(UserRole::Admin),
@@ -95,18 +97,18 @@ pub enum Permission {
     RotateKey,
     ReadKey,
     ListKeys,
-    
+
     // Cryptographic operation permissions
     Encrypt,
     Decrypt,
     Sign,
     Verify,
-    
+
     // Utility permissions
     GenerateRandom,
     HashData,
     DeriveKey,
-    
+
     // Administrative permissions
     ViewMetrics,
     ConfigureSystem,
@@ -149,22 +151,28 @@ impl AuthService {
     pub fn new(config: AuthConfig) -> Self {
         let encoding_key = EncodingKey::from_secret(config.jwt_secret.as_bytes());
         let decoding_key = DecodingKey::from_secret(config.jwt_secret.as_bytes());
-        
+
         Self {
             config,
             encoding_key,
             decoding_key,
         }
     }
-    
+
     /// Generate JWT token for a user
-    pub fn generate_token(&self, user_id: &str, name: &str, email: &str, roles: Vec<String>) -> Result<String, AuthError> {
+    pub fn generate_token(
+        &self,
+        user_id: &str,
+        name: &str,
+        email: &str,
+        roles: Vec<String>,
+    ) -> Result<String, AuthError> {
         let now = Utc::now();
         let exp = now + Duration::hours(self.config.jwt_expiration_hours);
-        
+
         // Generate permissions based on roles
         let permissions = self.generate_permissions_from_roles(&roles);
-        
+
         let claims = Claims {
             sub: user_id.to_string(),
             name: name.to_string(),
@@ -177,44 +185,44 @@ impl AuthService {
             aud: self.config.audience.clone(),
             jti: Uuid::new_v4().to_string(),
         };
-        
+
         encode(&Header::default(), &claims, &self.encoding_key)
             .map_err(|e| AuthError::TokenGeneration(e.to_string()))
     }
-    
+
     /// Validate and decode JWT token
     pub fn validate_token(&self, token: &str) -> Result<TokenData<Claims>, AuthError> {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[&self.config.issuer]);
         validation.set_audience(&[&self.config.audience]);
-        
+
         decode::<Claims>(token, &self.decoding_key, &validation)
             .map_err(|e| AuthError::TokenValidation(e.to_string()))
     }
-    
+
     /// Check if user has required permission
     pub fn check_permission(&self, claims: &Claims, required_permission: Permission) -> bool {
         let permission_str = required_permission.as_string();
-        
+
         // Check if user has the specific permission
         if claims.permissions.contains(&permission_str) {
             return true;
         }
-        
+
         // Check if user has admin role (admins have all permissions)
         for admin_role in &self.config.admin_roles {
             if claims.roles.contains(admin_role) {
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     /// Generate permissions based on user roles
     fn generate_permissions_from_roles(&self, roles: &[String]) -> Vec<String> {
         let mut permissions = Vec::new();
-        
+
         for role in roles {
             match UserRole::from_string(role) {
                 Some(UserRole::Admin) => {
@@ -237,7 +245,7 @@ impl AuthService {
                         Permission::ManageUsers.as_string(),
                         Permission::AccessAuditLogs.as_string(),
                     ]);
-                },
+                }
                 Some(UserRole::VaultAdmin) => {
                     permissions.extend(vec![
                         Permission::CreateKey.as_string(),
@@ -254,7 +262,7 @@ impl AuthService {
                         Permission::ViewMetrics.as_string(),
                         Permission::AccessAuditLogs.as_string(),
                     ]);
-                },
+                }
                 Some(UserRole::KeyManager) => {
                     permissions.extend(vec![
                         Permission::CreateKey.as_string(),
@@ -263,7 +271,7 @@ impl AuthService {
                         Permission::ListKeys.as_string(),
                         Permission::ViewMetrics.as_string(),
                     ]);
-                },
+                }
                 Some(UserRole::CryptoUser) => {
                     permissions.extend(vec![
                         Permission::ReadKey.as_string(),
@@ -276,20 +284,20 @@ impl AuthService {
                         Permission::HashData.as_string(),
                         Permission::DeriveKey.as_string(),
                     ]);
-                },
+                }
                 Some(UserRole::ReadOnly) => {
                     permissions.extend(vec![
                         Permission::ReadKey.as_string(),
                         Permission::ListKeys.as_string(),
                         Permission::ViewMetrics.as_string(),
                     ]);
-                },
+                }
                 None => {
                     warn!("Unknown role: {}", role);
                 }
             }
         }
-        
+
         permissions.sort();
         permissions.dedup();
         permissions
@@ -299,11 +307,9 @@ impl AuthService {
 /// Extract bearer token from Authorization header
 pub fn extract_bearer_token(auth_header: &HeaderValue) -> Option<String> {
     let auth_str = auth_header.to_str().ok()?;
-    if auth_str.starts_with("Bearer ") {
-        Some(auth_str[7..].to_string())
-    } else {
-        None
-    }
+    auth_str
+        .strip_prefix("Bearer ")
+        .map(|stripped| stripped.to_string())
 }
 
 /// Authentication errors
@@ -311,22 +317,22 @@ pub fn extract_bearer_token(auth_header: &HeaderValue) -> Option<String> {
 pub enum AuthError {
     #[error("Token generation failed: {0}")]
     TokenGeneration(String),
-    
+
     #[error("Token validation failed: {0}")]
     TokenValidation(String),
-    
+
     #[error("Missing authorization header")]
     MissingAuthHeader,
-    
+
     #[error("Invalid authorization header format")]
     InvalidAuthHeader,
-    
+
     #[error("Permission denied")]
     PermissionDenied,
-    
+
     #[error("User not found")]
     UserNotFound,
-    
+
     #[error("Invalid credentials")]
     InvalidCredentials,
 }
@@ -336,21 +342,19 @@ impl IntoResponse for AuthError {
         let (status, message) = match self {
             AuthError::MissingAuthHeader | AuthError::InvalidAuthHeader => {
                 (StatusCode::UNAUTHORIZED, self.to_string())
-            },
-            AuthError::PermissionDenied => {
-                (StatusCode::FORBIDDEN, self.to_string())
-            },
+            }
+            AuthError::PermissionDenied => (StatusCode::FORBIDDEN, self.to_string()),
             AuthError::UserNotFound | AuthError::InvalidCredentials => {
                 (StatusCode::UNAUTHORIZED, self.to_string())
-            },
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
-        
+
         let body = Json(serde_json::json!({
             "error": message,
             "status": status.as_u16()
         }));
-        
+
         (status, body).into_response()
     }
 }
@@ -383,32 +387,34 @@ pub struct UserInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_token_generation_and_validation() {
         let config = AuthConfig::default();
         let auth_service = AuthService::new(config);
-        
-        let token = auth_service.generate_token(
-            "user123",
-            "Test User",
-            "test@example.com",
-            vec!["crypto-user".to_string()]
-        ).unwrap();
-        
+
+        let token = auth_service
+            .generate_token(
+                "user123",
+                "Test User",
+                "test@example.com",
+                vec!["crypto-user".to_string()],
+            )
+            .unwrap();
+
         let token_data = auth_service.validate_token(&token).unwrap();
-        
+
         assert_eq!(token_data.claims.sub, "user123");
         assert_eq!(token_data.claims.name, "Test User");
         assert_eq!(token_data.claims.email, "test@example.com");
         assert!(token_data.claims.roles.contains(&"crypto-user".to_string()));
     }
-    
+
     #[test]
     fn test_permission_checking() {
         let config = AuthConfig::default();
         let auth_service = AuthService::new(config);
-        
+
         let claims = Claims {
             sub: "user123".to_string(),
             name: "Test User".to_string(),
@@ -424,7 +430,7 @@ mod tests {
             aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
         };
-        
+
         assert!(auth_service.check_permission(&claims, Permission::Encrypt));
         assert!(auth_service.check_permission(&claims, Permission::Decrypt));
         assert!(!auth_service.check_permission(&claims, Permission::DeleteKey));
