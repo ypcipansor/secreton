@@ -22,8 +22,8 @@ tokio.workspace = true
 async-trait.workspace = true
 futures = "0.3"
 
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "migrate", "chrono", "json"] }
+# Database - Using explicit features for PostgreSQL with SQLx 0.8.1
+sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
 
 # Security dependencies for advanced features
 rand = "0.8"
@@ -50,7 +50,6 @@ scrypt = "0.11"
 jsonwebtoken = "9.2"
 x25519-dalek = "2.0"
 ed25519-dalek = "2.0"
-rsa = "0.9"
 p256 = "0.13"
 k256 = "0.13"
 aes = "0.8"
@@ -58,6 +57,12 @@ chacha20poly1305 = "0.10"
 
 # HTTP API
 warp = "0.3"
+
+# Secret Versioning
+secret_versioning = { path = "./secret_versioning" }
+granular_revocation = { path = "./granular_revocation" }
+audit_log = { path = "./audit_log" }
+flate2 = "1.1.2"
 
 [features]
 default = ["postgres", "redis"]

@@ -52,7 +52,7 @@ impl KVEngine {
         data: HashMap<String, String>,
     ) -> CryptoResult<u32> {
         let mut secrets = self.secrets.write().unwrap();
-        let path_secrets = secrets.entry(path.to_string()).or_insert_with(HashMap::new);
+        let path_secrets = secrets.entry(path.to_string()).or_default();
         
         // Get the next version number
         let version = if path_secrets.is_empty() {

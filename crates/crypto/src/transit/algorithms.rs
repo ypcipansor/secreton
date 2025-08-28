@@ -1,4 +1,8 @@
 //! Cryptographic algorithms implementation using RustCrypto
+//! 
+//! This module provides implementations of various cryptographic algorithms
+//! using the RustCrypto ecosystem, with a focus on modern, secure algorithms
+//! like Ed25519 for signatures and ChaCha20-Poly1305 for encryption.
 
 use crate::error::{CryptoResult, CryptoError};
 use serde::{Serialize, Deserialize};
@@ -70,6 +74,27 @@ impl fmt::Display for KdfAlgorithm {
             KdfAlgorithm::Scrypt => write!(f, "scrypt"),
             KdfAlgorithm::HkdfSha256 => write!(f, "hkdf-sha256"),
             KdfAlgorithm::HkdfSha512 => write!(f, "hkdf-sha512"),
+        }
+    }
+}
+
+/// Supported signature algorithms
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureAlgorithm {
+    /// Ed25519 with SHA-512 (recommended)
+    Ed25519,
+    /// ECDSA with P-256 and SHA-256
+    EcdsaP256,
+    /// ECDSA with secp256k1 and SHA-256
+    EcdsaSecp256k1,
+}
+
+impl fmt::Display for SignatureAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SignatureAlgorithm::Ed25519 => write!(f, "ed25519"),
+            SignatureAlgorithm::EcdsaP256 => write!(f, "ecdsa-p256-sha256"),
+            SignatureAlgorithm::EcdsaSecp256k1 => write!(f, "ecdsa-secp256k1-sha256"),
         }
     }
 }
@@ -230,6 +255,7 @@ pub struct AlgorithmRegistry {
     supported_ciphers: Vec<String>,
     supported_hashes: Vec<HashAlgorithm>,
     supported_kdfs: Vec<KdfAlgorithm>,
+    supported_signatures: Vec<SignatureAlgorithm>,
 }
 
 impl AlgorithmRegistry {
@@ -237,28 +263,31 @@ impl AlgorithmRegistry {
     pub fn new() -> Self {
         Self {
             supported_ciphers: vec![
-                "aes-256-gcm".to_string(),
-                "aes-128-gcm".to_string(),
-                "chacha20-poly1305".to_string(),
                 "xchacha20-poly1305".to_string(),
-                "rsa-oaep".to_string(),
+                "chacha20-poly1305".to_string(),
+                "aes-256-gcm".to_string(),
             ],
             supported_hashes: vec![
-                HashAlgorithm::Sha256,
-                HashAlgorithm::Sha384,
-                HashAlgorithm::Sha512,
-                HashAlgorithm::Sha3_256,
-                HashAlgorithm::Sha3_384,
-                HashAlgorithm::Sha3_512,
                 HashAlgorithm::Blake3,
+                HashAlgorithm::Sha3_512,
+                HashAlgorithm::Sha3_384,
+                HashAlgorithm::Sha3_256,
+                HashAlgorithm::Sha512,
+                HashAlgorithm::Sha384,
+                HashAlgorithm::Sha256,
             ],
             supported_kdfs: vec![
-                KdfAlgorithm::Pbkdf2Sha256,
-                KdfAlgorithm::Pbkdf2Sha512,
                 KdfAlgorithm::Argon2id,
                 KdfAlgorithm::Scrypt,
+                KdfAlgorithm::Pbkdf2Sha512,
+                KdfAlgorithm::Pbkdf2Sha256,
                 KdfAlgorithm::HkdfSha256,
                 KdfAlgorithm::HkdfSha512,
+            ],
+            supported_signatures: vec![
+                SignatureAlgorithm::Ed25519,
+                SignatureAlgorithm::EcdsaP256,
+                SignatureAlgorithm::EcdsaSecp256k1,
             ],
         }
     }

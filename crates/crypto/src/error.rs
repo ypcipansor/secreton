@@ -128,23 +128,23 @@ pub type CryptoResult<T> = Result<T, CryptoError>;
 impl CryptoError {
     /// Check if error is recoverable (temporary)
     pub fn is_recoverable(&self) -> bool {
-        match self {
+        matches!(
+            self,
             CryptoError::NetworkError(_) |
             CryptoError::OperationTimeout |
             CryptoError::ResourceExhausted(_) |
-            CryptoError::ConcurrencyLimitExceeded => true,
-            _ => false,
-        }
+            CryptoError::ConcurrencyLimitExceeded
+        )
     }
     
     /// Check if error should be retried
     pub fn should_retry(&self) -> bool {
-        match self {
+        matches!(
+            self,
             CryptoError::OperationTimeout |
             CryptoError::NetworkError(_) |
-            CryptoError::ConcurrencyLimitExceeded => true,
-            _ => false,
-        }
+            CryptoError::ConcurrencyLimitExceeded
+        )
     }
     
     /// Get error severity level

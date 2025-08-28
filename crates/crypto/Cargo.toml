@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Cryptographic primitives and quantum-safe algorithms for Secreton"
+description = "Cryptographic primitives and quantum-safe algorithms for Secreton using Ed25519 for signatures"
 keywords = ["cryptography", "quantum-safe", "post-quantum"]
 
 [dependencies]
@@ -40,7 +40,6 @@ p384.workspace = true
 k256.workspace = true
 x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
-rsa.workspace = true
 
 # Cryptographic traits and utilities
 digest.workspace = true

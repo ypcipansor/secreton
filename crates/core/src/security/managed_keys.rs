@@ -9,12 +9,39 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::fmt;
 use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
-use uuid::Uuid;
+use async_trait::async_trait;
+use thiserror::Error;
 
-use crate::error::SecretonResult;
-use crate::security::fips_compliance::{FipsAlgorithm, FipsLevel};
+use crate::error::CoreError;
+use crate::security::fips_compliance::FipsLevel;
+
+/// Custom error type for managed keys operations
+#[derive(Debug, Error)]
+pub enum ManagedKeysError {
+    #[error("Key not found: {0}")]
+    KeyNotFound(String),
+    
+    #[error("Provider error: {0}")]
+    ProviderError(String),
+    
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+    
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+    
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    
+    #[error(transparent)]
+    CoreError(#[from] CoreError),
+}
+
+/// Type alias for managed keys operations result
+pub type Result<T> = std::result::Result<T, ManagedKeysError>;
 
 /// Managed Keys Engine - Enterprise-grade key management
 pub struct ManagedKeysEngine {
@@ -46,48 +73,74 @@ pub struct KeyProviderWithConfig {
 }
 
 /// Advanced Key Provider Trait
-pub trait KeyProvider: Send + Sync {
+#[async_trait]
+pub trait KeyProvider: Send + Sync + fmt::Debug + 'static {
     /// Initialize the key provider
-    async fn initialize(&mut self) -> SecretonResult<()>;
+    async fn initialize(&mut self) -> Result<()>;
     
-    /// Generate a new managed key
-    async fn generate_key(&self, spec: &KeyGenerationSpec) -> SecretonResult<GeneratedKey>;
+    /// Generate a new key based on the provided specification
+    async fn generate_key(&self, spec: &KeyGenerationSpec) -> Result<GeneratedKey>;
     
-    /// Import an existing key
-    async fn import_key(&self, spec: &KeyImportSpec) -> SecretonResult<ImportedKey>;
+    /// Import a key using the provided import specification
+    async fn import_key(&self, spec: &KeyImportSpec) -> Result<ImportedKey>;
     
-    /// Rotate a managed key
-    async fn rotate_key(&self, key_id: &ManagedKeyId) -> SecretonResult<RotatedKey>;
+    /// Rotate an existing key
+    async fn rotate_key(&self, key_id: &ManagedKeyId) -> Result<RotatedKey>;
     
-    /// Delete a managed key (secure destruction)
-    async fn delete_key(&self, key_id: &ManagedKeyId) -> SecretonResult<()>;
+    /// Delete a key by its ID
+    async fn delete_key(&self, key_id: &ManagedKeyId) -> Result<()>;
     
-    /// Get key metadata
-    async fn get_key_metadata(&self, key_id: &ManagedKeyId) -> SecretonResult<KeyMetadata>;
+    /// Get metadata for a specific key
+    async fn get_key_metadata(&self, key_id: &ManagedKeyId) -> Result<KeyMetadata>;
     
-    /// Sign data with managed key
-    async fn sign(&self, key_id: &ManagedKeyId, data: &[u8], algorithm: SignatureAlgorithm) -> SecretonResult<Signature>;
+    /// Sign data using the specified key and algorithm
+    async fn sign(
+        &self, 
+        key_id: &ManagedKeyId, 
+        data: &[u8], 
+        algorithm: SignatureAlgorithm
+    ) -> Result<Signature>;
     
-    /// Verify signature
-    async fn verify(&self, key_id: &ManagedKeyId, data: &[u8], signature: &Signature) -> SecretonResult<bool>;
+    /// Verify a signature for the given data
+    async fn verify(
+        &self, 
+        key_id: &ManagedKeyId, 
+        data: &[u8], 
+        signature: &Signature
+    ) -> Result<bool>;
     
-    /// Encrypt data with managed key
-    async fn encrypt(&self, key_id: &ManagedKeyId, plaintext: &[u8], algorithm: EncryptionAlgorithm) -> SecretonResult<EncryptedData>;
+    /// Encrypt data using the specified key and algorithm
+    async fn encrypt(
+        &self, 
+        key_id: &ManagedKeyId, 
+        plaintext: &[u8], 
+        algorithm: EncryptionAlgorithm
+    ) -> Result<EncryptedData>;
     
-    /// Decrypt data with managed key
-    async fn decrypt(&self, key_id: &ManagedKeyId, ciphertext: &EncryptedData) -> SecretonResult<Vec<u8>>;
+    /// Decrypt data using the specified key
+    async fn decrypt(
+        &self, 
+        key_id: &ManagedKeyId, 
+        ciphertext: &EncryptedData
+    ) -> Result<Vec<u8>>;
     
-    /// Backup key (if supported)
-    async fn backup_key(&self, key_id: &ManagedKeyId) -> SecretonResult<KeyBackup>;
+    /// Create a backup of a key
+    async fn backup_key(&self, key_id: &ManagedKeyId) -> Result<KeyBackup>;
     
-    /// Restore key from backup
-    async fn restore_key(&self, backup: &KeyBackup) -> SecretonResult<ManagedKeyId>;
+    /// Restore a key from a backup
+    async fn restore_key(&self, backup: &KeyBackup) -> Result<ManagedKeyId>;
     
-    /// Health check
-    async fn health_check(&self) -> SecretonResult<KeyProviderHealth>;
+    /// Check the health status of the key provider
+    async fn health_check(&self) -> Result<KeyProviderHealth>;
     
-    /// Provider information
+    /// Get information about the key provider
     fn provider_info(&self) -> KeyProviderInfo;
+    
+    /// Create a boxed clone of the key provider
+    fn box_clone(&self) -> Box<dyn KeyProvider>;
+    
+    /// Check if the key provider supports a specific key type
+    fn supports_key_type(&self, key_type: &KeyType) -> bool;
 }
 
 /// Managed Key ID
@@ -122,21 +175,21 @@ pub struct ManagedKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyType {
     // Asymmetric Keys
-    RSA2048,
-    RSA3072,
-    RSA4096,
-    ECC_P256,
-    ECC_P384,
-    ECC_P521,
+    Rsa2048,
+    Rsa3072,
+    Rsa4096,
+    EcdsaP256,
+    EcdsaP384,
+    EcdsaP521,
     Ed25519,
     Ed448,
-    
+    X25519,
+    X448,
     // Symmetric Keys
-    AES128,
-    AES192,
-    AES256,
+    Aes128,
+    Aes192,
+    Aes256,
     ChaCha20,
-    
     // Post-Quantum Keys
     Kyber512,
     Kyber768,
@@ -144,43 +197,38 @@ pub enum KeyType {
     Dilithium2,
     Dilithium3,
     Dilithium5,
-    FrodoKEM640,
-    FrodoKEM976,
-    FrodoKEM1344,
-    
+    FrodoKem640,
+    FrodoKem976,
+    FrodoKem1344,
     // Hybrid Keys
-    RSA_Kyber,
-    ECDSA_Dilithium,
-    
+    RsaKyber,
+    EcdsaDilithium,
     // Special Purpose Keys
-    HMAC_SHA256,
-    HMAC_SHA512,
+    HmacSha256,
+    HmacSha512,
     KeyWrap,
     DataEncryption,
-    
     // Custom key types
     Custom(String),
 }
 
 /// Key States
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyState {
     /// Key is being generated
     Generating,
     /// Key is active and can be used
     Active,
-    /// Key is scheduled for rotation
-    RotationPending,
     /// Key is being rotated
     Rotating,
-    /// Key has been rotated but kept for decryption
-    Deprecated,
-    /// Key is suspended (temporarily inactive)
+    /// Key is suspended and cannot be used
     Suspended,
     /// Key is being destroyed
     Destroying,
     /// Key has been destroyed
     Destroyed,
+    /// Key is compromised
+    Compromised,
     /// Key is in error state
     Error(String),
 }
@@ -209,40 +257,44 @@ pub struct KeyMetadata {
 }
 
 /// Key Algorithms
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyAlgorithm {
     // Signature algorithms
-    RSA_PSS_SHA256,
-    RSA_PSS_SHA384,
-    RSA_PSS_SHA512,
-    ECDSA_SHA256,
-    ECDSA_SHA384,
-    ECDSA_SHA512,
-    EdDSA,
-    
+    RsaPssSha256,
+    RsaPssSha384,
+    RsaPssSha512,
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
+    Ed25519,
+    Ed448,
     // Encryption algorithms
-    RSA_OAEP_SHA256,
-    RSA_OAEP_SHA384,
-    RSA_OAEP_SHA512,
-    ECIES_P256,
-    ECIES_P384,
-    ECIES_P521,
-    
-    // Symmetric algorithms
-    AES_GCM,
-    AES_CBC,
-    AES_CTR,
-    ChaCha20_Poly1305,
-    
+    RsaOaepSha256,
+    RsaOaepSha384,
+    RsaOaepSha512,
+    EcdhEs,
+    EcdhEsA128Kw,
+    EcdhEsA192Kw,
+    EcdhEsA256Kw,
+    // Key wrapping
+    A128Kw,
+    A192Kw,
+    A256Kw,
+    A128GcmKw,
+    A192GcmKw,
+    A256GcmKw,
+    // Key agreement
+    EcdhEsHkdf256,
+    EcdhEsHkdf384,
+    EcdhEsHkdf512,
     // Post-quantum algorithms
-    Kyber_KEM,
-    Dilithium_Signature,
-    FrodoKEM,
-    
+    KyberKem,
+    DilithiumSignature,
+    FrodoKem,
     // HMAC algorithms
-    HMAC_SHA256,
-    HMAC_SHA384,
-    HMAC_SHA512,
+    HmacSha256,
+    HmacSha384,
+    HmacSha512,
 }
 
 /// Key Purposes
@@ -252,18 +304,18 @@ pub enum KeyPurpose {
     Signing,
     /// Data encryption
     Encryption,
-    /// Key wrapping/unwrapping
-    KeyWrap,
-    /// Message authentication
-    MAC,
-    /// Key derivation
-    KeyDerivation,
+    /// Key wrapping
+    KeyWrapping,
+    /// Key agreement
+    KeyAgreement,
     /// Certificate signing
     CertificateSigning,
-    /// TLS/SSL operations
-    TLS,
     /// Code signing
     CodeSigning,
+    /// TLS client authentication
+    TlsClientAuth,
+    /// TLS server authentication
+    TlsServerAuth,
     /// Document signing
     DocumentSigning,
     /// Multi-purpose key
@@ -283,8 +335,9 @@ pub enum KeyOperation {
     UnwrapKey,
     DeriveKey,
     DeriveBits,
-    Export,
-    Import,
+    GenerateKey,
+    RotateKey,
+    DestroyKey,
 }
 
 /// Key Lifecycle Information
@@ -314,18 +367,17 @@ pub enum KeyPolicy {
     /// Usage limit policy
     UsageLimit { max_uses: u64 },
     /// Time-based access policy
-    TimeBasedAccess { 
-        start: chrono::DateTime<chrono::Utc>, 
-        end: chrono::DateTime<chrono::Utc> 
-    },
+    TimeBasedAccess { not_before: String, not_after: String },
     /// IP-based access policy
-    IPRestriction { allowed_ips: Vec<String> },
-    /// Geographic restriction
-    GeographicRestriction { allowed_regions: Vec<String> },
+    IpBasedAccess { allowed_ips: Vec<String> },
+    /// Certificate-based access policy
+    CertificateBasedAccess { allowed_issuers: Vec<String> },
+    /// MFA requirement policy
+    MfaRequired { required: bool },
     /// Client certificate requirement
     ClientCertRequired,
     /// Multi-factor authentication requirement
-    MFARequired,
+    MfaRequired,
     /// Approval workflow requirement
     ApprovalRequired { approvers: Vec<String> },
     /// Custom policy
@@ -359,11 +411,13 @@ pub struct LifecyclePolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ComplianceRequirement {
     /// FIPS 140-2/3 compliance
-    FIPS(FipsLevel),
+    Fips(FipsLevel),
     /// Common Criteria certification
-    CommonCriteria(String),
-    /// NIST standards compliance
-    NIST(String),
+    CommonCriteria { level: u8 },
+    /// NIST SP 800-131A compliance
+    NistSp800131A,
+    /// NIST SP 800-56B compliance
+    NistSp80056B,
     /// Industry-specific requirements
     Industry(String),
     /// Custom compliance requirement
@@ -422,16 +476,18 @@ pub struct KeyImportSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KeyImportFormat {
     /// PKCS#8 format
-    PKCS8,
+    Pkcs8,
     /// PKCS#1 format
-    PKCS1,
-    /// SEC1 format
-    SEC1,
-    /// Raw key bytes
+    Pkcs1,
+    /// JWK format
+    Jwk,
+    /// Raw format
     Raw,
-    /// JSON Web Key
-    JWK,
-    /// Wrapped key
+    /// PEM format
+    Pem,
+    /// DER format
+    Der,
+    /// Wrapped format
     Wrapped,
     /// Custom format
     Custom(String),
@@ -475,13 +531,14 @@ pub struct RotatedKey {
 /// Signature Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureAlgorithm {
-    RSA_PSS_SHA256,
-    RSA_PSS_SHA384,
-    RSA_PSS_SHA512,
-    ECDSA_SHA256,
-    ECDSA_SHA384,
-    ECDSA_SHA512,
-    EdDSA,
+    RsaPssSha256,
+    RsaPssSha384,
+    RsaPssSha512,
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
+    Ed25519,
+    Ed448,
     Dilithium2,
     Dilithium3,
     Dilithium5,
@@ -490,12 +547,15 @@ pub enum SignatureAlgorithm {
 /// Encryption Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    RSA_OAEP_SHA256,
-    RSA_OAEP_SHA384,
-    RSA_OAEP_SHA512,
-    AES_GCM,
-    AES_CBC,
-    ChaCha20_Poly1305,
+    RsaOaepSha256,
+    RsaOaepSha384,
+    RsaOaepSha512,
+    A128Gcm,
+    A192Gcm,
+    A256Gcm,
+    A128CbcHs256,
+    A192CbcHs384,
+    A256CbcHs512,
     Kyber512,
     Kyber768,
     Kyber1024,
@@ -663,17 +723,20 @@ pub enum KeyProviderType {
     // Software providers
     Software,
     
-    // Hardware Security Modules
-    PKCS11HSM,
+    // HSM providers
+    AwsKms,
     AzureKeyVault,
-    AwsKMS,
-    GcpKMS,
-    HashiVaultTransit,
+    GoogleCloudKms,
     
-    // Dedicated HSMs
-    ThalesHSM,
-    GemaltoHSM,
-    UtimacohSM,
+    // On-premises HSM
+    ThalesLuna,
+    Utimaco,
+    Gemalto,
+    
+    // Cloud HSM
+    AwsCloudHsm,
+    AzureDedicatedHsm,
+    GoogleCloudHsm,
     
     // Custom providers
     Custom(String),
@@ -736,18 +799,21 @@ pub struct UsageTrend {
 }
 
 /// Rotation Scheduler Trait
-pub trait RotationScheduler: Send + Sync {
+#[async_trait]
+pub trait RotationScheduler: Send + Sync + std::fmt::Debug + 'static {
+    /// Clone the rotation scheduler as a trait object
+    fn box_clone(&self) -> Box<dyn RotationScheduler>;
     /// Schedule automatic rotation for a key
-    async fn schedule_rotation(&self, key_id: &ManagedKeyId, rotation_time: chrono::DateTime<chrono::Utc>) -> SecretonResult<()>;
+    async fn schedule_rotation(&self, key_id: &ManagedKeyId, rotation_time: chrono::DateTime<chrono::Utc>) -> Result<()>;
     
     /// Cancel scheduled rotation
-    async fn cancel_rotation(&self, key_id: &ManagedKeyId) -> SecretonResult<()>;
+    async fn cancel_rotation(&self, key_id: &ManagedKeyId) -> Result<()>;
     
     /// Get next scheduled rotations
-    async fn get_next_rotations(&self, limit: usize) -> SecretonResult<Vec<ScheduledRotation>>;
+    async fn get_next_rotations(&self, limit: usize) -> Result<Vec<ScheduledRotation>>;
     
     /// Process due rotations
-    async fn process_due_rotations(&self) -> SecretonResult<Vec<RotationResult>>;
+    async fn process_due_rotations(&self) -> Result<Vec<RotationResult>>;
 }
 
 /// Scheduled Rotation
@@ -768,16 +834,16 @@ pub enum RotationReason {
     Scheduled,
     /// Usage threshold reached
     UsageThreshold,
-    /// Key age limit reached
-    AgeLimit,
+    /// Key expiration
+    Expiration,
     /// Security incident
     SecurityIncident,
     /// Manual rotation requested
     Manual,
-    /// Policy requirement
-    PolicyRequired,
     /// Compliance requirement
-    ComplianceRequired,
+    Compliance,
+    /// Key compromise suspected
+    CompromiseSuspected,
 }
 
 /// Rotation Result
@@ -801,22 +867,25 @@ pub enum RotationStatus {
     Success,
     Failed,
     Partial,
-    Skipped,
+    InProgress,
 }
 
 /// Key Governance Trait
-pub trait KeyGovernance: Send + Sync {
+#[async_trait]
+pub trait KeyGovernance: Send + Sync + std::fmt::Debug + 'static {
+    /// Clone the key governance as a trait object
+    fn box_clone(&self) -> Box<dyn KeyGovernance>;
     /// Check if key operation is allowed
-    async fn check_operation_allowed(&self, key_id: &ManagedKeyId, operation: &KeyOperation, context: &OperationContext) -> SecretonResult<bool>;
+    async fn check_operation_allowed(&self, key_id: &ManagedKeyId, operation: &KeyOperation, context: &OperationContext) -> Result<bool>;
     
     /// Enforce key lifecycle policies
-    async fn enforce_lifecycle_policies(&self, key_id: &ManagedKeyId) -> SecretonResult<Vec<PolicyAction>>;
+    async fn enforce_lifecycle_policies(&self, key_id: &ManagedKeyId) -> Result<Vec<PolicyAction>>;
     
     /// Audit key compliance
-    async fn audit_compliance(&self, key_id: &ManagedKeyId) -> SecretonResult<ComplianceReport>;
+    async fn audit_compliance(&self, key_id: &ManagedKeyId) -> Result<ComplianceReport>;
     
     /// Get required approvals for operation
-    async fn get_required_approvals(&self, key_id: &ManagedKeyId, operation: &KeyOperation) -> SecretonResult<Vec<ApprovalRequirement>>;
+    async fn get_required_approvals(&self, key_id: &ManagedKeyId, operation: &KeyOperation) -> Result<Vec<ApprovalRequirement>>;
 }
 
 /// Operation Context
@@ -838,9 +907,19 @@ pub enum PolicyAction {
     /// Allow the operation
     Allow,
     /// Deny the operation
-    Deny(String),
-    /// Require approval
-    RequireApproval(ApprovalRequirement),
+    Deny,
+    /// Allow with approval
+    AllowWithApproval {
+        /// Number of approvals required
+        required_approvals: u32,
+        /// List of approvers
+        approvers: Vec<String>,
+    },
+    /// Allow with justification
+    AllowWithJustification {
+        /// Whether justification is required
+        justification_required: bool,
+    },
     /// Log and allow
     LogAndAllow,
     /// Rotate the key
@@ -910,21 +989,24 @@ pub enum IssueSeverity {
 }
 
 /// Key Audit Logger Trait
-pub trait KeyAuditLogger: Send + Sync {
+#[async_trait]
+pub trait KeyAuditLogger: Send + Sync + std::fmt::Debug + 'static {
+    /// Clone the audit logger as a trait object
+    fn box_clone(&self) -> Box<dyn KeyAuditLogger>;
     /// Log key generation
-    async fn log_key_generation(&self, spec: &KeyGenerationSpec, result: &SecretonResult<GeneratedKey>) -> SecretonResult<()>;
+    async fn log_key_generation(&self, spec: &KeyGenerationSpec, result: &Result<GeneratedKey>) -> Result<()>;
     
     /// Log key import
-    async fn log_key_import(&self, spec: &KeyImportSpec, result: &SecretonResult<ImportedKey>) -> SecretonResult<()>;
+    async fn log_key_import(&self, spec: &KeyImportSpec, result: &Result<ImportedKey>) -> Result<()>;
     
     /// Log key operation
-    async fn log_key_operation(&self, key_id: &ManagedKeyId, operation: &KeyOperation, context: &OperationContext, result: &SecretonResult<()>) -> SecretonResult<()>;
+    async fn log_key_operation(&self, key_id: &ManagedKeyId, operation: &KeyOperation, context: &OperationContext, result: &Result<()>) -> Result<()>;
     
     /// Log key rotation
-    async fn log_key_rotation(&self, result: &RotationResult) -> SecretonResult<()>;
+    async fn log_key_rotation(&self, result: &RotationResult) -> Result<()>;
     
     /// Log policy violation
-    async fn log_policy_violation(&self, key_id: &ManagedKeyId, violation: &str, context: &OperationContext) -> SecretonResult<()>;
+    async fn log_policy_violation(&self, key_id: &ManagedKeyId, violation: &str, context: &OperationContext) -> Result<()>;
 }
 
 /// Key Metrics
@@ -965,7 +1047,7 @@ impl ManagedKeysEngine {
         rotation_scheduler: Arc<dyn RotationScheduler>,
         governance: Arc<dyn KeyGovernance>,
         audit_logger: Arc<dyn KeyAuditLogger>,
-    ) -> SecretonResult<Self> {
+    ) -> Result<Self> {
         Ok(Self {
             key_providers: Arc::new(RwLock::new(Vec::new())),
             managed_keys: Arc::new(RwLock::new(HashMap::new())),
@@ -979,7 +1061,7 @@ impl ManagedKeysEngine {
     }
     
     /// Add a key provider
-    pub async fn add_provider(&self, provider: Arc<dyn KeyProvider>, config: KeyProviderConfig) -> SecretonResult<()> {
+    pub async fn add_provider(&self, provider: Arc<dyn KeyProvider>, config: KeyProviderConfig) -> Result<()> {
         let capabilities = self.query_provider_capabilities(&provider).await?;
         let health_status = provider.health_check().await?;
         

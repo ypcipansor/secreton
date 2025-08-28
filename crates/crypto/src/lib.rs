@@ -15,6 +15,7 @@ pub mod key_derivation;
 pub mod transit_simple;
 pub mod kv_engine;
 pub mod error;
+pub mod quantum_safe_crypto;
 
 pub use encryption::*;
 pub use hashing::*;

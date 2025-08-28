@@ -13,7 +13,11 @@ use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-use crate::error::SecretonResult;
+use crate::error::Result as CoreResult;
+
+// Placeholder types for missing definitions
+type NodeId = String;
+type SecretId = String;
 use crate::security::fips_compliance::FipsLevel;
 
 /// Enterprise Namespaces Engine
@@ -75,7 +79,7 @@ pub struct Namespace {
 }
 
 /// Namespace States
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NamespaceState {
     /// Namespace is active and operational
     Active,
@@ -121,7 +125,7 @@ pub struct NamespaceMetadata {
 }
 
 /// Namespace Types
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NamespaceType {
     /// Root namespace (system-level)
     Root,
@@ -323,7 +327,7 @@ pub enum PolicyEffect {
 }
 
 /// Policy Conditions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PolicyCondition {
     /// Time-based condition
     TimeWindow {
@@ -364,7 +368,7 @@ pub enum PolicyCondition {
 }
 
 /// Comparison Operators
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComparisonOperator {
     Equal,
     NotEqual,

@@ -138,6 +138,12 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
 /// Unified encryption interface
 pub struct CryptoEngine;
 
+impl Default for CryptoEngine {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl CryptoEngine {
     pub fn new() -> Self {
         Self

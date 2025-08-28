@@ -12,8 +12,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
 
-use crate::error::SecretonResult;
-use crate::security::SecretId;
+use crate::error::Result as CoreResult;
+
+// Placeholder type for missing definition
+type SecretId = String;
 
 /// FIPS Compliance Levels
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,12 +42,12 @@ pub enum FipsLevel {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FipsAlgorithm {
     // Symmetric Encryption
-    AES128_GCM,
-    AES192_GCM,
-    AES256_GCM,
-    AES128_CBC,
-    AES192_CBC,
-    AES256_CBC,
+    Aes128Gcm,
+    Aes192Gcm,
+    Aes256Gcm,
+    Aes128Cbc,
+    Aes192Cbc,
+    Aes256Cbc,
     
     // Asymmetric Encryption
     RSA2048,
@@ -55,12 +57,12 @@ pub enum FipsAlgorithm {
     RSA8192,
     
     // Elliptic Curve
-    ECDSA_P256,
-    ECDSA_P384,
-    ECDSA_P521,
-    ECDH_P256,
-    ECDH_P384,
-    ECDH_P521,
+    EcdsaP256,
+    EcdsaP384,
+    EcdsaP521,
+    EcdhP256,
+    EcdhP384,
+    EcdhP521,
     
     // Hash Functions
     SHA256,
@@ -74,9 +76,9 @@ pub enum FipsAlgorithm {
     HKDF,
     
     // MAC
-    HMAC_SHA256,
-    HMAC_SHA384,
-    HMAC_SHA512,
+    HmacSha256,
+    HmacSha384,
+    HmacSha512,
     
     // Post-Quantum (FIPS 140-3)
     KYBER512,
@@ -88,14 +90,14 @@ pub enum FipsAlgorithm {
 }
 
 /// TLS Cipher Suites approved for FIPS compliance
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum FipsTlsCipher {
-    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-    TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-    TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-    TLS_RSA_WITH_AES_128_GCM_SHA256,
-    TLS_RSA_WITH_AES_256_GCM_SHA384,
+    TlsEcdheRsaWithAes128GcmSha256,
+    TlsEcdheRsaWithAes256GcmSha384,
+    TlsEcdheEcdsaWithAes128GcmSha256,
+    TlsEcdheEcdsaWithAes256GcmSha384,
+    TlsRsaWithAes128GcmSha256,
+    TlsRsaWithAes256GcmSha384,
 }
 
 /// FIPS Compliance Configuration
@@ -323,34 +325,21 @@ pub struct HsmHealthStatus {
 }
 
 /// HSM Provider Trait
+
+// Object-safe trait for HSM provider (for dynamic dispatch)
 pub trait HsmProviderTrait: Send + Sync {
-    /// Initialize connection to HSM
-    async fn initialize(&mut self) -> SecretonResult<()>;
-    
-    /// Generate a new key in HSM
-    async fn generate_key(&self, algorithm: FipsAlgorithm, key_size: u32) -> SecretonResult<String>;
-    
-    /// Encrypt data using HSM key
-    async fn encrypt(&self, key_id: &str, plaintext: &[u8]) -> SecretonResult<Vec<u8>>;
-    
-    /// Decrypt data using HSM key
-    async fn decrypt(&self, key_id: &str, ciphertext: &[u8]) -> SecretonResult<Vec<u8>>;
-    
-    /// Sign data using HSM key
-    async fn sign(&self, key_id: &str, data: &[u8]) -> SecretonResult<Vec<u8>>;
-    
-    /// Verify signature using HSM key
-    async fn verify(&self, key_id: &str, data: &[u8], signature: &[u8]) -> SecretonResult<bool>;
-    
-    /// Generate random bytes using HSM RNG
-    async fn generate_random(&self, byte_count: u32) -> SecretonResult<Vec<u8>>;
-    
-    /// Check HSM health status
-    async fn health_check(&self) -> SecretonResult<HsmHealthStatus>;
-    
-    /// Get HSM provider information
     fn provider_info(&self) -> HsmProviderInfo;
+    // For async methods, use static dispatch or call via concrete type
+    // Example: implement async methods directly on the struct, not via trait object
 }
+
+// For static dispatch, implement these async methods directly on the struct
+// (Do not use as trait objects)
+// Example:
+// impl MyHsmProvider {
+//     pub async fn initialize(&mut self) -> SecretonResult<()> { ... }
+//     ...
+// }
 
 /// HSM Provider Information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -363,19 +352,18 @@ pub struct HsmProviderInfo {
 }
 
 /// FIPS Audit Logger Trait
+
 pub trait FipsAuditLogger: Send + Sync {
-    /// Log FIPS compliance event
-    async fn log_compliance_event(&self, event: ComplianceEvent) -> SecretonResult<()>;
-    
-    /// Log algorithm usage
-    async fn log_algorithm_usage(&self, algorithm: FipsAlgorithm, operation: &str) -> SecretonResult<()>;
-    
-    /// Log self-test results
-    async fn log_self_test(&self, results: &SelfTestResults) -> SecretonResult<()>;
-    
-    /// Log HSM operations
-    async fn log_hsm_operation(&self, operation: &str, success: bool) -> SecretonResult<()>;
+    // Only object-safe methods here (e.g., non-async, no generics)
+    // For async methods, implement directly on the struct for static dispatch
 }
+
+// For static dispatch, implement these async methods directly on the struct
+// Example:
+// impl MyAuditLogger {
+//     pub async fn log_compliance_event(&self, event: ComplianceEvent) -> SecretonResult<()> { ... }
+//     ...
+// }
 
 /// FIPS Compliance Events
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,19 +396,18 @@ pub enum EventSeverity {
 }
 
 /// Self-Test Runner Trait
+
 pub trait SelfTestRunner: Send + Sync {
-    /// Run power-on self-tests
-    async fn run_power_on_tests(&self) -> SecretonResult<SelfTestResults>;
-    
-    /// Run conditional self-tests
-    async fn run_conditional_tests(&self) -> SecretonResult<SelfTestResults>;
-    
-    /// Run periodic self-tests
-    async fn run_periodic_tests(&self) -> SecretonResult<SelfTestResults>;
-    
-    /// Test specific algorithm implementation
-    async fn test_algorithm(&self, algorithm: FipsAlgorithm) -> SecretonResult<TestResult>;
+    // Only object-safe methods here
+    // For async methods, implement directly on the struct for static dispatch
 }
+
+// For static dispatch, implement these async methods directly on the struct
+// Example:
+// impl MySelfTestRunner {
+//     pub async fn run_power_on_tests(&self) -> SecretonResult<SelfTestResults> { ... }
+//     ...
+// }
 
 impl FipsComplianceEngine {
     /// Create new FIPS Compliance Engine
@@ -677,15 +664,15 @@ impl Default for FipsConfig {
         let mut approved_algorithms = HashSet::new();
         
         // Add default FIPS-approved algorithms
-        approved_algorithms.insert(FipsAlgorithm::AES256_GCM);
+    approved_algorithms.insert(FipsAlgorithm::Aes256Gcm);
         approved_algorithms.insert(FipsAlgorithm::RSA2048);
-        approved_algorithms.insert(FipsAlgorithm::ECDSA_P256);
+    approved_algorithms.insert(FipsAlgorithm::EcdsaP256);
         approved_algorithms.insert(FipsAlgorithm::SHA256);
-        approved_algorithms.insert(FipsAlgorithm::HMAC_SHA256);
+    approved_algorithms.insert(FipsAlgorithm::HmacSha256);
         
         let mut approved_tls_ciphers = HashSet::new();
-        approved_tls_ciphers.insert(FipsTlsCipher::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384);
-        approved_tls_ciphers.insert(FipsTlsCipher::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384);
+    approved_tls_ciphers.insert(FipsTlsCipher::TlsEcdheEcdsaWithAes256GcmSha384);
+    approved_tls_ciphers.insert(FipsTlsCipher::TlsEcdheRsaWithAes256GcmSha384);
         
         Self {
             enabled: false,

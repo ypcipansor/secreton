@@ -9,12 +9,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::io::{self, Read, Write};
 use serde::{Serialize, Deserialize};
-use uuid::Uuid;
-
-use crate::error::SecretonResult;
-use crate::security::fips_compliance::{FipsAlgorithm, FipsLevel};
+use thiserror::Error;
+use zeroize::Zeroize;
+use flate2::Compression;
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use crate::error::Result as CoreResult;
+use crate::security::fips_compliance::FipsLevel;
 
 /// Seal Wrapping Engine - Advanced beyond HashiCorp Vault
 pub struct SealWrappingEngine {
@@ -42,7 +45,8 @@ pub struct SealProviderWithPriority {
 }
 
 /// Advanced Seal Provider Trait
-pub trait SealProvider: Send + Sync {
+#[async_trait]
+pub trait SealProvider: Send + Sync + std::fmt::Debug {
     /// Initialize the seal provider
     async fn initialize(&mut self) -> SecretonResult<()>;
     
@@ -75,26 +79,26 @@ pub trait SealProvider: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SealAlgorithm {
     // Classical Algorithms
-    AES256_GCM,
-    AES256_GCM_SIV,
-    ChaCha20_Poly1305,
-    XChaCha20_Poly1305,
+    Aes256Gcm,
+    Aes256GcmSiv,
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
     
     // Quantum-Resistant Algorithms
-    Kyber768_AES256,
-    Kyber1024_AES256,
-    FrodoKEM_AES256,
-    SIKE_AES256,
+    Kyber768Aes256,
+    Kyber1024Aes256,
+    FrodoKemAes256,
+    SikeAes256,
     
     // Hybrid Algorithms (Classical + Post-Quantum)
-    Hybrid_RSA4096_Kyber768,
-    Hybrid_ECDSA_P384_Dilithium3,
-    Hybrid_AES256_FrodoKEM,
+    HybridRsa4096Kyber768,
+    HybridEcdsaP384Dilithium3,
+    HybridAes256FrodoKem,
     
     // Advanced Algorithms
-    Noise_XK_AES256,
-    Signal_X3DH_AES256,
-    MLS_TreeKEM_AES256,
+    NoiseXkAes256,
+    SignalX3dhAes256,
+    MlsTreeKemAes256,
 }
 
 /// Data Types for Seal Wrapping
@@ -519,7 +523,7 @@ impl SealWrappingEngine {
     }
     
     /// Unwrap sealed data
-    pub async fn unwrap(&self, wrapped: &WrappedData, context: UnwrapContext) -> SecretonResult<Vec<u8>> {
+    pub async fn unwrap(&self, wrapped: &WrappedData, context: UnwrapContext) -> CoreResult<Vec<u8>> {
         let start_time = std::time::Instant::now();
         
         let result = if wrapped.multi_seal_data.is_some() {
@@ -550,7 +554,7 @@ impl SealWrappingEngine {
     }
     
     /// Multi-layer wrapping for maximum security
-    async fn multi_layer_wrap(&self, data: &[u8], context: &WrapContext, config: &WrapConfig) -> SecretonResult<WrappedData> {
+    async fn multi_layer_wrap(&self, data: &[u8], context: &WrapContext, config: &WrapConfig) -> CoreResult<WrappedData> {
         let providers = self.seal_providers.read().await;
         let available_providers: Vec<_> = providers.iter()
             .filter(|p| p.health_status.available)
@@ -558,7 +562,7 @@ impl SealWrappingEngine {
             .collect();
         
         if available_providers.is_empty() {
-            return Err(crate::error::SecretonError::SealProviderUnavailable);
+            return Err(crate::error::CoreError::SealError { message: "No seal provider available".to_string() });
         }
         
         let mut current_data = data.to_vec();
@@ -601,17 +605,17 @@ impl SealWrappingEngine {
     }
     
     /// Single seal wrapping
-    async fn single_seal_wrap(&self, data: &[u8], context: &WrapContext, config: &WrapConfig) -> SecretonResult<WrappedData> {
+    async fn single_seal_wrap(&self, data: &[u8], context: &WrapContext, config: &WrapConfig) -> CoreResult<WrappedData> {
         let providers = self.seal_providers.read().await;
         let provider = providers.iter()
             .find(|p| p.health_status.available)
-            .ok_or(crate::error::SecretonError::SealProviderUnavailable)?;
+            .ok_or_else(|| crate::error::CoreError::SealError { message: "No seal provider available".to_string() })?;
         
         provider.provider.wrap(data, context).await
     }
     
     /// Multi-seal unwrapping
-    async fn multi_seal_unwrap(&self, wrapped: &WrappedData, context: &UnwrapContext) -> SecretonResult<Vec<u8>> {
+    async fn multi_seal_unwrap(&self, wrapped: &WrappedData, context: &UnwrapContext) -> CoreResult<Vec<u8>> {
         if let Some(multi_seal_data) = &wrapped.multi_seal_data {
             let mut current_data = wrapped.ciphertext.clone();
             
@@ -628,46 +632,42 @@ impl SealWrappingEngine {
                 let providers = self.seal_providers.read().await;
                 let provider = providers.iter()
                     .find(|p| p.provider.provider_info().id == layer.provider_id)
-                    .ok_or(crate::error::SecretonError::SealProviderNotFound)?;
+                    .map_err(|e| crate::error::CoreError::SealError { message: format!("Unwrap failed: {}", e) })?;
                 
                 current_data = provider.provider.unwrap(layer, &layer_context).await?;
             }
             
             Ok(current_data)
         } else {
-            Err(crate::error::SecretonError::InvalidMultiSealData)
+            Err(crate::error::CoreError::InvalidMultiSealData)
         }
     }
     
     /// Single seal unwrapping
-    async fn single_seal_unwrap(&self, wrapped: &WrappedData, context: &UnwrapContext) -> SecretonResult<Vec<u8>> {
+    async fn single_seal_unwrap(&self, wrapped: &WrappedData, context: &UnwrapContext) -> CoreResult<Vec<u8>> {
         let providers = self.seal_providers.read().await;
         let provider = providers.iter()
             .find(|p| p.provider.provider_info().id == wrapped.provider_id)
-            .ok_or(crate::error::SecretonError::SealProviderNotFound)?;
+            .map_err(|e| crate::error::CoreError::SealError { message: format!("Unwrap failed: {}", e) })?;
         
         provider.provider.unwrap(wrapped, context).await
     }
     
     /// Compress data before wrapping
-    fn compress_data(&self, data: &[u8]) -> SecretonResult<Vec<u8>> {
-        use flate2::Compression;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-        
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
-        encoder.write_all(data)?;
-        Ok(encoder.finish()?)
+    fn compress_data(&self, data: &[u8]) -> CoreResult<Vec<u8>> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+        encoder.write_all(data)
+            .map_err(|e| crate::error::CoreError::SealError { message: format!("Compression failed: {}", e) })?;
+        encoder.finish()
+            .map_err(|e| crate::error::CoreError::SealError { message: format!("Failed to finalize compression: {}", e) })
     }
     
     /// Decompress data after unwrapping
-    fn decompress_data(&self, data: &[u8]) -> SecretonResult<Vec<u8>> {
-        use flate2::read::GzDecoder;
-        use std::io::Read;
-        
-        let mut decoder = GzDecoder::new(data);
+    fn decompress_data(&self, data: &[u8]) -> CoreResult<Vec<u8>> {
+        let mut decoder = ZlibDecoder::new(data);
         let mut decompressed = Vec::new();
-        decoder.read_to_end(&mut decompressed)?;
+        decoder.read_to_end(&mut decompressed)
+            .map_err(|e| crate::error::CoreError::SealError { message: format!("Decompression failed: {}", e) })?;
         Ok(decompressed)
     }
     
@@ -721,7 +721,7 @@ impl SealWrappingEngine {
         
         // Standard security data types
         configs.insert(DataType::Secret, WrapConfig {
-            algorithm: SealAlgorithm::AES256_GCM,
+            algorithm: SealAlgorithm::Aes256Gcm,
             min_seals: 1,
             multi_layer: false,
             rotation_interval: 365,
@@ -758,7 +758,7 @@ impl Default for MultiSealConfig {
 impl Default for WrapConfig {
     fn default() -> Self {
         Self {
-            algorithm: SealAlgorithm::AES256_GCM,
+            algorithm: SealAlgorithm::Aes256Gcm,
             min_seals: 1,
             multi_layer: false,
             rotation_interval: 365,

@@ -322,17 +322,40 @@ mod security_validation_tests {
         let approved_algorithms = orchestrator.get_approved_algorithms().await?;
         
         // Should use only approved algorithms
-        let required_algorithms = vec!["AES-256", "SHA-256", "ECDSA-P256", "RSA-2048"];
+        let required_algorithms = vec![
+            "AES-256", 
+            "AES-256-GCM", 
+            "ChaCha20-Poly1305", 
+            "XChaCha20-Poly1305",
+            "Ed25519",
+            "ECDSA-P256",
+            "ECDSA-secp256k1"
+        ];
         for algorithm in required_algorithms {
-            assert!(approved_algorithms.contains(&algorithm.to_string()),
-                   "Should support required algorithm: {}", algorithm);
+            assert!(
+                approved_algorithms.contains(&algorithm.to_string()),
+                "Should support required algorithm: {}", 
+                algorithm
+            );
         }
         
-        // Should not use deprecated algorithms
-        let deprecated_algorithms = vec!["DES", "MD5", "SHA-1", "RSA-1024"];
+        // Should not use deprecated or insecure algorithms
+        let deprecated_algorithms = vec![
+            "DES", 
+            "3DES", 
+            "MD5", 
+            "SHA-1", 
+            "RSA-1024", 
+            "RSA-2048",
+            "RSA-3072",
+            "RSA-4096"
+        ];
         for algorithm in deprecated_algorithms {
-            assert!(!approved_algorithms.contains(&algorithm.to_string()),
-                   "Should not use deprecated algorithm: {}", algorithm);
+            assert!(
+                !approved_algorithms.contains(&algorithm.to_string()),
+                "Should not use deprecated or insecure algorithm: {}", 
+                algorithm
+            );
         }
         
         Ok(())

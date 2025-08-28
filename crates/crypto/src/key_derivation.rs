@@ -238,7 +238,7 @@ pub mod stretch {
             use sha2::{Sha256, Digest};
             let mut hasher = Sha256::new();
             hasher.update(master_key);
-            hasher.update(&(index as u32).to_be_bytes());
+            hasher.update((index as u32).to_be_bytes());
             hasher.update(info.as_bytes());
             
             let hash = hasher.finalize();
@@ -247,8 +247,8 @@ pub mod stretch {
             // Stretch to desired length if needed
             while key.len() < key_length {
                 let mut hasher = Sha256::new();
-                hasher.update(&key);
-                hasher.update(&[key.len() as u8]);
+                hasher.update(&key[..]);
+                hasher.update([key.len() as u8]);
                 key.extend_from_slice(&hasher.finalize());
             }
             

@@ -7,13 +7,17 @@
 //! with multi-region active-active replication, conflict resolution, disaster recovery,
 //! and quantum-safe synchronization protocols.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, Mutex};
+use tokio::sync::{RwLock, mpsc};
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-use crate::error::SecretonResult;
+// Import async_trait macro
+#[allow(unused_imports)]
+use async_trait::async_trait;
+
+use crate::error::Result as CoreResult;
 use crate::security::fips_compliance::FipsLevel;
 
 /// Advanced Replication Engine
@@ -149,8 +153,8 @@ pub struct TlsConfig {
 /// TLS Versions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TlsVersion {
-    TLS1_2,
-    TLS1_3,
+    Tls1_2,
+    Tls1_3,
 }
 
 /// Connection Limits
@@ -197,19 +201,20 @@ pub struct SecurityConfig {
 /// Encryption Algorithms for Replication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    AES256_GCM,
-    ChaCha20_Poly1305,
-    AES256_GCM_SIV,
-    /// Post-quantum algorithms
-    Kyber1024_AES256,
-    Hybrid_AES256_Kyber768,
+    Aes256Gcm,
+    ChaCha20Poly1305,
+    Aes256GcmSiv,
+    /// Kyber1024 with AES-256 encryption
+    Kyber1024Aes256,
+    /// Hybrid encryption with AES-256 and Kyber-768
+    HybridAes256Kyber768,
 }
 
 /// Authentication Methods
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthenticationMethod {
     /// Mutual TLS authentication
-    MTLS,
+    Mtls,
     /// Shared secret with HMAC
     SharedSecret,
     /// Token-based authentication
@@ -727,7 +732,8 @@ pub struct StreamMetrics {
 }
 
 /// Conflict Resolution Trait
-pub trait ConflictResolver: Send + Sync {
+#[async_trait::async_trait]
+pub trait ConflictResolver: Send + Sync + 'static {
     /// Resolve conflict between two versions of the same data
     async fn resolve_conflict(
         &self,
@@ -735,13 +741,13 @@ pub trait ConflictResolver: Send + Sync {
         local_version: &ConflictVersion,
         remote_version: &ConflictVersion,
         context: &ConflictContext,
-    ) -> SecretonResult<ConflictResolution>;
+    ) -> CoreResult<ConflictResolution>;
     
     /// Get supported conflict resolution methods
     fn supported_methods(&self) -> Vec<ConflictResolutionMethod>;
     
     /// Configure conflict resolution policy
-    async fn configure_policy(&self, policy: ConflictResolutionPolicy) -> SecretonResult<()>;
+    async fn configure_policy(&self, policy: ConflictResolutionPolicy) -> CoreResult<()>;
 }
 
 /// Conflict Version
@@ -833,22 +839,55 @@ pub struct ConflictResolutionPolicy {
     pub custom_policies: HashMap<String, serde_json::Value>,
 }
 
-/// Disaster Recovery Coordinator Trait
-pub trait DisasterRecoveryCoordinator: Send + Sync {
-    /// Initiate disaster recovery procedure
-    async fn initiate_recovery(&self, scenario: DisasterScenario) -> SecretonResult<RecoveryPlan>;
-    
-    /// Execute recovery plan
-    async fn execute_recovery(&self, plan: &RecoveryPlan) -> SecretonResult<RecoveryResult>;
+/// Trait for planning disaster recovery procedures
+#[async_trait::async_trait]
+pub trait DisasterRecoveryPlanner: Send + Sync + 'static {
+    /// Create a recovery plan for a disaster scenario
+    async fn create_recovery_plan(
+        &self, 
+        scenario: &DisasterScenario
+    ) -> Result<RecoveryPlan, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for executing and monitoring disaster recovery
+#[async_trait::async_trait]
+pub trait DisasterRecoveryExecutor: Send + Sync + 'static {
+    /// Execute a recovery plan
+    async fn execute_recovery(
+        &self, 
+        plan: &RecoveryPlan
+    ) -> Result<RecoveryResult, Box<dyn std::error::Error + Send + Sync>>;
     
     /// Monitor recovery progress
-    async fn monitor_recovery(&self, recovery_id: &str) -> SecretonResult<RecoveryStatus>;
+    async fn monitor_recovery(
+        &self, 
+        recovery_id: &str
+    ) -> Result<RecoveryStatus, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for managing backups
+#[async_trait::async_trait]
+pub trait BackupManager: Send + Sync + 'static {
+    /// Create a backup
+    async fn create_backup(
+        &self, 
+        spec: &BackupSpec
+    ) -> Result<Backup, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Create backup for disaster recovery
-    async fn create_backup(&self, backup_spec: BackupSpec) -> SecretonResult<Backup>;
-    
-    /// Restore from backup
-    async fn restore_from_backup(&self, backup: &Backup, target_node: &NodeId) -> SecretonResult<()>;
+    /// Restore from a backup
+    async fn restore_from_backup(
+        &self, 
+        backup: &Backup, 
+        target: &NodeId
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Main disaster recovery coordinator that composes the smaller traits
+#[async_trait::async_trait]
+pub trait DisasterRecoveryCoordinator: 
+    DisasterRecoveryPlanner + DisasterRecoveryExecutor + BackupManager 
+{
+    // Common methods can be added here if needed
 }
 
 /// Disaster Scenarios
@@ -1025,22 +1064,53 @@ pub struct Backup {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Replication State Manager Trait
-pub trait ReplicationStateManager: Send + Sync {
-    /// Get current replication state
-    async fn get_state(&self, node_id: &NodeId) -> SecretonResult<ReplicationState>;
+/// Trait for managing replication state
+#[async_trait::async_trait]
+pub trait ReplicationStateAccessor: Send + Sync + 'static {
+    /// Get current replication state for a node
+    async fn get_state(
+        &self, 
+        node_id: &NodeId
+    ) -> Result<ReplicationState, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Update replication state
-    async fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> SecretonResult<()>;
+    /// Update replication state for a node
+    async fn update_state(
+        &self, 
+        node_id: &NodeId, 
+        state: ReplicationState
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for managing replication log positions
+#[async_trait::async_trait]
+pub trait ReplicationPositionManager: Send + Sync + 'static {
+    /// Get current replication log position for a node
+    async fn get_position(
+        &self, 
+        node_id: &NodeId
+    ) -> Result<ReplicationPosition, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Get replication log position
-    async fn get_position(&self, node_id: &NodeId) -> SecretonResult<ReplicationPosition>;
-    
-    /// Update replication log position
-    async fn update_position(&self, node_id: &NodeId, position: ReplicationPosition) -> SecretonResult<()>;
-    
-    /// Persist state to storage
-    async fn persist_state(&self) -> SecretonResult<()>;
+    /// Update replication log position for a node
+    async fn update_position(
+        &self, 
+        node_id: &NodeId, 
+        position: ReplicationPosition
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for state persistence
+#[async_trait::async_trait]
+pub trait StatePersistence: Send + Sync + 'static {
+    /// Persist current state to storage
+    async fn persist_state(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Main replication state manager trait that composes the smaller traits
+#[async_trait::async_trait]
+pub trait ReplicationStateManager: 
+    ReplicationStateAccessor + ReplicationPositionManager + StatePersistence 
+{
+    // Common methods can be added here if needed
 }
 
 /// Replication State
@@ -1060,22 +1130,57 @@ pub struct ReplicationState {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
-/// Replication Security Manager Trait
-pub trait ReplicationSecurityManager: Send + Sync {
-    /// Establish secure channel with peer
-    async fn establish_secure_channel(&self, peer_node: &NodeId) -> SecretonResult<SecureChannel>;
+/// Trait for managing secure channels
+#[async_trait::async_trait]
+pub trait SecureChannelManager: Send + Sync + 'static {
+    /// Establish a secure channel with a peer
+    async fn establish_secure_channel(
+        &self, 
+        peer_node: &NodeId
+    ) -> Result<SecureChannel, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Encrypt replication data
-    async fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
+    /// Rotate encryption keys for a channel
+    async fn rotate_keys(
+        &self, 
+        channel: &mut SecureChannel
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for data encryption/decryption
+#[async_trait::async_trait]
+pub trait DataSecurity: Send + Sync + 'static {
+    /// Encrypt data using the specified channel
+    async fn encrypt_data(
+        &self, 
+        data: &[u8], 
+        channel: &SecureChannel
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Decrypt replication data
-    async fn decrypt_data(&self, encrypted_data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
-    
-    /// Rotate encryption keys
-    async fn rotate_keys(&self, channel: &mut SecureChannel) -> SecretonResult<()>;
-    
-    /// Authenticate peer
-    async fn authenticate_peer(&self, peer_node: &NodeId, credentials: &PeerCredentials) -> SecretonResult<bool>;
+    /// Decrypt data using the specified channel
+    async fn decrypt_data(
+        &self, 
+        encrypted_data: &[u8], 
+        channel: &SecureChannel
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for peer authentication
+#[async_trait::async_trait]
+pub trait PeerAuthenticator: Send + Sync + 'static {
+    /// Authenticate a peer node
+    async fn authenticate_peer(
+        &self, 
+        peer_node: &NodeId, 
+        credentials: &PeerCredentials
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Main security manager trait that composes the smaller traits
+#[async_trait::async_trait]
+pub trait ReplicationSecurityManager: 
+    SecureChannelManager + DataSecurity + PeerAuthenticator 
+{
+    // Common methods can be added here if needed
 }
 
 /// Secure Channel
@@ -1151,19 +1256,52 @@ pub enum ReplicationEvent {
     Custom { event_type: String, data: serde_json::Value },
 }
 
-/// Replication Audit Logger Trait
-pub trait ReplicationAuditLogger: Send + Sync {
-    /// Log replication event
-    async fn log_event(&self, event: &ReplicationEvent) -> SecretonResult<()>;
-    
-    /// Log security event
-    async fn log_security_event(&self, event: &SecurityEvent) -> SecretonResult<()>;
-    
+/// Trait for logging replication events
+#[async_trait::async_trait]
+pub trait ReplicationEventLogger: Send + Sync + 'static {
+    /// Log a replication event
+    async fn log_event(
+        &self, 
+        event: &ReplicationEvent
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for logging security events
+#[async_trait::async_trait]
+pub trait SecurityEventLogger: Send + Sync + 'static {
+    /// Log a security event
+    async fn log_security_event(
+        &self, 
+        event: &SecurityEvent
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for logging metrics
+#[async_trait::async_trait]
+pub trait MetricsLogger: Send + Sync + 'static {
     /// Log performance metrics
-    async fn log_metrics(&self, metrics: &ReplicationMetrics) -> SecretonResult<()>;
-    
-    /// Log disaster recovery operation
-    async fn log_disaster_recovery(&self, operation: &DisasterRecoveryOperation) -> SecretonResult<()>;
+    async fn log_metrics(
+        &self, 
+        metrics: &ReplicationMetrics
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for logging disaster recovery operations
+#[async_trait::async_trait]
+pub trait DisasterRecoveryLogger: Send + Sync + 'static {
+    /// Log a disaster recovery operation
+    async fn log_disaster_recovery(
+        &self, 
+        operation: &DisasterRecoveryOperation
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Main audit logger trait that composes the smaller traits
+#[async_trait::async_trait]
+pub trait ReplicationAuditLogger: 
+    ReplicationEventLogger + SecurityEventLogger + MetricsLogger + DisasterRecoveryLogger 
+{
+    // Common methods can be added here if needed
 }
 
 /// Security Events
@@ -1228,7 +1366,7 @@ impl ReplicationEngine {
         state_manager: Arc<dyn ReplicationStateManager>,
         security_manager: Arc<dyn ReplicationSecurityManager>,
         audit_logger: Arc<dyn ReplicationAuditLogger>,
-    ) -> SecretonResult<Self> {
+    ) -> CoreResult<Self> {
         let (event_tx, _event_rx) = mpsc::channel(1000);
         
         Ok(Self {
@@ -1280,18 +1418,18 @@ impl ReplicationEngine {
     }
     
     /// Join cluster
-    pub async fn join_cluster(&self, cluster_address: &str) -> SecretonResult<()> {
+    pub async fn join_cluster(&self, cluster_address: &str) -> CoreResult<()> {
         // Implementation would establish connections to cluster
         // This is a simplified placeholder
         
         let event = ReplicationEvent::NodeJoined(self.get_node_id().await);
-        self.event_dispatcher.send(event).await.map_err(|_| crate::error::SecretonError::ChannelSend)?;
+        self.event_dispatcher.send(event).await.map_err(|_| crate::error::CoreError::ChannelSend { message: "Failed to send node joined event".to_string() })?;
         
         Ok(())
     }
     
     /// Start replication stream
-    pub async fn start_replication_stream(&self, target_node: &NodeId, config: StreamConfig) -> SecretonResult<ReplicationStreamId> {
+    pub async fn start_replication_stream(&self, target_node: &NodeId, config: StreamConfig) -> CoreResult<ReplicationStreamId> {
         let stream_id = Uuid::new_v4().to_string();
         let source_node = self.get_node_id().await;
         

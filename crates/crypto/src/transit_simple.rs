@@ -124,7 +124,7 @@ impl TransitEngine {
                 
                 // Format: vault:v1:base64(nonce):base64(ciphertext)
                 let mut result = format!("vault:v{}:", key.version);
-                result.push_str(&BASE64.encode(&nonce_bytes));
+                result.push_str(&BASE64.encode(nonce_bytes));
                 result.push(':');
                 result.push_str(&BASE64.encode(&ciphertext));
                 
@@ -142,7 +142,7 @@ impl TransitEngine {
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 
                 let mut result = format!("vault:v{}:", key.version);
-                result.push_str(&BASE64.encode(&nonce_bytes));
+                result.push_str(&BASE64.encode(nonce_bytes));
                 result.push(':');
                 result.push_str(&BASE64.encode(&ciphertext));
                 

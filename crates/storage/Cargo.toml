@@ -19,8 +19,8 @@ uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 
-# Database
-sqlx.workspace = true
+# Database - Using explicit features for PostgreSQL with SQLx 0.8.1
+sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "migrate"] }
 redis.workspace = true
 
 # Cryptography
