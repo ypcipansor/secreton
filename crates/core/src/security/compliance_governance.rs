@@ -1,5 +1,5 @@
 //! Compliance and Governance Engine
-//! 
+//!
 //! Provides comprehensive compliance monitoring and governance capabilities:
 //! - Multi-framework compliance (SOX, PCI DSS, HIPAA, GDPR, etc.)
 //! - Real-time compliance monitoring and reporting
@@ -9,15 +9,15 @@
 //! - Cross-jurisdictional compliance management
 //! - Automated compliance reporting and dashboards
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock, Mutex};
-use std::time::Duration;
 use async_trait::async_trait;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration as ChronoDuration};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use tokio::time::interval;
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 /// Supported compliance frameworks
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -391,28 +391,28 @@ pub struct ComplianceTrends {
 pub enum ComplianceError {
     #[error("Requirement not found: {id}")]
     RequirementNotFound { id: String },
-    
+
     #[error("Framework not supported: {framework}")]
     FrameworkNotSupported { framework: String },
-    
+
     #[error("Verification failed: {reason}")]
     VerificationFailed { reason: String },
-    
+
     #[error("Evidence collection failed: {reason}")]
     EvidenceCollectionFailed { reason: String },
-    
+
     #[error("Report generation failed: {reason}")]
     ReportGenerationFailed { reason: String },
-    
+
     #[error("Invalid compliance configuration: {reason}")]
     InvalidConfiguration { reason: String },
-    
+
     #[error("Remediation plan creation failed: {reason}")]
     RemediationPlanFailed { reason: String },
-    
+
     #[error("Database error: {message}")]
     DatabaseError { message: String },
-    
+
     #[error("Integration error: {service} - {message}")]
     IntegrationError { service: String, message: String },
 }
@@ -420,9 +420,18 @@ pub enum ComplianceError {
 /// Trait for compliance checkers
 #[async_trait]
 pub trait ComplianceChecker: Send + Sync {
-    async fn check_compliance(&self, requirement: &ComplianceRequirement) -> Result<ComplianceStatus, ComplianceError>;
-    async fn collect_evidence(&self, requirement: &ComplianceRequirement) -> Result<Vec<ComplianceEvidence>, ComplianceError>;
-    async fn verify_controls(&self, controls: &[String]) -> Result<HashMap<String, bool>, ComplianceError>;
+    async fn check_compliance(
+        &self,
+        requirement: &ComplianceRequirement,
+    ) -> Result<ComplianceStatus, ComplianceError>;
+    async fn collect_evidence(
+        &self,
+        requirement: &ComplianceRequirement,
+    ) -> Result<Vec<ComplianceEvidence>, ComplianceError>;
+    async fn verify_controls(
+        &self,
+        controls: &[String],
+    ) -> Result<HashMap<String, bool>, ComplianceError>;
     fn get_supported_frameworks(&self) -> Vec<ComplianceFramework>;
     fn get_checker_name(&self) -> String;
 }
@@ -430,7 +439,11 @@ pub trait ComplianceChecker: Send + Sync {
 /// Trait for evidence collectors
 #[async_trait]
 pub trait EvidenceCollector: Send + Sync {
-    async fn collect(&self, evidence_type: &EvidenceType, context: &HashMap<String, String>) -> Result<ComplianceEvidence, ComplianceError>;
+    async fn collect(
+        &self,
+        evidence_type: &EvidenceType,
+        context: &HashMap<String, String>,
+    ) -> Result<ComplianceEvidence, ComplianceError>;
     fn supports_evidence_type(&self, evidence_type: &EvidenceType) -> bool;
     fn get_collector_name(&self) -> String;
 }
@@ -490,7 +503,7 @@ impl Default for ReportingConfig {
     fn default() -> Self {
         Self {
             executive_report_frequency: Duration::from_secs(86400 * 7), // Weekly
-            technical_report_frequency: Duration::from_secs(86400), // Daily  
+            technical_report_frequency: Duration::from_secs(86400),     // Daily
             regulatory_report_frequency: Duration::from_secs(86400 * 30), // Monthly
             custom_reports: Vec::new(),
         }
@@ -547,7 +560,7 @@ impl Default for ComplianceConfig {
             },
             reporting_config: ReportingConfig {
                 executive_report_frequency: Duration::from_secs(86400 * 30), // Monthly
-                technical_report_frequency: Duration::from_secs(86400 * 7), // Weekly
+                technical_report_frequency: Duration::from_secs(86400 * 7),  // Weekly
                 regulatory_report_frequency: Duration::from_secs(86400 * 90), // Quarterly
                 custom_reports: Vec::new(),
             },
@@ -588,24 +601,34 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Add a compliance requirement
-    pub fn add_requirement(&self, requirement: ComplianceRequirement) -> Result<(), ComplianceError> {
-        if !self.config.enabled_frameworks.contains(&requirement.framework) {
+    pub fn add_requirement(
+        &self,
+        requirement: ComplianceRequirement,
+    ) -> Result<(), ComplianceError> {
+        if !self
+            .config
+            .enabled_frameworks
+            .contains(&requirement.framework)
+        {
             return Err(ComplianceError::FrameworkNotSupported {
-                framework: format!("{:?}", requirement.framework)
+                framework: format!("{:?}", requirement.framework),
             });
         }
 
         let mut requirements = self.requirements.write().unwrap();
         requirements.insert(requirement.id.clone(), requirement);
-        
+
         Ok(())
     }
 
     /// Load compliance requirements from framework definitions
-    pub async fn load_framework_requirements(&self, framework: &ComplianceFramework) -> Result<usize, ComplianceError> {
+    pub async fn load_framework_requirements(
+        &self,
+        framework: &ComplianceFramework,
+    ) -> Result<usize, ComplianceError> {
         let requirements = self.generate_framework_requirements(framework);
         let mut count = 0;
-        
+
         {
             let mut reqs = self.requirements.write().unwrap();
             for requirement in requirements {
@@ -614,12 +637,18 @@ impl ComplianceGovernanceEngine {
             }
         }
 
-        info!("Loaded {} requirements for framework {:?}", count, framework);
+        info!(
+            "Loaded {} requirements for framework {:?}",
+            count, framework
+        );
         Ok(count)
     }
 
     /// Generate framework-specific requirements
-    fn generate_framework_requirements(&self, framework: &ComplianceFramework) -> Vec<ComplianceRequirement> {
+    fn generate_framework_requirements(
+        &self,
+        framework: &ComplianceFramework,
+    ) -> Vec<ComplianceRequirement> {
         match framework {
             ComplianceFramework::PciDss => self.generate_pci_dss_requirements(),
             ComplianceFramework::Gdpr => self.generate_gdpr_requirements(),
@@ -807,27 +836,39 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Perform compliance check for a specific requirement
-    pub async fn check_requirement(&self, requirement_id: &str) -> Result<ComplianceStatus, ComplianceError> {
+    pub async fn check_requirement(
+        &self,
+        requirement_id: &str,
+    ) -> Result<ComplianceStatus, ComplianceError> {
         let requirement = {
             let requirements = self.requirements.read().unwrap();
-            requirements.get(requirement_id).cloned()
-                .ok_or_else(|| ComplianceError::RequirementNotFound { id: requirement_id.to_string() })?
+            requirements.get(requirement_id).cloned().ok_or_else(|| {
+                ComplianceError::RequirementNotFound {
+                    id: requirement_id.to_string(),
+                }
+            })?
         };
 
         // Find appropriate checker
         let checker = {
             let checkers = self.checkers.read().unwrap();
             let mut selected_checker = None;
-            
+
             for (_, checker) in checkers.iter() {
-                if checker.get_supported_frameworks().contains(&requirement.framework) {
+                if checker
+                    .get_supported_frameworks()
+                    .contains(&requirement.framework)
+                {
                     selected_checker = Some(checker.clone());
                     break;
                 }
             }
-            
+
             selected_checker.ok_or_else(|| ComplianceError::VerificationFailed {
-                reason: format!("No checker available for framework {:?}", requirement.framework)
+                reason: format!(
+                    "No checker available for framework {:?}",
+                    requirement.framework
+                ),
             })?
         };
 
@@ -845,7 +886,10 @@ impl ComplianceGovernanceEngine {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.total_checks_performed += 1;
             for finding in &status.findings {
-                *metrics.findings_by_severity.entry(finding.severity.clone()).or_insert(0) += 1;
+                *metrics
+                    .findings_by_severity
+                    .entry(finding.severity.clone())
+                    .or_insert(0) += 1;
             }
         }
 
@@ -858,35 +902,50 @@ impl ComplianceGovernanceEngine {
         // Create remediation plan if non-compliant
         if status.status == ComplianceState::NonCompliant && self.config.auto_remediation_enabled {
             if let Err(e) = self.create_remediation_plan(&requirement, &status).await {
-                warn!("Failed to create remediation plan for {}: {}", requirement_id, e);
+                warn!(
+                    "Failed to create remediation plan for {}: {}",
+                    requirement_id, e
+                );
             }
         }
 
-        info!("Compliance check completed for requirement {} with status {:?}", requirement_id, status.status);
+        info!(
+            "Compliance check completed for requirement {} with status {:?}",
+            requirement_id, status.status
+        );
         Ok(status)
     }
 
     /// Collect evidence for a requirement
-    async fn collect_requirement_evidence(&self, requirement: &ComplianceRequirement) -> Result<Vec<ComplianceEvidence>, ComplianceError> {
+    async fn collect_requirement_evidence(
+        &self,
+        requirement: &ComplianceRequirement,
+    ) -> Result<Vec<ComplianceEvidence>, ComplianceError> {
         let mut evidence = Vec::new();
-        
+
         // Get collector list first to avoid holding lock across await
         let collector_list: Vec<(String, Arc<dyn EvidenceCollector>)> = {
             let collectors = self.collectors.read().unwrap();
-            collectors.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            collectors
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
         };
 
         for evidence_req in &requirement.evidence_requirements {
             // Find appropriate collector
             let mut collector_found = false;
-            
+
             for (_, collector) in collector_list.iter() {
                 if collector.supports_evidence_type(evidence_req) {
                     let context = HashMap::from([
                         ("requirement_id".to_string(), requirement.id.clone()),
-                        ("framework".to_string(), format!("{:?}", requirement.framework)),
+                        (
+                            "framework".to_string(),
+                            format!("{:?}", requirement.framework),
+                        ),
                     ]);
-                    
+
                     match collector.collect(evidence_req, &context).await {
                         Ok(evidence_item) => {
                             evidence.push(evidence_item);
@@ -899,7 +958,7 @@ impl ComplianceGovernanceEngine {
                     }
                 }
             }
-            
+
             if !collector_found {
                 warn!("No collector found for evidence type: {:?}", evidence_req);
             }
@@ -915,17 +974,24 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Create remediation plan for non-compliant requirements
-    async fn create_remediation_plan(&self, requirement: &ComplianceRequirement, status: &ComplianceStatus) -> Result<RemediationPlan, ComplianceError> {
+    async fn create_remediation_plan(
+        &self,
+        requirement: &ComplianceRequirement,
+        status: &ComplianceStatus,
+    ) -> Result<RemediationPlan, ComplianceError> {
         let plan_id = Uuid::new_v4().to_string();
         let finding_ids: Vec<String> = status.findings.iter().map(|f| f.id.clone()).collect();
 
         let steps = self.generate_remediation_steps(requirement, &status.findings);
-        
+
         let plan = RemediationPlan {
             id: plan_id.clone(),
             finding_ids,
             title: format!("Remediation for {}", requirement.title),
-            description: format!("Automated remediation plan for non-compliant requirement: {}", requirement.id),
+            description: format!(
+                "Automated remediation plan for non-compliant requirement: {}",
+                requirement.id
+            ),
             steps,
             assigned_to: "compliance_team".to_string(), // TODO: Make configurable
             due_date: Utc::now() + ChronoDuration::days(30), // Default 30 days
@@ -946,12 +1012,19 @@ impl ComplianceGovernanceEngine {
             metrics.remediation_plans_created += 1;
         }
 
-        info!("Created remediation plan {} for requirement {}", plan_id, requirement.id);
+        info!(
+            "Created remediation plan {} for requirement {}",
+            plan_id, requirement.id
+        );
         Ok(plan)
     }
 
     /// Generate remediation steps based on findings
-    fn generate_remediation_steps(&self, _requirement: &ComplianceRequirement, findings: &[ComplianceFinding]) -> Vec<RemediationStep> {
+    fn generate_remediation_steps(
+        &self,
+        _requirement: &ComplianceRequirement,
+        findings: &[ComplianceFinding],
+    ) -> Vec<RemediationStep> {
         let mut steps = Vec::new();
         let mut step_counter = 1;
 
@@ -960,7 +1033,10 @@ impl ComplianceGovernanceEngine {
                 ComplianceSeverity::Critical => {
                     steps.push(RemediationStep {
                         id: format!("STEP-{:03}", step_counter),
-                        description: format!("Immediate resolution of critical finding: {}", finding.description),
+                        description: format!(
+                            "Immediate resolution of critical finding: {}",
+                            finding.description
+                        ),
                         responsible_party: "security_team".to_string(),
                         due_date: Utc::now() + ChronoDuration::hours(24), // 24 hours for critical
                         dependencies: Vec::new(),
@@ -1006,14 +1082,16 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Run compliance checks for all requirements
-    pub async fn run_full_compliance_check(&self) -> Result<HashMap<String, ComplianceStatus>, ComplianceError> {
+    pub async fn run_full_compliance_check(
+        &self,
+    ) -> Result<HashMap<String, ComplianceStatus>, ComplianceError> {
         let requirement_ids: Vec<String> = {
             let requirements = self.requirements.read().unwrap();
             requirements.keys().cloned().collect()
         };
 
         let mut results = HashMap::new();
-        
+
         for requirement_id in requirement_ids {
             match self.check_requirement(&requirement_id).await {
                 Ok(status) => {
@@ -1029,7 +1107,10 @@ impl ComplianceGovernanceEngine {
         // Update overall compliance score
         self.update_compliance_metrics(&results).await;
 
-        info!("Full compliance check completed. Checked {} requirements", results.len());
+        info!(
+            "Full compliance check completed. Checked {} requirements",
+            results.len()
+        );
         Ok(results)
     }
 
@@ -1043,12 +1124,18 @@ impl ComplianceGovernanceEngine {
             count += 1;
         }
 
-        let overall_score = if count > 0 { total_score / count as f64 } else { 0.0 };
+        let overall_score = if count > 0 {
+            total_score / count as f64
+        } else {
+            0.0
+        };
 
         {
             let mut metrics = self.metrics.lock().unwrap();
-            metrics.compliance_score_history.push_back((Utc::now(), overall_score));
-            
+            metrics
+                .compliance_score_history
+                .push_back((Utc::now(), overall_score));
+
             // Keep only last 100 scores for trending
             if metrics.compliance_score_history.len() > 100 {
                 metrics.compliance_score_history.pop_front();
@@ -1057,14 +1144,19 @@ impl ComplianceGovernanceEngine {
     }
 
     /// Generate compliance report
-    pub async fn generate_report(&self, framework: &ComplianceFramework, report_type: ReportType) -> Result<ComplianceReport, ComplianceError> {
+    pub async fn generate_report(
+        &self,
+        framework: &ComplianceFramework,
+        report_type: ReportType,
+    ) -> Result<ComplianceReport, ComplianceError> {
         let report_id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let period_start = now - ChronoDuration::days(30); // Last 30 days
 
         // Collect relevant statuses
         let statuses = self.statuses.read().unwrap();
-        let relevant_statuses: Vec<&ComplianceStatus> = statuses.values()
+        let relevant_statuses: Vec<&ComplianceStatus> = statuses
+            .values()
             .filter(|status| {
                 let requirements = self.requirements.read().unwrap();
                 if let Some(req) = requirements.get(&status.requirement_id) {
@@ -1103,11 +1195,17 @@ impl ComplianceGovernanceEngine {
             trends,
             metadata: HashMap::from([
                 ("version".to_string(), "1.0".to_string()),
-                ("generator".to_string(), "Brankas Compliance Engine".to_string()),
+                (
+                    "generator".to_string(),
+                    "Brankas Compliance Engine".to_string(),
+                ),
             ]),
         };
 
-        info!("Generated compliance report {} for framework {:?}", report_id, framework);
+        info!(
+            "Generated compliance report {} for framework {:?}",
+            report_id, framework
+        );
         Ok(report)
     }
 
@@ -1166,12 +1264,12 @@ impl ComplianceGovernanceEngine {
     /// Generate compliance trends
     fn generate_compliance_trends(&self, _statuses: &[&ComplianceStatus]) -> ComplianceTrends {
         let metrics = self.metrics.lock().unwrap();
-        
+
         ComplianceTrends {
             score_history: metrics.compliance_score_history.iter().cloned().collect(),
             finding_trends: HashMap::new(), // TODO: Implement trend analysis
-            remediation_velocity: 0.8, // TODO: Calculate from actual data
-            improvement_rate: 5.2, // TODO: Calculate from actual data
+            remediation_velocity: 0.8,      // TODO: Calculate from actual data
+            improvement_rate: 5.2,          // TODO: Calculate from actual data
         }
     }
 
@@ -1207,8 +1305,13 @@ impl ComplianceGovernanceEngine {
         }
 
         // Add framework-specific recommendations
-        recommendations.push("Regular compliance monitoring should be maintained with automated checks.".to_string());
-        recommendations.push("Consider implementing continuous compliance monitoring for real-time visibility.".to_string());
+        recommendations.push(
+            "Regular compliance monitoring should be maintained with automated checks.".to_string(),
+        );
+        recommendations.push(
+            "Consider implementing continuous compliance monitoring for real-time visibility."
+                .to_string(),
+        );
 
         recommendations
     }
@@ -1220,10 +1323,10 @@ impl ComplianceGovernanceEngine {
 
         tokio::spawn(async move {
             let mut interval = interval(check_frequency);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 info!("Starting scheduled compliance check");
                 if let Err(e) = engine.run_full_compliance_check().await {
                     error!("Scheduled compliance check failed: {}", e);
@@ -1264,10 +1367,13 @@ impl BasicComplianceChecker {
 
 #[async_trait]
 impl ComplianceChecker for BasicComplianceChecker {
-    async fn check_compliance(&self, requirement: &ComplianceRequirement) -> Result<ComplianceStatus, ComplianceError> {
+    async fn check_compliance(
+        &self,
+        requirement: &ComplianceRequirement,
+    ) -> Result<ComplianceStatus, ComplianceError> {
         // Basic mock implementation - in reality this would perform actual checks
         let compliance_score = 85.0; // Mock score
-        
+
         let status = if compliance_score >= 90.0 {
             ComplianceState::Compliant
         } else if compliance_score >= 70.0 {
@@ -1303,7 +1409,10 @@ impl ComplianceChecker for BasicComplianceChecker {
         })
     }
 
-    async fn collect_evidence(&self, _requirement: &ComplianceRequirement) -> Result<Vec<ComplianceEvidence>, ComplianceError> {
+    async fn collect_evidence(
+        &self,
+        _requirement: &ComplianceRequirement,
+    ) -> Result<Vec<ComplianceEvidence>, ComplianceError> {
         // Basic mock evidence collection
         Ok(vec![ComplianceEvidence {
             id: Uuid::new_v4().to_string(),
@@ -1325,14 +1434,17 @@ impl ComplianceChecker for BasicComplianceChecker {
         }])
     }
 
-    async fn verify_controls(&self, controls: &[String]) -> Result<HashMap<String, bool>, ComplianceError> {
+    async fn verify_controls(
+        &self,
+        controls: &[String],
+    ) -> Result<HashMap<String, bool>, ComplianceError> {
         let mut results = HashMap::new();
-        
+
         for control in controls {
             // Mock verification - in reality would check actual control implementation
             results.insert(control.clone(), true);
         }
-        
+
         Ok(results)
     }
 
@@ -1353,7 +1465,7 @@ mod tests {
     async fn test_compliance_engine_creation() {
         let config = ComplianceConfig::default();
         let engine = ComplianceGovernanceEngine::new(config);
-        
+
         // Test basic functionality
         assert!(engine.requirements.read().unwrap().is_empty());
         assert!(engine.statuses.read().unwrap().is_empty());
@@ -1363,10 +1475,13 @@ mod tests {
     async fn test_requirement_loading() {
         let config = ComplianceConfig::default();
         let engine = ComplianceGovernanceEngine::new(config);
-        
-        let count = engine.load_framework_requirements(&ComplianceFramework::PciDss).await.unwrap();
+
+        let count = engine
+            .load_framework_requirements(&ComplianceFramework::PciDss)
+            .await
+            .unwrap();
         assert!(count > 0);
-        
+
         let requirements = engine.requirements.read().unwrap();
         assert!(!requirements.is_empty());
     }
@@ -1375,20 +1490,25 @@ mod tests {
     async fn test_compliance_checking() {
         let config = ComplianceConfig::default();
         let engine = ComplianceGovernanceEngine::new(config);
-        
+
         // Register basic checker
-        let checker = Arc::new(BasicComplianceChecker::new(vec![ComplianceFramework::PciDss]));
+        let checker = Arc::new(BasicComplianceChecker::new(vec![
+            ComplianceFramework::PciDss,
+        ]));
         engine.register_checker("basic".to_string(), checker);
-        
+
         // Load requirements
-        engine.load_framework_requirements(&ComplianceFramework::PciDss).await.unwrap();
-        
+        engine
+            .load_framework_requirements(&ComplianceFramework::PciDss)
+            .await
+            .unwrap();
+
         // Get first requirement ID
         let requirement_id = {
             let requirements = engine.requirements.read().unwrap();
             requirements.keys().next().cloned().unwrap()
         };
-        
+
         // Test compliance check
         let status = engine.check_requirement(&requirement_id).await.unwrap();
         assert!(!status.requirement_id.is_empty());
@@ -1399,10 +1519,10 @@ mod tests {
     fn test_framework_requirement_generation() {
         let config = ComplianceConfig::default();
         let engine = ComplianceGovernanceEngine::new(config);
-        
+
         let pci_requirements = engine.generate_pci_dss_requirements();
         assert!(!pci_requirements.is_empty());
-        
+
         for req in &pci_requirements {
             assert_eq!(req.framework, ComplianceFramework::PciDss);
             assert!(!req.id.is_empty());
@@ -1414,22 +1534,28 @@ mod tests {
     async fn test_report_generation() {
         let config = ComplianceConfig::default();
         let engine = ComplianceGovernanceEngine::new(config);
-        
+
         // Register checker and load requirements
         let checker = Arc::new(BasicComplianceChecker::new(vec![ComplianceFramework::Gdpr]));
         engine.register_checker("basic".to_string(), checker);
-        engine.load_framework_requirements(&ComplianceFramework::Gdpr).await.unwrap();
-        
+        engine
+            .load_framework_requirements(&ComplianceFramework::Gdpr)
+            .await
+            .unwrap();
+
         // Run a check first to create some status data
         let requirement_id = {
             let requirements = engine.requirements.read().unwrap();
             requirements.keys().next().cloned().unwrap()
         };
         engine.check_requirement(&requirement_id).await.unwrap();
-        
+
         // Generate report
-        let report = engine.generate_report(&ComplianceFramework::Gdpr, ReportType::Technical).await.unwrap();
-        
+        let report = engine
+            .generate_report(&ComplianceFramework::Gdpr, ReportType::Technical)
+            .await
+            .unwrap();
+
         assert_eq!(report.framework, ComplianceFramework::Gdpr);
         assert!(matches!(report.report_type, ReportType::Technical));
         // More lenient assertion - check that score is valid (can be 0.0 for new systems)

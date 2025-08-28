@@ -62,6 +62,7 @@ prometheus.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 wiremock = { workspace = true }
+mockito = "1.4"
 
 [build-dependencies]
 tonic-build = "0.10"

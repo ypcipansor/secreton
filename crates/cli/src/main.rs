@@ -53,13 +53,13 @@ enum TransitCommand {
     /// List all encryption keys
     ListKeys,
     /// Encrypt data with a key
-    Encrypt { 
+    Encrypt {
         key: String,
         #[arg(short, long)]
         data: Option<String>,
     },
     /// Decrypt data with a key
-    Decrypt { 
+    Decrypt {
         key: String,
         #[arg(short, long)]
         data: Option<String>,
@@ -87,11 +87,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging
-    let level = if cli.verbose { Level::DEBUG } else { Level::INFO };
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .finish();
-    
+    let level = if cli.verbose {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+    let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
+
     tracing::subscriber::set_global_default(subscriber)?;
 
     // Load configuration
@@ -117,36 +119,48 @@ async fn main() -> Result<()> {
 
 async fn status_command(config: &CliConfig) -> Result<()> {
     let client = reqwest::Client::new();
-    
+
     // Check health
     let health_url = format!("{}/health", config.server_url);
     let health_response = client.get(&health_url).send().await?;
-    
+
     if health_response.status().is_success() {
         let health: serde_json::Value = health_response.json().await?;
         println!("🟢 Brankas Vault Status: HEALTHY");
         println!("   Server: {}", config.server_url);
-        println!("   Version: {}", health.get("version").unwrap_or(&serde_json::Value::String("unknown".to_string())));
-        println!("   Timestamp: {}", health.get("timestamp").unwrap_or(&serde_json::Value::String("unknown".to_string())));
+        println!(
+            "   Version: {}",
+            health
+                .get("version")
+                .unwrap_or(&serde_json::Value::String("unknown".to_string()))
+        );
+        println!(
+            "   Timestamp: {}",
+            health
+                .get("timestamp")
+                .unwrap_or(&serde_json::Value::String("unknown".to_string()))
+        );
     } else {
         println!("🔴 Brankas Vault Status: UNHEALTHY");
         println!("   HTTP Status: {}", health_response.status());
     }
-    
+
     Ok(())
 }
 
 async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> {
     let client = reqwest::Client::new();
-    
+
     match cmd {
         TransitCommand::CreateKey { name } => {
             let url = format!("{}/v1/transit/keys/{}", config.server_url, name);
-            let response = client.post(&url)
+            let response = client
+                .post(&url)
                 .header("Content-Type", "application/json")
                 .json(&serde_json::json!({}))
-                .send().await?;
-            
+                .send()
+                .await?;
+
             if response.status().is_success() {
                 println!("✅ Created encryption key: {}", name);
             } else {
@@ -156,7 +170,7 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
         TransitCommand::ListKeys => {
             let url = format!("{}/v1/transit/keys", config.server_url);
             let response = client.get(&url).send().await?;
-            
+
             if response.status().is_success() {
                 let keys: serde_json::Value = response.json().await?;
                 println!("🔑 Available encryption keys:");
@@ -183,20 +197,22 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
                 std::io::stdin().read_to_string(&mut buffer)?;
                 buffer.trim().to_string()
             };
-            
+
             // Base64 encode the plaintext
             let encoded_data = BASE64_STANDARD.encode(plaintext.as_bytes());
-            
+
             let url = format!("{}/v1/transit/encrypt/{}", config.server_url, key);
             let payload = serde_json::json!({
                 "plaintext": encoded_data
             });
-            
-            let response = client.post(&url)
+
+            let response = client
+                .post(&url)
                 .header("Content-Type", "application/json")
                 .json(&payload)
-                .send().await?;
-            
+                .send()
+                .await?;
+
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
                 if let Some(ciphertext) = result.get("ciphertext").and_then(|c| c.as_str()) {
@@ -216,17 +232,19 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
                 std::io::stdin().read_to_string(&mut buffer)?;
                 buffer.trim().to_string()
             };
-            
+
             let url = format!("{}/v1/transit/decrypt/{}", config.server_url, key);
             let payload = serde_json::json!({
                 "ciphertext": ciphertext
             });
-            
-            let response = client.post(&url)
+
+            let response = client
+                .post(&url)
                 .header("Content-Type", "application/json")
                 .json(&payload)
-                .send().await?;
-            
+                .send()
+                .await?;
+
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
                 if let Some(plaintext_b64) = result.get("plaintext").and_then(|p| p.as_str()) {
@@ -241,36 +259,41 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
             }
         }
     }
-    
+
     Ok(())
 }
 
 async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
     let client = reqwest::Client::new();
-    
+
     match cmd {
         SecretCommand::Put { path, data } => {
             // Parse key=value pairs
             let mut secret_data = serde_json::Map::new();
             for pair in data {
                 if let Some((key, value)) = pair.split_once('=') {
-                    secret_data.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+                    secret_data.insert(
+                        key.to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
                 } else {
                     println!("❌ Invalid format '{}'. Use key=value format.", pair);
                     return Ok(());
                 }
             }
-            
+
             let url = format!("{}/v1/secret/data/{}", config.server_url, path);
             let payload = serde_json::json!({
                 "data": secret_data
             });
-            
-            let response = client.post(&url)
+
+            let response = client
+                .post(&url)
                 .header("Content-Type", "application/json")
                 .json(&payload)
-                .send().await?;
-            
+                .send()
+                .await?;
+
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
                 if let Some(version) = result.get("version").and_then(|v| v.as_u64()) {
@@ -285,7 +308,7 @@ async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
         SecretCommand::Get { path } => {
             let url = format!("{}/v1/secret/data/{}", config.server_url, path);
             let response = client.get(&url).send().await?;
-            
+
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
                 if let Some(data) = result.get("data") {
@@ -304,7 +327,7 @@ async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
         SecretCommand::List => {
             let url = format!("{}/v1/secrets", config.server_url);
             let response = client.get(&url).send().await?;
-            
+
             if response.status().is_success() {
                 let result: serde_json::Value = response.json().await?;
                 if let Some(secrets) = result.get("keys").and_then(|s| s.as_array()) {
@@ -324,7 +347,7 @@ async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
         SecretCommand::Delete { path } => {
             let url = format!("{}/v1/secret/data/{}", config.server_url, path);
             let response = client.delete(&url).send().await?;
-            
+
             if response.status().is_success() {
                 println!("✅ Secret deleted at path '{}'", path);
             } else if response.status() == 404 {
@@ -334,6 +357,6 @@ async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

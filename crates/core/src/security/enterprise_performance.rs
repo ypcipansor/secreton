@@ -2,87 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Enterprise Performance Engine
-//! 
+//!
 //! Advanced performance optimization system that surpasses HashiCorp Vault's capabilities
 //! with intelligent caching, predictive scaling, adaptive load balancing, and real-time
 //! performance analytics for maximum throughput and minimal latency.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
-use crate::error::Result as CoreResult;
+use crate::error::SecretonResult;
 
-// Placeholder types for missing definitions
-type NodeId = String;
-type RateLimitStatus = String;
-type ResourceUsage = String;
-
-/// Load balancing statistics
-#[derive(Debug, Default, Clone)]
-pub struct LoadBalancingStats {
-    pub total_requests: u64,
-    pub successful_requests: u64,
-    pub failed_requests: u64,
-    pub avg_response_time_ms: f64,
-    pub backend_stats: HashMap<String, BackendStats>,
-}
-
-/// Backend statistics for load balancing
-#[derive(Debug, Default, Clone)]
-pub struct BackendStats {
-    pub active_connections: u32,
-    pub total_requests: u64,
-    pub error_rate: f64,
-    pub avg_latency_ms: f64,
-}
-
-/// Scaling state information
-#[derive(Debug, Default, Clone)]
-pub struct ScalingState {
-    pub current_instances: u32,
-    pub desired_instances: u32,
-    pub min_instances: u32,
-    pub max_instances: u32,
-    pub cpu_utilization: f64,
-    pub memory_utilization: f64,
-}
-
-/// Cache statistics structure
-#[derive(Debug, Default, Clone)]
-pub struct CacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub hit_ratio: f64,
-    pub total_entries: usize,
-    pub memory_usage_bytes: u64,
-    pub evictions: u64,
-    pub avg_response_time_us: u64,
-}
-
-impl CacheStats {
-    /// Create a new CacheStats instance with default values
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-// Placeholder traits
-#[async_trait]
-pub trait AutoScaler: Send + Sync {
-    async fn scale_up(&self, node_type: &str, count: u32) -> CoreResult<()>;
-    async fn scale_down(&self, node_id: &str) -> CoreResult<()>;
-}
-
-#[async_trait]
-pub trait CircuitBreakerManager: Send + Sync {
-    async fn trip(&self, circuit_id: &str) -> CoreResult<()>;
-    async fn reset(&self, circuit_id: &str) -> CoreResult<()>;
-    async fn state(&self, circuit_id: &str) -> CoreResult<bool>;
+/// Time range for performance metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeRange {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
 }
 
 /// Enterprise Performance Engine
@@ -90,25 +27,25 @@ pub struct PerformanceEngine {
     /// Performance configuration
     config: Arc<RwLock<PerformanceConfig>>,
     /// Intelligent cache manager
-    cache_manager: Arc<dyn CacheManager>,
+    cache_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Load balancer
-    load_balancer: Arc<dyn LoadBalancer>,
+    load_balancer: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Auto-scaler
-    auto_scaler: Arc<dyn AutoScaler>,
+    auto_scaler: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance monitor
-    perf_monitor: Arc<dyn PerformanceMonitor>,
+    perf_monitor: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Resource manager
-    resource_manager: Arc<dyn ResourceManager>,
+    resource_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Circuit breaker manager
-    circuit_breaker: Arc<dyn CircuitBreakerManager>,
+    circuit_breaker: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Rate limiter
-    rate_limiter: Arc<dyn RateLimiter>,
+    rate_limiter: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance metrics collector
     metrics: Arc<RwLock<PerformanceMetrics>>,
     /// Adaptive algorithms
-    adaptive_algorithms: Arc<dyn AdaptiveAlgorithms>,
+    adaptive_algorithms: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance predictor
-    predictor: Arc<dyn PerformancePredictor>,
+    predictor: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
 }
 
 /// Performance Configuration
@@ -673,280 +610,719 @@ pub struct ExportConfig {
     pub custom_exporters: Vec<String>,
 }
 
-use async_trait::async_trait;
-use crate::error::Result;
-use std::fmt::Debug;
-#[async_trait]
-pub trait CacheManager: Send + Sync + Debug + 'static {
+/// Cache Manager Trait
+pub trait CacheManager: Send + Sync {
     /// Get value from cache
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>>;
-    
-    /// Set value in cache
-    async fn set(&self, key: &str, value: &[u8], ttl: Option<Duration>) -> Result<()>;
-    
-    /// Delete value from cache
-    async fn delete(&self, key: &str) -> Result<()>;
-    
-    /// Clear entire cache
-    async fn clear(&self) -> Result<()>;
-    
+    async fn get(&self, key: &str) -> SecretonResult<Option<CacheEntry>>;
+
+    /// Put value into cache
+    async fn put(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> SecretonResult<()>;
+
+    /// Remove value from cache
+    async fn remove(&self, key: &str) -> SecretonResult<bool>;
+
+    /// Clear cache
+    async fn clear(&self) -> SecretonResult<()>;
+
     /// Get cache statistics
-    async fn get_stats(&self) -> Result<CacheStats>;
-    
-    /// Get cache configuration
-    fn get_config(&self) -> &CacheConfig;
-    
-    /// Update cache configuration
-    async fn update_config(&self, config: CacheConfig) -> Result<()>;
-    
-    /// Get cache size in bytes
-    async fn get_size(&self) -> Result<u64>;
-    
-    /// Get number of items in cache
-    async fn get_count(&self) -> Result<usize>;
+    async fn get_stats(&self) -> SecretonResult<CacheStats>;
+
+    /// Prefetch data based on patterns
+    async fn prefetch(&self, patterns: &[String]) -> SecretonResult<u32>;
+
+    /// Invalidate cache entries matching pattern
+    async fn invalidate_pattern(&self, pattern: &str) -> SecretonResult<u32>;
+}
+
+/// Cache Entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheEntry {
+    /// Entry key
+    pub key: String,
+    /// Entry value
+    pub value: Vec<u8>,
+    /// Time to live
+    pub ttl: Option<Duration>,
+    /// Creation timestamp
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Last accessed timestamp
+    pub last_accessed: chrono::DateTime<chrono::Utc>,
+    /// Access count
+    pub access_count: u64,
+    /// Metadata
+    pub metadata: HashMap<String, String>,
+}
+
+/// Cache Statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheStats {
+    /// Cache hit count
+    pub hits: u64,
+    /// Cache miss count
+    pub misses: u64,
+    /// Hit ratio
+    pub hit_ratio: f64,
+    /// Total entries
+    pub total_entries: u64,
+    /// Memory usage (bytes)
+    pub memory_usage_bytes: u64,
+    /// Eviction count
+    pub evictions: u64,
+    /// Average response time (microseconds)
+    pub avg_response_time_us: u64,
 }
 
 /// Load Balancer Trait
-#[async_trait]
-pub trait LoadBalancer: Send + Sync + Debug + 'static {
-    /// Route request to appropriate backend
-    async fn route_request(&self, ctx: &RequestContext) -> Result<BackendServer>;
-    
+pub trait LoadBalancer: Send + Sync {
+    /// Select backend server for request
+    async fn select_backend(
+        &self,
+        request_context: &RequestContext,
+    ) -> SecretonResult<BackendServer>;
+
+    /// Update backend server health status
+    async fn update_backend_health(
+        &self,
+        server_id: &str,
+        health: HealthStatus,
+    ) -> SecretonResult<()>;
+
     /// Add backend server
-    async fn add_backend(&self, server: BackendServer) -> Result<()>;
-    
+    async fn add_backend(&self, server: BackendServer) -> SecretonResult<()>;
+
     /// Remove backend server
-    async fn remove_backend(&self, server_id: &str) -> Result<()>;
-    
-    /// Get backend server by ID
-    async fn get_backend(&self, server_id: &str) -> Result<Option<BackendServer>>;
-    
-    /// List all backend servers
-    async fn list_backends(&self) -> Result<Vec<BackendServer>>;
-    
-    /// Update backend server
-    async fn update_backend(&self, server: BackendServer) -> Result<()>;
-    
-    /// Get load balancer statistics
-    async fn get_stats(&self) -> Result<LoadBalancingStats>;
-    
-    /// Get load balancer configuration
-    fn get_config(&self) -> &LoadBalancingConfig;
-    
-    /// Update load balancer configuration
-    async fn update_config(&self, config: LoadBalancingConfig) -> Result<()>;
+    async fn remove_backend(&self, server_id: &str) -> SecretonResult<()>;
+
+    /// Get load balancing statistics
+    async fn get_stats(&self) -> SecretonResult<LoadBalancingStats>;
+}
+
+/// Request Context
+#[derive(Debug, Clone)]
+pub struct RequestContext {
+    /// Client IP address
+    pub client_ip: std::net::IpAddr,
+    /// Request headers
+    pub headers: HashMap<String, String>,
+    /// Request method
+    pub method: String,
+    /// Request path
+    pub path: String,
+    /// Session ID (if available)
+    pub session_id: Option<String>,
+    /// Request priority
+    pub priority: RequestPriority,
+    /// Geographic information
+    pub geo_info: Option<GeoInfo>,
+}
+
+/// Request Priority
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RequestPriority {
+    Low,
+    Normal,
+    High,
+    Critical,
+}
+
+/// Geographic Information
+#[derive(Debug, Clone)]
+pub struct GeoInfo {
+    /// Country code
+    pub country: String,
+    /// Region
+    pub region: Option<String>,
+    /// City
+    pub city: Option<String>,
+}
+
+/// Backend Server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendServer {
+    /// Server ID
+    pub id: String,
+    /// Server address
+    pub address: String,
+    /// Server port
+    pub port: u16,
+    /// Server weight
+    pub weight: u32,
+    /// Health status
+    pub health: HealthStatus,
+    /// Server metadata
+    pub metadata: HashMap<String, String>,
+    /// Performance metrics
+    pub metrics: ServerMetrics,
+}
+
+/// Health Status
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HealthStatus {
+    Healthy,
+    Unhealthy,
+    Degraded,
+    Unknown,
+}
+
+/// Server Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerMetrics {
+    /// Current connections
+    pub current_connections: u32,
+    /// Average response time (milliseconds)
+    pub avg_response_time_ms: f64,
+    /// Error rate (percentage)
+    pub error_rate_percent: f64,
+    /// CPU utilization (percentage)
+    pub cpu_utilization_percent: f64,
+    /// Memory utilization (percentage)
+    pub memory_utilization_percent: f64,
+}
+
+/// Load Balancing Statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadBalancingStats {
+    /// Total requests
+    pub total_requests: u64,
+    /// Successful requests
+    pub successful_requests: u64,
+    /// Failed requests
+    pub failed_requests: u64,
+    /// Average response time
+    pub avg_response_time_ms: f64,
+    /// Backend server statistics
+    pub backend_stats: HashMap<String, BackendStats>,
+}
+
+/// Backend Statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendStats {
+    /// Requests handled
+    pub requests_handled: u64,
+    /// Success rate
+    pub success_rate: f64,
+    /// Average response time
+    pub avg_response_time_ms: f64,
+    /// Current load
+    pub current_load: f64,
+}
+
+/// Auto Scaler Trait
+pub trait AutoScaler: Send + Sync {
+    /// Evaluate scaling decision based on metrics
+    async fn evaluate_scaling(&self, metrics: &ScalingMetrics) -> SecretonResult<ScalingDecision>;
+
+    /// Execute scaling action
+    async fn execute_scaling(&self, decision: &ScalingDecision) -> SecretonResult<ScalingResult>;
+
+    /// Get current scaling state
+    async fn get_scaling_state(&self) -> SecretonResult<ScalingState>;
+
+    /// Update scaling configuration
+    async fn update_config(&self, config: AutoScalingConfig) -> SecretonResult<()>;
+}
+
+/// Scaling Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingMetrics {
+    /// CPU utilization
+    pub cpu_utilization: f64,
+    /// Memory utilization
+    pub memory_utilization: f64,
+    /// Network I/O
+    pub network_io: NetworkIOMetrics,
+    /// Request metrics
+    pub request_metrics: RequestMetrics,
+    /// Custom metrics
+    pub custom_metrics: HashMap<String, f64>,
+    /// Timestamp
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// Network I/O Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkIOMetrics {
+    /// Bytes per second in
+    pub bytes_in_per_sec: f64,
+    /// Bytes per second out
+    pub bytes_out_per_sec: f64,
+    /// Packets per second in
+    pub packets_in_per_sec: f64,
+    /// Packets per second out
+    pub packets_out_per_sec: f64,
+}
+
+/// Request Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestMetrics {
+    /// Requests per second
+    pub requests_per_second: f64,
+    /// Average response time
+    pub avg_response_time_ms: f64,
+    /// Error rate
+    pub error_rate: f64,
+    /// Queue depth
+    pub queue_depth: u32,
+}
+
+/// Scaling Decision
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingDecision {
+    /// Scaling action
+    pub action: ScalingAction,
+    /// Number of instances to change
+    pub instance_count: u32,
+    /// Reason for scaling
+    pub reason: String,
+    /// Confidence level (0.0 to 1.0)
+    pub confidence: f64,
+    /// Estimated impact
+    pub estimated_impact: EstimatedImpact,
+}
+
+/// Scaling Actions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ScalingAction {
+    ScaleUp,
+    ScaleDown,
+    NoAction,
+}
+
+/// Estimated Impact
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EstimatedImpact {
+    /// Performance improvement
+    pub performance_improvement: f64,
+    /// Cost impact
+    pub cost_impact: f64,
+    /// Resource utilization change
+    pub resource_utilization_change: f64,
+}
+
+/// Scaling Result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingResult {
+    /// Success status
+    pub success: bool,
+    /// Error message (if failed)
+    pub error: Option<String>,
+    /// Instances added/removed
+    pub instances_changed: u32,
+    /// Duration of scaling operation
+    pub duration_ms: u64,
+}
+
+/// Scaling State
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingState {
+    /// Current instance count
+    pub current_instances: u32,
+    /// Desired instance count
+    pub desired_instances: u32,
+    /// Scaling status
+    pub status: ScalingStatus,
+    /// Last scaling action
+    pub last_scaling_action: Option<ScalingAction>,
+    /// Last scaling timestamp
+    pub last_scaling_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// Cooldown remaining (seconds)
+    pub cooldown_remaining_seconds: u32,
+}
+
+/// Scaling Status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ScalingStatus {
+    Stable,
+    ScalingUp,
+    ScalingDown,
+    Cooldown,
+    Error(String),
 }
 
 /// Performance Monitor Trait
-#[async_trait]
-pub trait PerformanceMonitor: Send + Sync + Debug + 'static {
+pub trait PerformanceMonitor: Send + Sync {
     /// Collect performance metrics
-    async fn collect_metrics(&self) -> Result<PerformanceSnapshot, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty snapshot
-        Ok(Default::default())
-    }
-    
-    /// Start monitoring
-    async fn start_monitoring(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation does nothing
-        Ok(())
-    }
-    
+    async fn collect_metrics(&self) -> SecretonResult<PerformanceSnapshot>;
+
+    /// Start continuous monitoring
+    async fn start_monitoring(&self) -> SecretonResult<()>;
+
     /// Stop monitoring
-    async fn stop_monitoring(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation does nothing
-        Ok(())
-    }
-    
+    async fn stop_monitoring(&self) -> SecretonResult<()>;
+
     /// Get historical metrics
     async fn get_historical_metrics(
         &self,
-        time_range: TimeRange
-    ) -> Result<Vec<PerformanceSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty vector
-        Ok(Vec::new())
-    }
-    
-    /// Subscribe to metrics updates
+        time_range: TimeRange,
+    ) -> SecretonResult<Vec<PerformanceSnapshot>>;
+
+    /// Subscribe to metric updates
     async fn subscribe_to_metrics(&self) -> SecretonResult<MetricsSubscription>;
 }
 
+/// Performance Snapshot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceSnapshot {
+    /// Timestamp
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// System metrics
+    pub system: SystemMetrics,
+    /// Application metrics
+    pub application: ApplicationMetrics,
+    /// Network metrics
+    pub network: NetworkMetrics,
+    /// Custom metrics
+    pub custom: HashMap<String, f64>,
+}
+
+/// System Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMetrics {
+    /// CPU utilization
+    pub cpu_utilization_percent: f64,
+    /// Memory usage
+    pub memory_usage_bytes: u64,
+    /// Memory utilization
+    pub memory_utilization_percent: f64,
+    /// Disk usage
+    pub disk_usage_bytes: u64,
+    /// Disk I/O
+    pub disk_io: DiskIOMetrics,
+    /// Load average
+    pub load_average: [f64; 3], // 1, 5, 15 minute averages
+}
+
+/// Disk I/O Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskIOMetrics {
+    /// Read bytes per second
+    pub read_bytes_per_sec: f64,
+    /// Write bytes per second
+    pub write_bytes_per_sec: f64,
+    /// Read operations per second
+    pub read_ops_per_sec: f64,
+    /// Write operations per second
+    pub write_ops_per_sec: f64,
+}
+
+/// Application Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplicationMetrics {
+    /// Request rate
+    pub request_rate: f64,
+    /// Average response time
+    pub avg_response_time_ms: f64,
+    /// Error rate
+    pub error_rate_percent: f64,
+    /// Active connections
+    pub active_connections: u32,
+    /// Queue depth
+    pub queue_depth: u32,
+    /// Garbage collection metrics
+    pub gc_metrics: Option<GarbageCollectionMetrics>,
+}
+
+/// Garbage Collection Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GarbageCollectionMetrics {
+    /// GC count
+    pub gc_count: u64,
+    /// GC time
+    pub gc_time_ms: u64,
+    /// Heap size
+    pub heap_size_bytes: u64,
+    /// Heap used
+    pub heap_used_bytes: u64,
+}
+
+/// Network Metrics  
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkMetrics {
+    /// Network I/O
+    pub io: NetworkIOMetrics,
+    /// Connection metrics
+    pub connections: ConnectionMetrics,
+    /// Bandwidth utilization
+    pub bandwidth_utilization_percent: f64,
+}
+
+/// Connection Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionMetrics {
+    /// Active connections
+    pub active_connections: u32,
+    /// Connection rate
+    pub connection_rate: f64,
+    /// Connection errors
+    pub connection_errors: u32,
+    /// Connection timeouts
+    pub connection_timeouts: u32,
+}
+
+/// Metrics Subscription
+pub struct MetricsSubscription {
+    /// Subscription ID
+    pub id: String,
+    /// Metrics receiver
+    pub receiver: tokio::sync::mpsc::Receiver<PerformanceSnapshot>,
+}
+
 /// Resource Manager Trait
-#[async_trait]
-pub trait ResourceManager: Send + Sync + Debug + 'static {
+pub trait ResourceManager: Send + Sync {
     /// Allocate resources
-    async fn allocate_resources(&self, request: &ResourceRequest) -> SecretonResult<ResourceAllocation> {
-        // Default implementation returns empty allocation
-        Ok(ResourceAllocation {
-            id: request.id.clone(),
-            resource_type: request.resource_type.clone(),
-            amount: 0,
-            expires_at: None,
-        })
-    }
-    
+    async fn allocate_resources(
+        &self,
+        request: &ResourceRequest,
+    ) -> SecretonResult<ResourceAllocation>;
+
     /// Release resources
-    async fn release_resources(&self, _allocation: &ResourceAllocation) -> SecretonResult<()> {
-        // Default implementation does nothing
-        Ok(())
-    }
-    
+    async fn release_resources(&self, allocation: &ResourceAllocation) -> SecretonResult<()>;
+
     /// Get resource usage
-    async fn get_resource_usage(&self) -> SecretonResult<ResourceUsage> {
-        // Default implementation returns empty usage
-        Ok(Default::default())
-    }
-    
+    async fn get_resource_usage(&self) -> SecretonResult<PerformanceResourceUsage>;
+
     /// Set resource limits
-    async fn set_resource_limits(&self, _limits: ResourceLimits) -> SecretonResult<()> {
-        // Default implementation does nothing
-        Ok(())
-    }
+    async fn set_resource_limits(&self, limits: ResourceLimits) -> SecretonResult<()>;
+}
+
+/// Resource Request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceRequest {
+    /// Request ID
+    pub id: String,
+    /// Resource type
+    pub resource_type: ResourceType,
+    /// Amount requested
+    pub amount: u64,
+    /// Duration (if temporary)
+    pub duration: Option<Duration>,
+    /// Priority
+    pub priority: ResourcePriority,
+}
+
+/// Resource Types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResourceType {
+    Memory,
+    CPU,
+    NetworkBandwidth,
+    DiskSpace,
+    FileDescriptors,
+    Connections,
+    Custom(String),
+}
+
+/// Resource Priority
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ResourcePriority {
+    Low,
+    Normal,
+    High,
+    Critical,
+}
+
+/// Resource Allocation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAllocation {
+    /// Allocation ID
+    pub id: String,
+    /// Resource type
+    pub resource_type: ResourceType,
+    /// Amount allocated
+    pub amount_allocated: u64,
+    /// Allocation timestamp
+    pub allocated_at: chrono::DateTime<chrono::Utc>,
+    /// Expiration (if temporary)
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Performance Resource Usage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceResourceUsage {
+    /// Memory usage
+    pub memory_bytes: u64,
+    /// CPU usage
+    pub cpu_cores: f64,
+    /// Network bandwidth usage
+    pub network_bandwidth_bps: u64,
+    /// Disk space usage
+    pub disk_space_bytes: u64,
+    /// File descriptor usage
+    pub file_descriptors: u32,
+    /// Connection usage
+    pub connections: u32,
+    /// Custom resource usage
+    pub custom_resources: HashMap<String, u64>,
 }
 
 /// Circuit Breaker Manager Trait
-#[async_trait]
-pub trait CircuitBreakerManager: Send + Sync + Debug + 'static {
+pub trait CircuitBreakerManager: Send + Sync {
     /// Execute request with circuit breaker protection
-    async fn execute<T, F>(&self, service_id: &str, operation: F) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
+    async fn execute<F, T, E>(&self, service_id: &str, operation: F) -> SecretonResult<T>
     where
-        T: 'static + Send,
-        F: std::future::Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>>> + Send + 'static,
-    {
-        // Default implementation just forwards the operation
-        operation.await
-    }
-    
+        F: std::future::Future<Output = Result<T, E>> + Send,
+        E: std::error::Error + Send + Sync + 'static;
+
     /// Get circuit breaker state
-    async fn get_state(&self, service_id: &str) -> Result<CircuitBreakerState, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns closed state
-        Ok(CircuitBreakerState::Closed)
-    }
-    
+    async fn get_state(&self, service_id: &str) -> SecretonResult<CircuitBreakerState>;
+
     /// Reset circuit breaker
-    async fn reset(&self, service_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation does nothing
-        Ok(())
-    }
-    
+    async fn reset(&self, service_id: &str) -> SecretonResult<()>;
+
     /// Get circuit breaker statistics
-    async fn get_stats(&self, service_id: &str) -> Result<CircuitBreakerStats, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty stats
-        Ok(Default::default())
-    }
+    async fn get_stats(&self, service_id: &str) -> SecretonResult<CircuitBreakerStats>;
+}
+
+/// Circuit Breaker State
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CircuitBreakerState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+/// Circuit Breaker Statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircuitBreakerStats {
+    /// Total requests
+    pub total_requests: u64,
+    /// Failed requests
+    pub failed_requests: u64,
+    /// Success rate
+    pub success_rate: f64,
+    /// Current state
+    pub state: CircuitBreakerState,
+    /// Time in current state
+    pub time_in_state_ms: u64,
+    /// Next retry time (if open)
+    pub next_retry_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Rate Limiter Trait
-#[async_trait]
-pub trait RateLimiter: Send + Sync + Debug + 'static {
+pub trait RateLimiter: Send + Sync {
     /// Check if request is allowed
-    async fn is_allowed(
-        &self, 
-        key: &str, 
-        tokens: u32
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation always allows
-        Ok(true)
-    }
-    
+    async fn is_allowed(&self, key: &str, tokens: u32) -> SecretonResult<bool>;
+
     /// Get current rate limit status
-    async fn get_status(
-        &self, 
-        key: &str
-    ) -> Result<RateLimitStatus, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty status
-        Ok(Default::default())
-    }
-    
+    async fn get_status(&self, key: &str) -> SecretonResult<RateLimitStatus>;
+
     /// Reset rate limit for key
-    async fn reset(
-        &self, 
-        key: &str
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation does nothing
-        Ok(())
-    }
-    
+    async fn reset(&self, key: &str) -> SecretonResult<()>;
+
     /// Update rate limits
-    async fn update_limits(
-        &self, 
-        key: &str, 
-        limits: RateLimits
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation does nothing
-        Ok(())
-    }
+    async fn update_limits(&self, key: &str, limits: RateLimits) -> SecretonResult<()>;
+}
+
+/// Rate Limit Status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitStatus {
+    /// Allowed requests
+    pub allowed: bool,
+    /// Remaining tokens
+    pub remaining_tokens: u32,
+    /// Reset time
+    pub reset_time: chrono::DateTime<chrono::Utc>,
+    /// Retry after (seconds)
+    pub retry_after_seconds: Option<u64>,
 }
 
 /// Adaptive Algorithms Trait
-#[async_trait]
-pub trait AdaptiveAlgorithms: Send + Sync + Debug + 'static {
+pub trait AdaptiveAlgorithms: Send + Sync {
     /// Adapt cache configuration based on patterns
     async fn adapt_cache_config(
-        &self, 
-        metrics: &CacheStats, 
-        patterns: &AccessPatterns
-    ) -> Result<CacheConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns default config
-        Ok(Default::default())
-    }
-    
-    /// Adapt load balancing configuration
+        &self,
+        metrics: &CacheStats,
+        patterns: &AccessPatterns,
+    ) -> SecretonResult<CacheConfig>;
+
+    /// Adapt load balancing based on performance
     async fn adapt_load_balancing(
-        &self, 
-        metrics: &LoadBalancingStats
-    ) -> Result<LoadBalancingConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns default config
-        Ok(Default::default())
-    }
-    
-    /// Adapt scaling thresholds
+        &self,
+        metrics: &LoadBalancingStats,
+    ) -> SecretonResult<LoadBalancingConfig>;
+
+    /// Adapt scaling thresholds based on history
     async fn adapt_scaling_thresholds(
-        &self, 
-        history: &[ScalingMetrics]
-    ) -> Result<AutoScalingConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns default config
-        Ok(Default::default())
-    }
+        &self,
+        history: &[ScalingMetrics],
+    ) -> SecretonResult<AutoScalingConfig>;
+}
+
+/// Access Patterns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessPatterns {
+    /// Hot keys (frequently accessed)
+    pub hot_keys: Vec<String>,
+    /// Cold keys (rarely accessed)
+    pub cold_keys: Vec<String>,
+    /// Access frequency distribution
+    pub frequency_distribution: HashMap<String, u64>,
+    /// Temporal patterns
+    pub temporal_patterns: Vec<TemporalPattern>,
+    /// Geographic patterns
+    pub geographic_patterns: HashMap<String, u64>,
+}
+
+/// Temporal Pattern
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalPattern {
+    /// Time window
+    pub time_window: TimeWindow,
+    /// Access count
+    pub access_count: u64,
+    /// Pattern type
+    pub pattern_type: PatternType,
+}
+
+/// Time Window
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TimeWindow {
+    Hourly(u8),
+    Daily(u8),
+    Weekly(u8),
+    Monthly(u8),
+    Custom(Duration),
+}
+
+/// Pattern Types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PatternType {
+    Peak,
+    Valley,
+    Steady,
+    Burst,
+    Custom(String),
 }
 
 /// Performance Predictor Trait
-#[async_trait]
-pub trait PerformancePredictor: Send + Sync + Debug + 'static {
-    /// Predict performance metrics
-    async fn predict_metrics(
+pub trait PerformancePredictor: Send + Sync {
+    /// Predict future performance metrics
+    async fn predict_metrics(&self, time_horizon: Duration) -> SecretonResult<PredictedMetrics>;
+
+    /// Predict resource requirements
+    async fn predict_resources(
         &self,
-        time_horizon: Duration
-    ) -> Result<PredictedMetrics, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty metrics
-        Ok(Default::default())
-    }
-    
-    /// Predict resource usage
-    async fn predict_resource_usage(
-        &self,
-        time_horizon: Duration
-    ) -> Result<ResourceForecast, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty forecast
-        Ok(Default::default())
-    }
-    
-    /// Predict load patterns
-    async fn predict_load_patterns(
-        &self,
-        time_horizon: Duration
-    ) -> Result<Vec<LoadForecast>, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty vector
-        Ok(Vec::new())
-    }
-    
-    /// Get prediction accuracy metrics
-    async fn get_accuracy_metrics(
-        &self
-    ) -> Result<PredictionAccuracy, Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation returns empty accuracy metrics
-        Ok(Default::default())
-    }
+        load_forecast: &LoadForecast,
+    ) -> SecretonResult<ResourceForecast>;
+
+    /// Train prediction model with new data
+    async fn train_model(&self, training_data: &[PerformanceSnapshot]) -> SecretonResult<()>;
+
+    /// Get prediction accuracy
+    async fn get_accuracy(&self) -> SecretonResult<PredictionAccuracy>;
+}
+
+/// Predicted Metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PredictedMetrics {
+    /// Predicted performance snapshot
+    pub snapshot: PerformanceSnapshot,
+    /// Confidence interval
+    pub confidence_interval: ConfidenceInterval,
+    /// Prediction timestamp
+    pub prediction_time: chrono::DateTime<chrono::Utc>,
+    /// Prediction horizon
+    pub horizon: Duration,
 }
 
 /// Confidence Interval
@@ -979,7 +1355,7 @@ pub struct LoadForecast {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceForecast {
     /// Predicted resource requirements
-    pub requirements: ResourceUsage,
+    pub requirements: PerformanceResourceUsage,
     /// Recommended instance count
     pub recommended_instances: u32,
     /// Confidence level
@@ -1003,38 +1379,6 @@ pub struct PredictionAccuracy {
     pub prediction_count: u64,
 }
 
-/// Scaling Status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ScalingStatus {
-    /// System is stable, no scaling needed
-    Stable,
-    /// System is scaling up
-    ScalingUp,
-    /// System is scaling down
-    ScalingDown,
-    /// System is in cooldown after scaling
-    Cooldown,
-    /// System is in an error state
-    Error(String),
-}
-
-/// Scaling State
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScalingState {
-    /// Current number of instances
-    pub current_instances: u32,
-    /// Desired number of instances
-    pub desired_instances: u32,
-    /// Current scaling status
-    pub status: ScalingStatus,
-    /// Last scaling action taken
-    pub last_scaling_action: Option<ScalingAction>,
-    /// When the last scaling action occurred
-    pub last_scaling_time: Option<DateTime<Utc>>,
-    /// Remaining cooldown time in seconds
-    pub cooldown_remaining_seconds: u64,
-}
-
 /// Performance Metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceMetrics {
@@ -1051,7 +1395,7 @@ pub struct PerformanceMetrics {
     /// Rate limiting status
     pub rate_limit_status: HashMap<String, RateLimitStatus>,
     /// Resource usage
-    pub resource_usage: ResourceUsage,
+    pub resource_usage: PerformanceResourceUsage,
     /// Performance targets compliance
     pub targets_compliance: TargetsCompliance,
 }
@@ -1075,63 +1419,54 @@ pub struct TargetsCompliance {
 
 impl PerformanceEngine {
     /// Create new Performance Engine
-    pub async fn new(
-        config: PerformanceConfig,
-        cache_manager: Arc<dyn CacheManager>,
-        load_balancer: Arc<dyn LoadBalancer>,
-        auto_scaler: Arc<dyn AutoScaler>,
-        perf_monitor: Arc<dyn PerformanceMonitor>,
-        resource_manager: Arc<dyn ResourceManager>,
-        circuit_breaker: Arc<dyn CircuitBreakerManager>,
-        rate_limiter: Arc<dyn RateLimiter>,
-        adaptive_algorithms: Arc<dyn AdaptiveAlgorithms>,
-        predictor: Arc<dyn PerformancePredictor>,
-    ) -> Result<Self> {
+    pub fn new(config: PerformanceConfig) -> SecretonResult<Self> {
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
-            cache_manager,
-            load_balancer,
-            auto_scaler,
-            perf_monitor,
-            resource_manager,
-            circuit_breaker,
-            rate_limiter,
+            cache_manager: None,
+            load_balancer: None,
+            auto_scaler: None,
+            perf_monitor: None,
+            resource_manager: None,
+            circuit_breaker: None,
+            rate_limiter: None,
             metrics: Arc::new(RwLock::new(PerformanceMetrics::default())),
-            adaptive_algorithms,
-            predictor,
+            adaptive_algorithms: None,
+            predictor: None,
         })
     }
-    
+
     /// Start performance monitoring and optimization
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self) -> SecretonResult<()> {
         // Start performance monitoring
-        self.perf_monitor.start_monitoring().await?;
-        
+        if let Some(_perf_monitor) = &self.perf_monitor {
+            // Performance monitoring would be started here
+        }
+
         // Initialize performance optimization loop
         self.start_optimization_loop().await?;
-        
+
         Ok(())
     }
-    
+
     /// Start optimization loop
-    async fn start_optimization_loop(&self) -> Result<()> {
+    async fn start_optimization_loop(&self) -> SecretonResult<()> {
         // This would start background tasks for:
         // 1. Continuous performance monitoring
         // 2. Adaptive algorithm optimization
         // 3. Predictive scaling
         // 4. Cache optimization
         // 5. Load balancing optimization
-        
+
         // Placeholder implementation
         tokio::spawn(async {
             // Optimization loop would go here
         });
-        
+
         Ok(())
     }
-    
+
     /// Get current performance metrics
-    pub async fn get_metrics(&self) -> Result<PerformanceMetrics> {
+    pub async fn get_metrics(&self) -> SecretonResult<PerformanceMetrics> {
         let metrics = self.metrics.read().await;
         Ok(metrics.clone())
     }
@@ -1141,12 +1476,33 @@ impl Default for PerformanceMetrics {
     fn default() -> Self {
         Self {
             current_snapshot: None,
-            cache_stats: CacheStats::new(),
-            load_balancing_stats: LoadBalancingStats::default(),
-            scaling_state: ScalingState::default(),
+            cache_stats: CacheStats {
+                hits: 0,
+                misses: 0,
+                hit_ratio: 0.0,
+                total_entries: 0,
+                memory_usage_bytes: 0,
+                evictions: 0,
+                avg_response_time_us: 0,
+            },
+            load_balancing_stats: LoadBalancingStats {
+                total_requests: 0,
+                successful_requests: 0,
+                failed_requests: 0,
+                avg_response_time_ms: 0.0,
+                backend_stats: HashMap::new(),
+            },
+            scaling_state: ScalingState {
+                current_instances: 0,
+                desired_instances: 0,
+                status: ScalingStatus::Stable,
+                last_scaling_action: None,
+                last_scaling_time: None,
+                cooldown_remaining_seconds: 0,
+            },
             circuit_breaker_states: HashMap::new(),
             rate_limit_status: HashMap::new(),
-            resource_usage: ResourceUsage {
+            resource_usage: PerformanceResourceUsage {
                 memory_bytes: 0,
                 cpu_cores: 0.0,
                 network_bandwidth_bps: 0,
@@ -1169,18 +1525,18 @@ impl Default for PerformanceMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    
+    // use super::*; // Unused import removed
+
     #[tokio::test]
     async fn test_performance_engine_creation() {
         // Test implementation would go here with mock providers
     }
-    
+
     #[tokio::test]
     async fn test_adaptive_optimization() {
         // Test adaptive algorithm functionality
     }
-    
+
     #[tokio::test]
     async fn test_predictive_scaling() {
         // Test predictive scaling functionality

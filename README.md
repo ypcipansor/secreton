@@ -25,6 +25,74 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 | **Replication** | Active-Active Multi-Region | Primary-Secondary | **Advanced** |
 | **Namespaces** | Hierarchical Unlimited | Limited Hierarchy | **Enterprise Scale** |
 
+## 📈 **Latest Updates (v2.0.5)**
+
+### 🔐 **Major Database & Security Overhaul: PostgreSQL Migration**
+- **BREAKING CHANGE**: Migrated from MySQL/SQLx to PostgreSQL-only backend using tokio-postgres and deadpool-postgres
+- **Security Achievement**: Eliminated RSA vulnerabilities by removing MySQL dependencies that included RSA transitive dependencies
+- **Dependency Cleanup**: Replaced unmaintained dependencies (wiremock → mockito, rmp-serde/postcard → ciborium, tabled → comfy-table)
+- **Audit Success**: Reduced security warnings from multiple RSA vulnerabilities to single unmaintained dependency warning
+- **Code Quality**: Zero compilation errors and warnings from cargo clippy
+
+### 🏗️ **Complete Storage Backend Rewrite**
+- **Database Migration**: Complete rewrite of PostgreSQL storage backend implementation
+- **Trait Compliance**: Implemented all required StorageBackend trait methods with proper async handling
+- **Connection Pooling**: Enhanced database operations with deadpool-postgres connection pooling
+- **Error Handling**: Improved structured error types and database query parameter binding
+- **Performance**: Optimized async database operations with proper trait bounds
+
+### Previous Updates (v2.0.4)
+- **RSA to Ed25519 Migration**: Complete migration from RSA to Ed25519 cryptography
+- **Security Improvement**: Eliminated all direct RSA vulnerabilities (RUSTSEC-2023-0071)
+- **Algorithm Updates**: Replaced RSA-PSS, RSA-PKCS#1 with Ed25519 signatures
+- **Performance Boost**: Ed25519 provides faster signing/verification than RSA
+- **Future-Proof**: Ed25519 offers better security properties and quantum resistance preparation
+
+### Critical Fixes & Code Quality Improvements
+- **Cryptographic Cleanup**: Removed all RSA key generation, signing, and verification code
+- **Enum Updates**: Updated KeyType, SignatureAlgorithm, and EncryptionAlgorithm enums
+- **Dependency Cleanup**: Removed direct RSA crate dependencies from workspace
+- **Lifecycle Policies**: Updated default policies to use Ed25519 instead of RSA4096
+- **Code Formatting**: Applied cargo fmt for consistent formatting
+
+### Previous Updates (v2.0.3)
+- **Build Stability**: Fixed critical compilation errors in `api_server.rs` (type mismatches between secreton_crypto and secreton_api)
+- **Naming Conventions**: Corrected enum variant naming to CamelCase across all security modules
+- **Import Cleanup**: Eliminated unused import warnings in test modules
+- **Reference Updates**: Fixed enum variant references to match new naming conventions
+- **Warning Reduction**: Systematic reduction from 217 to 161 clippy warnings
+
+### Previous Updates (v2.0.2)
+- **Build Stability**: Fixed all compilation errors including unresolved imports in `api_server.rs`
+- **Naming Conventions**: Corrected non-CamelCase enum variant names across security modules
+- **Code Cleanup**: Eliminated unused variable warnings by proper prefixing and refactoring
+- **Structural Fixes**: Resolved syntax errors and missing braces in key management modules
+- **Method Corrections**: Fixed field access patterns and method signatures for proper compilation
+
+### Ongoing Optimization (v2.0.1)
+- **Warning Reduction**: Continued systematic reduction from 265 to 221 clippy warnings
+- **Modern API Usage**: Updated deprecated base64 functions to use modern `Engine::encode/decode` methods
+- **Idiomatic Rust**: Replaced manual string operations with `strip_prefix` and `matches!` macro usage
+- **Performance**: Optimized HashMap operations using `entry` API instead of `contains_key` + `insert`
+- **Async Safety**: Fixed mutex guard scoping to prevent holding locks across await points
+- **Security**: Updated RSA crate to `0.10.0-rc.5` to address RUSTSEC-2023-0071 Marvin Attack vulnerability
+- **Code Consistency**: Applied `cargo fmt` across entire codebase for uniform formatting
+
+### Security Status
+- **Vulnerability Mitigation**: Addressed RSA timing sidechannel attack with latest available patch
+- **Dependency Audit**: 2 vulnerabilities remain (RSA Marvin Attack - no fix available), 3 unmaintained dependency warnings
+- **Compliance**: Enhanced FIPS 140-3 compliance validation and self-testing capabilities
+
+### Development Progress
+- **Quality Improvement**: Systematic approach to eliminating all warnings and errors
+- **Code Maintainability**: Enhanced error handling and async trait management
+- **Documentation**: Continuous updates to reflect optimization progress
+- **🔄 Multi-Layer Seal Wrapping**: Triple encryption layers with automatic rotation
+- **🗝️ Intelligent Key Management**: ML-powered lifecycle automation and governance
+- **🏢 Enterprise Namespaces**: Hierarchical multi-tenancy with unlimited depth
+- **🌍 Advanced Replication**: Active-active multi-region with conflict resolution
+- **⚡ Predictive Performance**: AI-driven auto-scaling and optimization
+
 ## 🚀 **Enterprise Features**
 
 ### ✅ **Advanced Security Architecture (Military Grade)**

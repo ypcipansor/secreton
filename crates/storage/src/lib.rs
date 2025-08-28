@@ -4,53 +4,53 @@
 //! PostgreSQL, Redis, file-based storage, and Raft integrated storage.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use thiserror::Error;
+use uuid::Uuid;
 
 pub mod backends;
-pub mod models;
 pub mod cache;
+pub mod models;
 
 // Re-export common backends
-pub use backends::{PostgresBackend, RedisBackend, FileBackend, RaftStorageBackend, RaftConfig};
+pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend, RedisBackend};
 
 /// Storage operation errors
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("Connection failed: {message}")]
     ConnectionFailed { message: String },
-    
+
     #[error("Query failed: {message}")]
     QueryFailed { message: String },
-    
+
     #[error("Transaction failed: {message}")]
     TransactionFailed { message: String },
-    
+
     #[error("Serialization error: {message}")]
     SerializationError { message: String },
-    
+
     #[error("Not found: {resource_type} with ID {id}")]
     NotFound { resource_type: String, id: String },
-    
+
     #[error("Duplicate entry: {resource_type} with ID {id}")]
     Duplicate { resource_type: String, id: String },
-    
+
     #[error("Constraint violation: {constraint} - {message}")]
     ConstraintViolation { constraint: String, message: String },
-    
+
     #[error("Permission denied for operation: {operation}")]
     PermissionDenied { operation: String },
-    
+
     #[error("Storage backend error: {backend} - {message}")]
     BackendError { backend: String, message: String },
-    
+
     #[error("Configuration error: {message}")]
     ConfigurationError { message: String },
-    
+
     #[error("Migration error: {message}")]
     MigrationError { message: String },
 }
@@ -73,37 +73,37 @@ pub enum SecurityLevel {
 pub struct VaultEntry {
     /// Unique identifier
     pub id: Uuid,
-    
+
     /// Entry path/key
     pub path: String,
-    
+
     /// Encrypted data
     pub encrypted_data: Vec<u8>,
-    
+
     /// Encryption metadata
     pub encryption_metadata: EncryptionMetadata,
-    
+
     /// Security classification
     pub security_level: SecurityLevel,
-    
+
     /// Entry metadata
     pub metadata: HashMap<String, String>,
-    
+
     /// Entry tags for organization
     pub tags: Vec<String>,
-    
+
     /// Entry version
     pub version: u32,
-    
+
     /// Owner user ID
     pub owner_id: Uuid,
-    
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
-    
+
     /// Last modified timestamp
     pub updated_at: DateTime<Utc>,
-    
+
     /// Expiration timestamp (optional)
     pub expires_at: Option<DateTime<Utc>>,
 }
@@ -131,7 +131,7 @@ impl VaultEntry {
             expires_at: None,
         }
     }
-    
+
     /// Check if entry has expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
@@ -140,19 +140,19 @@ impl VaultEntry {
             false
         }
     }
-    
+
     /// Set expiration time
     pub fn with_expiration(mut self, expires_at: DateTime<Utc>) -> Self {
         self.expires_at = Some(expires_at);
         self
     }
-    
+
     /// Add metadata
     pub fn add_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
     }
-    
+
     /// Add tag
     pub fn add_tag(mut self, tag: String) -> Self {
         if !self.tags.contains(&tag) {
@@ -167,19 +167,19 @@ impl VaultEntry {
 pub struct EncryptionMetadata {
     /// Encryption algorithm used
     pub algorithm: String,
-    
+
     /// Key identifier
     pub key_id: String,
-    
+
     /// Initialization vector/nonce
     pub iv: Vec<u8>,
-    
+
     /// Authentication tag (for AEAD modes)
     pub auth_tag: Option<Vec<u8>>,
-    
+
     /// Additional authenticated data
     pub aad: Option<Vec<u8>>,
-    
+
     /// Key derivation parameters
     pub kdf_params: Option<HashMap<String, String>>,
 }
@@ -189,31 +189,31 @@ pub struct EncryptionMetadata {
 pub struct QueryParams {
     /// Filter by path prefix
     pub path_prefix: Option<String>,
-    
+
     /// Filter by security level (minimum)
     pub security_level: Option<SecurityLevel>,
-    
+
     /// Filter by tags
     pub tags: Vec<String>,
-    
+
     /// Filter by owner
     pub owner_id: Option<Uuid>,
-    
+
     /// Filter by metadata
     pub metadata_filters: HashMap<String, String>,
-    
+
     /// Include expired entries
     pub include_expired: bool,
-    
+
     /// Maximum number of results
     pub limit: Option<u32>,
-    
+
     /// Results offset
     pub offset: Option<u32>,
-    
+
     /// Sort order
     pub sort_by: Option<String>,
-    
+
     /// Sort direction (asc/desc)
     pub sort_order: Option<String>,
 }
@@ -222,27 +222,27 @@ impl QueryParams {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn with_path_prefix(mut self, prefix: String) -> Self {
         self.path_prefix = Some(prefix);
         self
     }
-    
+
     pub fn with_security_level(mut self, level: SecurityLevel) -> Self {
         self.security_level = Some(level);
         self
     }
-    
+
     pub fn with_tag(mut self, tag: String) -> Self {
         self.tags.push(tag);
         self
     }
-    
+
     pub fn with_owner(mut self, owner_id: Uuid) -> Self {
         self.owner_id = Some(owner_id);
         self
     }
-    
+
     pub fn with_limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -254,40 +254,40 @@ impl QueryParams {
 pub trait StorageBackend: Send + Sync {
     /// Store a vault entry
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()>;
-    
+
     /// Retrieve a vault entry by ID
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>>;
-    
+
     /// Retrieve a vault entry by path
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>>;
-    
+
     /// Update an existing vault entry
     async fn update(&self, entry: &VaultEntry) -> StorageResult<()>;
-    
+
     /// Delete a vault entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
-    
+
     /// Delete a vault entry by path
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool>;
-    
+
     /// List vault entries with filtering
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>>;
-    
+
     /// Count vault entries matching query
     async fn count(&self, params: &QueryParams) -> StorageResult<u64>;
-    
+
     /// Check if path exists
     async fn exists(&self, path: &str) -> StorageResult<bool>;
-    
+
     /// Begin a transaction
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>>;
-    
+
     /// Perform health check
     async fn health_check(&self) -> StorageResult<HealthStatus>;
-    
+
     /// Get storage statistics
     async fn get_stats(&self) -> StorageResult<StorageStats>;
-    
+
     /// Run migrations
     async fn migrate(&self) -> StorageResult<()>;
 }
@@ -297,16 +297,16 @@ pub trait StorageBackend: Send + Sync {
 pub trait StorageTransaction: Send + Sync {
     /// Store entry within transaction
     async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()>;
-    
+
     /// Update entry within transaction
     async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()>;
-    
+
     /// Delete entry within transaction
     async fn delete(&mut self, id: Uuid) -> StorageResult<bool>;
-    
+
     /// Commit the transaction
     async fn commit(self: Box<Self>) -> StorageResult<()>;
-    
+
     /// Rollback the transaction
     async fn rollback(self: Box<Self>) -> StorageResult<()>;
 }
@@ -339,22 +339,22 @@ pub struct StorageStats {
 pub struct StorageConfig {
     /// Backend type (postgres, redis, file)
     pub backend_type: String,
-    
+
     /// Connection string or path
     pub connection_string: String,
-    
+
     /// Connection pool settings
     pub pool_settings: PoolSettings,
-    
+
     /// Encryption settings
     pub encryption_enabled: bool,
-    
+
     /// Compression settings
     pub compression_enabled: bool,
-    
+
     /// Backup settings
     pub backup_enabled: bool,
-    
+
     /// Cache settings
     pub cache_enabled: bool,
 }
@@ -388,6 +388,12 @@ pub struct MockStorageBackend {
     id_index: Arc<std::sync::RwLock<HashMap<Uuid, String>>>,
 }
 
+impl Default for MockStorageBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockStorageBackend {
     pub fn new() -> Self {
         Self {
@@ -402,13 +408,13 @@ impl StorageBackend for MockStorageBackend {
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
         let mut data = self.data.write().unwrap();
         let mut id_index = self.id_index.write().unwrap();
-        
+
         data.insert(entry.path.clone(), entry.clone());
         id_index.insert(entry.id, entry.path.clone());
-        
+
         Ok(())
     }
-    
+
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
         let id_index = self.id_index.read().unwrap();
         if let Some(path) = id_index.get(&id) {
@@ -418,12 +424,12 @@ impl StorageBackend for MockStorageBackend {
             Ok(None)
         }
     }
-    
+
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
         let data = self.data.read().unwrap();
         Ok(data.get(path).cloned())
     }
-    
+
     async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
         let mut data = self.data.write().unwrap();
         if data.contains_key(&entry.path) {
@@ -436,7 +442,7 @@ impl StorageBackend for MockStorageBackend {
             })
         }
     }
-    
+
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
         let mut id_index = self.id_index.write().unwrap();
         if let Some(path) = id_index.remove(&id) {
@@ -447,7 +453,7 @@ impl StorageBackend for MockStorageBackend {
             Ok(false)
         }
     }
-    
+
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
         let mut data = self.data.write().unwrap();
         if let Some(entry) = data.remove(path) {
@@ -458,10 +464,11 @@ impl StorageBackend for MockStorageBackend {
             Ok(false)
         }
     }
-    
+
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
         let data = self.data.read().unwrap();
-        let mut results: Vec<VaultEntry> = data.values()
+        let mut results: Vec<VaultEntry> = data
+            .values()
             .filter(|entry| {
                 // Simple filtering logic
                 if let Some(prefix) = &params.path_prefix {
@@ -478,30 +485,30 @@ impl StorageBackend for MockStorageBackend {
             })
             .cloned()
             .collect();
-        
+
         // Apply limit
         if let Some(limit) = params.limit {
             results.truncate(limit as usize);
         }
-        
+
         Ok(results)
     }
-    
+
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         let entries = self.list(params).await?;
         Ok(entries.len() as u64)
     }
-    
+
     async fn exists(&self, path: &str) -> StorageResult<bool> {
         let data = self.data.read().unwrap();
         Ok(data.contains_key(path))
     }
-    
+
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
         // For mock, just return a no-op transaction
         Ok(Box::new(MockTransaction))
     }
-    
+
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         Ok(HealthStatus {
             is_healthy: true,
@@ -512,14 +519,12 @@ impl StorageBackend for MockStorageBackend {
             uptime_seconds: 3600,
         })
     }
-    
+
     async fn get_stats(&self) -> StorageResult<StorageStats> {
         let data = self.data.read().unwrap();
         let total_entries = data.len() as u64;
-        let total_size_bytes = data.values()
-            .map(|e| e.encrypted_data.len() as u64)
-            .sum();
-        
+        let total_size_bytes = data.values().map(|e| e.encrypted_data.len() as u64).sum();
+
         Ok(StorageStats {
             total_entries,
             total_size_bytes,
@@ -534,7 +539,7 @@ impl StorageBackend for MockStorageBackend {
             expired_entries: 0,
         })
     }
-    
+
     async fn migrate(&self) -> StorageResult<()> {
         // Mock migration - nothing to do
         Ok(())
@@ -549,19 +554,19 @@ impl StorageTransaction for MockTransaction {
     async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         Ok(())
     }
-    
+
     async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         Ok(())
     }
-    
+
     async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         Ok(true)
     }
-    
+
     async fn commit(self: Box<Self>) -> StorageResult<()> {
         Ok(())
     }
-    
+
     async fn rollback(self: Box<Self>) -> StorageResult<()> {
         Ok(())
     }

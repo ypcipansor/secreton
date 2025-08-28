@@ -1,5 +1,5 @@
 //! Advanced MFA (Multi-Factor Authentication) System
-//! 
+//!
 //! Provides comprehensive MFA capabilities exceeding standard implementations:
 //! - Adaptive MFA with risk-based authentication
 //! - Multiple authenticator types with fallback mechanisms  
@@ -10,21 +10,21 @@
 //! - Behavioral biometrics and continuous authentication
 //! - Geographic and network-based risk assessment
 
+use async_trait::async_trait;
+use base32;
+use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, Utc};
+use hex;
+use hmac::{Hmac, Mac};
+use qrcode::QrCode;
+use rand::{thread_rng, Rng};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use sha2::Sha256;
-use hmac::{Hmac, Mac};
-use base32;
-use hex;
-use base64::{Engine as _, engine::general_purpose};
-use qrcode::QrCode;
-use rand::{thread_rng, Rng};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -135,19 +135,33 @@ impl PartialEq for KeystrokeProfile {
     fn eq(&self, other: &Self) -> bool {
         // Use epsilon comparison for f64 values
         const EPSILON: f64 = 1e-10;
-        
-        self.dwell_times.len() == other.dwell_times.len() &&
-        self.flight_times.len() == other.flight_times.len() &&
-        self.typing_rhythm.len() == other.typing_rhythm.len() &&
-        self.dwell_times.iter().zip(&other.dwell_times).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        self.flight_times.iter().zip(&other.flight_times).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        self.typing_rhythm.iter().zip(&other.typing_rhythm).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        (self.confidence_score - other.confidence_score).abs() < EPSILON &&
-        match (&self.pressure_patterns, &other.pressure_patterns) {
-            (None, None) => true,
-            (Some(a), Some(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < EPSILON),
-            _ => false,
-        }
+
+        self.dwell_times.len() == other.dwell_times.len()
+            && self.flight_times.len() == other.flight_times.len()
+            && self.typing_rhythm.len() == other.typing_rhythm.len()
+            && self
+                .dwell_times
+                .iter()
+                .zip(&other.dwell_times)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && self
+                .flight_times
+                .iter()
+                .zip(&other.flight_times)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && self
+                .typing_rhythm
+                .iter()
+                .zip(&other.typing_rhythm)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && (self.confidence_score - other.confidence_score).abs() < EPSILON
+            && match (&self.pressure_patterns, &other.pressure_patterns) {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < EPSILON)
+                }
+                _ => false,
+            }
     }
 }
 
@@ -163,16 +177,32 @@ pub struct MouseProfile {
 impl PartialEq for MouseProfile {
     fn eq(&self, other: &Self) -> bool {
         const EPSILON: f64 = 1e-10;
-        
-        self.movement_velocity.len() == other.movement_velocity.len() &&
-        self.acceleration_patterns.len() == other.acceleration_patterns.len() &&
-        self.click_patterns.len() == other.click_patterns.len() &&
-        self.scroll_behavior.len() == other.scroll_behavior.len() &&
-        self.movement_velocity.iter().zip(&other.movement_velocity).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        self.acceleration_patterns.iter().zip(&other.acceleration_patterns).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        self.click_patterns.iter().zip(&other.click_patterns).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        self.scroll_behavior.iter().zip(&other.scroll_behavior).all(|(a, b)| (a - b).abs() < EPSILON) &&
-        (self.confidence_score - other.confidence_score).abs() < EPSILON
+
+        self.movement_velocity.len() == other.movement_velocity.len()
+            && self.acceleration_patterns.len() == other.acceleration_patterns.len()
+            && self.click_patterns.len() == other.click_patterns.len()
+            && self.scroll_behavior.len() == other.scroll_behavior.len()
+            && self
+                .movement_velocity
+                .iter()
+                .zip(&other.movement_velocity)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && self
+                .acceleration_patterns
+                .iter()
+                .zip(&other.acceleration_patterns)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && self
+                .click_patterns
+                .iter()
+                .zip(&other.click_patterns)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && self
+                .scroll_behavior
+                .iter()
+                .zip(&other.scroll_behavior)
+                .all(|(a, b)| (a - b).abs() < EPSILON)
+            && (self.confidence_score - other.confidence_score).abs() < EPSILON
     }
 }
 
@@ -276,34 +306,34 @@ pub enum RiskFactor {
 pub enum MfaError {
     #[error("Challenge not found: {challenge_id}")]
     ChallengeNotFound { challenge_id: Uuid },
-    
+
     #[error("Challenge expired: {challenge_id}")]
     ChallengeExpired { challenge_id: Uuid },
-    
+
     #[error("Invalid challenge response")]
     InvalidResponse,
-    
+
     #[error("Maximum attempts exceeded")]
     MaxAttemptsExceeded,
-    
+
     #[error("User locked out until: {until}")]
     UserLockedOut { until: DateTime<Utc> },
-    
+
     #[error("MFA method not enrolled: {method}")]
     MethodNotEnrolled { method: String },
-    
+
     #[error("Biometric verification failed: {reason}")]
     BiometricVerificationFailed { reason: String },
-    
+
     #[error("Hardware key verification failed: {reason}")]
     HardwareKeyVerificationFailed { reason: String },
-    
+
     #[error("OTP generation failed: {reason}")]
     OtpGenerationFailed { reason: String },
-    
+
     #[error("Risk score too high: {score} > {threshold}")]
     RiskScoreTooHigh { score: u8, threshold: u8 },
-    
+
     #[error("Network communication error: {message}")]
     NetworkError { message: String },
 }
@@ -311,9 +341,22 @@ pub enum MfaError {
 /// Trait for MFA method implementations
 #[async_trait]
 pub trait MfaMethod: Send + Sync {
-    async fn enroll(&self, user_id: &str, enrollment_data: &HashMap<String, String>) -> Result<MfaChallengeType, MfaError>;
-    async fn create_challenge(&self, user_id: &str, method: &MfaChallengeType, context: &HashMap<String, String>) -> Result<MfaChallenge, MfaError>;
-    async fn verify_response(&self, challenge: &MfaChallenge, response: &str) -> Result<MfaAuthResult, MfaError>;
+    async fn enroll(
+        &self,
+        user_id: &str,
+        enrollment_data: &HashMap<String, String>,
+    ) -> Result<MfaChallengeType, MfaError>;
+    async fn create_challenge(
+        &self,
+        user_id: &str,
+        method: &MfaChallengeType,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaChallenge, MfaError>;
+    async fn verify_response(
+        &self,
+        challenge: &MfaChallenge,
+        response: &str,
+    ) -> Result<MfaAuthResult, MfaError>;
     async fn is_available(&self) -> bool;
     fn get_method_name(&self) -> String;
     fn get_security_level(&self) -> u8;
@@ -324,11 +367,21 @@ pub struct TotpMethod;
 
 #[async_trait]
 impl MfaMethod for TotpMethod {
-    async fn enroll(&self, user_id: &str, enrollment_data: &HashMap<String, String>) -> Result<MfaChallengeType, MfaError> {
+    async fn enroll(
+        &self,
+        user_id: &str,
+        enrollment_data: &HashMap<String, String>,
+    ) -> Result<MfaChallengeType, MfaError> {
         let secret = self.generate_secret();
-        let issuer = enrollment_data.get("issuer").unwrap_or(&"Brankas".to_string()).clone();
-        let account_name = enrollment_data.get("account_name").unwrap_or(&user_id.to_string()).clone();
-        
+        let issuer = enrollment_data
+            .get("issuer")
+            .unwrap_or(&"Brankas".to_string())
+            .clone();
+        let account_name = enrollment_data
+            .get("account_name")
+            .unwrap_or(&user_id.to_string())
+            .clone();
+
         Ok(MfaChallengeType::Totp {
             secret_key: secret,
             issuer,
@@ -339,7 +392,12 @@ impl MfaMethod for TotpMethod {
         })
     }
 
-    async fn create_challenge(&self, user_id: &str, method: &MfaChallengeType, context: &HashMap<String, String>) -> Result<MfaChallenge, MfaError> {
+    async fn create_challenge(
+        &self,
+        user_id: &str,
+        method: &MfaChallengeType,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaChallenge, MfaError> {
         if let MfaChallengeType::Totp { .. } = method {
             Ok(MfaChallenge {
                 challenge_id: Uuid::new_v4(),
@@ -353,18 +411,37 @@ impl MfaMethod for TotpMethod {
                 context: context.clone(),
             })
         } else {
-            Err(MfaError::MethodNotEnrolled { method: "TOTP".to_string() })
+            Err(MfaError::MethodNotEnrolled {
+                method: "TOTP".to_string(),
+            })
         }
     }
 
-    async fn verify_response(&self, challenge: &MfaChallenge, response: &str) -> Result<MfaAuthResult, MfaError> {
-        if let MfaChallengeType::Totp { secret_key, algorithm, digits, period, .. } = &challenge.challenge_type {
+    async fn verify_response(
+        &self,
+        challenge: &MfaChallenge,
+        response: &str,
+    ) -> Result<MfaAuthResult, MfaError> {
+        if let MfaChallengeType::Totp {
+            secret_key,
+            algorithm,
+            digits,
+            period,
+            ..
+        } = &challenge.challenge_type
+        {
             let expected_code = self.generate_totp_code(secret_key, algorithm, *digits, *period)?;
             let provided_code = response.trim();
-            
-            let success = expected_code == provided_code || 
-                          self.verify_previous_window(secret_key, algorithm, *digits, *period, provided_code)?;
-            
+
+            let success = expected_code == provided_code
+                || self.verify_previous_window(
+                    secret_key,
+                    algorithm,
+                    *digits,
+                    *period,
+                    provided_code,
+                )?;
+
             Ok(MfaAuthResult {
                 success,
                 challenge_id: challenge.challenge_id,
@@ -372,7 +449,11 @@ impl MfaMethod for TotpMethod {
                 verified_at: Utc::now(),
                 risk_score: if success { 10 } else { 80 },
                 confidence: if success { 0.95 } else { 0.0 },
-                error_message: if success { None } else { Some("Invalid TOTP code".to_string()) },
+                error_message: if success {
+                    None
+                } else {
+                    Some("Invalid TOTP code".to_string())
+                },
                 additional_challenges_required: Vec::new(),
             })
         } else {
@@ -398,65 +479,101 @@ impl TotpMethod {
         // Generate 20 random bytes for TOTP secret
         let mut secret = [0u8; 20];
         let rng = ring::rand::SystemRandom::new();
-        ring::rand::SecureRandom::fill(&rng, &mut secret).expect("Failed to generate random secret");
+        ring::rand::SecureRandom::fill(&rng, &mut secret)
+            .expect("Failed to generate random secret");
         base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &secret)
     }
 
-    fn generate_totp_code(&self, secret: &str, algorithm: &TotpAlgorithm, digits: u8, period: u32) -> Result<String, MfaError> {
+    fn generate_totp_code(
+        &self,
+        secret: &str,
+        algorithm: &TotpAlgorithm,
+        digits: u8,
+        period: u32,
+    ) -> Result<String, MfaError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| MfaError::OtpGenerationFailed { reason: "Time error".to_string() })?
+            .map_err(|_| MfaError::OtpGenerationFailed {
+                reason: "Time error".to_string(),
+            })?
             .as_secs();
-        
+
         let counter = now / period as u64;
         self.generate_hotp_code(secret, counter, algorithm, digits)
     }
 
-    fn generate_hotp_code(&self, secret: &str, counter: u64, algorithm: &TotpAlgorithm, digits: u8) -> Result<String, MfaError> {
+    fn generate_hotp_code(
+        &self,
+        secret: &str,
+        counter: u64,
+        algorithm: &TotpAlgorithm,
+        digits: u8,
+    ) -> Result<String, MfaError> {
         let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
-            .ok_or_else(|| MfaError::OtpGenerationFailed { reason: "Invalid secret".to_string() })?;
-        
+            .ok_or_else(|| MfaError::OtpGenerationFailed {
+                reason: "Invalid secret".to_string(),
+            })?;
+
         let counter_bytes = counter.to_be_bytes();
-        
-        let hmac_result = match algorithm {
-            TotpAlgorithm::Sha1 => {
-                let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(&secret_bytes)
-                    .map_err(|_| MfaError::OtpGenerationFailed { reason: "HMAC error".to_string() })?;
-                mac.update(&counter_bytes);
-                mac.finalize().into_bytes().to_vec()
-            }
-            TotpAlgorithm::Sha256 => {
-                let mut mac = HmacSha256::new_from_slice(&secret_bytes)
-                    .map_err(|_| MfaError::OtpGenerationFailed { reason: "HMAC error".to_string() })?;
-                mac.update(&counter_bytes);
-                mac.finalize().into_bytes().to_vec()
-            }
-            TotpAlgorithm::Sha512 => {
-                let mut mac = hmac::Hmac::<sha2::Sha512>::new_from_slice(&secret_bytes)
-                    .map_err(|_| MfaError::OtpGenerationFailed { reason: "HMAC error".to_string() })?;
-                mac.update(&counter_bytes);
-                mac.finalize().into_bytes().to_vec()
-            }
-        };
+
+        let hmac_result =
+            match algorithm {
+                TotpAlgorithm::Sha1 => {
+                    let mut mac =
+                        hmac::Hmac::<sha1::Sha1>::new_from_slice(&secret_bytes).map_err(|_| {
+                            MfaError::OtpGenerationFailed {
+                                reason: "HMAC error".to_string(),
+                            }
+                        })?;
+                    mac.update(&counter_bytes);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                TotpAlgorithm::Sha256 => {
+                    let mut mac = HmacSha256::new_from_slice(&secret_bytes).map_err(|_| {
+                        MfaError::OtpGenerationFailed {
+                            reason: "HMAC error".to_string(),
+                        }
+                    })?;
+                    mac.update(&counter_bytes);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                TotpAlgorithm::Sha512 => {
+                    let mut mac = hmac::Hmac::<sha2::Sha512>::new_from_slice(&secret_bytes)
+                        .map_err(|_| MfaError::OtpGenerationFailed {
+                            reason: "HMAC error".to_string(),
+                        })?;
+                    mac.update(&counter_bytes);
+                    mac.finalize().into_bytes().to_vec()
+                }
+            };
 
         let offset = (hmac_result[hmac_result.len() - 1] & 0x0f) as usize;
         let binary = ((hmac_result[offset] & 0x7f) as u32) << 24
             | (hmac_result[offset + 1] as u32) << 16
             | (hmac_result[offset + 2] as u32) << 8
             | (hmac_result[offset + 3] as u32);
-        
+
         let otp = binary % 10_u32.pow(digits as u32);
         Ok(format!("{:0width$}", otp, width = digits as usize))
     }
 
-    fn verify_previous_window(&self, secret: &str, algorithm: &TotpAlgorithm, digits: u8, period: u32, provided_code: &str) -> Result<bool, MfaError> {
+    fn verify_previous_window(
+        &self,
+        secret: &str,
+        algorithm: &TotpAlgorithm,
+        digits: u8,
+        period: u32,
+        provided_code: &str,
+    ) -> Result<bool, MfaError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| MfaError::OtpGenerationFailed { reason: "Time error".to_string() })?
+            .map_err(|_| MfaError::OtpGenerationFailed {
+                reason: "Time error".to_string(),
+            })?
             .as_secs();
-        
+
         let current_counter = now / period as u64;
-        
+
         // Check previous window (to handle clock skew)
         for window_offset in 1..=2 {
             let counter = current_counter - window_offset;
@@ -465,18 +582,26 @@ impl TotpMethod {
                 return Ok(true);
             }
         }
-        
+
         Ok(false)
     }
 
     pub fn generate_qr_code(&self, totp_config: &MfaChallengeType) -> Result<String, MfaError> {
-        if let MfaChallengeType::Totp { secret_key, issuer, account_name, algorithm, digits, period } = totp_config {
+        if let MfaChallengeType::Totp {
+            secret_key,
+            issuer,
+            account_name,
+            algorithm,
+            digits,
+            period,
+        } = totp_config
+        {
             let algorithm_str = match algorithm {
                 TotpAlgorithm::Sha1 => "SHA1",
-                TotpAlgorithm::Sha256 => "SHA256", 
+                TotpAlgorithm::Sha256 => "SHA256",
                 TotpAlgorithm::Sha512 => "SHA512",
             };
-            
+
             let uri = format!(
                 "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm={}&digits={}&period={}",
                 urlencoding::encode(issuer),
@@ -487,18 +612,22 @@ impl TotpMethod {
                 digits,
                 period
             );
-            
-            let qr = QrCode::new(&uri)
-                .map_err(|_| MfaError::OtpGenerationFailed { reason: "QR code generation failed".to_string() })?;
-            
-            let string = qr.render::<char>()
+
+            let qr = QrCode::new(&uri).map_err(|_| MfaError::OtpGenerationFailed {
+                reason: "QR code generation failed".to_string(),
+            })?;
+
+            let string = qr
+                .render::<char>()
                 .quiet_zone(false)
                 .module_dimensions(2, 1)
                 .build();
-            
+
             Ok(string)
         } else {
-            Err(MfaError::MethodNotEnrolled { method: "TOTP".to_string() })
+            Err(MfaError::MethodNotEnrolled {
+                method: "TOTP".to_string(),
+            })
         }
     }
 }
@@ -515,11 +644,18 @@ pub trait SmsProvider: Send + Sync {
 
 #[async_trait]
 impl MfaMethod for SmsMethod {
-    async fn enroll(&self, _user_id: &str, enrollment_data: &HashMap<String, String>) -> Result<MfaChallengeType, MfaError> {
-        let phone_number = enrollment_data.get("phone_number")
-            .ok_or_else(|| MfaError::MethodNotEnrolled { method: "Phone number required".to_string() })?
+    async fn enroll(
+        &self,
+        _user_id: &str,
+        enrollment_data: &HashMap<String, String>,
+    ) -> Result<MfaChallengeType, MfaError> {
+        let phone_number = enrollment_data
+            .get("phone_number")
+            .ok_or_else(|| MfaError::MethodNotEnrolled {
+                method: "Phone number required".to_string(),
+            })?
             .clone();
-            
+
         Ok(MfaChallengeType::Sms {
             phone_number,
             code_length: 6,
@@ -527,18 +663,31 @@ impl MfaMethod for SmsMethod {
         })
     }
 
-    async fn create_challenge(&self, user_id: &str, method: &MfaChallengeType, context: &HashMap<String, String>) -> Result<MfaChallenge, MfaError> {
-        if let MfaChallengeType::Sms { phone_number, code_length, expiry_duration } = method {
+    async fn create_challenge(
+        &self,
+        user_id: &str,
+        method: &MfaChallengeType,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaChallenge, MfaError> {
+        if let MfaChallengeType::Sms {
+            phone_number,
+            code_length,
+            expiry_duration,
+        } = method
+        {
             let code = self.generate_sms_code(*code_length);
-            
-            let message = format!("Your Brankas verification code is: {}. Valid for {} minutes.", 
-                                  code, expiry_duration.as_secs() / 60);
-            
+
+            let message = format!(
+                "Your Brankas verification code is: {}. Valid for {} minutes.",
+                code,
+                expiry_duration.as_secs() / 60
+            );
+
             self.sms_provider.send_sms(phone_number, &message).await?;
-            
+
             let mut challenge_context = context.clone();
             challenge_context.insert("verification_code".to_string(), code);
-            
+
             Ok(MfaChallenge {
                 challenge_id: Uuid::new_v4(),
                 user_id: user_id.to_string(),
@@ -551,16 +700,24 @@ impl MfaMethod for SmsMethod {
                 context: challenge_context,
             })
         } else {
-            Err(MfaError::MethodNotEnrolled { method: "SMS".to_string() })
+            Err(MfaError::MethodNotEnrolled {
+                method: "SMS".to_string(),
+            })
         }
     }
 
-    async fn verify_response(&self, challenge: &MfaChallenge, response: &str) -> Result<MfaAuthResult, MfaError> {
-        let expected_code = challenge.context.get("verification_code")
+    async fn verify_response(
+        &self,
+        challenge: &MfaChallenge,
+        response: &str,
+    ) -> Result<MfaAuthResult, MfaError> {
+        let expected_code = challenge
+            .context
+            .get("verification_code")
             .ok_or(MfaError::InvalidResponse)?;
-            
+
         let success = expected_code == response.trim();
-        
+
         Ok(MfaAuthResult {
             success,
             challenge_id: challenge.challenge_id,
@@ -568,7 +725,11 @@ impl MfaMethod for SmsMethod {
             verified_at: Utc::now(),
             risk_score: if success { 20 } else { 70 },
             confidence: if success { 0.85 } else { 0.0 },
-            error_message: if success { None } else { Some("Invalid SMS code".to_string()) },
+            error_message: if success {
+                None
+            } else {
+                Some("Invalid SMS code".to_string())
+            },
             additional_challenges_required: Vec::new(),
         })
     }
@@ -593,7 +754,9 @@ impl SmsMethod {
 
     fn generate_sms_code(&self, length: u8) -> String {
         let mut rng = thread_rng();
-        (0..length).map(|_| rng.gen_range(0..10).to_string()).collect()
+        (0..length)
+            .map(|_| rng.gen_range(0..10).to_string())
+            .collect()
     }
 }
 
@@ -602,21 +765,33 @@ pub struct HardwareKeyMethod;
 
 #[async_trait]
 impl MfaMethod for HardwareKeyMethod {
-    async fn enroll(&self, _user_id: &str, enrollment_data: &HashMap<String, String>) -> Result<MfaChallengeType, MfaError> {
-        let credential_id = enrollment_data.get("credential_id")
-            .ok_or_else(|| MfaError::MethodNotEnrolled { method: "Credential ID required".to_string() })?
+    async fn enroll(
+        &self,
+        _user_id: &str,
+        enrollment_data: &HashMap<String, String>,
+    ) -> Result<MfaChallengeType, MfaError> {
+        let credential_id = enrollment_data
+            .get("credential_id")
+            .ok_or_else(|| MfaError::MethodNotEnrolled {
+                method: "Credential ID required".to_string(),
+            })?
             .clone();
-            
-        let public_key_hex = enrollment_data.get("public_key")
-            .ok_or_else(|| MfaError::MethodNotEnrolled { method: "Public key required".to_string() })?;
-            
-        let public_key = hex::decode(public_key_hex)
-            .map_err(|_| MfaError::MethodNotEnrolled { method: "Invalid public key format".to_string() })?;
-            
-        let attestation = enrollment_data.get("attestation")
-            .map(|a| hex::decode(a).ok())
-            .flatten();
-            
+
+        let public_key_hex =
+            enrollment_data
+                .get("public_key")
+                .ok_or_else(|| MfaError::MethodNotEnrolled {
+                    method: "Public key required".to_string(),
+                })?;
+
+        let public_key = hex::decode(public_key_hex).map_err(|_| MfaError::MethodNotEnrolled {
+            method: "Invalid public key format".to_string(),
+        })?;
+
+        let attestation = enrollment_data
+            .get("attestation")
+            .and_then(|a| hex::decode(a).ok());
+
         Ok(MfaChallengeType::HardwareKey {
             credential_id,
             public_key,
@@ -624,17 +799,23 @@ impl MfaMethod for HardwareKeyMethod {
         })
     }
 
-    async fn create_challenge(&self, user_id: &str, method: &MfaChallengeType, context: &HashMap<String, String>) -> Result<MfaChallenge, MfaError> {
+    async fn create_challenge(
+        &self,
+        user_id: &str,
+        method: &MfaChallengeType,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaChallenge, MfaError> {
         if let MfaChallengeType::HardwareKey { .. } = method {
             // Generate challenge data for hardware key
             let mut challenge_bytes = [0u8; 32];
             let rng = ring::rand::SystemRandom::new();
-            ring::rand::SecureRandom::fill(&rng, &mut challenge_bytes).expect("Failed to generate challenge");
-            let challenge_b64 = general_purpose::STANDARD.encode(&challenge_bytes);
-            
+            ring::rand::SecureRandom::fill(&rng, &mut challenge_bytes)
+                .expect("Failed to generate challenge");
+            let challenge_b64 = general_purpose::STANDARD.encode(challenge_bytes);
+
             let mut challenge_context = context.clone();
             challenge_context.insert("challenge_data".to_string(), challenge_b64);
-            
+
             Ok(MfaChallenge {
                 challenge_id: Uuid::new_v4(),
                 user_id: user_id.to_string(),
@@ -647,19 +828,27 @@ impl MfaMethod for HardwareKeyMethod {
                 context: challenge_context,
             })
         } else {
-            Err(MfaError::MethodNotEnrolled { method: "HardwareKey".to_string() })
+            Err(MfaError::MethodNotEnrolled {
+                method: "HardwareKey".to_string(),
+            })
         }
     }
 
-    async fn verify_response(&self, challenge: &MfaChallenge, response: &str) -> Result<MfaAuthResult, MfaError> {
+    async fn verify_response(
+        &self,
+        challenge: &MfaChallenge,
+        response: &str,
+    ) -> Result<MfaAuthResult, MfaError> {
         // In a real implementation, this would verify the WebAuthn/FIDO2 signature
         // For now, we'll do a mock verification
-        let _challenge_data = challenge.context.get("challenge_data")
+        let _challenge_data = challenge
+            .context
+            .get("challenge_data")
             .ok_or(MfaError::InvalidResponse)?;
-            
+
         // Mock verification - in reality this would verify cryptographic signature
         let success = response.len() > 10 && response.contains("signature");
-        
+
         Ok(MfaAuthResult {
             success,
             challenge_id: challenge.challenge_id,
@@ -667,7 +856,11 @@ impl MfaMethod for HardwareKeyMethod {
             verified_at: Utc::now(),
             risk_score: if success { 5 } else { 90 },
             confidence: if success { 0.99 } else { 0.0 },
-            error_message: if success { None } else { Some("Hardware key verification failed".to_string()) },
+            error_message: if success {
+                None
+            } else {
+                Some("Hardware key verification failed".to_string())
+            },
             additional_challenges_required: Vec::new(),
         })
     }
@@ -719,8 +912,16 @@ impl Default for MfaEngineConfig {
 
 #[async_trait]
 pub trait MfaRiskAssessor: Send + Sync {
-    async fn assess_risk(&self, user_id: &str, context: &HashMap<String, String>) -> Result<MfaRiskAssessment, MfaError>;
-    async fn update_behavioral_profile(&self, user_id: &str, auth_data: &MfaAuthResult) -> Result<(), MfaError>;
+    async fn assess_risk(
+        &self,
+        user_id: &str,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaRiskAssessment, MfaError>;
+    async fn update_behavioral_profile(
+        &self,
+        user_id: &str,
+        auth_data: &MfaAuthResult,
+    ) -> Result<(), MfaError>;
 }
 
 impl AdvancedMfaEngine {
@@ -747,15 +948,24 @@ impl AdvancedMfaEngine {
     }
 
     /// Enroll a user in MFA
-    pub async fn enroll_user(&self, user_id: &str, method_name: &str, enrollment_data: HashMap<String, String>) -> Result<UserMfaConfig, MfaError> {
+    pub async fn enroll_user(
+        &self,
+        user_id: &str,
+        method_name: &str,
+        enrollment_data: HashMap<String, String>,
+    ) -> Result<UserMfaConfig, MfaError> {
         let method = {
             let methods = self.methods.read().unwrap();
-            methods.get(method_name).cloned()
-                .ok_or_else(|| MfaError::MethodNotEnrolled { method: method_name.to_string() })?
+            methods
+                .get(method_name)
+                .cloned()
+                .ok_or_else(|| MfaError::MethodNotEnrolled {
+                    method: method_name.to_string(),
+                })?
         };
 
         let mfa_method = method.enroll(user_id, &enrollment_data).await?;
-        
+
         let config = UserMfaConfig {
             user_id: user_id.to_string(),
             primary_method: Some(mfa_method),
@@ -779,19 +989,28 @@ impl AdvancedMfaEngine {
             user_configs.insert(user_id.to_string(), config.clone());
         }
 
-        info!("User {} enrolled in MFA with method {}", user_id, method_name);
+        info!(
+            "User {} enrolled in MFA with method {}",
+            user_id, method_name
+        );
         Ok(config)
     }
 
     /// Initiate MFA challenge
-    pub async fn create_challenge(&self, user_id: &str, context: HashMap<String, String>) -> Result<MfaChallenge, MfaError> {
+    pub async fn create_challenge(
+        &self,
+        user_id: &str,
+        context: HashMap<String, String>,
+    ) -> Result<MfaChallenge, MfaError> {
         // Check if user is locked out
         {
             let user_configs = self.user_configs.read().unwrap();
             if let Some(config) = user_configs.get(user_id) {
                 if let Some(lockout_until) = config.lockout_until {
                     if Utc::now() < lockout_until {
-                        return Err(MfaError::UserLockedOut { until: lockout_until });
+                        return Err(MfaError::UserLockedOut {
+                            until: lockout_until,
+                        });
                     }
                 }
             }
@@ -817,16 +1036,27 @@ impl AdvancedMfaEngine {
 
         let method = {
             let methods = self.methods.read().unwrap();
-            methods.get(&method_name).cloned()
-                .ok_or_else(|| MfaError::MethodNotEnrolled { method: method_name.clone() })?
+            methods
+                .get(&method_name)
+                .cloned()
+                .ok_or_else(|| MfaError::MethodNotEnrolled {
+                    method: method_name.clone(),
+                })?
         };
 
-        let mut challenge = method.create_challenge(user_id, &mfa_method, &context).await?;
-        
+        let mut challenge = method
+            .create_challenge(user_id, &mfa_method, &context)
+            .await?;
+
         // Add risk information to challenge context
-        challenge.context.insert("risk_score".to_string(), risk_assessment.risk_score.to_string());
-        challenge.context.insert("risk_factors".to_string(), 
-                                serde_json::to_string(&risk_assessment.risk_factors).unwrap_or_default());
+        challenge.context.insert(
+            "risk_score".to_string(),
+            risk_assessment.risk_score.to_string(),
+        );
+        challenge.context.insert(
+            "risk_factors".to_string(),
+            serde_json::to_string(&risk_assessment.risk_factors).unwrap_or_default(),
+        );
 
         // Store active challenge
         {
@@ -834,15 +1064,24 @@ impl AdvancedMfaEngine {
             active_challenges.insert(challenge.challenge_id, challenge.clone());
         }
 
-        info!("MFA challenge created for user {} with method {}", user_id, method_name);
+        info!(
+            "MFA challenge created for user {} with method {}",
+            user_id, method_name
+        );
         Ok(challenge)
     }
 
     /// Verify MFA response
-    pub async fn verify_challenge(&self, challenge_id: Uuid, response: &str) -> Result<MfaAuthResult, MfaError> {
+    pub async fn verify_challenge(
+        &self,
+        challenge_id: Uuid,
+        response: &str,
+    ) -> Result<MfaAuthResult, MfaError> {
         let challenge = {
             let active_challenges = self.active_challenges.read().unwrap();
-            active_challenges.get(&challenge_id).cloned()
+            active_challenges
+                .get(&challenge_id)
+                .cloned()
                 .ok_or(MfaError::ChallengeNotFound { challenge_id })?
         };
 
@@ -868,8 +1107,12 @@ impl AdvancedMfaEngine {
 
         let method = {
             let methods = self.methods.read().unwrap();
-            methods.get(method_name).cloned()
-                .ok_or_else(|| MfaError::MethodNotEnrolled { method: method_name.to_string() })?
+            methods
+                .get(method_name)
+                .cloned()
+                .ok_or_else(|| MfaError::MethodNotEnrolled {
+                    method: method_name.to_string(),
+                })?
         };
 
         // Verify the response
@@ -899,7 +1142,11 @@ impl AdvancedMfaEngine {
                 } else {
                     config.failure_count += 1;
                     if config.failure_count >= self.config.max_failures_before_lockout {
-                        config.lockout_until = Some(Utc::now() + chrono::Duration::from_std(self.config.default_lockout_duration).unwrap());
+                        config.lockout_until = Some(
+                            Utc::now()
+                                + chrono::Duration::from_std(self.config.default_lockout_duration)
+                                    .unwrap(),
+                        );
                         warn!("User {} locked out due to MFA failures", challenge.user_id);
                     }
                 }
@@ -908,7 +1155,11 @@ impl AdvancedMfaEngine {
 
         // Update behavioral profile for risk assessment
         if result.success && self.config.behavioral_biometrics_enabled {
-            if let Err(e) = self.risk_assessor.update_behavioral_profile(&challenge.user_id, &result).await {
+            if let Err(e) = self
+                .risk_assessor
+                .update_behavioral_profile(&challenge.user_id, &result)
+                .await
+            {
                 warn!("Failed to update behavioral profile: {}", e);
             }
         }
@@ -920,16 +1171,18 @@ impl AdvancedMfaEngine {
 
         // Check if step-up authentication is required
         if result.success && self.config.risk_based_step_up {
-            if let Ok(risk_score) = challenge.context.get("risk_score")
-                .unwrap_or(&"0".to_string()).parse::<u8>() {
+            if let Ok(risk_score) = challenge
+                .context
+                .get("risk_score")
+                .unwrap_or(&"0".to_string())
+                .parse::<u8>()
+            {
                 if risk_score > 70 {
-                    result.additional_challenges_required = vec![
-                        MfaChallengeType::HardwareKey {
-                            credential_id: "".to_string(),
-                            public_key: Vec::new(),
-                            attestation: None,
-                        }
-                    ];
+                    result.additional_challenges_required = vec![MfaChallengeType::HardwareKey {
+                        credential_id: "".to_string(),
+                        public_key: Vec::new(),
+                        attestation: None,
+                    }];
                 }
             }
         }
@@ -938,10 +1191,17 @@ impl AdvancedMfaEngine {
     }
 
     /// Select appropriate MFA method based on risk assessment
-    async fn select_mfa_method(&self, user_id: &str, risk_assessment: &MfaRiskAssessment) -> Result<(String, MfaChallengeType), MfaError> {
+    async fn select_mfa_method(
+        &self,
+        user_id: &str,
+        risk_assessment: &MfaRiskAssessment,
+    ) -> Result<(String, MfaChallengeType), MfaError> {
         let user_configs = self.user_configs.read().unwrap();
-        let config = user_configs.get(user_id)
-            .ok_or_else(|| MfaError::MethodNotEnrolled { method: "User not enrolled".to_string() })?;
+        let config = user_configs
+            .get(user_id)
+            .ok_or_else(|| MfaError::MethodNotEnrolled {
+                method: "User not enrolled".to_string(),
+            })?;
 
         // For high risk, prefer hardware keys
         if risk_assessment.risk_score > 80 {
@@ -963,7 +1223,9 @@ impl AdvancedMfaEngine {
             return Ok((method_name.to_string(), primary.clone()));
         }
 
-        Err(MfaError::MethodNotEnrolled { method: "No methods available".to_string() })
+        Err(MfaError::MethodNotEnrolled {
+            method: "No methods available".to_string(),
+        })
     }
 
     /// Remove expired or completed challenges
@@ -979,13 +1241,13 @@ impl AdvancedMfaEngine {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(cleanup_interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 let now = Utc::now();
                 let mut challenges_to_remove = Vec::new();
-                
+
                 {
                     let challenges = active_challenges.read().unwrap();
                     for (id, challenge) in challenges.iter() {
@@ -994,7 +1256,7 @@ impl AdvancedMfaEngine {
                         }
                     }
                 }
-                
+
                 if !challenges_to_remove.is_empty() {
                     let mut challenges = active_challenges.write().unwrap();
                     for id in challenges_to_remove {
@@ -1012,15 +1274,21 @@ impl AdvancedMfaEngine {
     }
 
     /// Generate backup codes for user
-    pub fn generate_backup_codes(&self, user_id: &str, count: usize) -> Result<Vec<String>, MfaError> {
+    pub fn generate_backup_codes(
+        &self,
+        user_id: &str,
+        count: usize,
+    ) -> Result<Vec<String>, MfaError> {
         let mut rng = thread_rng();
         let codes: Vec<String> = (0..count)
             .map(|_| {
-                (0..8).map(|_| {
-                    let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-                    let idx = rng.gen_range(0..chars.len());
-                    chars.chars().nth(idx).unwrap()
-                }).collect::<String>()
+                (0..8)
+                    .map(|_| {
+                        let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                        let idx = rng.gen_range(0..chars.len());
+                        chars.chars().nth(idx).unwrap()
+                    })
+                    .collect::<String>()
             })
             .collect();
 
@@ -1057,7 +1325,11 @@ pub struct SimpleRiskAssessor;
 
 #[async_trait]
 impl MfaRiskAssessor for SimpleRiskAssessor {
-    async fn assess_risk(&self, _user_id: &str, context: &HashMap<String, String>) -> Result<MfaRiskAssessment, MfaError> {
+    async fn assess_risk(
+        &self,
+        _user_id: &str,
+        context: &HashMap<String, String>,
+    ) -> Result<MfaRiskAssessment, MfaError> {
         let mut risk_factors = HashMap::new();
         let mut risk_score = 20u8; // Base risk
 
@@ -1097,7 +1369,11 @@ impl MfaRiskAssessor for SimpleRiskAssessor {
         })
     }
 
-    async fn update_behavioral_profile(&self, user_id: &str, _auth_data: &MfaAuthResult) -> Result<(), MfaError> {
+    async fn update_behavioral_profile(
+        &self,
+        user_id: &str,
+        _auth_data: &MfaAuthResult,
+    ) -> Result<(), MfaError> {
         debug!("Updated behavioral profile for user: {}", user_id);
         Ok(())
     }
@@ -1112,7 +1388,7 @@ mod tests {
     async fn test_totp_generation_and_verification() {
         let totp_method = TotpMethod;
         let secret = totp_method.generate_secret();
-        
+
         // Create TOTP config
         let totp_config = MfaChallengeType::Totp {
             secret_key: secret.clone(),
@@ -1124,8 +1400,10 @@ mod tests {
         };
 
         // Generate current code
-        let current_code = totp_method.generate_totp_code(&secret, &TotpAlgorithm::Sha256, 6, 30).unwrap();
-        
+        let current_code = totp_method
+            .generate_totp_code(&secret, &TotpAlgorithm::Sha256, 6, 30)
+            .unwrap();
+
         // Create challenge
         let challenge = MfaChallenge {
             challenge_id: Uuid::new_v4(),
@@ -1140,7 +1418,10 @@ mod tests {
         };
 
         // Verify the code
-        let result = totp_method.verify_response(&challenge, &current_code).await.unwrap();
+        let result = totp_method
+            .verify_response(&challenge, &current_code)
+            .await
+            .unwrap();
         assert!(result.success);
     }
 
@@ -1155,14 +1436,20 @@ mod tests {
         enrollment_data.insert("issuer".to_string(), "TestApp".to_string());
         enrollment_data.insert("account_name".to_string(), "testuser".to_string());
 
-        let user_config = mfa_engine.enroll_user("testuser", "totp", enrollment_data).await.unwrap();
+        let user_config = mfa_engine
+            .enroll_user("testuser", "totp", enrollment_data)
+            .await
+            .unwrap();
         assert!(user_config.primary_method.is_some());
 
         // Create challenge
         let mut context = HashMap::new();
         context.insert("session_id".to_string(), "test_session".to_string());
 
-        let challenge = mfa_engine.create_challenge("testuser", context).await.unwrap();
+        let challenge = mfa_engine
+            .create_challenge("testuser", context)
+            .await
+            .unwrap();
         assert_eq!(challenge.user_id, "testuser");
         assert_eq!(challenge.state, ChallengeState::Pending);
     }
@@ -1175,7 +1462,7 @@ mod tests {
 
         let codes = mfa_engine.generate_backup_codes("testuser", 10).unwrap();
         assert_eq!(codes.len(), 10);
-        
+
         for code in codes {
             assert_eq!(code.len(), 8);
             assert!(code.chars().all(|c| c.is_ascii_alphanumeric()));
@@ -1186,7 +1473,7 @@ mod tests {
     fn test_qr_code_generation() {
         let totp_method = TotpMethod;
         let secret = totp_method.generate_secret();
-        
+
         let totp_config = MfaChallengeType::Totp {
             secret_key: secret,
             issuer: "TestApp".to_string(),

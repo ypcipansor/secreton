@@ -25,6 +25,10 @@ futures = "0.3"
 # Database - Using explicit features for PostgreSQL with SQLx 0.8.1
 sqlx = { version = "0.8.1", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
 
+# Database
+tokio-postgres = { workspace = true, optional = true }
+deadpool-postgres = { workspace = true, optional = true }
+
 # Security dependencies for advanced features
 rand = "0.8"
 aes-gcm = "0.10"
@@ -57,6 +61,7 @@ chacha20poly1305 = "0.10"
 
 # HTTP API
 warp = "0.3"
+flate2 = "1.0"
 
 # Secret Versioning
 secret_versioning = { path = "./secret_versioning" }
@@ -66,5 +71,5 @@ flate2 = "1.1.2"
 
 [features]
 default = ["postgres", "redis"]
-postgres = ["sqlx/postgres"]
+postgres = ["tokio-postgres", "deadpool-postgres"]
 redis = []

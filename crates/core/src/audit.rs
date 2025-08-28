@@ -1,15 +1,15 @@
 //! Comprehensive Audit and Compliance System
-//! 
+//!
 //! Implements immutable audit trails, real-time monitoring, and automated
 //! compliance reporting for international banking and security standards.
 
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use crate::{error::CoreError, ResourceId, SecurityLevel};
 
@@ -17,88 +17,304 @@ use crate::{error::CoreError, ResourceId, SecurityLevel};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SecurityEventType {
     /// Authentication events
-    AuthenticationSuccess { user: String, method: String },
-    AuthenticationFailure { user: String, method: String, reason: String },
-    AuthenticationBlocked { user: String, reason: String },
-    AuthenticationChallenge { user: String, challenge_type: String },
-    SessionCreated { user: String, session_id: String },
-    SessionTerminated { user: String, session_id: String, reason: String },
-    PasswordChanged { user: String },
-    
+    AuthenticationSuccess {
+        user: String,
+        method: String,
+    },
+    AuthenticationFailure {
+        user: String,
+        method: String,
+        reason: String,
+    },
+    AuthenticationBlocked {
+        user: String,
+        reason: String,
+    },
+    AuthenticationChallenge {
+        user: String,
+        challenge_type: String,
+    },
+    SessionCreated {
+        user: String,
+        session_id: String,
+    },
+    SessionTerminated {
+        user: String,
+        session_id: String,
+        reason: String,
+    },
+    PasswordChanged {
+        user: String,
+    },
+
     /// Authorization events
-    AccessGranted { user: String, resource: String, action: String },
-    AccessDenied { user: String, resource: String, action: String, reason: String },
-    PrivilegeEscalation { user: String, from_role: String, to_role: String },
-    PolicyViolation { user: String, policy: String, details: String },
-    
+    AccessGranted {
+        user: String,
+        resource: String,
+        action: String,
+    },
+    AccessDenied {
+        user: String,
+        resource: String,
+        action: String,
+        reason: String,
+    },
+    PrivilegeEscalation {
+        user: String,
+        from_role: String,
+        to_role: String,
+    },
+    PolicyViolation {
+        user: String,
+        policy: String,
+        details: String,
+    },
+
     /// Cryptographic operations
-    KeyGeneration { key_type: String, key_id: String, algorithm: String },
-    KeyRotation { old_key_id: String, new_key_id: String, algorithm: String },
-    KeyDeletion { key_id: String, algorithm: String },
-    KeyAccess { key_id: String, user: String, operation: String },
-    EncryptionOperation { key_id: String, user: String, data_size: u64 },
-    DecryptionOperation { key_id: String, user: String, data_size: u64 },
-    SigningOperation { key_id: String, user: String, data_hash: String },
-    VerificationOperation { key_id: String, user: String, signature_valid: bool },
-    
+    KeyGeneration {
+        key_type: String,
+        key_id: String,
+        algorithm: String,
+    },
+    KeyRotation {
+        old_key_id: String,
+        new_key_id: String,
+        algorithm: String,
+    },
+    KeyDeletion {
+        key_id: String,
+        algorithm: String,
+    },
+    KeyAccess {
+        key_id: String,
+        user: String,
+        operation: String,
+    },
+    EncryptionOperation {
+        key_id: String,
+        user: String,
+        data_size: u64,
+    },
+    DecryptionOperation {
+        key_id: String,
+        user: String,
+        data_size: u64,
+    },
+    SigningOperation {
+        key_id: String,
+        user: String,
+        data_hash: String,
+    },
+    VerificationOperation {
+        key_id: String,
+        user: String,
+        signature_valid: bool,
+    },
+
     /// Hardware Security Module operations
-    HSMConnection { hsm_type: String, status: String },
-    HSMOperation { hsm_type: String, operation: String, success: bool },
-    HSMError { hsm_type: String, error: String },
-    HSMKeyGeneration { hsm_type: String, key_id: String },
-    
+    HSMConnection {
+        hsm_type: String,
+        status: String,
+    },
+    HSMOperation {
+        hsm_type: String,
+        operation: String,
+        success: bool,
+    },
+    HSMError {
+        hsm_type: String,
+        error: String,
+    },
+    HSMKeyGeneration {
+        hsm_type: String,
+        key_id: String,
+    },
+
     /// Multi-Factor Authentication
-    MFAChallenge { user: String, method: String, challenge_id: String },
-    MFASuccess { user: String, method: String },
-    MFAFailure { user: String, method: String, reason: String },
-    MFARegistration { user: String, method: String },
-    MFARemoval { user: String, method: String },
-    
+    MFAChallenge {
+        user: String,
+        method: String,
+        challenge_id: String,
+    },
+    MFASuccess {
+        user: String,
+        method: String,
+    },
+    MFAFailure {
+        user: String,
+        method: String,
+        reason: String,
+    },
+    MFARegistration {
+        user: String,
+        method: String,
+    },
+    MFARemoval {
+        user: String,
+        method: String,
+    },
+
     /// System administration
-    SystemStartup { version: String, config_hash: String },
-    SystemShutdown { reason: String, graceful: bool },
-    ConfigurationChange { parameter: String, old_value: String, new_value: String, user: String },
-    SecretCreation { secret_path: String, user: String },
-    SecretAccess { secret_path: String, user: String, operation: String },
-    SecretDeletion { secret_path: String, user: String },
-    SecretVersionChange { secret_path: String, old_version: u32, new_version: u32, user: String },
-    PolicyCreation { policy_name: String, user: String },
-    PolicyModification { policy_name: String, user: String },
-    PolicyDeletion { policy_name: String, user: String },
-    
+    SystemStartup {
+        version: String,
+        config_hash: String,
+    },
+    SystemShutdown {
+        reason: String,
+        graceful: bool,
+    },
+    ConfigurationChange {
+        parameter: String,
+        old_value: String,
+        new_value: String,
+        user: String,
+    },
+    SecretCreation {
+        secret_path: String,
+        user: String,
+    },
+    SecretAccess {
+        secret_path: String,
+        user: String,
+        operation: String,
+    },
+    SecretDeletion {
+        secret_path: String,
+        user: String,
+    },
+    SecretVersionChange {
+        secret_path: String,
+        old_version: u32,
+        new_version: u32,
+        user: String,
+    },
+    PolicyCreation {
+        policy_name: String,
+        user: String,
+    },
+    PolicyModification {
+        policy_name: String,
+        user: String,
+    },
+    PolicyDeletion {
+        policy_name: String,
+        user: String,
+    },
+
     /// Security incidents
-    FailedAccessAttempt { user: String, resource: String, attempts: u32 },
-    SuspiciousActivity { user: String, activity: String },
-    SecurityThreat { threat_type: String, source: String, severity: String },
-    IntrusionAttempt { source_ip: String, attack_type: String },
-    AnomalousUsage { user: String, pattern: String },
-    ComplianceViolation { regulation: String, violation: String, user: String },
-    DataBreach { scope: String, data_types: String, affected_users: u32 },
-    
+    FailedAccessAttempt {
+        user: String,
+        resource: String,
+        attempts: u32,
+    },
+    SuspiciousActivity {
+        user: String,
+        activity: String,
+    },
+    SecurityThreat {
+        threat_type: String,
+        source: String,
+        severity: String,
+    },
+    IntrusionAttempt {
+        source_ip: String,
+        attack_type: String,
+    },
+    AnomalousUsage {
+        user: String,
+        pattern: String,
+    },
+    ComplianceViolation {
+        regulation: String,
+        violation: String,
+        user: String,
+    },
+    DataBreach {
+        scope: String,
+        data_types: String,
+        affected_users: u32,
+    },
+
     /// Network and system security
-    NetworkConnection { source_ip: String, destination_port: u16, protocol: String },
-    TLSHandshake { client_ip: String, cipher_suite: String, version: String, success: bool },
-    RateLimitTriggered { client_ip: String, endpoint: String, limit: u32 },
-    IPBlacklisted { ip: String, reason: String },
-    CertificateValidation { certificate_subject: String, valid: bool, expiry: DateTime<Utc> },
-    
+    NetworkConnection {
+        source_ip: String,
+        destination_port: u16,
+        protocol: String,
+    },
+    TLSHandshake {
+        client_ip: String,
+        cipher_suite: String,
+        version: String,
+        success: bool,
+    },
+    RateLimitTriggered {
+        client_ip: String,
+        endpoint: String,
+        limit: u32,
+    },
+    IPBlacklisted {
+        ip: String,
+        reason: String,
+    },
+    CertificateValidation {
+        certificate_subject: String,
+        valid: bool,
+        expiry: DateTime<Utc>,
+    },
+
     /// Backup and disaster recovery
-    BackupCreated { backup_id: String, size: u64, encrypted: bool },
-    BackupRestored { backup_id: String, user: String },
-    DisasterRecoveryTriggered { reason: String, user: String },
-    
+    BackupCreated {
+        backup_id: String,
+        size: u64,
+        encrypted: bool,
+    },
+    BackupRestored {
+        backup_id: String,
+        user: String,
+    },
+    DisasterRecoveryTriggered {
+        reason: String,
+        user: String,
+    },
+
     /// Compliance and reporting
-    ComplianceCheck { standard: String, status: String, details: String },
-    ReportGenerated { report_type: String, user: String, timespan: String },
-    DataRetentionAction { action: String, data_type: String, count: u32 },
-    
+    ComplianceCheck {
+        standard: String,
+        status: String,
+        details: String,
+    },
+    ReportGenerated {
+        report_type: String,
+        user: String,
+        timespan: String,
+    },
+    DataRetentionAction {
+        action: String,
+        data_type: String,
+        count: u32,
+    },
+
     /// Post-Quantum Cryptography
-    PQCOperation { algorithm: String, operation: String, key_id: String },
-    HybridCryptoOperation { classical_alg: String, pqc_alg: String, operation: String },
-    QuantumResistanceCheck { algorithm: String, status: String },
-    
+    PQCOperation {
+        algorithm: String,
+        operation: String,
+        key_id: String,
+    },
+    HybridCryptoOperation {
+        classical_alg: String,
+        pqc_alg: String,
+        operation: String,
+    },
+    QuantumResistanceCheck {
+        algorithm: String,
+        status: String,
+    },
+
     /// Custom events for extensibility
-    Custom { event_type: String, details: String },
+    Custom {
+        event_type: String,
+        details: String,
+    },
 }
 
 /// Compliance standards supported by the audit system
@@ -182,73 +398,73 @@ pub struct ImmutableAuditTrail {
 pub struct AuditEntry {
     /// Unique identifier for this audit entry
     pub id: String,
-    
+
     /// Timestamp when the event occurred
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    
+
     /// Security event type with detailed context
     pub event_type: SecurityEventType,
-    
+
     /// User ID who performed the action (if applicable)
     pub user_id: Option<String>,
-    
+
     /// Session ID associated with the action
     pub session_id: Option<String>,
-    
+
     /// Action that was performed
     pub action: String,
-    
+
     /// Resource that was acted upon
     pub resource: Option<ResourceId>,
-    
+
     /// IP address of the client
     pub client_ip: Option<String>,
-    
+
     /// User agent string
     pub user_agent: Option<String>,
-    
+
     /// Geographical location (ISO 3166 country code)
     pub geo_location: Option<String>,
-    
+
     /// Whether the action was successful
     pub success: bool,
-    
+
     /// Error message if the action failed
     pub error: Option<String>,
-    
+
     /// Risk score calculated for this event (0.0-10.0)
     pub risk_score: f64,
-    
+
     /// Additional context and metadata
     pub metadata: HashMap<String, serde_json::Value>,
-    
+
     /// Security classification of this audit entry
     pub security_level: SecurityLevel,
-    
+
     /// Source component that generated this entry
     pub source: String,
-    
+
     /// Immutable trail information
     pub trail: Option<ImmutableAuditTrail>,
-    
+
     /// Compliance tags for regulatory mapping
     pub compliance_tags: Vec<ComplianceStandard>,
-    
+
     /// Data classification (public, internal, confidential, restricted)
     pub data_classification: String,
-    
+
     /// Correlation ID for linking related events
     pub correlation_id: Option<String>,
-    
+
     /// Request ID for tracing distributed operations
     pub request_id: Option<String>,
-    
+
     /// Performance metrics
     pub duration_ms: Option<u64>,
-    
+
     /// Data size involved in operation (bytes)
     pub data_size: Option<u64>,
-    
+
     /// TLS/encryption information
     pub encryption_info: Option<EncryptionInfo>,
 }
@@ -361,7 +577,11 @@ impl AuditEntry {
     }
 
     /// Create a successful audit entry
-    pub fn success(action: String, event_type: SecurityEventType, resource: Option<ResourceId>) -> Self {
+    pub fn success(
+        action: String,
+        event_type: SecurityEventType,
+        resource: Option<ResourceId>,
+    ) -> Self {
         Self::builder()
             .action(action)
             .event_type(event_type)
@@ -371,7 +591,12 @@ impl AuditEntry {
     }
 
     /// Create a failed audit entry
-    pub fn failure(action: String, event_type: SecurityEventType, resource: Option<ResourceId>, error: String) -> Self {
+    pub fn failure(
+        action: String,
+        event_type: SecurityEventType,
+        resource: Option<ResourceId>,
+        error: String,
+    ) -> Self {
         Self::builder()
             .action(action)
             .event_type(event_type)
@@ -407,6 +632,12 @@ pub struct AuditEntryBuilder {
     entry: AuditEntry,
 }
 
+impl Default for AuditEntryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuditEntryBuilder {
     /// Create a new builder
     pub fn new() -> Self {
@@ -414,9 +645,9 @@ impl AuditEntryBuilder {
             entry: AuditEntry {
                 id: Uuid::new_v4().to_string(),
                 timestamp: chrono::Utc::now(),
-                event_type: SecurityEventType::Custom { 
-                    event_type: "unknown".to_string(), 
-                    details: "No details available".to_string() 
+                event_type: SecurityEventType::Custom {
+                    event_type: "unknown".to_string(),
+                    details: "No details available".to_string(),
                 },
                 user_id: None,
                 session_id: None,
@@ -580,49 +811,48 @@ impl AuditEntryBuilder {
 pub trait AuditStorage: Send + Sync {
     /// Store an audit entry with integrity verification
     async fn store(&self, entry: &AuditEntry) -> Result<(), CoreError>;
-    
+
     /// Store multiple entries atomically
     async fn store_batch(&self, entries: &[AuditEntry]) -> Result<(), CoreError>;
-    
+
     /// Retrieve audit entries with optional filtering
-    async fn retrieve(
-        &self,
-        filters: AuditFilters,
-    ) -> Result<Vec<AuditEntry>, CoreError>;
-    
+    async fn retrieve(&self, filters: AuditFilters) -> Result<Vec<AuditEntry>, CoreError>;
+
     /// Count total audit entries matching filters
     async fn count(&self, filters: AuditFilters) -> Result<u64, CoreError>;
-    
+
     /// Delete audit entries older than specified date
-    async fn cleanup_before(
-        &self,
-        before: chrono::DateTime<chrono::Utc>,
-    ) -> Result<u64, CoreError>;
-    
+    async fn cleanup_before(&self, before: chrono::DateTime<chrono::Utc>)
+        -> Result<u64, CoreError>;
+
     /// Verify integrity of audit trail
-    async fn verify_integrity(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<bool, CoreError>;
-    
+    async fn verify_integrity(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<bool, CoreError>;
+
     /// Generate compliance report
     async fn generate_compliance_report(
         &self,
         standard: ComplianceStandard,
         period: (DateTime<Utc>, DateTime<Utc>),
     ) -> Result<ComplianceReport, CoreError>;
-    
+
     /// Search for security incidents
     async fn search_incidents(
         &self,
         patterns: Vec<String>,
         time_range: (DateTime<Utc>, DateTime<Utc>),
     ) -> Result<Vec<SecurityIncident>, CoreError>;
-    
+
     /// Export audit data for external analysis
     async fn export_data(
         &self,
         format: ExportFormat,
         filters: AuditFilters,
     ) -> Result<Vec<u8>, CoreError>;
-    
+
     /// Archive old audit entries
     async fn archive_entries(
         &self,
@@ -636,31 +866,31 @@ pub trait AuditStorage: Send + Sync {
 pub struct AuditFilters {
     /// Start time (inclusive)
     pub start_time: Option<chrono::DateTime<chrono::Utc>>,
-    
+
     /// End time (inclusive)
     pub end_time: Option<chrono::DateTime<chrono::Utc>>,
-    
+
     /// User ID filter
     pub user_id: Option<String>,
-    
+
     /// Action filter (can use wildcards)
     pub action: Option<String>,
-    
+
     /// Resource filter
     pub resource: Option<ResourceId>,
-    
+
     /// Success status filter
     pub success: Option<bool>,
-    
+
     /// Security level filter (minimum level)
     pub min_security_level: Option<SecurityLevel>,
-    
+
     /// Source component filter
     pub source: Option<String>,
-    
+
     /// Maximum number of results
     pub limit: Option<u32>,
-    
+
     /// Number of results to skip
     pub offset: Option<u32>,
 }
@@ -675,6 +905,12 @@ impl AuditFilters {
 /// Builder for audit filters
 pub struct AuditFiltersBuilder {
     filters: AuditFilters,
+}
+
+impl Default for AuditFiltersBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuditFiltersBuilder {
@@ -764,61 +1000,107 @@ pub struct RiskCalculator {
     context_factors: HashMap<String, f64>,
 }
 
+impl Default for RiskCalculator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RiskCalculator {
     pub fn new() -> Self {
         let mut rules = HashMap::new();
-        
+
         // High-risk authentication events
-        rules.insert(SecurityEventType::AuthenticationFailure { 
-            user: String::new(), method: String::new(), reason: String::new() 
-        }, 7.0);
-        rules.insert(SecurityEventType::AuthenticationBlocked { 
-            user: String::new(), reason: String::new() 
-        }, 9.0);
-        rules.insert(SecurityEventType::PrivilegeEscalation { 
-            user: String::new(), from_role: String::new(), to_role: String::new() 
-        }, 8.5);
-        
+        rules.insert(
+            SecurityEventType::AuthenticationFailure {
+                user: String::new(),
+                method: String::new(),
+                reason: String::new(),
+            },
+            7.0,
+        );
+        rules.insert(
+            SecurityEventType::AuthenticationBlocked {
+                user: String::new(),
+                reason: String::new(),
+            },
+            9.0,
+        );
+        rules.insert(
+            SecurityEventType::PrivilegeEscalation {
+                user: String::new(),
+                from_role: String::new(),
+                to_role: String::new(),
+            },
+            8.5,
+        );
+
         // Critical crypto operations
-        rules.insert(SecurityEventType::KeyDeletion { 
-            key_id: String::new(), algorithm: String::new() 
-        }, 9.5);
-        rules.insert(SecurityEventType::HSMError { 
-            hsm_type: String::new(), error: String::new() 
-        }, 8.0);
-        
+        rules.insert(
+            SecurityEventType::KeyDeletion {
+                key_id: String::new(),
+                algorithm: String::new(),
+            },
+            9.5,
+        );
+        rules.insert(
+            SecurityEventType::HSMError {
+                hsm_type: String::new(),
+                error: String::new(),
+            },
+            8.0,
+        );
+
         // Security incidents
-        rules.insert(SecurityEventType::SecurityThreat { 
-            threat_type: String::new(), source: String::new(), severity: String::new() 
-        }, 9.0);
-        rules.insert(SecurityEventType::IntrusionAttempt { 
-            source_ip: String::new(), attack_type: String::new() 
-        }, 8.5);
-        rules.insert(SecurityEventType::DataBreach { 
-            scope: String::new(), data_types: String::new(), affected_users: 0 
-        }, 10.0);
-        
+        rules.insert(
+            SecurityEventType::SecurityThreat {
+                threat_type: String::new(),
+                source: String::new(),
+                severity: String::new(),
+            },
+            9.0,
+        );
+        rules.insert(
+            SecurityEventType::IntrusionAttempt {
+                source_ip: String::new(),
+                attack_type: String::new(),
+            },
+            8.5,
+        );
+        rules.insert(
+            SecurityEventType::DataBreach {
+                scope: String::new(),
+                data_types: String::new(),
+                affected_users: 0,
+            },
+            10.0,
+        );
+
         Self {
             rules,
             context_factors: HashMap::new(),
         }
     }
-    
-    pub fn calculate_risk(&self, event: &SecurityEventType, context: &HashMap<String, serde_json::Value>) -> f64 {
+
+    pub fn calculate_risk(
+        &self,
+        event: &SecurityEventType,
+        context: &HashMap<String, serde_json::Value>,
+    ) -> f64 {
         let base_risk = self.rules.get(event).copied().unwrap_or(1.0);
-        
+
         // Apply context factors
         let mut risk = base_risk;
-        
+
         // Time-based factors
         if let Some(hour) = context.get("hour") {
             if let Some(h) = hour.as_u64() {
-                if h < 6 || h > 22 {
+                if !(6..=22).contains(&h) {
                     risk *= 1.2; // After hours activity is riskier
                 }
             }
         }
-        
+
         // Geographic factors
         if let Some(geo) = context.get("geo_location") {
             if let Some(country) = geo.as_str() {
@@ -827,7 +1109,7 @@ impl RiskCalculator {
                 }
             }
         }
-        
+
         // Failed attempt patterns
         if let Some(attempts) = context.get("failed_attempts") {
             if let Some(count) = attempts.as_u64() {
@@ -836,7 +1118,7 @@ impl RiskCalculator {
                 }
             }
         }
-        
+
         risk.min(10.0)
     }
 }
@@ -854,75 +1136,141 @@ pub struct ComplianceRules {
     pub real_time_monitoring: bool,
 }
 
+impl Default for ComplianceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComplianceMonitor {
     pub fn new() -> Self {
         let mut standards = HashMap::new();
-        
+
         // FIPS 140-3 requirements
-        standards.insert(ComplianceStandard::FIPS140_3, ComplianceRules {
-            required_events: vec![
-                SecurityEventType::KeyGeneration { key_type: String::new(), key_id: String::new(), algorithm: String::new() },
-                SecurityEventType::KeyRotation { old_key_id: String::new(), new_key_id: String::new(), algorithm: String::new() },
-                SecurityEventType::HSMOperation { hsm_type: String::new(), operation: String::new(), success: false },
-            ],
-            retention_days: 2555, // 7 years
-            encryption_required: true,
-            real_time_monitoring: true,
-        });
-        
+        standards.insert(
+            ComplianceStandard::FIPS140_3,
+            ComplianceRules {
+                required_events: vec![
+                    SecurityEventType::KeyGeneration {
+                        key_type: String::new(),
+                        key_id: String::new(),
+                        algorithm: String::new(),
+                    },
+                    SecurityEventType::KeyRotation {
+                        old_key_id: String::new(),
+                        new_key_id: String::new(),
+                        algorithm: String::new(),
+                    },
+                    SecurityEventType::HSMOperation {
+                        hsm_type: String::new(),
+                        operation: String::new(),
+                        success: false,
+                    },
+                ],
+                retention_days: 2555, // 7 years
+                encryption_required: true,
+                real_time_monitoring: true,
+            },
+        );
+
         // SOC 2 Type II requirements
-        standards.insert(ComplianceStandard::SOC2TypeII, ComplianceRules {
-            required_events: vec![
-                SecurityEventType::AuthenticationSuccess { user: String::new(), method: String::new() },
-                SecurityEventType::AccessGranted { user: String::new(), resource: String::new(), action: String::new() },
-                SecurityEventType::AccessDenied { user: String::new(), resource: String::new(), action: String::new(), reason: String::new() },
-            ],
-            retention_days: 365,
-            encryption_required: true,
-            real_time_monitoring: true,
-        });
-        
+        standards.insert(
+            ComplianceStandard::SOC2TypeII,
+            ComplianceRules {
+                required_events: vec![
+                    SecurityEventType::AuthenticationSuccess {
+                        user: String::new(),
+                        method: String::new(),
+                    },
+                    SecurityEventType::AccessGranted {
+                        user: String::new(),
+                        resource: String::new(),
+                        action: String::new(),
+                    },
+                    SecurityEventType::AccessDenied {
+                        user: String::new(),
+                        resource: String::new(),
+                        action: String::new(),
+                        reason: String::new(),
+                    },
+                ],
+                retention_days: 365,
+                encryption_required: true,
+                real_time_monitoring: true,
+            },
+        );
+
         // PCI DSS requirements
-        standards.insert(ComplianceStandard::PCIDSS, ComplianceRules {
-            required_events: vec![
-                SecurityEventType::AuthenticationSuccess { user: String::new(), method: String::new() },
-                SecurityEventType::AuthenticationFailure { user: String::new(), method: String::new(), reason: String::new() },
-                SecurityEventType::AccessGranted { user: String::new(), resource: String::new(), action: String::new() },
-                SecurityEventType::AccessDenied { user: String::new(), resource: String::new(), action: String::new(), reason: String::new() },
-                SecurityEventType::SecretAccess { secret_path: String::new(), user: String::new(), operation: String::new() },
-            ],
-            retention_days: 365,
-            encryption_required: true,
-            real_time_monitoring: true,
-        });
-        
+        standards.insert(
+            ComplianceStandard::PCIDSS,
+            ComplianceRules {
+                required_events: vec![
+                    SecurityEventType::AuthenticationSuccess {
+                        user: String::new(),
+                        method: String::new(),
+                    },
+                    SecurityEventType::AuthenticationFailure {
+                        user: String::new(),
+                        method: String::new(),
+                        reason: String::new(),
+                    },
+                    SecurityEventType::AccessGranted {
+                        user: String::new(),
+                        resource: String::new(),
+                        action: String::new(),
+                    },
+                    SecurityEventType::AccessDenied {
+                        user: String::new(),
+                        resource: String::new(),
+                        action: String::new(),
+                        reason: String::new(),
+                    },
+                    SecurityEventType::SecretAccess {
+                        secret_path: String::new(),
+                        user: String::new(),
+                        operation: String::new(),
+                    },
+                ],
+                retention_days: 365,
+                encryption_required: true,
+                real_time_monitoring: true,
+            },
+        );
+
         Self { standards }
     }
-    
+
     pub async fn check_compliance(
         &self,
         standard: &ComplianceStandard,
         entries: &[AuditEntry],
     ) -> ComplianceReport {
-        let rules = self.standards.get(standard).cloned().unwrap_or(ComplianceRules {
-            required_events: Vec::new(),
-            retention_days: 365,
-            encryption_required: false,
-            real_time_monitoring: false,
-        });
-        
+        let rules = self
+            .standards
+            .get(standard)
+            .cloned()
+            .unwrap_or(ComplianceRules {
+                required_events: Vec::new(),
+                retention_days: 365,
+                encryption_required: false,
+                real_time_monitoring: false,
+            });
+
         let mut findings = Vec::new();
         let mut statistics = HashMap::new();
         let mut compliance_score: f64 = 100.0;
-        
+
         // Check for required events
         for required_event in &rules.required_events {
-            let count = entries.iter()
-                .filter(|e| std::mem::discriminant(&e.event_type) == std::mem::discriminant(required_event))
+            let count = entries
+                .iter()
+                .filter(|e| {
+                    std::mem::discriminant(&e.event_type) == std::mem::discriminant(required_event)
+                })
                 .count();
-            
+
             statistics.insert(format!("{:?}", required_event), count as u64);
-            
+
             if count == 0 {
                 findings.push(ComplianceFinding {
                     id: Uuid::new_v4().to_string(),
@@ -938,7 +1286,7 @@ impl ComplianceMonitor {
                 compliance_score -= 10.0;
             }
         }
-        
+
         ComplianceReport {
             id: Uuid::new_v4().to_string(),
             standard: standard.clone(),
@@ -989,7 +1337,7 @@ impl AuditLogger {
         metadata: HashMap<String, serde_json::Value>,
     ) -> Result<(), CoreError> {
         let risk_score = self.risk_calculator.calculate_risk(&event_type, &metadata);
-        
+
         let entry = AuditEntry::builder()
             .event_type(event_type.clone())
             .action(format!("{:?}", event_type))
@@ -1055,30 +1403,31 @@ impl AuditLogger {
     /// Check for alert conditions
     async fn check_alerts(&self, entry: &AuditEntry) -> Result<(), CoreError> {
         let configs = self.alert_configs.read().await;
-        
+
         for config in configs.iter() {
-            if config.trigger_events.contains(&entry.event_type) && 
-               entry.risk_score >= self.get_severity_threshold(&config.severity) {
+            if config.trigger_events.contains(&entry.event_type)
+                && entry.risk_score >= self.get_severity_threshold(&config.severity)
+            {
                 self.send_alert(config, entry).await?;
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Send alert notification
     async fn send_alert(&self, _config: &AlertConfig, entry: &AuditEntry) -> Result<(), CoreError> {
         info!(
             "SECURITY ALERT: {} - Risk Score: {} - User: {:?} - Event: {:?}",
             entry.action, entry.risk_score, entry.user_id, entry.event_type
         );
-        
+
         // In a real implementation, this would send notifications through
         // configured channels (email, webhook, SIEM, etc.)
-        
+
         Ok(())
     }
-    
+
     /// Get risk threshold for alert severity
     fn get_severity_threshold(&self, severity: &AlertSeverity) -> f64 {
         match severity {
@@ -1095,7 +1444,9 @@ impl AuditLogger {
         standard: ComplianceStandard,
         period: (DateTime<Utc>, DateTime<Utc>),
     ) -> Result<ComplianceReport, CoreError> {
-        self.storage.generate_compliance_report(standard, period).await
+        self.storage
+            .generate_compliance_report(standard, period)
+            .await
     }
 
     /// Search for security incidents
@@ -1159,14 +1510,17 @@ mod tests {
             secret_path: "test/secret".to_string(),
             user: "user123".to_string(),
         };
-        
+
         let entry = AuditEntry::builder()
             .action("create_secret".to_string())
             .event_type(event_type.clone())
             .user_id("user123".to_string())
             .success(true)
             .risk_score(2.5)
-            .metadata("key".to_string(), serde_json::Value::String("value".to_string()))
+            .metadata(
+                "key".to_string(),
+                serde_json::Value::String("value".to_string()),
+            )
             .build();
 
         assert_eq!(entry.action, "create_secret");
@@ -1201,14 +1555,17 @@ mod tests {
         let calculator = RiskCalculator::new();
         let mut context = HashMap::new();
         context.insert("hour".to_string(), serde_json::Value::from(2));
-        context.insert("geo_location".to_string(), serde_json::Value::String("CN".to_string()));
-        
+        context.insert(
+            "geo_location".to_string(),
+            serde_json::Value::String("CN".to_string()),
+        );
+
         let event = SecurityEventType::AuthenticationFailure {
             user: "test".to_string(),
             method: "password".to_string(),
             reason: "invalid_password".to_string(),
         };
-        
+
         let risk = calculator.calculate_risk(&event, &context);
         // Adjusted threshold based on actual calculation: base risk (5.0) * time factor (1.5) * geo factor (1.2) = 9.0
         assert!(risk > 6.0); // More realistic threshold for the calculation
@@ -1218,18 +1575,18 @@ mod tests {
     #[tokio::test]
     async fn test_compliance_monitor() {
         let monitor = ComplianceMonitor::new();
-        let entries = vec![
-            AuditEntry::builder()
-                .event_type(SecurityEventType::AuthenticationSuccess {
-                    user: "test".to_string(),
-                    method: "password".to_string(),
-                })
-                .action("login".to_string())
-                .success(true)
-                .build(),
-        ];
-        
-        let report = monitor.check_compliance(&ComplianceStandard::SOC2TypeII, &entries).await;
+        let entries = vec![AuditEntry::builder()
+            .event_type(SecurityEventType::AuthenticationSuccess {
+                user: "test".to_string(),
+                method: "password".to_string(),
+            })
+            .action("login".to_string())
+            .success(true)
+            .build()];
+
+        let report = monitor
+            .check_compliance(&ComplianceStandard::SOC2TypeII, &entries)
+            .await;
         assert!(!report.id.is_empty());
         assert_eq!(report.standard, ComplianceStandard::SOC2TypeII);
         assert!(report.compliance_score <= 100.0);

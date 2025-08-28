@@ -1,20 +1,17 @@
 //! Security API Layer
-//! 
+//!
 //! Provides HTTP API endpoints for all security operations
 //! integrating with the comprehensive security/ directory modules.
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use warp::{Filter, Reply, Rejection, reject};
 use tracing::{info, warn};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use warp::{reject, Filter, Rejection, Reply};
 
-use crate::{
-    error::CoreError,
-    security::*,
-};
+use crate::{error::CoreError, security::*};
 
 /// API Response wrapper
 #[derive(Debug, Serialize)]
@@ -34,7 +31,7 @@ impl<T> ApiResponse<T> {
             timestamp: Utc::now(),
         }
     }
-    
+
     pub fn error(message: String) -> Self {
         Self {
             success: false,
@@ -143,14 +140,14 @@ pub struct AdvancedSecurityManager {
 impl AdvancedSecurityManager {
     pub async fn new() -> Result<Self, CoreError> {
         info!("Initializing Advanced Security Manager");
-        
+
         // Initialize concrete implementations for abstract interfaces
         use crate::security::concrete_implementations::*;
-        
+
         // Initialize all security components with proper dependencies
         let entropy_engine = EntropyAugmentationEngine::new(Default::default());
         let hsm_manager = HsmManager::new();
-        
+
         let audit_storage = MemoryAuditStorage::new();
         let anomaly_detector = SimpleAnomalyDetector::new();
         let audit_system = AdvancedAuditSystem::new(
@@ -158,18 +155,21 @@ impl AdvancedSecurityManager {
             "node-1".to_string(),
             Default::default(), // ComplianceConfig
             anomaly_detector,
-        ).map_err(|e| CoreError::from(anyhow::anyhow!("Failed to initialize audit system: {}", e)))?;
-        
+        )
+        .map_err(|e| {
+            CoreError::from(anyhow::anyhow!("Failed to initialize audit system: {}", e))
+        })?;
+
         let risk_engine = ConcreteRiskAssessmentEngine::new();
         let zero_trust_engine = ZeroTrustEngine::new(risk_engine, Default::default());
-        
+
         let mfa_risk_assessor = ConcreteMfaRiskAssessor::new();
         let mfa_engine = AdvancedMfaEngine::new(mfa_risk_assessor, Default::default());
-        
+
         let compliance_engine = ComplianceGovernanceEngine::new(Default::default());
         let quantum_crypto_engine = QuantumSafeCryptoEngine::new(Default::default());
         let threat_intel_engine = ThreatIntelligenceEngine::new(Default::default());
-        
+
         Ok(Self {
             entropy_engine,
             hsm_manager,
@@ -181,10 +181,15 @@ impl AdvancedSecurityManager {
             threat_intel_engine,
         })
     }
-    
-    pub async fn authenticate(&self, user_id: String, _mfa_responses: Vec<(String, String)>, _client_info: ClientInfo) -> Result<AuthSession, CoreError> {
+
+    pub async fn authenticate(
+        &self,
+        user_id: String,
+        _mfa_responses: Vec<(String, String)>,
+        _client_info: ClientInfo,
+    ) -> Result<AuthSession, CoreError> {
         info!("Authenticating user: {}", user_id);
-        
+
         // Mock implementation - in production this would integrate with MFA engine
         let session = AuthSession {
             id: Uuid::new_v4().to_string(),
@@ -192,79 +197,78 @@ impl AdvancedSecurityManager {
             expires_at: Utc::now() + chrono::Duration::hours(8),
             risk_score: 25.0, // Low risk
         };
-        
+
         // Log authentication event
         // self.audit_system.log_event(...).await?;
-        
+
         Ok(session)
     }
-    
-    pub async fn process_hsm_operation(&self, operation: HsmOperation) -> Result<serde_json::Value, CoreError> {
+
+    pub async fn process_hsm_operation(
+        &self,
+        operation: HsmOperation,
+    ) -> Result<serde_json::Value, CoreError> {
         info!("Processing HSM operation: {:?}", operation);
-        
+
         match operation {
-            HsmOperation::GenerateKey { algorithm, key_size } => {
-                Ok(serde_json::json!({
-                    "key_id": Uuid::new_v4().to_string(),
-                    "algorithm": algorithm,
-                    "key_size": key_size,
-                    "created_at": Utc::now(),
-                    "status": "generated"
-                }))
-            },
-            HsmOperation::ListKeys => {
-                Ok(serde_json::json!({
-                    "keys": [],
-                    "total": 0
-                }))
-            },
-            HsmOperation::GetKeyInfo { key_id } => {
-                Ok(serde_json::json!({
-                    "key_id": key_id,
-                    "status": "active",
-                    "created_at": Utc::now()
-                }))
-            },
-            _ => {
-                Ok(serde_json::json!({
-                    "status": "operation_completed",
-                    "timestamp": Utc::now()
-                }))
-            }
+            HsmOperation::GenerateKey {
+                algorithm,
+                key_size,
+            } => Ok(serde_json::json!({
+                "key_id": Uuid::new_v4().to_string(),
+                "algorithm": algorithm,
+                "key_size": key_size,
+                "created_at": Utc::now(),
+                "status": "generated"
+            })),
+            HsmOperation::ListKeys => Ok(serde_json::json!({
+                "keys": [],
+                "total": 0
+            })),
+            HsmOperation::GetKeyInfo { key_id } => Ok(serde_json::json!({
+                "key_id": key_id,
+                "status": "active",
+                "created_at": Utc::now()
+            })),
+            _ => Ok(serde_json::json!({
+                "status": "operation_completed",
+                "timestamp": Utc::now()
+            })),
         }
     }
-    
-    pub async fn process_audit_operation(&self, operation: AuditOperation) -> Result<serde_json::Value, CoreError> {
+
+    pub async fn process_audit_operation(
+        &self,
+        operation: AuditOperation,
+    ) -> Result<serde_json::Value, CoreError> {
         info!("Processing audit operation: {:?}", operation);
-        
+
         match operation {
-            AuditOperation::SearchEvents { .. } => {
-                Ok(serde_json::json!({
-                    "events": [],
-                    "total": 0,
-                    "page": 1
-                }))
-            },
-            AuditOperation::GenerateReport { report_type, start_date, end_date } => {
-                Ok(serde_json::json!({
-                    "report_id": Uuid::new_v4().to_string(),
-                    "report_type": report_type,
-                    "period": {
-                        "start": start_date,
-                        "end": end_date
-                    },
-                    "status": "generated",
-                    "created_at": Utc::now()
-                }))
-            },
-            AuditOperation::ExportData { format, .. } => {
-                Ok(serde_json::json!({
-                    "export_id": Uuid::new_v4().to_string(),
-                    "format": format,
-                    "status": "processing",
-                    "created_at": Utc::now()
-                }))
-            }
+            AuditOperation::SearchEvents { .. } => Ok(serde_json::json!({
+                "events": [],
+                "total": 0,
+                "page": 1
+            })),
+            AuditOperation::GenerateReport {
+                report_type,
+                start_date,
+                end_date,
+            } => Ok(serde_json::json!({
+                "report_id": Uuid::new_v4().to_string(),
+                "report_type": report_type,
+                "period": {
+                    "start": start_date,
+                    "end": end_date
+                },
+                "status": "generated",
+                "created_at": Utc::now()
+            })),
+            AuditOperation::ExportData { format, .. } => Ok(serde_json::json!({
+                "export_id": Uuid::new_v4().to_string(),
+                "format": format,
+                "status": "processing",
+                "created_at": Utc::now()
+            })),
         }
     }
 }
@@ -272,9 +276,15 @@ impl AdvancedSecurityManager {
 #[derive(Debug)]
 pub struct AuthSession {
     pub id: String,
-    pub user_id: String, 
+    pub user_id: String,
     pub expires_at: DateTime<Utc>,
     pub risk_score: f64,
+}
+
+impl Default for SecurityAPI {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SecurityAPI {
@@ -284,7 +294,7 @@ impl SecurityAPI {
             security_manager: None,
         }
     }
-    
+
     pub async fn with_security_manager() -> Result<Self, CoreError> {
         info!("Initializing Security API with full security manager");
         let security_manager = Arc::new(AdvancedSecurityManager::new().await?);
@@ -292,46 +302,46 @@ impl SecurityAPI {
             security_manager: Some(security_manager),
         })
     }
-    
+
     /// Create all API routes with enhanced security operations
     pub fn routes() -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let health = warp::path("health")
             .and(warp::get())
             .and_then(health_handler);
-            
+
         let security_status = warp::path("security")
             .and(warp::path("status"))
             .and(warp::get())
             .and_then(security_status_handler);
-            
+
         let audit_events = warp::path("audit")
             .and(warp::path("events"))
             .and(warp::get())
             .and_then(audit_events_handler);
-            
+
         // Enhanced endpoints
         let authenticate = warp::path("auth")
             .and(warp::path("login"))
             .and(warp::post())
             .and(warp::body::json())
             .and_then(authentication_handler);
-            
+
         let hsm_operations = warp::path("hsm")
             .and(warp::post())
             .and(warp::body::json())
             .and_then(hsm_operation_handler);
-            
+
         let audit_operations = warp::path("audit")
             .and(warp::path("operations"))
             .and(warp::post())
             .and(warp::body::json())
             .and_then(audit_operation_handler);
-            
+
         let security_metrics = warp::path("security")
             .and(warp::path("metrics"))
             .and(warp::get())
             .and_then(security_metrics_handler);
-            
+
         health
             .or(security_status)
             .or(audit_events)
@@ -357,9 +367,9 @@ async fn health_handler() -> Result<impl Reply, Rejection> {
         ("service", "secreton-security-api"),
         ("timestamp", timestamp.as_str()),
         ("uptime", "operational"),
-        ("components", "8") // All security components
+        ("components", "8"), // All security components
     ]));
-    
+
     Ok(warp::reply::json(&response))
 }
 
@@ -367,7 +377,7 @@ async fn health_handler() -> Result<impl Reply, Rejection> {
 async fn security_status_handler() -> Result<impl Reply, Rejection> {
     let mut status = HashMap::from([
         ("entropy_engine", "operational"),
-        ("hsm_manager", "operational"), 
+        ("hsm_manager", "operational"),
         ("audit_system", "operational"),
         ("zero_trust", "operational"),
         ("mfa_engine", "operational"),
@@ -377,10 +387,10 @@ async fn security_status_handler() -> Result<impl Reply, Rejection> {
         ("overall_health", "excellent"),
         ("security_level", "maximum"),
     ]);
-    
+
     let timestamp = Utc::now().to_rfc3339();
     status.insert("last_updated", timestamp.as_str());
-    
+
     let response = ApiResponse::success(status);
     Ok(warp::reply::json(&response))
 }
@@ -394,7 +404,7 @@ async fn audit_events_handler() -> Result<impl Reply, Rejection> {
             ("user", "admin".to_string()),
             ("status", "success".to_string()),
             ("risk_score", "low".to_string()),
-            ("timestamp", Utc::now().to_rfc3339())
+            ("timestamp", Utc::now().to_rfc3339()),
         ]),
         HashMap::from([
             ("id", "evt_002".to_string()),
@@ -402,22 +412,22 @@ async fn audit_events_handler() -> Result<impl Reply, Rejection> {
             ("algorithm", "RSA-4096".to_string()),
             ("hsm", "primary".to_string()),
             ("status", "completed".to_string()),
-            ("timestamp", Utc::now().to_rfc3339())
+            ("timestamp", Utc::now().to_rfc3339()),
         ]),
         HashMap::from([
             ("id", "evt_003".to_string()),
             ("type", "compliance_check".to_string()),
             ("framework", "SOX".to_string()),
             ("result", "compliant".to_string()),
-            ("timestamp", Utc::now().to_rfc3339())
-        ])
+            ("timestamp", Utc::now().to_rfc3339()),
+        ]),
     ];
-    
+
     let response = ApiResponse::success(HashMap::from([
         ("events", serde_json::to_value(events).unwrap()),
         ("total", serde_json::json!(3)),
         ("page", serde_json::json!(1)),
-        ("has_more", serde_json::json!(false))
+        ("has_more", serde_json::json!(false)),
     ]));
     Ok(warp::reply::json(&response))
 }
@@ -425,7 +435,7 @@ async fn audit_events_handler() -> Result<impl Reply, Rejection> {
 /// Authentication handler with MFA support
 async fn authentication_handler(request: AuthenticationRequest) -> Result<impl Reply, Rejection> {
     info!("Authentication request for user: {}", request.user_id);
-    
+
     // Mock authentication process
     let auth_result = if request.user_id.is_empty() {
         AuthenticationResponse {
@@ -444,16 +454,19 @@ async fn authentication_handler(request: AuthenticationRequest) -> Result<impl R
             error: None,
         }
     };
-    
+
     Ok(warp::reply::json(&auth_result))
 }
 
 /// HSM operations handler
 async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Rejection> {
     info!("HSM operation request: {:?}", request.operation);
-    
+
     let result = match request.operation {
-        HsmOperation::GenerateKey { algorithm, key_size } => {
+        HsmOperation::GenerateKey {
+            algorithm,
+            key_size,
+        } => {
             serde_json::json!({
                 "success": true,
                 "key_id": Uuid::new_v4().to_string(),
@@ -463,7 +476,7 @@ async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Reject
                 "status": "generated",
                 "created_at": Utc::now()
             })
-        },
+        }
         HsmOperation::ListKeys => {
             serde_json::json!({
                 "success": true,
@@ -475,7 +488,7 @@ async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Reject
                         "created_at": Utc::now()
                     },
                     {
-                        "key_id": "key_002", 
+                        "key_id": "key_002",
                         "algorithm": "AES-256",
                         "status": "active",
                         "created_at": Utc::now()
@@ -483,7 +496,7 @@ async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Reject
                 ],
                 "total": 2
             })
-        },
+        }
         HsmOperation::GetKeyInfo { key_id } => {
             serde_json::json!({
                 "success": true,
@@ -494,7 +507,7 @@ async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Reject
                 "created_at": Utc::now(),
                 "last_used": Utc::now()
             })
-        },
+        }
         _ => {
             serde_json::json!({
                 "success": true,
@@ -503,14 +516,14 @@ async fn hsm_operation_handler(request: HsmRequest) -> Result<impl Reply, Reject
             })
         }
     };
-    
+
     Ok(warp::reply::json(&result))
 }
 
 /// Audit operations handler
 async fn audit_operation_handler(request: AuditRequest) -> Result<impl Reply, Rejection> {
     info!("Audit operation request: {:?}", request.operation);
-    
+
     let result = match request.operation {
         AuditOperation::SearchEvents { limit, .. } => {
             serde_json::json!({
@@ -520,8 +533,12 @@ async fn audit_operation_handler(request: AuditRequest) -> Result<impl Reply, Re
                 "limit": limit.unwrap_or(50),
                 "page": 1
             })
-        },
-        AuditOperation::GenerateReport { report_type, start_date, end_date } => {
+        }
+        AuditOperation::GenerateReport {
+            report_type,
+            start_date,
+            end_date,
+        } => {
             serde_json::json!({
                 "success": true,
                 "report_id": Uuid::new_v4().to_string(),
@@ -534,7 +551,7 @@ async fn audit_operation_handler(request: AuditRequest) -> Result<impl Reply, Re
                 "download_url": format!("/audit/reports/{}", Uuid::new_v4()),
                 "created_at": Utc::now()
             })
-        },
+        }
         AuditOperation::ExportData { format, .. } => {
             serde_json::json!({
                 "success": true,
@@ -545,7 +562,7 @@ async fn audit_operation_handler(request: AuditRequest) -> Result<impl Reply, Re
             })
         }
     };
-    
+
     Ok(warp::reply::json(&result))
 }
 
@@ -561,10 +578,13 @@ async fn security_metrics_handler() -> Result<impl Reply, Rejection> {
         ("compliance_violations", serde_json::json!(0)),
         ("entropy_quality", serde_json::json!("excellent")),
         ("quantum_readiness", serde_json::json!(true)),
-        ("last_security_scan", serde_json::json!(Utc::now().to_rfc3339())),
-        ("uptime_percentage", serde_json::json!(99.99))
+        (
+            "last_security_scan",
+            serde_json::json!(Utc::now().to_rfc3339()),
+        ),
+        ("uptime_percentage", serde_json::json!(99.99)),
     ]);
-    
+
     let response = ApiResponse::success(metrics);
     Ok(warp::reply::json(&response))
 }
@@ -572,16 +592,21 @@ async fn security_metrics_handler() -> Result<impl Reply, Rejection> {
 /// Start the security API server with enhanced capabilities
 pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting Enhanced Security API server on port {}", port);
-    
+
     let routes = SecurityAPI::routes()
-        .with(warp::cors()
-            .allow_any_origin()
-            .allow_headers(vec!["content-type", "authorization", "x-session-id"])
-            .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]))
+        .with(
+            warp::cors()
+                .allow_any_origin()
+                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
+        )
         .with(warp::log("security_api"))
         .recover(handle_rejection);
-    
-    info!("🚀 Brankas Enhanced Security API server starting on http://127.0.0.1:{}", port);
+
+    info!(
+        "🚀 Brankas Enhanced Security API server starting on http://127.0.0.1:{}",
+        port
+    );
     info!("📋 Available endpoints:");
     info!("   GET  /health - System health check");
     info!("   GET  /security/status - Security components status");
@@ -590,11 +615,9 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     info!("   POST /auth/login - User authentication");
     info!("   POST /hsm - HSM operations");
     info!("   POST /audit/operations - Audit operations");
-    
-    warp::serve(routes)
-        .run(([127, 0, 0, 1], port))
-        .await;
-    
+
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+
     Ok(())
 }
 
@@ -655,7 +678,10 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
                 message = "Internal server error";
             }
         }
-    } else if err.find::<warp::filters::body::BodyDeserializeError>().is_some() {
+    } else if err
+        .find::<warp::filters::body::BodyDeserializeError>()
+        .is_some()
+    {
         code = warp::http::StatusCode::BAD_REQUEST;
         message = "Invalid JSON format";
     } else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
@@ -669,6 +695,6 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
 
     let error_response = ApiResponse::<()>::error(message.to_string());
     let json = warp::reply::json(&error_response);
-    
+
     Ok(warp::reply::with_status(json, code))
 }

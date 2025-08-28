@@ -11,7 +11,7 @@ pub enum CoreError {
     #[error("Authentication failed: {message}")]
     Authentication { message: String },
 
-    #[error("Authorization failed: {message}")]  
+    #[error("Authorization failed: {message}")]
     Authorization { message: String },
 
     #[error("Resource not found: {resource}")]
@@ -43,6 +43,51 @@ pub enum CoreError {
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
+}
+
+/// Secreton-specific errors
+#[derive(Error, Debug)]
+pub enum SecretonError {
+    #[error("Core error: {0}")]
+    Core(#[from] CoreError),
+
+    #[error("Key not found")]
+    KeyNotFound,
+
+    #[error("Provider not found")]
+    ProviderNotFound,
+
+    #[error("No suitable provider")]
+    NoSuitableProvider,
+
+    #[error("Seal provider unavailable")]
+    SealProviderUnavailable,
+
+    #[error("Seal provider not found")]
+    SealProviderNotFound,
+
+    #[error("Invalid multi-seal data")]
+    InvalidMultiSealData,
+
+    #[error("Parent namespace not found")]
+    ParentNamespaceNotFound,
+
+    #[error("Channel send error")]
+    ChannelSend,
+
+    #[error("Encryption failed")]
+    EncryptionFailed,
+
+    #[error("IO error: {0}")]
+    IoError(String),
+}
+
+pub type SecretonResult<T> = std::result::Result<T, SecretonError>;
+
+impl From<std::io::Error> for SecretonError {
+    fn from(err: std::io::Error) -> Self {
+        SecretonError::IoError(err.to_string())
+    }
 }
 
 impl CoreError {
@@ -178,31 +223,31 @@ impl CoreError {
 pub enum ErrorCategory {
     /// Security-related errors (authentication, authorization)
     Security,
-    
+
     /// Resource not found errors
     NotFound,
-    
+
     /// Resource conflict errors (already exists)
     Conflict,
-    
+
     /// Business logic errors
     Business,
-    
+
     /// Input validation errors
     Validation,
-    
+
     /// Service availability errors
     Service,
-    
+
     /// Rate limiting errors
     RateLimit,
-    
+
     /// Timeout errors
     Timeout,
-    
+
     /// Configuration errors
     Configuration,
-    
+
     /// System-level errors (IO, serialization, etc.)
     System,
 }
@@ -261,7 +306,7 @@ mod tests {
         assert!(CoreError::service_unavailable("test").is_retryable());
         assert!(CoreError::RateLimitExceeded.is_retryable());
         assert!(CoreError::timeout("operation").is_retryable());
-        
+
         assert!(!CoreError::authentication("test").is_retryable());
         assert!(!CoreError::validation("test").is_retryable());
     }

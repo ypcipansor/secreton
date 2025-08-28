@@ -4,76 +4,72 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::error;
 
-use brankas_api::{
-    ApiState, ApiConfig, TransitApiState, KVApiState,
-    create_api_router,
-};
-use brankas_crypto::{transit_simple::TransitEngine, KVEngine};
+use secreton_api::kv::KVEngine;
+use secreton_api::transit::TransitEngine;
+use secreton_api::{create_api_router, ApiConfig, ApiState, KVApiState, TransitApiState};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize simple logging
     // tracing_subscriber::init();
-    
+
     print_startup_banner();
-    
+
     println!("Creating transit engine...");
     // Create transit engine
     let transit_engine = Arc::new(TransitEngine::new());
-    
+
     println!("Creating KV engine...");
     // Create KV engine
     let kv_engine = Arc::new(KVEngine::new());
-    
+
     println!("Creating API state...");
     // Create API state
     let api_state = ApiState {
         transit: TransitApiState {
             engine: transit_engine,
         },
-        kv: KVApiState {
-            engine: kv_engine,
-        },
+        kv: KVApiState { engine: kv_engine },
     };
-    
+
     println!("Creating router...");
     // Create router
     let app = create_api_router(api_state);
-    
+
     println!("Binding to address...");
     // Bind server
     let config = ApiConfig::default();
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     let listener = TcpListener::bind(addr).await?;
-    
-    println!("🚀 Brankas API server starting on http://{}", addr);
+
+    println!("🚀 Secreton API server starting on http://{}", addr);
     println!("📋 Health check: http://{}/health", addr);
     println!("📋 Version info: http://{}/version", addr);
     println!("🔐 Transit API: http://{}/v1/transit", addr);
     println!("🗄️  KV Secrets API: http://{}/v1/secrets", addr);
-    
+
     // Start server
-    serve(listener, app)
-        .await
-        .map_err(|e| {
-            error!("Server error: {}", e);
-            e
-        })?;
-    
+    serve(listener, app).await.map_err(|e| {
+        error!("Server error: {}", e);
+        e
+    })?;
+
     Ok(())
 }
 
 fn print_startup_banner() {
-    println!(r#"
+    println!(
+        r#"
     ╔══════════════════════════════════════════════╗
-    ║              🔐 BRANKAS VAULT 🔐              ║
+    ║              🔐 SECRETON VAULT 🔐             ║
     ║          Enterprise Transit Engine           ║
     ╠══════════════════════════════════════════════╣
-    ║  Version: 1.0.0                             ║
+    ║  Version: 2.0.1                             ║
     ║  Build: Production Ready                     ║
     ║  Crypto: RustCrypto Suite                    ║
     ╠══════════════════════════════════════════════╣
     ║  🚀 Starting HTTP API Server...              ║
     ╚══════════════════════════════════════════════╝
-    "#);
+    "#
+    );
 }
