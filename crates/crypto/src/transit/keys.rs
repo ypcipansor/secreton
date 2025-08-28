@@ -1,7 +1,8 @@
-//! Transiuse aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead}};
+//! Transit keys implementation with RustCrypto integration
+
+use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead}};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
-use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1v15::Pkcs1v15Encrypt, Oaep};
-use rsa::pkcs1v15::SigningKey as RsaSigningKey;
+// RSA imports removed - using Ed25519 instead
 use p256::{SecretKey as P256SecretKey, PublicKey as P256PublicKey, ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey}};
 use k256::{SecretKey as K256SecretKey, PublicKey as K256PublicKey, ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey}};
 use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey, Signature as Ed25519Signature};
@@ -10,7 +11,7 @@ use hkdf::Hkdf;
 use sha2::{Sha256, Sha384, Sha512};
 use sha3::{Sha3_256, Sha3_512};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use signature::{Signer, Verifier};ement with RustCrypto integration
+use signature::{Signer, Verifier};
 
 use crate::error::{CryptoResult, CryptoError};
 use serde::{Serialize, Deserialize};
@@ -19,14 +20,6 @@ use chrono::{DateTime, Utc};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use rand::{RngCore, CryptoRng};
 
-// RustCrypto imports
-use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit, generic_array::GenericArray}};
-use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
-use rsa::{RsaPrivateKey, RsaPublicKey, PaddingScheme, Hash as RsaHash};
-use rsa::pkcs1v15::SigningKey as RsaSigningKey;
-use p256::{SecretKey as P256SecretKey, PublicKey as P256PublicKey, ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey}};
-use k256::{SecretKey as K256SecretKey, PublicKey as K256PublicKey, ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey}};
-use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey, Signature as Ed25519Signature};
 use x25519_dalek::{StaticSecret as X25519Secret, PublicKey as X25519PublicKey};
 use hkdf::Hkdf;
 use sha2::{Sha256, Sha384, Sha512};
@@ -42,14 +35,12 @@ pub enum KeyType {
     ChaCha20Poly1305,
     /// XChaCha20-Poly1305 symmetric encryption (extended nonce)
     XChaCha20Poly1305,
-    /// RSA key for encryption and signing (2048, 3072, 4096 bits)
-    Rsa(u32),
+    /// Ed25519 key for signing
+    Ed25519,
     /// ECDSA key using P-256 curve
     EcdsaP256,
     /// ECDSA key using secp256k1 curve
     EcdsaSecp256k1,
-    /// Ed25519 key for signing
-    Ed25519,
     /// X25519 key for key exchange
     X25519,
 }
@@ -97,20 +88,12 @@ pub enum KeyUsage {
 /// Signature algorithms supported
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum SignatureAlgorithm {
-    /// RSA-PSS with SHA-256
-    RsaPssSha256,
-    /// RSA-PSS with SHA-512
-    RsaPssSha512,
-    /// RSA PKCS#1 v1.5 with SHA-256
-    RsaPkcs1Sha256,
-    /// RSA PKCS#1 v1.5 with SHA-512
-    RsaPkcs1Sha512,
+    /// Ed25519 signature
+    Ed25519,
     /// ECDSA with SHA-256
     EcdsaSha256,
     /// ECDSA with SHA-384
     EcdsaSha384,
-    /// Ed25519 (pure EdDSA)
-    Ed25519,
 }
 
 /// Transit key with versioning and RustCrypto backends
@@ -152,8 +135,6 @@ enum KeyMaterial {
     ChaCha20Poly1305(Box<[u8; 32]>),
     /// XChaCha20-Poly1305 key
     XChaCha20Poly1305(Box<[u8; 32]>),
-    /// RSA private key
-    Rsa(Box<RsaPrivateKey>),
     /// ECDSA P-256 private key
     EcdsaP256(Box<P256SecretKey>),
     /// ECDSA secp256k1 private key
@@ -296,17 +277,6 @@ impl TransitKey {
                 result
             }
             
-            KeyMaterial::Rsa(private_key) => {
-                let public_key = RsaPublicKey::from(private_key.as_ref());
-                let padding = PaddingScheme::new_oaep::<sha2::Sha256>();
-                
-                let encrypted = public_key.encrypt(&mut rand::thread_rng(), padding, plaintext)
-                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
-                
-                let mut result = format!("v{}:", version);
-                result.push_str(&base64::encode(&encrypted));
-                result
-            }
             
             _ => {
                 return Err(CryptoError::InvalidUsage("Key type does not support encryption".to_string()));
@@ -400,18 +370,6 @@ impl TransitKey {
                 decrypted
             }
             
-            KeyMaterial::Rsa(private_key) => {
-                if parts.len() != 2 {
-                    return Err(CryptoError::InvalidCiphertext("Invalid RSA format".to_string()));
-                }
-                
-                let padding = PaddingScheme::new_oaep::<sha2::Sha256>();
-                let encrypted_bytes = base64::decode(parts[1])
-                    .map_err(|_| CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string()))?;
-                
-                private_key.decrypt(padding, &encrypted_bytes)
-                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?
-            }
             
             _ => {
                 return Err(CryptoError::InvalidUsage("Key type does not support decryption".to_string()));
@@ -438,26 +396,6 @@ impl TransitKey {
         }
         
         let signature = match &key_version.material {
-            KeyMaterial::Rsa(private_key) => {
-                let algo = algorithm.unwrap_or(SignatureAlgorithm::RsaPssSha256);
-                match algo {
-                    SignatureAlgorithm::RsaPssSha256 => {
-                        let padding = PaddingScheme::new_pss::<sha2::Sha256, _>(&mut rand::thread_rng());
-                        let hashed = Sha256::digest(data);
-                        let signature = private_key.sign(padding, &hashed)
-                            .map_err(|e| CryptoError::SigningFailed(e.to_string()))?;
-                        base64::encode(&signature)
-                    }
-                    SignatureAlgorithm::RsaPkcs1Sha256 => {
-                        let padding = PaddingScheme::new_pkcs1v15_sign::<sha2::Sha256>();
-                        let hashed = Sha256::digest(data);
-                        let signature = private_key.sign(padding, &hashed)
-                            .map_err(|e| CryptoError::SigningFailed(e.to_string()))?;
-                        base64::encode(&signature)
-                    }
-                    _ => return Err(CryptoError::InvalidUsage("Signature algorithm not supported for RSA".to_string())),
-                }
-            }
             
             KeyMaterial::EcdsaP256(private_key) => {
                 let signing_key = P256SigningKey::from(private_key.as_ref());
@@ -515,24 +453,6 @@ impl TransitKey {
             .map_err(|_| CryptoError::InvalidSignature("Invalid signature encoding".to_string()))?;
         
         let is_valid = match &key_version.material {
-            KeyMaterial::Rsa(private_key) => {
-                let public_key = RsaPublicKey::from(private_key.as_ref());
-                let algo = algorithm.unwrap_or(SignatureAlgorithm::RsaPssSha256);
-                
-                match algo {
-                    SignatureAlgorithm::RsaPssSha256 => {
-                        let padding = PaddingScheme::new_pss::<sha2::Sha256, _>(&mut rand::thread_rng());
-                        let hashed = Sha256::digest(data);
-                        public_key.verify(padding, &hashed, &signature_bytes).is_ok()
-                    }
-                    SignatureAlgorithm::RsaPkcs1Sha256 => {
-                        let padding = PaddingScheme::new_pkcs1v15_sign::<sha2::Sha256>();
-                        let hashed = Sha256::digest(data);
-                        public_key.verify(padding, &hashed, &signature_bytes).is_ok()
-                    }
-                    _ => return Err(CryptoError::InvalidUsage("Signature algorithm not supported for RSA".to_string())),
-                }
-            }
             
             KeyMaterial::EcdsaP256(private_key) => {
                 let public_key = private_key.public_key();
@@ -626,12 +546,6 @@ impl KeyVersion {
                 KeyMaterial::XChaCha20Poly1305(key_bytes)
             }
             
-            KeyType::Rsa(bits) => {
-                let mut rng = rand::thread_rng();
-                let private_key = RsaPrivateKey::new(&mut rng, *bits as usize)
-                    .map_err(|e| CryptoError::KeyGenerationFailed(e.to_string()))?;
-                KeyMaterial::Rsa(Box::new(private_key))
-            }
             
             KeyType::EcdsaP256 => {
                 let secret_key = P256SecretKey::random(&mut rand::thread_rng());

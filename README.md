@@ -25,9 +25,23 @@ A next-generation, quantum-safe security vault system built with Rust by **Ciphe
 | **Replication** | Active-Active Multi-Region | Primary-Secondary | **Advanced** |
 | **Namespaces** | Hierarchical Unlimited | Limited Hierarchy | **Enterprise Scale** |
 
-## 📈 **Latest Updates (v2.0.3)**
+## 📈 **Latest Updates (v2.0.4)**
+
+### 🔐 **Major Security Enhancement: RSA to Ed25519 Migration**
+- **BREAKING CHANGE**: Complete migration from RSA to Ed25519 cryptography
+- **Security Improvement**: Eliminated all direct RSA vulnerabilities (RUSTSEC-2023-0071)
+- **Algorithm Updates**: Replaced RSA-PSS, RSA-PKCS#1 with Ed25519 signatures
+- **Performance Boost**: Ed25519 provides faster signing/verification than RSA
+- **Future-Proof**: Ed25519 offers better security properties and quantum resistance preparation
 
 ### Critical Fixes & Code Quality Improvements
+- **Cryptographic Cleanup**: Removed all RSA key generation, signing, and verification code
+- **Enum Updates**: Updated KeyType, SignatureAlgorithm, and EncryptionAlgorithm enums
+- **Dependency Cleanup**: Removed direct RSA crate dependencies from workspace
+- **Lifecycle Policies**: Updated default policies to use Ed25519 instead of RSA4096
+- **Code Formatting**: Applied cargo fmt for consistent formatting
+
+### Previous Updates (v2.0.3)
 - **Build Stability**: Fixed critical compilation errors in `api_server.rs` (type mismatches between secreton_crypto and secreton_api)
 - **Naming Conventions**: Corrected enum variant naming to CamelCase across all security modules
 - **Import Cleanup**: Eliminated unused import warnings in test modules

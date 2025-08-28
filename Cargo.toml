@@ -70,7 +70,6 @@ p384 = "0.13"
 k256 = "0.13"
 x25519-dalek = "2.0"
 ed25519-dalek = "2.1"
-rsa = "0.10.0-rc.5"
 
 # Cryptographic traits and utilities
 digest = "0.10"

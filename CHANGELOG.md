@@ -5,6 +5,27 @@ All notable changes to the Secreton Security Vault System by Cipherce will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2024-12-28
+
+### Security
+- **BREAKING**: Complete migration from RSA to Ed25519 cryptography
+- Removed all RSA cryptographic implementations and dependencies
+- Eliminated RSA-related enum variants (RSA4096, RsaPssSha256, RsaPkcs1Sha256, etc.)
+- Replaced RSA hybrid algorithms with Ed25519-based alternatives
+- Reduced direct RSA vulnerabilities (RUSTSEC-2023-0071 now only affects transitive dependencies)
+
+### Fixed
+- Fixed syntax errors in transit/keys.rs after RSA removal
+- Updated KeyType, SignatureAlgorithm, and EncryptionAlgorithm enums to use Ed25519
+- Removed RSA key generation, signing, and verification code
+- Updated lifecycle policies to use Ed25519 instead of RSA4096
+- Applied cargo fmt for consistent code formatting
+
+### Changed
+- **BREAKING**: All RSA-based cryptographic operations now use Ed25519
+- Updated default signature algorithm from RSA-PSS to Ed25519
+- Simplified cryptographic algorithm selection with Ed25519 as primary asymmetric option
+
 ## [2.0.3] - 2024-12-28
 
 ### Fixed

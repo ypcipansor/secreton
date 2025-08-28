@@ -91,7 +91,7 @@ pub enum SealAlgorithm {
     SikeAes256,
 
     // Hybrid Algorithms (Classical + Post-Quantum)
-    HybridRsa4096Kyber768,
+    HybridEd25519Kyber768,
     HybridEcdsaP384Dilithium3,
     HybridAes256FrodoKem,
 
@@ -828,7 +828,7 @@ impl SealWrappingEngine {
         configs.insert(
             DataType::RootKey,
             WrapConfig {
-                algorithm: SealAlgorithm::HybridRsa4096Kyber768,
+                algorithm: SealAlgorithm::HybridEd25519Kyber768,
                 min_seals: 3,
                 multi_layer: true,
                 rotation_interval: 90,

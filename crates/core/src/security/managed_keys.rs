@@ -140,14 +140,11 @@ pub struct ManagedKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyType {
     // Asymmetric Keys
-    RSA2048,
-    RSA3072,
-    RSA4096,
+    Ed25519,
+    Ed448,
     EccP256,
     EccP384,
     EccP521,
-    Ed25519,
-    Ed448,
 
     // Symmetric Keys
     AES128,
@@ -167,7 +164,7 @@ pub enum KeyType {
     FrodoKEM1344,
 
     // Hybrid Keys
-    RsaKyber,
+    Ed25519Kyber,
     EcdsaDilithium,
 
     // Special Purpose Keys
@@ -230,18 +227,12 @@ pub struct KeyMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyAlgorithm {
     // Signature algorithms
-    RsaPssSha256,
-    RsaPssSha384,
-    RsaPssSha512,
+    EdDSA,
     EcdsaSha256,
     EcdsaSha384,
     EcdsaSha512,
-    EdDSA,
 
     // Encryption algorithms
-    RsaOaepSha256,
-    RsaOaepSha384,
-    RsaOaepSha512,
     EciesP256,
     EciesP384,
     EciesP521,
@@ -496,13 +487,10 @@ pub struct RotatedKey {
 /// Signature Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureAlgorithm {
-    RsaPssSha256,
-    RsaPssSha384,
-    RsaPssSha512,
+    EdDSA,
     EcdsaSha256,
     EcdsaSha384,
     EcdsaSha512,
-    EdDSA,
     Dilithium2,
     Dilithium3,
     Dilithium5,
@@ -511,9 +499,6 @@ pub enum SignatureAlgorithm {
 /// Encryption Algorithms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    RsaOaepSha256,
-    RsaOaepSha384,
-    RsaOaepSha512,
     AesGcm,
     AesCbc,
     ChaCha20Poly1305,
@@ -1228,9 +1213,9 @@ impl ManagedKeysEngine {
 
         // High-security keys - frequent rotation
         policies.insert(
-            KeyType::RSA4096,
+            KeyType::Ed25519,
             LifecyclePolicy {
-                key_type: KeyType::RSA4096,
+                key_type: KeyType::Ed25519,
                 rotation_interval: 90, // 3 months
                 max_key_age_days: 365,
                 usage_rotation_threshold: Some(1000000), // 1M operations
