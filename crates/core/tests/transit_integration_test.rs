@@ -4,12 +4,53 @@ use base64::{engine::general_purpose, Engine as _};
 use secreton_core::secrets::engine::{
     CreateKeyRequest, DecryptRequest, EncryptRequest, SecretsEngine, TransitSecretsEngine,
 };
-use secreton_core::storage::MemoryStorage;
-use std::sync::Arc;
+
+// For integration tests, create test storage inline
+async fn create_test_storage() -> std::sync::Arc<dyn secreton_core::storage::StorageEngine> {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    
+    #[derive(Debug)]
+    struct TestStorage {
+        data: Arc<tokio::sync::RwLock<HashMap<String, secreton_core::storage::StorageEntry>>>,
+    }
+    
+    #[async_trait::async_trait]
+    impl secreton_core::storage::StorageEngine for TestStorage {
+        async fn get(&self, key: &str) -> Result<Option<secreton_core::storage::StorageEntry>, secreton_core::error::CoreError> {
+            let data = self.data.read().await;
+            Ok(data.get(key).cloned())
+        }
+        
+        async fn put(&self, entry: secreton_core::storage::StorageEntry) -> Result<(), secreton_core::error::CoreError> {
+            let mut data = self.data.write().await;
+            data.insert(entry.key.clone(), entry);
+            Ok(())
+        }
+        
+        async fn delete(&self, key: &str) -> Result<(), secreton_core::error::CoreError> {
+            let mut data = self.data.write().await;
+            data.remove(key);
+            Ok(())
+        }
+        
+        async fn list(&self, prefix: &str) -> Result<Vec<String>, secreton_core::error::CoreError> {
+            let data = self.data.read().await;
+            Ok(data.keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
+        }
+    }
+    
+    Arc::new(TestStorage {
+        data: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+    })
+}
 
 #[tokio::test]
 async fn test_transit_engine_integration() {
-    let storage = Arc::new(MemoryStorage::new("memory://").await.unwrap());
+    let storage = create_test_storage().await;
     let engine = TransitSecretsEngine::new(storage);
 
     // Create key
@@ -72,51 +113,65 @@ async fn test_transit_engine_integration() {
 
 #[tokio::test]
 async fn test_transit_storage_interface() {
-    let storage = Arc::new(MemoryStorage::new("memory://").await.unwrap());
+    let storage = create_test_storage().await;
     let engine = TransitSecretsEngine::new(storage);
 
-    // Test SecretsEngine interface
+    // Test SecretsEngine interface for Transit
     use serde_json::json;
 
-    // Create a test secret
-    let test_data = json!({"test": "data"});
-    let secret_result = engine
-        .create_secret("test/key", test_data.clone(), None)
-        .await;
-    assert!(secret_result.is_ok(), "Should be able to create secret");
-
-    // Read the secret back
-    let read_result = engine.read_secret("test/key").await;
-    assert!(read_result.is_ok(), "Should be able to read secret");
-
-    // List secrets
-    let list_result = engine.list_secrets("test").await;
-    assert!(list_result.is_ok(), "Should be able to list secrets");
-    let keys = list_result.unwrap();
-    assert!(!keys.is_empty(), "Should have at least one secret");
+    // Create a transit key (not a regular secret)
+    let key_data = json!({
+        "name": "test-key",
+        "type": "aes256-gcm",
+        "exportable": true
+    });
+    let key_result = engine.create_secret("keys", key_data.clone(), None).await;
     assert!(
-        keys.contains(&"key".to_string()),
+        key_result.is_ok(),
+        "Should be able to create transit key: {:?}",
+        key_result.err()
+    );
+
+    // List keys (using list_secrets on keys path)
+    let list_result = engine.list_secrets("keys").await;
+    assert!(
+        list_result.is_ok(),
+        "Should be able to list keys: {:?}",
+        list_result.err()
+    );
+    let keys = list_result.unwrap();
+    assert!(!keys.is_empty(), "Should have at least one key");
+    assert!(
+        keys.contains(&"test-key".to_string()),
         "Should contain the created key"
     );
 
-    // Update secret
-    let updated_data = json!({"test": "updated_data"});
-    let update_result = engine.update_secret("test/key", updated_data, None).await;
-    assert!(update_result.is_ok(), "Should be able to update secret");
+    // Read key (using read_secret)
+    let read_result = engine.read_secret("keys/test-key").await;
+    assert!(
+        read_result.is_ok(),
+        "Should be able to read key: {:?}",
+        read_result.err()
+    );
 
-    // Delete secret
-    let delete_result = engine.delete_secret("test/key").await;
-    assert!(delete_result.is_ok(), "Should be able to delete secret");
+    // Test delete key
+    let delete_result = engine.delete_secret("keys/test-key").await;
+    assert!(
+        delete_result.is_ok(),
+        "Should be able to delete key: {:?}",
+        delete_result.err()
+    );
 
     // Verify deletion
-    let list_after_delete = engine.list_secrets("test").await;
+    let list_after_delete = engine.list_secrets("keys").await;
     assert!(
         list_after_delete.is_ok(),
-        "Should be able to list after delete"
+        "Should be able to list keys after delete: {:?}",
+        list_after_delete.err()
     );
     let keys_after_delete = list_after_delete.unwrap();
     assert!(
-        !keys_after_delete.contains(&"key".to_string()),
+        !keys_after_delete.contains(&"test-key".to_string()),
         "Key should be deleted"
     );
 }

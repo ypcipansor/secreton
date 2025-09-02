@@ -267,13 +267,11 @@ impl AuthManager {
 mod tests {
     use super::*;
 
+    use crate::test_utils::create_test_storage;
+
     #[tokio::test]
     async fn test_authenticate() {
-        let storage = Arc::new(
-            crate::storage::MemoryStorage::new("memory://")
-                .await
-                .unwrap(),
-        );
+        let storage = create_test_storage().await;
         let auth_manager = AuthManager::new("test_secret", storage).unwrap();
 
         // Test valid credentials
@@ -287,11 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_token_generation_and_verification() {
-        let storage = Arc::new(
-            crate::storage::MemoryStorage::new("memory://")
-                .await
-                .unwrap(),
-        );
+        let storage = create_test_storage().await;
         let auth_manager = AuthManager::new("test_secret", storage).unwrap();
 
         let token = auth_manager.generate_token("test_user", false).unwrap();

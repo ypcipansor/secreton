@@ -180,23 +180,51 @@ impl SecretsEngineRegistry {
 /// Initialize the default secrets engines
 pub async fn init_default_engines(
     data_dir: impl AsRef<Path>,
-    with_memory: bool,
+    _with_memory: bool,
 ) -> Result<SecretsEngineRegistry, AppError> {
     let registry = SecretsEngineRegistry::new();
 
-    // Create storage instance
-    let storage: Arc<RwLock<dyn StorageEngine + Send + Sync>> = if with_memory {
-        let storage = crate::storage::MemoryStorage::new(":memory:")
-            .await
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
-        Arc::new(RwLock::new(storage))
-    } else {
-        // For now, use memory storage - in production this would be a persistent storage
-        let storage = crate::storage::MemoryStorage::new(":memory:")
-            .await
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
-        Arc::new(RwLock::new(storage))
-    };
+    // Create storage instance using test utilities
+    use std::collections::HashMap;
+    
+    #[derive(Debug)]
+    struct TestStorageEngine {
+        data: Arc<tokio::sync::RwLock<HashMap<String, crate::storage::StorageEntry>>>,
+    }
+    
+    #[async_trait::async_trait]
+    impl StorageEngine for TestStorageEngine {
+        async fn get(&self, key: &str) -> Result<Option<crate::storage::StorageEntry>, crate::error::CoreError> {
+            let data = self.data.read().await;
+            Ok(data.get(key).cloned())
+        }
+        
+        async fn put(&self, entry: crate::storage::StorageEntry) -> Result<(), crate::error::CoreError> {
+            let mut data = self.data.write().await;
+            data.insert(entry.key.clone(), entry);
+            Ok(())
+        }
+        
+        async fn delete(&self, key: &str) -> Result<(), crate::error::CoreError> {
+            let mut data = self.data.write().await;
+            data.remove(key);
+            Ok(())
+        }
+        
+        async fn list(&self, prefix: &str) -> Result<Vec<String>, crate::error::CoreError> {
+            let data = self.data.read().await;
+            Ok(data.keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
+        }
+    }
+    
+    let storage: Arc<RwLock<dyn StorageEngine + Send + Sync>> = Arc::new(RwLock::new(
+        TestStorageEngine {
+            data: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        }
+    ));
 
     // Initialize and register the KV secrets engine
     let kv_base_path = data_dir.as_ref().join("kv");

@@ -9,6 +9,8 @@
 //! - Quantum-safe key generation
 //! - Hardware attestation and verification
 
+#![allow(clippy::await_holding_lock)] // HSM operations require careful lock management
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

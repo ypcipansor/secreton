@@ -35,6 +35,18 @@ pub struct TransitConfig {
     pub convergent_encryption: bool,
 }
 
+impl Default for TransitConfig {
+    fn default() -> Self {
+        Self {
+            min_decryption_version: 1,
+            min_encryption_version: 1,
+            max_versions: 10,
+            allow_plaintext_backup: false,
+            convergent_encryption: false,
+        }
+    }
+}
+
 /// Key configuration for a transit key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitKeyConfig {
@@ -680,11 +692,11 @@ pub fn new_transit_engine(storage: Arc<dyn crate::storage::StorageEngine>) -> Bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, StorageEntry};
-    use std::sync::Arc;
+    use crate::storage::{StorageEntry};
+    use crate::test_utils::create_test_storage;
 
     async fn setup_engine() -> TransitSecretsEngine {
-        let storage = Arc::new(MemoryStorage::new("memory://").await.unwrap());
+        let storage = create_test_storage().await;
         TransitSecretsEngine::new(storage)
     }
 
@@ -901,6 +913,15 @@ mod tests {
     #[tokio::test]
     async fn test_secrets_engine_interface() {
         let engine = setup_engine().await;
+
+        // Setup initial config for testing
+        let config = TransitConfig::default();
+        let config_entry = StorageEntry {
+            key: "config".to_string(),
+            value: serde_json::to_vec(&config).unwrap(),
+            metadata: HashMap::new(),
+        };
+        engine.storage.put(config_entry).await.unwrap();
 
         // Test get config
         let config_result = engine.storage.get("config").await;

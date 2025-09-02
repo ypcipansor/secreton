@@ -1,52 +1,120 @@
-//! Redis storage backend implementation (simplified)
+//! Modern Redis storage backend implementation using redis v1.0.0-alpha.1
 
 use crate::{
     HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
+use redis::{aio::ConnectionManager, AsyncCommands, Client};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Redis storage backend (simplified implementation)
+/// Modern Redis storage backend with connection pooling
 pub struct RedisBackend {
-    // In a real implementation, this would contain Redis connection
-    _connection_url: String,
+    manager: ConnectionManager,
+    #[allow(dead_code)]
+    connection_url: String,
 }
 
 impl RedisBackend {
-    /// Create a new Redis backend
+    /// Create a new modern Redis backend with connection pooling
     pub async fn new(connection_url: &str) -> StorageResult<Self> {
-        // In a real implementation, establish Redis connection here
+        let client = Client::open(connection_url).map_err(|e| StorageError::ConnectionFailed {
+            message: format!("Invalid Redis URL: {}", e),
+        })?;
+
+        let manager =
+            ConnectionManager::new(client)
+                .await
+                .map_err(|e| StorageError::ConnectionFailed {
+                    message: format!("Failed to create Redis connection manager: {}", e),
+                })?;
+
         Ok(Self {
-            _connection_url: connection_url.to_string(),
+            manager,
+            connection_url: connection_url.to_string(),
         })
     }
 }
 
 #[async_trait]
 impl StorageBackend for RedisBackend {
-    async fn store(&self, _entry: &VaultEntry) -> StorageResult<()> {
-        // Simplified implementation
-        Err(StorageError::BackendError {
-            backend: "Redis".to_string(),
-            message: "Redis backend not fully implemented yet".to_string(),
-        })
+    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+        let key = format!("vault:entry:{}", entry.id);
+        let value = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
+
+        let mut conn = self.manager.clone();
+        conn.set::<_, _, ()>(&key, value)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to store entry: {}", e),
+            })?;
+
+        // Also store path mapping
+        if !entry.path.is_empty() {
+            let path_key = format!("vault:path:{}", entry.path);
+            conn.set::<_, _, ()>(&path_key, entry.id.to_string())
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to store path mapping: {}", e),
+                })?;
+        }
+
+        Ok(())
     }
 
-    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<VaultEntry>> {
-        Ok(None)
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+        let key = format!("vault:entry:{}", id);
+        let mut conn = self.manager.clone();
+
+        let value: Option<String> =
+            conn.get(&key)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to get entry: {}", e),
+                })?;
+
+        match value {
+            Some(json_str) => {
+                let entry = serde_json::from_str(&json_str).map_err(|e| {
+                    StorageError::SerializationError {
+                        message: e.to_string(),
+                    }
+                })?;
+                Ok(Some(entry))
+            }
+            None => Ok(None),
+        }
     }
 
-    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<VaultEntry>> {
-        Ok(None)
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+        let key = format!("vault:path:{}", path);
+        let mut conn = self.manager.clone();
+
+        let entry_id: Option<String> =
+            conn.get(&key)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to get path mapping: {}", e),
+                })?;
+
+        match entry_id {
+            Some(id_str) => {
+                let id =
+                    Uuid::parse_str(&id_str).map_err(|e| StorageError::SerializationError {
+                        message: e.to_string(),
+                    })?;
+                self.get_by_id(id).await
+            }
+            None => Ok(None),
+        }
     }
 
-    async fn update(&self, _entry: &VaultEntry) -> StorageResult<()> {
-        Err(StorageError::BackendError {
-            backend: "Redis".to_string(),
-            message: "Redis backend not fully implemented yet".to_string(),
-        })
+    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+        // For updates, we use the same store logic
+        self.store(entry).await
     }
 
     async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {

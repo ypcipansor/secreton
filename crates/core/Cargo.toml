@@ -18,6 +18,9 @@ uuid.workspace = true
 chrono.workspace = true
 config.workspace = true
 
+# API Documentation
+aide.workspace = true
+
 # Async
 tokio.workspace = true
 async-trait.workspace = true
@@ -124,3 +127,4 @@ postgres = ["tokio-postgres", "deadpool-postgres"]
 redis = []
 wasm = []
 distributed = []
+test-utils = []

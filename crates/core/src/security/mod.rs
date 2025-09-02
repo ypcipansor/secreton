@@ -28,6 +28,9 @@ pub mod seal_wrapping;
 /// Managed keys engine for automatic key lifecycle management
 pub mod managed_keys;
 
+/// Optimized trait definitions replacing type erasure anti-patterns
+pub mod optimized_traits;
+
 /// Enterprise namespaces for hierarchical multi-tenancy
 pub mod enterprise_namespaces;
 
@@ -254,7 +257,7 @@ pub struct AdvancedSecurityOrchestrator {
 
 impl AdvancedSecurityOrchestrator {
     /// Initialize the complete advanced security stack
-    pub fn new(config: AdvancedSecurityConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(config: AdvancedSecurityConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Validate configuration
         config.validate()?;
 
@@ -264,8 +267,8 @@ impl AdvancedSecurityOrchestrator {
         let hsm_manager = hsm::HsmManager::new();
         // Initialize advanced audit system with proper constructor arguments (4 params)
         let audit_config = audit::ComplianceConfig::default();
-        let anomaly_detector = concrete_implementations::SimpleAnomalyDetector::new();
-        let audit_storage = concrete_implementations::MemoryAuditStorage::new();
+        let anomaly_detector = concrete_implementations::SimpleAnomalyDetector::create();
+        let audit_storage = concrete_implementations::MemoryAuditStorage::create();
         let audit_system = audit::AdvancedAuditSystem::new(
             audit_storage,
             "secreton-node-1".to_string(),
@@ -274,7 +277,7 @@ impl AdvancedSecurityOrchestrator {
         )?;
 
         // Initialize zero trust engine with proper constructor arguments (2 params)
-        let risk_engine = concrete_implementations::ConcreteRiskAssessmentEngine::new();
+        let risk_engine = concrete_implementations::ConcreteRiskAssessmentEngine::create();
         let zero_trust_config = zero_trust::ZeroTrustConfig::default();
         let zero_trust_engine = zero_trust::ZeroTrustEngine::new(risk_engine, zero_trust_config);
 
@@ -347,7 +350,10 @@ impl AdvancedSecurityOrchestrator {
         let mut report = SecurityHealthReport::default();
 
         // Use the actual health check methods from each engine
-        report.entropy_health = self.entropy_engine.get_health_metrics().await;
+        report.entropy_health = self
+            .entropy_engine
+            .get_health_metrics()
+            .await;
         report.hsm_health = self.hsm_manager.get_metrics(); // This returns HsmHealthStatus directly
         report.audit_health = self.audit_system.get_health_status().await;
         report.zero_trust_health = self.zero_trust_engine.get_health_metrics().await;
@@ -475,7 +481,10 @@ impl AdvancedSecurityOrchestrator {
     /// Collect metrics from all security modules
     pub async fn collect_metrics(&self) -> AggregatedSecurityMetrics {
         AggregatedSecurityMetrics {
-            entropy_metrics: self.entropy_engine.get_health_metrics().await,
+            entropy_metrics: self
+                .entropy_engine
+                .get_health_metrics()
+                .await,
             hsm_metrics: self.hsm_manager.get_metrics(),
             audit_metrics: self.audit_system.get_health_metrics().await,
             zero_trust_metrics: self.zero_trust_engine.get_health_metrics().await,
@@ -525,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn test_security_orchestrator_creation() {
         let config = AdvancedSecurityConfig::default();
-        let result = AdvancedSecurityOrchestrator::new(config);
+        let result = AdvancedSecurityOrchestrator::new(config).await;
         assert!(result.is_ok());
     }
 

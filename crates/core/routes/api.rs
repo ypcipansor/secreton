@@ -88,7 +88,8 @@ use crate::services::auth::oidc::{build_authorize_url, handle_callback};
 use crate::services::auth::approle::{generate_role, login_approle, rotate_secret_id};
 use crate::models::approle::AppRole;
 use crate::services::rbac::{check_policy, resolve_user_roles};
-use utoipa::ToSchema;
+use aide::transform::TransformResponse;
+use aide::utoipa::ToSchema;
 // use crate::core::RevokeTokenRequest; // avoid duplicate type name
 use crate::plugins::dyn_password::DynPasswordPlugin;
 use crate::plugins::sops_file::SopsFilePlugin;

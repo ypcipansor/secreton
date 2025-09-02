@@ -78,6 +78,9 @@ pub enum SecretonError {
     #[error("Encryption failed")]
     EncryptionFailed,
 
+    #[error("Insufficient entropy")]
+    InsufficientEntropy,
+
     #[error("IO error: {0}")]
     IoError(String),
 }

@@ -13,8 +13,9 @@ use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -606,10 +607,27 @@ impl ZeroTrustEngine {
         }
     }
 
+    /// Register device fingerprint for enhanced security
+    pub async fn register_device_fingerprint(
+        &self,
+        device_id: String,
+        info: DeviceInfo,
+    ) -> Result<(), ZeroTrustError> {
+        let mut fingerprints = self.device_fingerprints.write().await;
+        fingerprints.insert(device_id, info);
+        Ok(())
+    }
+
+    /// Get device fingerprint information
+    pub async fn get_device_fingerprint(&self, device_id: &str) -> Option<DeviceInfo> {
+        let fingerprints = self.device_fingerprints.read().await;
+        fingerprints.get(device_id).cloned()
+    }
+
     /// Register a new entity in the zero trust system
     #[allow(clippy::await_holding_lock)]
     pub async fn register_entity(&self, entity: ZeroTrustEntity) -> Result<(), ZeroTrustError> {
-        let mut entities = self.entities.write().unwrap();
+        let mut entities = self.entities.write().await;
 
         // Perform initial risk assessment
         let mut entity = entity;
@@ -641,7 +659,7 @@ impl ZeroTrustEngine {
         context: &AccessContext,
     ) -> Result<AccessDecision, ZeroTrustError> {
         let mut entity = {
-            let entities = self.entities.read().unwrap();
+            let entities = self.entities.read().await;
             entities
                 .get(&entity_id)
                 .cloned()
@@ -673,7 +691,7 @@ impl ZeroTrustEngine {
 
         // Update entity
         {
-            let mut entities = self.entities.write().unwrap();
+            let mut entities = self.entities.write().await;
             entities.insert(entity_id, entity);
         }
 
@@ -761,7 +779,7 @@ impl ZeroTrustEngine {
         entity: &ZeroTrustEntity,
         context: &AccessContext,
     ) -> Result<PolicyDecision, ZeroTrustError> {
-        let policies = self.policies.read().unwrap();
+        let policies = self.policies.read().await;
 
         for policy in policies.iter() {
             if !policy.enabled {
@@ -922,8 +940,8 @@ impl ZeroTrustEngine {
     }
 
     /// Add a zero trust policy
-    pub fn add_policy(&self, policy: ZeroTrustPolicy) {
-        let mut policies = self.policies.write().unwrap();
+    pub async fn add_policy(&self, policy: ZeroTrustPolicy) {
+        let mut policies = self.policies.write().await;
         policies.push(policy);
         policies.sort_by_key(|p| p.priority);
     }
@@ -939,7 +957,7 @@ impl ZeroTrustEngine {
         }
 
         let mut entity = {
-            let entities = self.entities.read().unwrap();
+            let entities = self.entities.read().await;
             entities
                 .get(&entity_id)
                 .cloned()
@@ -971,7 +989,7 @@ impl ZeroTrustEngine {
 
         // Update entity
         {
-            let mut entities = self.entities.write().unwrap();
+            let mut entities = self.entities.write().await;
             entities.insert(entity_id, entity);
         }
 
@@ -979,14 +997,14 @@ impl ZeroTrustEngine {
     }
 
     /// Get entity information
-    pub fn get_entity(&self, entity_id: Uuid) -> Option<ZeroTrustEntity> {
-        let entities = self.entities.read().unwrap();
+    pub async fn get_entity(&self, entity_id: Uuid) -> Option<ZeroTrustEntity> {
+        let entities = self.entities.read().await;
         entities.get(&entity_id).cloned()
     }
 
     /// Update threat intelligence
-    pub fn update_threat_intel(&self, indicators: Vec<ThreatIndicator>) {
-        let mut threat_intel = self.threat_intel.write().unwrap();
+    pub async fn update_threat_intel(&self, indicators: Vec<ThreatIndicator>) {
+        let mut threat_intel = self.threat_intel.write().await;
         *threat_intel = indicators;
         info!(
             "Updated threat intelligence with {} indicators",
@@ -995,9 +1013,9 @@ impl ZeroTrustEngine {
     }
 
     /// Get zero trust engine metrics
-    pub fn get_metrics(&self) -> ZeroTrustEngineHealthMetrics {
-        let entities = self.entities.read().unwrap();
-        let _policies = self.policies.read().unwrap();
+    pub async fn get_metrics(&self) -> ZeroTrustEngineHealthMetrics {
+        let entities = self.entities.read().await;
+        let _policies = self.policies.read().await;
 
         ZeroTrustEngineHealthMetrics {
             overall_health: 100.0, // Mock value
@@ -1024,7 +1042,7 @@ impl ZeroTrustEngine {
 
     /// Get detailed health metrics
     pub async fn get_health_metrics(&self) -> ZeroTrustEngineHealthMetrics {
-        let entities = self.entities.read().unwrap();
+        let entities = self.entities.read().await;
         let trust_distribution: HashMap<TrustLevel, usize> =
             entities.values().fold(HashMap::new(), |mut acc, entity| {
                 *acc.entry(entity.trust_level).or_insert(0) += 1;
@@ -1044,7 +1062,7 @@ impl ZeroTrustEngine {
 
     /// Initiate emergency lockdown
     pub async fn initiate_emergency_lockdown(&self) -> Result<(), ZeroTrustError> {
-        let mut entities = self.entities.write().unwrap();
+        let mut entities = self.entities.write().await;
         for entity in entities.values_mut() {
             entity.trust_level = TrustLevel::None;
             entity.risk_score.total_score = 100; // Maximum risk

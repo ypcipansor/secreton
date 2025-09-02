@@ -117,6 +117,9 @@ redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 # SQLx with PostgreSQL-only (removing RSA vulnerability from MySQL) - temporarily disabled
 # sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
 
+# API Documentation
+aide = { version = "0.15", features = ["axum", "macros"] }
+
 # Configuration
 toml = "0.8"
 config = "0.14"

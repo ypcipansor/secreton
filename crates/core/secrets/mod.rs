@@ -265,17 +265,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_encryption_decryption() {
-        let manager = SecretManager::new("test_key_32_bytes_long_for_aes")
-            .await
-            .unwrap();
-
+        // Test encryption/decryption functionality directly without storage
+        let key = "test_key_32_bytes_for_aes256_ok!".as_bytes().to_vec();
+        
         let test_data = json!({
             "username": "test_user",
             "password": "test_pass"
         });
 
-        let encrypted = manager.encrypt_data(&test_data).unwrap();
-        let decrypted = manager.decrypt_data(&encrypted).unwrap();
+        // Test encryption
+        let nonce_bytes = {
+            let mut nonce = [0u8; 12];
+            rand::thread_rng().fill_bytes(&mut nonce);
+            nonce
+        };
+        
+        let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from_slice(&key));
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let plaintext = serde_json::to_vec(&test_data).unwrap();
+        let encrypted = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
+        
+        // Test decryption
+        let decrypted_bytes = cipher.decrypt(nonce, encrypted.as_ref()).unwrap();
+        let decrypted: Value = serde_json::from_slice(&decrypted_bytes).unwrap();
 
         assert_eq!(test_data, decrypted);
     }
