@@ -25,6 +25,10 @@ tokio.workspace = true
 async-trait.workspace = true
 futures = "0.3"
 
+# Database - Using postgres crate for better dependency isolation
+postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+postgres-types = { version = "0.2", features = ["derive"] }
+
 # Database
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
@@ -61,7 +65,12 @@ chacha20poly1305 = "0.10"
 
 # HTTP API
 warp = "0.3"
-flate2 = "1.0"
+
+# Secret Versioning
+secret_versioning = { path = "./secret_versioning" }
+granular_revocation = { path = "./granular_revocation" }
+audit_log = { path = "./audit_log" }
+flate2 = "1.1.2"
 
 [features]
 default = ["postgres", "redis"]

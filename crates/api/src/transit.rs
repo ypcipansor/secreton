@@ -19,8 +19,9 @@ pub enum KeyType {
     ChaCha20Poly1305,
     Ed25519,
     Ecdsa256,
-    Rsa2048,
-    Rsa4096,
+    // RSA key types removed for security - replaced with Ed25519
+    // Rsa2048, // Deprecated - use Ed25519 instead
+    // Rsa4096, // Deprecated - use Ed25519 instead
 }
 
 #[derive(Debug, Clone)]

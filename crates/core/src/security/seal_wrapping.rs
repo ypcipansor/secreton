@@ -7,7 +7,6 @@
 //! capabilities with multi-layer encryption, quantum-resistant wrapping, and zero-trust
 //! architecture for Critical Security Parameters (CSPs).
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -23,10 +22,12 @@ pub struct SealWrappingEngine {
     seal_providers: Arc<RwLock<Vec<SealProviderWithPriority>>>,
     /// Wrapping configuration per data type
     wrapping_configs: Arc<RwLock<HashMap<DataType, WrapConfig>>>,
+    /// Multi-seal support for maximum security
+    // multi_seal_config: Arc<RwLock<MultiSealConfig>>, // TODO: Implement multi-seal support
     /// Quantum-resistant wrapper
-    quantum_wrapper: Option<Arc<dyn QuantumSealWrapper>>,
+    quantum_wrapper: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Audit logger for seal operations
-    audit_logger: Option<Arc<dyn SealAuditLogger>>,
+    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance metrics
     metrics: Arc<RwLock<SealMetrics>>,
 }
@@ -41,29 +42,28 @@ pub struct SealProviderWithPriority {
 }
 
 /// Advanced Seal Provider Trait
-#[async_trait]
 pub trait SealProvider: Send + Sync {
     /// Initialize the seal provider
-    async fn initialize(&mut self) -> SecretonResult<()>;
+    fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Wrap data with the seal
-    async fn wrap(&self, data: &[u8], context: &WrapContext) -> SecretonResult<WrappedData>;
+    fn wrap(&self, data: &[u8], context: &WrapContext) -> impl std::future::Future<Output = SecretonResult<WrappedData>> + Send;
 
     /// Unwrap sealed data
-    async fn unwrap(
+    fn unwrap(
         &self,
         wrapped: &WrappedData,
         context: &UnwrapContext,
-    ) -> SecretonResult<Vec<u8>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Generate a new wrapping key
-    async fn generate_key(&self, algorithm: SealAlgorithm) -> SecretonResult<SealKeyId>;
+    fn generate_key(&self, algorithm: SealAlgorithm) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
 
     /// Rotate wrapping keys
-    async fn rotate_key(&self, key_id: &SealKeyId) -> SecretonResult<SealKeyId>;
+    fn rotate_key(&self, key_id: &SealKeyId) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
 
     /// Health check for the seal provider
-    async fn health_check(&self) -> SecretonResult<SealProviderHealth>;
+    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<SealProviderHealth>> + Send;
 
     /// Get provider information
     fn provider_info(&self) -> SealProviderInfo;
@@ -378,17 +378,16 @@ pub struct PerformanceCharacteristics {
 }
 
 /// Quantum Seal Wrapper Trait
-#[async_trait]
 pub trait QuantumSealWrapper: Send + Sync {
     /// Wrap data with quantum-resistant algorithms
-    async fn quantum_wrap(
+    fn quantum_wrap(
         &self,
         data: &[u8],
         algorithm: SealAlgorithm,
-    ) -> SecretonResult<WrappedData>;
+    ) -> impl std::future::Future<Output = SecretonResult<WrappedData>> + Send;
 
     /// Unwrap quantum-sealed data
-    async fn quantum_unwrap(&self, wrapped: &WrappedData) -> SecretonResult<Vec<u8>>;
+    fn quantum_unwrap(&self, wrapped: &WrappedData) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Check quantum resistance level
     fn quantum_resistance_level(&self) -> QuantumResistanceLevel;
@@ -410,37 +409,36 @@ pub enum QuantumResistanceLevel {
 }
 
 /// Seal Audit Logger Trait
-#[async_trait]
 pub trait SealAuditLogger: Send + Sync {
     /// Log seal wrap operation
-    async fn log_wrap(
+    fn log_wrap(
         &self,
         context: &WrapContext,
         result: &SecretonResult<WrappedData>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log seal unwrap operation
-    async fn log_unwrap(
+    fn log_unwrap(
         &self,
         context: &UnwrapContext,
         result: &SecretonResult<Vec<u8>>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log key rotation
-    async fn log_key_rotation(
+    fn log_key_rotation(
         &self,
         provider_id: &str,
         old_key: &SealKeyId,
         new_key: &SealKeyId,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log provider health changes
-    async fn log_health_change(
+    fn log_health_change(
         &self,
         provider_id: &str,
         old_health: &SealProviderHealth,
         new_health: &SealProviderHealth,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Seal Metrics
@@ -479,6 +477,7 @@ impl SealWrappingEngine {
         Ok(Self {
             seal_providers: Arc::new(RwLock::new(Vec::new())),
             wrapping_configs: Arc::new(RwLock::new(Self::default_wrap_configs())),
+            // multi_seal_config: Arc::new(RwLock::new(MultiSealConfig::default())), // TODO: Implement multi-seal support
             quantum_wrapper: None,
             audit_logger: None,
             metrics: Arc::new(RwLock::new(SealMetrics::default())),

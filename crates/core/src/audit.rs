@@ -995,7 +995,6 @@ pub struct AuditLogger {
 
 /// Risk calculation engine for audit events
 pub struct RiskCalculator {
-    rules: HashMap<SecurityEventType, f64>,
     #[allow(dead_code)]
     context_factors: HashMap<String, f64>,
 }
@@ -1008,76 +1007,7 @@ impl Default for RiskCalculator {
 
 impl RiskCalculator {
     pub fn new() -> Self {
-        let mut rules = HashMap::new();
-
-        // High-risk authentication events
-        rules.insert(
-            SecurityEventType::AuthenticationFailure {
-                user: String::new(),
-                method: String::new(),
-                reason: String::new(),
-            },
-            7.0,
-        );
-        rules.insert(
-            SecurityEventType::AuthenticationBlocked {
-                user: String::new(),
-                reason: String::new(),
-            },
-            9.0,
-        );
-        rules.insert(
-            SecurityEventType::PrivilegeEscalation {
-                user: String::new(),
-                from_role: String::new(),
-                to_role: String::new(),
-            },
-            8.5,
-        );
-
-        // Critical crypto operations
-        rules.insert(
-            SecurityEventType::KeyDeletion {
-                key_id: String::new(),
-                algorithm: String::new(),
-            },
-            9.5,
-        );
-        rules.insert(
-            SecurityEventType::HSMError {
-                hsm_type: String::new(),
-                error: String::new(),
-            },
-            8.0,
-        );
-
-        // Security incidents
-        rules.insert(
-            SecurityEventType::SecurityThreat {
-                threat_type: String::new(),
-                source: String::new(),
-                severity: String::new(),
-            },
-            9.0,
-        );
-        rules.insert(
-            SecurityEventType::IntrusionAttempt {
-                source_ip: String::new(),
-                attack_type: String::new(),
-            },
-            8.5,
-        );
-        rules.insert(
-            SecurityEventType::DataBreach {
-                scope: String::new(),
-                data_types: String::new(),
-                affected_users: 0,
-            },
-            10.0,
-        );
-
         Self {
-            rules,
             context_factors: HashMap::new(),
         }
     }
@@ -1087,7 +1017,18 @@ impl RiskCalculator {
         event: &SecurityEventType,
         context: &HashMap<String, serde_json::Value>,
     ) -> f64 {
-        let base_risk = self.rules.get(event).copied().unwrap_or(1.0);
+        // Get base risk based on event type
+        let base_risk = match event {
+            SecurityEventType::AuthenticationFailure { .. } => 7.0,
+            SecurityEventType::AuthenticationBlocked { .. } => 9.0,
+            SecurityEventType::PrivilegeEscalation { .. } => 8.5,
+            SecurityEventType::KeyDeletion { .. } => 9.5,
+            SecurityEventType::HSMError { .. } => 8.0,
+            SecurityEventType::SecurityThreat { .. } => 9.0,
+            SecurityEventType::IntrusionAttempt { .. } => 8.5,
+            SecurityEventType::DataBreach { .. } => 10.0,
+            _ => 1.0, // Default low risk for other events
+        };
 
         // Apply context factors
         let mut risk = base_risk;
@@ -1096,6 +1037,10 @@ impl RiskCalculator {
         if let Some(hour) = context.get("hour") {
             if let Some(h) = hour.as_u64() {
                 if !(6..=22).contains(&h) {
+                    risk *= 1.2; // After hours activity is riskier
+                }
+            } else if let Some(h) = hour.as_i64() {
+                if !(6..=22).contains(&(h as u64)) {
                     risk *= 1.2; // After hours activity is riskier
                 }
             }

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Cryptographic primitives and quantum-safe algorithms for Secreton"
+description = "Cryptographic primitives and quantum-safe algorithms for Secreton using Ed25519 for signatures"
 keywords = ["cryptography", "quantum-safe", "post-quantum"]
 
 [dependencies]

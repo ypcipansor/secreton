@@ -1,11 +1,15 @@
 # Secreton Vault - Raft Integrated Storage
 
+**Version:** 2.1.1
+**Last Updated:** August 28, 2025
+**Status:** ✅ Production Ready
+
 Secreton Vault implements HashiCorp Vault-compatible integrated storage using the Raft consensus algorithm. This provides a self-contained, highly available storage solution without external dependencies.
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
-- [Architecture](#architecture)  
+- [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Deployment Modes](#deployment-modes)
 - [Getting Started](#getting-started)

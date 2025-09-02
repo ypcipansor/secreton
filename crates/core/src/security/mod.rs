@@ -263,8 +263,7 @@ impl AdvancedSecurityOrchestrator {
 
         // Initialize all security engines
         let entropy_engine =
-            entropy_augmentation::EntropyAugmentationEngine::new(config.entropy_config.clone())
-                .await?;
+            entropy_augmentation::EntropyAugmentationEngine::new(config.entropy_config.clone());
         let hsm_manager = hsm::HsmManager::new();
         // Initialize advanced audit system with proper constructor arguments (4 params)
         let audit_config = audit::ComplianceConfig::default();
@@ -354,8 +353,7 @@ impl AdvancedSecurityOrchestrator {
         report.entropy_health = self
             .entropy_engine
             .get_health_metrics()
-            .await
-            .unwrap_or_default();
+            .await;
         report.hsm_health = self.hsm_manager.get_metrics(); // This returns HsmHealthStatus directly
         report.audit_health = self.audit_system.get_health_status().await;
         report.zero_trust_health = self.zero_trust_engine.get_health_metrics().await;
@@ -486,8 +484,7 @@ impl AdvancedSecurityOrchestrator {
             entropy_metrics: self
                 .entropy_engine
                 .get_health_metrics()
-                .await
-                .unwrap_or_default(),
+                .await,
             hsm_metrics: self.hsm_manager.get_metrics(),
             audit_metrics: self.audit_system.get_health_metrics().await,
             zero_trust_metrics: self.zero_trust_engine.get_health_metrics().await,

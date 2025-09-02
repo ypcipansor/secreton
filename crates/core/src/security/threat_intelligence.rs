@@ -582,8 +582,11 @@ pub struct ThreatIntelligenceEngine {
     executors: Arc<RwLock<HashMap<String, Arc<dyn ResponseActionExecutor>>>>,
     indicators: Arc<RwLock<HashMap<String, ThreatIndicator>>>,
     detections: Arc<RwLock<HashMap<String, ThreatDetection>>>,
+    #[allow(unused)]
     anomalies: Arc<RwLock<HashMap<String, BehavioralAnomaly>>>,
+    #[allow(unused)]
     threat_hunts: Arc<RwLock<HashMap<String, ThreatHunt>>>,
+    #[allow(unused)]
     behavior_baselines: Arc<RwLock<HashMap<String, BehaviorBaseline>>>,
     config: ThreatIntelConfig,
     metrics: Arc<Mutex<ThreatIntelMetrics>>,

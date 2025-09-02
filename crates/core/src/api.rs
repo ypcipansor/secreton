@@ -145,14 +145,7 @@ impl AdvancedSecurityManager {
         use crate::security::concrete_implementations::*;
 
         // Initialize all security components with proper dependencies
-        let entropy_engine = EntropyAugmentationEngine::new(Default::default())
-            .await
-            .map_err(|e| {
-                CoreError::from(anyhow::anyhow!(
-                    "Failed to initialize entropy engine: {}",
-                    e
-                ))
-            })?;
+        let entropy_engine = EntropyAugmentationEngine::new(Default::default());
         let hsm_manager = HsmManager::new();
 
         let audit_storage = MemoryAuditStorage::create();

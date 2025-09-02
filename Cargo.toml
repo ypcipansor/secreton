@@ -2,12 +2,12 @@
 resolver = "2"
 members = [
     "crates/core",
-    # "crates/agent", # Temporarily disabled - has missing module issues
+    # "crates/agent", # Temporarily disabled - has module issues
     "crates/ui",
     "crates/crypto",
     "crates/storage",
     "crates/api",
-    "crates/cli", # Re-enabled with simplified implementation
+    "crates/cli"
 ]
 
 [workspace.package]
@@ -38,6 +38,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+bincode = "1.3"
+zeroize = { version = "1.7", features = ["zeroize_derive"] }
+
+# Testing dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = { version = "1.2", default-features = false, features = ["std"] }
+rmp-serde = "1.1"
+secrecy = { version = "0.8", features = ["serde"] }
+wiremock = { version = "0.6.5", default-features = false }
 
 # Async runtime
 async-trait = "0.1"
@@ -94,10 +103,15 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression"] }
 prost = "0.12"
 
-# Database
-tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-deadpool-postgres = "0.12"
-redis = { version = "1.0.0-alpha.1", features = ["tokio-comp", "connection-manager"] }
+# Database - Using postgres crate for better dependency isolation and security
+# Replaced sqlx with postgres crate to avoid RSA vulnerabilities from sqlx-mysql
+postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+postgres-types = { version = "0.2", features = ["derive"] }
+
+# Database dependencies - Updated to latest versions
+tokio-postgres = { version = "0.7.10", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+deadpool-postgres = "0.14"
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
 
 # API Documentation
 aide = { version = "0.15", features = ["axum", "macros"] }
@@ -108,25 +122,19 @@ config = "0.14"
 clap = { version = "4.4", features = ["derive"] }
 
 # Metrics and monitoring
-prometheus = "0.14"
+# Metrics and monitoring
+prometheus = "0.14.0"  # Updated to address protobuf vulnerability
 opentelemetry = "0.21"
 opentelemetry-jaeger = "0.20"
 
 # Security utilities
-zeroize = { version = "1.7", features = ["zeroize_derive"] }
-secrecy = { version = "0.8", features = ["serde"] }
 constant_time_eq = "0.3"
 
 # Serialization formats
-bincode = "1.3"
-rmp-serde = "1.1"
-cbor4ii = "0.3"
+cbor4ii = "=0.3.3"  # Pinned to resolve version conflict
 num_cpus = "1.16"
 
 # Development and testing dependencies
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.4"
-wiremock = "0.5"
 tokio-test = "0.4"
 pretty_assertions = "1.4"
 

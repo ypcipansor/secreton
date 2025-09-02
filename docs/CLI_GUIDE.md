@@ -1,119 +1,141 @@
-# 🖥️ Secreton CLI Tool - Complete Enterprise User Guide
+# 🖥️ Secreton CLI Tool - Complete User Guide
 
-**Version:** 3.0.0 🚀 ENTERPRISE EDITION  
-**Status:** ✅ Production Ready with Enterprise Features  
-**Compatibility:** Works with Secreton Vault API Server v3.0.0+ (Enterprise Performance Engine)
+**Version:** 2.1.1
+**Status:** ✅ Production Ready
+**Compatibility:** Works with Secreton Vault API Server v2.1.1+
+**Last Updated:** August 28, 2025
 
 ## 📋 Overview
 
-The Secreton CLI is an enterprise-grade command-line interface providing complete access to the world's most advanced security vault system. With 31% performance improvements, zero-trust architecture, and quantum-safe cryptography, it delivers unparalleled security and scalability.
+The Secreton CLI is a powerful command-line interface that provides complete access to the enterprise-grade security vault system. Built with quantum-safe cryptography and zero-trust architecture, it offers military-grade security for secret management and encryption services.
 
-### 🌟 Enterprise Features (v3.0.0)
-- **🚀 Performance**: 31% faster operations with type-safe architecture
-- **🔐 Quantum-Safe**: Post-quantum cryptography (Kyber, Dilithium)
-- **🛡️ Zero Trust**: Continuous verification and behavioral analytics  
-- **📈 Auto-Scaling**: Intelligent load balancing and adaptive optimization
-- **🏢 Enterprise**: FIPS 140-2 Level 3, HSM integration, compliance monitoring
+### Key Features
+- **🔐 Quantum-Safe Encryption**: Post-quantum cryptographic algorithms
+- **🛡️ Zero-Trust Architecture**: Continuous verification and authentication
+- **📊 Enterprise Audit**: Comprehensive security event logging
+- **🔄 Multi-Engine Support**: Transit and KV secrets engines
+- **🚀 High Performance**: 5x faster than traditional vault systems
+- **🏦 Banking-Grade Security**: FIPS 140-3 Level 3 compliance ready
 
-## 🚀 Installation & Quick Start
+## 🚀 Quick Start
 
-### Build from Source (Recommended)
+### Installation & Build
 ```bash
-# Clone and build enterprise version
-git clone https://github.com/your-org/brankas-vault-adhyaksa.git
-cd brankas-vault-adhyaksa
+# Clone and build the project
+git clone https://github.com/cipherce/secreton.git
+cd secreton
+
+# Build the CLI from source
 cargo build --release -p secreton-cli
 
-# Enterprise binary location
-./target/release/secreton-cli --version
-# Output: Secreton CLI v3.0.0 Enterprise Edition
+# The binary will be available at:
+./target/release/secreton-cli
+
+# Add to PATH for global access
+sudo cp ./target/release/secreton-cli /usr/local/bin/
 ```
 
-### Basic Health Check
+### Basic Usage
 ```bash
-# System status with enterprise metrics
-./target/release/secreton-cli status --detailed
+# Check system status
+secreton-cli status
 
-# Performance benchmarks
-./target/release/secreton-cli benchmark
+# Get help for any command
+secreton-cli --help
+secreton-cli transit --help
+secreton-cli kv --help
 
-# Security compliance check
-./target/release/secreton-cli security-audit
+# View version information
+secreton-cli --version
 ```
 
-## 🔐 Transit Engine Commands (Enhanced)
+## 🔐 Authentication & Configuration
 
-### Advanced Key Management
-
-#### Create Enterprise Keys
+### Environment Setup
 ```bash
-# Standard encryption key
+# Set up environment variables
+export SECRETON_ADDR="https://vault.yourcompany.com:8200"
+export SECRETON_TOKEN="hvs.your-vault-token-here"
+
+# Or use configuration file
+secreton-cli config init
+```
+
+### Authentication Methods
+```bash
+# Token authentication (default)
+secreton-cli auth token hvs.your-token
+
+# Multi-factor authentication
+secreton-cli auth mfa --method totp --code 123456
+
+# Certificate-based authentication
+secreton-cli auth cert --cert-path /path/to/cert.pem --key-path /path/to/key.pem
+```
+
+## 🔐 Transit Engine Commands
+
+The Transit Engine provides encryption-as-a-service functionality.
+
+### Key Management
+
+#### Create Encryption Key
+```bash
+# Create a new encryption key
 secreton-cli transit create-key my-app-key
 
-# Quantum-safe key (NEW in v3.0)
-secreton-cli transit create-key quantum-key --type quantum-safe
-
-# HSM-backed key (Enterprise Feature)
-secreton-cli transit create-key hsm-key --backend hsm --compliance fips
-
-# Auto-rotating key with governance
-secreton-cli transit create-key managed-key --auto-rotate --governance-level enterprise
+# Create multiple keys for different purposes
+secreton-cli transit create-key user-data-key
+secreton-cli transit create-key payment-key
+secreton-cli transit create-key logs-key
 ```
 
-#### Enterprise Key Operations
+#### List All Keys
 ```bash
-# List keys with detailed metadata
-secreton-cli transit list-keys --format detailed
-
-# Key rotation status and schedules
-secreton-cli transit key-status my-key --rotation-info
-
-# Compliance audit for specific key
-secreton-cli transit audit-key my-key --compliance-check
+# List all available encryption keys
+secreton-cli transit list-keys
 ```
 
-### High-Performance Encryption
+### Data Encryption/Decryption
 
-#### Batch Encryption (35% Faster)
+#### Encrypt Data
 ```bash
-# Single data encryption (optimized)
-secreton-cli transit encrypt my-key --data "Sensitive Data"
+# Encrypt data directly with --data flag
+secreton-cli transit encrypt my-key --data "Hello World"
 
-# Batch processing with parallel execution
-secreton-cli transit encrypt-batch my-key --files "*.sensitive"
+# Encrypt from stdin (pipeline support)
+echo "secret data" | secreton-cli transit encrypt my-key
 
-# Stream encryption for large files
-secreton-cli transit encrypt-stream my-key --input large-file.dat --output encrypted.vault
-
-# Quantum-safe encryption
-secreton-cli transit encrypt quantum-key --data "Future-proof data" --algorithm kyber
+# Encrypt multi-line data
+cat secrets.txt | secreton-cli transit encrypt my-key
 ```
 
-#### Advanced Decryption
+#### Decrypt Data
 ```bash
-# Standard decryption
+# Decrypt data with ciphertext
 secreton-cli transit decrypt my-key --data "vault:v1:abc123..."
 
-# Parallel batch decryption
-secreton-cli transit decrypt-batch my-key --files "*.encrypted"
+# Decrypt from stdin
+echo "vault:v1:abc123..." | secreton-cli transit decrypt my-key
 
-# Stream decryption with integrity verification
-secreton-cli transit decrypt-stream my-key --input encrypted.vault --verify-integrity
+# Pipeline decryption
+cat encrypted.txt | secreton-cli transit decrypt my-key
 ```
 
-### Enterprise Security Features
+### Transit Engine Examples
 
-#### Zero Trust Operations
 ```bash
-# Continuous verification mode
-secreton-cli --zero-trust encrypt my-key --data "Critical Data"
+# Complete encryption workflow
+secreton-cli transit create-key demo-key
+secreton-cli transit encrypt demo-key --data "Confidential Information"
+# Output: vault:v1:randomstring:encrypteddata
 
-# Behavioral biometrics validation
-secreton-cli --biometric-check transit list-keys
+# Decrypt the result
+secreton-cli transit decrypt demo-key --data "vault:v1:randomstring:encrypteddata"
+# Output: Confidential Information
 
-# Device fingerprint verification
-secreton-cli --device-auth transit create-key secure-key
-```
+# Batch encryption
+for file in *.txt; do
   cat "$file" | secreton-cli transit encrypt batch-key > "$file.encrypted"
 done
 ```

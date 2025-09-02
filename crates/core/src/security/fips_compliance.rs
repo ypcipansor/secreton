@@ -348,29 +348,29 @@ pub struct HsmHealthStatus {
 /// HSM Provider Trait
 pub trait HsmProviderTrait: Send + Sync {
     /// Initialize connection to HSM
-    async fn initialize(&mut self) -> SecretonResult<()>;
+    fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Generate a new key in HSM
-    async fn generate_key(&self, algorithm: FipsAlgorithm, key_size: u32)
-        -> SecretonResult<String>;
+    fn generate_key(&self, algorithm: FipsAlgorithm, key_size: u32)
+        -> impl std::future::Future<Output = SecretonResult<String>> + Send;
 
     /// Encrypt data using HSM key
-    async fn encrypt(&self, key_id: &str, plaintext: &[u8]) -> SecretonResult<Vec<u8>>;
+    fn encrypt(&self, key_id: &str, plaintext: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Decrypt data using HSM key
-    async fn decrypt(&self, key_id: &str, ciphertext: &[u8]) -> SecretonResult<Vec<u8>>;
+    fn decrypt(&self, key_id: &str, ciphertext: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Sign data using HSM key
-    async fn sign(&self, key_id: &str, data: &[u8]) -> SecretonResult<Vec<u8>>;
+    fn sign(&self, key_id: &str, data: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Verify signature using HSM key
-    async fn verify(&self, key_id: &str, data: &[u8], signature: &[u8]) -> SecretonResult<bool>;
+    fn verify(&self, key_id: &str, data: &[u8], signature: &[u8]) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Generate random bytes using HSM RNG
-    async fn generate_random(&self, byte_count: u32) -> SecretonResult<Vec<u8>>;
+    fn generate_random(&self, byte_count: u32) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Check HSM health status
-    async fn health_check(&self) -> SecretonResult<HsmHealthStatus>;
+    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<HsmHealthStatus>> + Send;
 
     /// Get HSM provider information
     fn provider_info(&self) -> HsmProviderInfo;
@@ -389,20 +389,20 @@ pub struct HsmProviderInfo {
 /// FIPS Audit Logger Trait
 pub trait FipsAuditLogger: Send + Sync {
     /// Log FIPS compliance event
-    async fn log_compliance_event(&self, event: ComplianceEvent) -> SecretonResult<()>;
+    fn log_compliance_event(&self, event: ComplianceEvent) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log algorithm usage
-    async fn log_algorithm_usage(
+    fn log_algorithm_usage(
         &self,
         algorithm: FipsAlgorithm,
         operation: &str,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log self-test results
-    async fn log_self_test(&self, results: &SelfTestResults) -> SecretonResult<()>;
+    fn log_self_test(&self, results: &SelfTestResults) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log HSM operations
-    async fn log_hsm_operation(&self, operation: &str, success: bool) -> SecretonResult<()>;
+    fn log_hsm_operation(&self, operation: &str, success: bool) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// FIPS Compliance Events
@@ -438,16 +438,16 @@ pub enum EventSeverity {
 /// Self-Test Runner Trait
 pub trait SelfTestRunner: Send + Sync {
     /// Run power-on self-tests
-    async fn run_power_on_tests(&self) -> SecretonResult<SelfTestResults>;
+    fn run_power_on_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Run conditional self-tests
-    async fn run_conditional_tests(&self) -> SecretonResult<SelfTestResults>;
+    fn run_conditional_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Run periodic self-tests
-    async fn run_periodic_tests(&self) -> SecretonResult<SelfTestResults>;
+    fn run_periodic_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Test specific algorithm implementation
-    async fn test_algorithm(&self, algorithm: FipsAlgorithm) -> SecretonResult<TestResult>;
+    fn test_algorithm(&self, algorithm: FipsAlgorithm) -> impl std::future::Future<Output = SecretonResult<TestResult>> + Send;
 }
 
 impl FipsComplianceEngine {

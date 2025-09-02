@@ -27,12 +27,14 @@ pub struct NamespacesEngine {
     /// Resource quota manager
     quota_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Policy inheritance resolver
+    #[allow(unused)]
     policy_resolver: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Audit logger for namespace operations
     audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Namespace metrics
     metrics: Arc<RwLock<NamespaceMetrics>>,
     /// Configuration
+    #[allow(unused)]
     config: Arc<RwLock<NamespaceConfig>>,
 }
 
@@ -537,27 +539,27 @@ pub struct NamespaceHierarchy {
 /// Namespace Access Control Trait
 pub trait NamespaceAccessControl: Send + Sync {
     /// Check if operation is allowed
-    async fn check_access(
+    fn check_access(
         &self,
         namespace_id: &NamespaceId,
         principal: &Principal,
         resource: &ResourceType,
         action: &Action,
         context: &AccessContext,
-    ) -> SecretonResult<AccessDecision>;
+    ) -> impl std::future::Future<Output = SecretonResult<AccessDecision>> + Send;
 
     /// Get effective policies for namespace
-    async fn get_effective_policies(
+    fn get_effective_policies(
         &self,
         namespace_id: &NamespaceId,
-    ) -> SecretonResult<Vec<AccessPolicy>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<AccessPolicy>>> + Send;
 
     /// Evaluate policy conditions
-    async fn evaluate_conditions(
+    fn evaluate_conditions(
         &self,
         conditions: &[PolicyCondition],
         context: &AccessContext,
-    ) -> SecretonResult<bool>;
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 }
 
 /// Principal (user, service, etc.)
@@ -652,30 +654,30 @@ pub enum Condition {
 /// Resource Quota Manager Trait
 pub trait ResourceQuotaManager: Send + Sync {
     /// Check if resource usage is within quota
-    async fn check_quota(
+    fn check_quota(
         &self,
         namespace_id: &NamespaceId,
         resource_type: &str,
         requested_amount: u64,
-    ) -> SecretonResult<QuotaCheckResult>;
+    ) -> impl std::future::Future<Output = SecretonResult<QuotaCheckResult>> + Send;
 
     /// Update resource usage
-    async fn update_usage(
+    fn update_usage(
         &self,
         namespace_id: &NamespaceId,
         resource_type: &str,
         usage_delta: i64,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get current resource usage
-    async fn get_usage(&self, namespace_id: &NamespaceId) -> SecretonResult<ResourceUsage>;
+    fn get_usage(&self, namespace_id: &NamespaceId) -> impl std::future::Future<Output = SecretonResult<ResourceUsage>> + Send;
 
     /// Set quota for namespace
-    async fn set_quota(
+    fn set_quota(
         &self,
         namespace_id: &NamespaceId,
         quotas: ResourceQuotas,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Quota Check Result
@@ -704,51 +706,51 @@ pub struct ResourceUsage {
 /// Policy Inheritance Resolver Trait
 pub trait PolicyInheritanceResolver: Send + Sync {
     /// Resolve effective policies considering inheritance
-    async fn resolve_policies(
+    fn resolve_policies(
         &self,
         namespace_id: &NamespaceId,
-    ) -> SecretonResult<Vec<AccessPolicy>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<AccessPolicy>>> + Send;
 
     /// Check if policy should be inherited
-    async fn should_inherit_policy(
+    fn should_inherit_policy(
         &self,
         policy: &AccessPolicy,
         target_namespace: &NamespaceId,
-    ) -> SecretonResult<bool>;
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Merge policies from different inheritance levels
-    async fn merge_policies(
+    fn merge_policies(
         &self,
         policies: Vec<Vec<AccessPolicy>>,
-    ) -> SecretonResult<Vec<AccessPolicy>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<AccessPolicy>>> + Send;
 }
 
 /// Namespace Audit Logger Trait
 pub trait NamespaceAuditLogger: Send + Sync {
     /// Log namespace creation
-    async fn log_namespace_created(
+    fn log_namespace_created(
         &self,
         namespace: &Namespace,
         created_by: &str,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log namespace modification
-    async fn log_namespace_modified(
+    fn log_namespace_modified(
         &self,
         old: &Namespace,
         new: &Namespace,
         modified_by: &str,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log namespace deletion
-    async fn log_namespace_deleted(
+    fn log_namespace_deleted(
         &self,
         namespace: &Namespace,
         deleted_by: &str,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log access decision
-    async fn log_access_decision(
+    fn log_access_decision(
         &self,
         namespace_id: &NamespaceId,
         principal: &Principal,
@@ -756,16 +758,16 @@ pub trait NamespaceAuditLogger: Send + Sync {
         action: &Action,
         decision: &AccessDecision,
         context: &AccessContext,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log quota violation
-    async fn log_quota_violation(
+    fn log_quota_violation(
         &self,
         namespace_id: &NamespaceId,
         resource_type: &str,
         attempted: u64,
         limit: u64,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Namespace Metrics

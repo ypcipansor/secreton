@@ -49,8 +49,9 @@ oauth2 = "4.4"
 governor = "0.6"
 headers = "0.4"
 
-# OpenAPI documentation
-aide.workspace = true
+# OpenAPI documentation - Updated to latest versions for security
+utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
 
 # Storage
 secreton-storage = { path = "../storage" }
@@ -60,6 +61,7 @@ prometheus.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+wiremock = { workspace = true }
 mockito = "1.4"
 
 [build-dependencies]

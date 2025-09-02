@@ -7,7 +7,6 @@
 //! with automatic key rotation, quantum-safe key generation, HSM integration, and
 //! enterprise-grade key governance policies.
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -24,16 +23,16 @@ pub struct ManagedKeysEngine {
     managed_keys: Arc<RwLock<HashMap<ManagedKeyId, ManagedKey>>>,
     /// Key lifecycle policies
     lifecycle_policies: Arc<RwLock<HashMap<KeyType, LifecyclePolicy>>>,
+    /// Key usage tracker
+    // usage_tracker: Arc<RwLock<KeyUsageTracker>>, // TODO: Implement usage tracking
+    /// Automatic rotation scheduler
+    rotation_scheduler: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    /// Key governance engine
+    // governance: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>, // TODO: Implement governance
+    /// Audit logger
+    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance metrics
     metrics: Arc<RwLock<KeyMetrics>>,
-    /// Key usage tracking
-    usage_tracker: Arc<RwLock<KeyUsageTracker>>,
-    /// Optional rotation scheduler
-    rotation_scheduler: Option<Arc<dyn crate::security::optimized_traits::RotationScheduler>>,
-    /// Key governance engine
-    governance: Arc<dyn crate::security::optimized_traits::KeyGovernance>,
-    /// Audit logger
-    audit_logger: Arc<dyn crate::security::optimized_traits::KeyAuditLogger>,
 }
 
 /// Key Provider with Configuration
@@ -46,65 +45,64 @@ pub struct KeyProviderWithConfig {
 }
 
 /// Advanced Key Provider Trait
-#[async_trait]
 pub trait KeyProvider: Send + Sync {
     /// Initialize the key provider
-    async fn initialize(&mut self) -> SecretonResult<()>;
+    fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Generate a new managed key
-    async fn generate_key(&self, spec: &KeyGenerationSpec) -> SecretonResult<GeneratedKey>;
+    fn generate_key(&self, spec: &KeyGenerationSpec) -> impl std::future::Future<Output = SecretonResult<GeneratedKey>> + Send;
 
     /// Import an existing key
-    async fn import_key(&self, spec: &KeyImportSpec) -> SecretonResult<ImportedKey>;
+    fn import_key(&self, spec: &KeyImportSpec) -> impl std::future::Future<Output = SecretonResult<ImportedKey>> + Send;
 
     /// Rotate a managed key
-    async fn rotate_key(&self, key_id: &ManagedKeyId) -> SecretonResult<RotatedKey>;
+    fn rotate_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<RotatedKey>> + Send;
 
     /// Delete a managed key (secure destruction)
-    async fn delete_key(&self, key_id: &ManagedKeyId) -> SecretonResult<()>;
+    fn delete_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get key metadata
-    async fn get_key_metadata(&self, key_id: &ManagedKeyId) -> SecretonResult<KeyMetadata>;
+    fn get_key_metadata(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<KeyMetadata>> + Send;
 
     /// Sign data with managed key
-    async fn sign(
+    fn sign(
         &self,
         key_id: &ManagedKeyId,
         data: &[u8],
         algorithm: SignatureAlgorithm,
-    ) -> SecretonResult<Signature>;
+    ) -> impl std::future::Future<Output = SecretonResult<Signature>> + Send;
 
     /// Verify signature
-    async fn verify(
+    fn verify(
         &self,
         key_id: &ManagedKeyId,
         data: &[u8],
         signature: &Signature,
-    ) -> SecretonResult<bool>;
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Encrypt data with managed key
-    async fn encrypt(
+    fn encrypt(
         &self,
         key_id: &ManagedKeyId,
         plaintext: &[u8],
         algorithm: EncryptionAlgorithm,
-    ) -> SecretonResult<EncryptedData>;
+    ) -> impl std::future::Future<Output = SecretonResult<EncryptedData>> + Send;
 
     /// Decrypt data with managed key
-    async fn decrypt(
+    fn decrypt(
         &self,
         key_id: &ManagedKeyId,
         ciphertext: &EncryptedData,
-    ) -> SecretonResult<Vec<u8>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Backup key (if supported)
-    async fn backup_key(&self, key_id: &ManagedKeyId) -> SecretonResult<KeyBackup>;
+    fn backup_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<KeyBackup>> + Send;
 
     /// Restore key from backup
-    async fn restore_key(&self, backup: &KeyBackup) -> SecretonResult<ManagedKeyId>;
+    fn restore_key(&self, backup: &KeyBackup) -> impl std::future::Future<Output = SecretonResult<ManagedKeyId>> + Send;
 
     /// Health check
-    async fn health_check(&self) -> SecretonResult<KeyProviderHealth>;
+    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<KeyProviderHealth>> + Send;
 
     /// Provider information
     fn provider_info(&self) -> KeyProviderInfo;
@@ -768,20 +766,20 @@ pub struct UsageTrend {
 /// Rotation Scheduler Trait
 pub trait RotationScheduler: Send + Sync {
     /// Schedule automatic rotation for a key
-    async fn schedule_rotation(
+    fn schedule_rotation(
         &self,
         key_id: &ManagedKeyId,
         rotation_time: chrono::DateTime<chrono::Utc>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Cancel scheduled rotation
-    async fn cancel_rotation(&self, key_id: &ManagedKeyId) -> SecretonResult<()>;
+    fn cancel_rotation(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get next scheduled rotations
-    async fn get_next_rotations(&self, limit: usize) -> SecretonResult<Vec<ScheduledRotation>>;
+    fn get_next_rotations(&self, limit: usize) -> impl std::future::Future<Output = SecretonResult<Vec<ScheduledRotation>>> + Send;
 
     /// Process due rotations
-    async fn process_due_rotations(&self) -> SecretonResult<Vec<RotationResult>>;
+    fn process_due_rotations(&self) -> impl std::future::Future<Output = SecretonResult<Vec<RotationResult>>> + Send;
 }
 
 /// Scheduled Rotation
@@ -841,28 +839,28 @@ pub enum RotationStatus {
 /// Key Governance Trait
 pub trait KeyGovernance: Send + Sync {
     /// Check if key operation is allowed
-    async fn check_operation_allowed(
+    fn check_operation_allowed(
         &self,
         key_id: &ManagedKeyId,
         operation: &KeyOperation,
         context: &OperationContext,
-    ) -> SecretonResult<bool>;
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Enforce key lifecycle policies
-    async fn enforce_lifecycle_policies(
+    fn enforce_lifecycle_policies(
         &self,
         key_id: &ManagedKeyId,
-    ) -> SecretonResult<Vec<PolicyAction>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<PolicyAction>>> + Send;
 
     /// Audit key compliance
-    async fn audit_compliance(&self, key_id: &ManagedKeyId) -> SecretonResult<ComplianceReport>;
+    fn audit_compliance(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<ComplianceReport>> + Send;
 
     /// Get required approvals for operation
-    async fn get_required_approvals(
+    fn get_required_approvals(
         &self,
         key_id: &ManagedKeyId,
         operation: &KeyOperation,
-    ) -> SecretonResult<Vec<ApprovalRequirement>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<ApprovalRequirement>>> + Send;
 }
 
 /// Operation Context
@@ -958,38 +956,38 @@ pub enum IssueSeverity {
 /// Key Audit Logger Trait
 pub trait KeyAuditLogger: Send + Sync {
     /// Log key generation
-    async fn log_key_generation(
+    fn log_key_generation(
         &self,
         spec: &KeyGenerationSpec,
         result: &SecretonResult<GeneratedKey>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log key import
-    async fn log_key_import(
+    fn log_key_import(
         &self,
         spec: &KeyImportSpec,
         result: &SecretonResult<ImportedKey>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log key operation
-    async fn log_key_operation(
+    fn log_key_operation(
         &self,
         key_id: &ManagedKeyId,
         operation: &KeyOperation,
         context: &OperationContext,
         result: &SecretonResult<()>,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log key rotation
-    async fn log_key_rotation(&self, result: &RotationResult) -> SecretonResult<()>;
+    fn log_key_rotation(&self, result: &RotationResult) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log policy violation
-    async fn log_policy_violation(
+    fn log_policy_violation(
         &self,
         key_id: &ManagedKeyId,
         violation: &str,
         context: &OperationContext,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Key Metrics
@@ -1031,11 +1029,11 @@ impl ManagedKeysEngine {
             key_providers: Arc::new(RwLock::new(Vec::new())),
             managed_keys: Arc::new(RwLock::new(HashMap::new())),
             lifecycle_policies: Arc::new(RwLock::new(Self::default_lifecycle_policies())),
-            metrics: Arc::new(RwLock::new(KeyMetrics::default())),
-            usage_tracker: Arc::new(RwLock::new(KeyUsageTracker::default())),
+            // usage_tracker: Arc::new(RwLock::new(KeyUsageTracker::default())), // TODO: Implement usage tracking
             rotation_scheduler: None,
-            governance: Arc::new(crate::security::optimized_traits::DefaultKeyGovernance),
-            audit_logger: Arc::new(crate::security::optimized_traits::DefaultKeyAuditLogger),
+            // governance: None, // TODO: Implement governance
+            audit_logger: None,
+            metrics: Arc::new(RwLock::new(KeyMetrics::default())),
         })
     }
 
@@ -1126,8 +1124,9 @@ impl ManagedKeysEngine {
         self.update_generation_metrics().await;
 
         // Audit log
-        let _logger = &self.audit_logger;
-        // Would log key generation here - placeholder
+        if let Some(_logger) = &self.audit_logger {
+            // Would log key generation here - placeholder
+        }
 
         Ok(managed_key)
     }
@@ -1164,45 +1163,46 @@ impl ManagedKeysEngine {
             old_key_id: managed_key.id.clone(),
             new_key_id: new_key_id.clone(),
             rotated_at,
-        };
+            };
 
-        // Update managed key record
-        {
-            let mut keys = self.managed_keys.write().await;
-            if let Some(key) = keys.get_mut(&managed_key.id) {
-                key.state = KeyState::Deprecated;
+            // Update managed key record
+            {
+                let mut keys = self.managed_keys.write().await;
+                if let Some(key) = keys.get_mut(&managed_key.id) {
+                    key.state = KeyState::Deprecated;
+                }
+
+                // Create new key record for the rotated key
+                let mut new_managed_key = managed_key.clone();
+                new_managed_key.id = new_key_id.clone();
+                new_managed_key.state = KeyState::Active;
+                new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
+                new_managed_key.lifecycle.next_rotation = self
+                    .calculate_next_rotation(&new_managed_key.key_type)
+                    .await;
+
+                keys.insert(new_key_id.clone(), new_managed_key);
             }
 
-            // Create new key record for the rotated key
-            let mut new_managed_key = managed_key.clone();
-            new_managed_key.id = new_key_id.clone();
-            new_managed_key.state = KeyState::Active;
-            new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
-            new_managed_key.lifecycle.next_rotation = self
-                .calculate_next_rotation(&new_managed_key.key_type)
-                .await;
-
-            keys.insert(new_key_id.clone(), new_managed_key);
-        }
-
-        // Schedule next rotation
-        if let Some(_next_rotation) = self
-            .managed_keys
-            .read()
-            .await
-            .get(key_id)
-            .and_then(|k| k.lifecycle.next_rotation)
-        {
-            if let Some(_scheduler) = &self.rotation_scheduler {
-                // Would schedule rotation here - placeholder
+            // Schedule next rotation
+            if let Some(_next_rotation) = self
+                .managed_keys
+                .read()
+                .await
+                .get(key_id)
+                .and_then(|k| k.lifecycle.next_rotation)
+            {
+                if let Some(_scheduler) = &self.rotation_scheduler {
+                    // Would schedule rotation here - placeholder
+                }
             }
-        }
 
-        // Audit log
-        let _logger = &self.audit_logger;
-        // Would log key rotation here - placeholder
+            // Audit log
+            if let Some(_logger) = &self.audit_logger {
+                // Would log key rotation here - placeholder
+            }
 
-        Ok(rotated_key)
+            Ok(rotated_key)
     }
 
     /// Get default lifecycle policies
@@ -1264,6 +1264,32 @@ impl ManagedKeysEngine {
             .ok_or(crate::error::SecretonError::NoSuitableProvider)
     }
 
+    /// Query provider capabilities
+    // TODO: Implement when provider capabilities are needed
+    // async fn query_provider_capabilities(
+    //     &self,
+    //     _provider_id: &str,
+    // ) -> SecretonResult<KeyProviderCapabilities> {
+    //     // This would query the actual provider for its capabilities
+    //     // For now, return default capabilities
+    //     Ok(KeyProviderCapabilities {
+    //         supported_key_types: HashSet::new(),
+    //         supported_algorithms: HashSet::new(),
+    //         max_key_size: 4096,
+    //         key_generation: true,
+    //         key_import: true,
+    //         key_rotation: true,
+    //         key_backup: false,
+    //         hsm_backed: false,
+    //         fips_level: None,
+    //         performance: KeyProviderPerformance {
+    //             generation_rate: 100,
+    //             signature_rate: 1000,
+    //             encryption_rate: 1000,
+    //             avg_latency_ms: 10,
+    //         },
+    //     })
+    // }
     /// Calculate next rotation time
     async fn calculate_next_rotation(
         &self,
