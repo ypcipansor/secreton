@@ -1121,7 +1121,7 @@ impl ThreatIntelligenceEngine {
     /// Estimate false positive probability
     fn estimate_false_positive_probability(&self, _event: &SourceEvent, confidence: f64) -> f64 {
         // Simple heuristic - higher confidence means lower false positive probability
-        (1.0 - confidence).max(0.01).min(0.99)
+        (1.0 - confidence).clamp(0.01, 0.99)
     }
 
     /// Execute response actions

@@ -4,8 +4,12 @@
 //! Provides foundational abstractions for security levels, audit logging,
 //! error handling, and common data structures.
 
+#![allow(async_fn_in_trait)]
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 pub mod api;
 pub mod audit;
@@ -84,7 +88,7 @@ impl SecurityLevel {
     }
 
     /// Get security level from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "public" => Some(SecurityLevel::Public),
             "internal" => Some(SecurityLevel::Internal),
@@ -98,6 +102,21 @@ impl SecurityLevel {
     /// Check if current level can access target level
     pub fn can_access(&self, target: SecurityLevel) -> bool {
         *self >= target
+    }
+}
+
+impl FromStr for SecurityLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "public" => Ok(SecurityLevel::Public),
+            "internal" => Ok(SecurityLevel::Internal),
+            "confidential" => Ok(SecurityLevel::Confidential),
+            "secret" => Ok(SecurityLevel::Secret),
+            "topsecret" | "top_secret" | "top-secret" => Ok(SecurityLevel::TopSecret),
+            _ => Err(format!("Unknown security level: {}", s)),
+        }
     }
 }
 
@@ -288,19 +307,24 @@ mod tests {
 
     #[test]
     fn test_security_level_from_string() {
+        assert_eq!(SecurityLevel::parse("public"), Some(SecurityLevel::Public));
         assert_eq!(
-            SecurityLevel::from_str("public"),
-            Some(SecurityLevel::Public)
-        );
-        assert_eq!(
-            SecurityLevel::from_str("CONFIDENTIAL"),
+            SecurityLevel::parse("CONFIDENTIAL"),
             Some(SecurityLevel::Confidential)
         );
         assert_eq!(
-            SecurityLevel::from_str("top-secret"),
+            SecurityLevel::parse("top-secret"),
             Some(SecurityLevel::TopSecret)
         );
-        assert_eq!(SecurityLevel::from_str("invalid"), None);
+        assert_eq!(SecurityLevel::parse("invalid"), None);
+
+        // Test FromStr trait implementation
+        assert_eq!("public".parse::<SecurityLevel>(), Ok(SecurityLevel::Public));
+        assert_eq!(
+            "confidential".parse::<SecurityLevel>(),
+            Ok(SecurityLevel::Confidential)
+        );
+        assert!("invalid".parse::<SecurityLevel>().is_err());
     }
 
     #[test]

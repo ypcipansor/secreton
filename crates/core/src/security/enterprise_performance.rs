@@ -26,26 +26,8 @@ pub struct TimeRange {
 pub struct PerformanceEngine {
     /// Performance configuration
     config: Arc<RwLock<PerformanceConfig>>,
-    /// Intelligent cache manager
-    cache_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Load balancer
-    load_balancer: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Auto-scaler
-    auto_scaler: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Performance monitor
-    perf_monitor: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Resource manager
-    resource_manager: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Circuit breaker manager
-    circuit_breaker: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Rate limiter
-    rate_limiter: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance metrics collector
     metrics: Arc<RwLock<PerformanceMetrics>>,
-    /// Adaptive algorithms
-    adaptive_algorithms: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Performance predictor
-    predictor: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
 }
 
 /// Performance Configuration
@@ -613,25 +595,39 @@ pub struct ExportConfig {
 /// Cache Manager Trait
 pub trait CacheManager: Send + Sync {
     /// Get value from cache
-    async fn get(&self, key: &str) -> SecretonResult<Option<CacheEntry>>;
+    fn get(
+        &self,
+        key: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<Option<CacheEntry>>> + Send;
 
     /// Put value into cache
-    async fn put(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> SecretonResult<()>;
+    fn put(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Option<Duration>,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Remove value from cache
-    async fn remove(&self, key: &str) -> SecretonResult<bool>;
+    fn remove(&self, key: &str) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Clear cache
-    async fn clear(&self) -> SecretonResult<()>;
+    fn clear(&self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get cache statistics
-    async fn get_stats(&self) -> SecretonResult<CacheStats>;
+    fn get_stats(&self) -> impl std::future::Future<Output = SecretonResult<CacheStats>> + Send;
 
     /// Prefetch data based on patterns
-    async fn prefetch(&self, patterns: &[String]) -> SecretonResult<u32>;
+    fn prefetch(
+        &self,
+        patterns: &[String],
+    ) -> impl std::future::Future<Output = SecretonResult<u32>> + Send;
 
     /// Invalidate cache entries matching pattern
-    async fn invalidate_pattern(&self, pattern: &str) -> SecretonResult<u32>;
+    fn invalidate_pattern(
+        &self,
+        pattern: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<u32>> + Send;
 }
 
 /// Cache Entry
@@ -675,26 +671,34 @@ pub struct CacheStats {
 /// Load Balancer Trait
 pub trait LoadBalancer: Send + Sync {
     /// Select backend server for request
-    async fn select_backend(
+    fn select_backend(
         &self,
         request_context: &RequestContext,
-    ) -> SecretonResult<BackendServer>;
+    ) -> impl std::future::Future<Output = SecretonResult<BackendServer>> + Send;
 
     /// Update backend server health status
-    async fn update_backend_health(
+    fn update_backend_health(
         &self,
         server_id: &str,
         health: HealthStatus,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Add backend server
-    async fn add_backend(&self, server: BackendServer) -> SecretonResult<()>;
+    fn add_backend(
+        &self,
+        server: BackendServer,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Remove backend server
-    async fn remove_backend(&self, server_id: &str) -> SecretonResult<()>;
+    fn remove_backend(
+        &self,
+        server_id: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get load balancing statistics
-    async fn get_stats(&self) -> SecretonResult<LoadBalancingStats>;
+    fn get_stats(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<LoadBalancingStats>> + Send;
 }
 
 /// Request Context
@@ -810,16 +814,27 @@ pub struct BackendStats {
 /// Auto Scaler Trait
 pub trait AutoScaler: Send + Sync {
     /// Evaluate scaling decision based on metrics
-    async fn evaluate_scaling(&self, metrics: &ScalingMetrics) -> SecretonResult<ScalingDecision>;
+    fn evaluate_scaling(
+        &self,
+        metrics: &ScalingMetrics,
+    ) -> impl std::future::Future<Output = SecretonResult<ScalingDecision>> + Send;
 
     /// Execute scaling action
-    async fn execute_scaling(&self, decision: &ScalingDecision) -> SecretonResult<ScalingResult>;
+    fn execute_scaling(
+        &self,
+        decision: &ScalingDecision,
+    ) -> impl std::future::Future<Output = SecretonResult<ScalingResult>> + Send;
 
     /// Get current scaling state
-    async fn get_scaling_state(&self) -> SecretonResult<ScalingState>;
+    fn get_scaling_state(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<ScalingState>> + Send;
 
     /// Update scaling configuration
-    async fn update_config(&self, config: AutoScalingConfig) -> SecretonResult<()>;
+    fn update_config(
+        &self,
+        config: AutoScalingConfig,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Scaling Metrics
@@ -942,22 +957,26 @@ pub enum ScalingStatus {
 /// Performance Monitor Trait
 pub trait PerformanceMonitor: Send + Sync {
     /// Collect performance metrics
-    async fn collect_metrics(&self) -> SecretonResult<PerformanceSnapshot>;
+    fn collect_metrics(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<PerformanceSnapshot>> + Send;
 
     /// Start continuous monitoring
-    async fn start_monitoring(&self) -> SecretonResult<()>;
+    fn start_monitoring(&self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Stop monitoring
-    async fn stop_monitoring(&self) -> SecretonResult<()>;
+    fn stop_monitoring(&self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get historical metrics
-    async fn get_historical_metrics(
+    fn get_historical_metrics(
         &self,
         time_range: TimeRange,
-    ) -> SecretonResult<Vec<PerformanceSnapshot>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<PerformanceSnapshot>>> + Send;
 
     /// Subscribe to metric updates
-    async fn subscribe_to_metrics(&self) -> SecretonResult<MetricsSubscription>;
+    fn subscribe_to_metrics(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<MetricsSubscription>> + Send;
 }
 
 /// Performance Snapshot
@@ -1070,19 +1089,27 @@ pub struct MetricsSubscription {
 /// Resource Manager Trait
 pub trait ResourceManager: Send + Sync {
     /// Allocate resources
-    async fn allocate_resources(
+    fn allocate_resources(
         &self,
         request: &ResourceRequest,
-    ) -> SecretonResult<ResourceAllocation>;
+    ) -> impl std::future::Future<Output = SecretonResult<ResourceAllocation>> + Send;
 
     /// Release resources
-    async fn release_resources(&self, allocation: &ResourceAllocation) -> SecretonResult<()>;
+    fn release_resources(
+        &self,
+        allocation: &ResourceAllocation,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get resource usage
-    async fn get_resource_usage(&self) -> SecretonResult<PerformanceResourceUsage>;
+    fn get_resource_usage(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<PerformanceResourceUsage>> + Send;
 
     /// Set resource limits
-    async fn set_resource_limits(&self, limits: ResourceLimits) -> SecretonResult<()>;
+    fn set_resource_limits(
+        &self,
+        limits: ResourceLimits,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Resource Request
@@ -1158,19 +1185,32 @@ pub struct PerformanceResourceUsage {
 /// Circuit Breaker Manager Trait
 pub trait CircuitBreakerManager: Send + Sync {
     /// Execute request with circuit breaker protection
-    async fn execute<F, T, E>(&self, service_id: &str, operation: F) -> SecretonResult<T>
+    fn execute<F, T, E>(
+        &self,
+        service_id: &str,
+        operation: F,
+    ) -> impl std::future::Future<Output = SecretonResult<T>> + Send
     where
         F: std::future::Future<Output = Result<T, E>> + Send,
         E: std::error::Error + Send + Sync + 'static;
 
     /// Get circuit breaker state
-    async fn get_state(&self, service_id: &str) -> SecretonResult<CircuitBreakerState>;
+    fn get_state(
+        &self,
+        service_id: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<CircuitBreakerState>> + Send;
 
     /// Reset circuit breaker
-    async fn reset(&self, service_id: &str) -> SecretonResult<()>;
+    fn reset(
+        &self,
+        service_id: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get circuit breaker statistics
-    async fn get_stats(&self, service_id: &str) -> SecretonResult<CircuitBreakerStats>;
+    fn get_stats(
+        &self,
+        service_id: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<CircuitBreakerStats>> + Send;
 }
 
 /// Circuit Breaker State
@@ -1201,16 +1241,27 @@ pub struct CircuitBreakerStats {
 /// Rate Limiter Trait
 pub trait RateLimiter: Send + Sync {
     /// Check if request is allowed
-    async fn is_allowed(&self, key: &str, tokens: u32) -> SecretonResult<bool>;
+    fn is_allowed(
+        &self,
+        key: &str,
+        tokens: u32,
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Get current rate limit status
-    async fn get_status(&self, key: &str) -> SecretonResult<RateLimitStatus>;
+    fn get_status(
+        &self,
+        key: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<RateLimitStatus>> + Send;
 
     /// Reset rate limit for key
-    async fn reset(&self, key: &str) -> SecretonResult<()>;
+    fn reset(&self, key: &str) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Update rate limits
-    async fn update_limits(&self, key: &str, limits: RateLimits) -> SecretonResult<()>;
+    fn update_limits(
+        &self,
+        key: &str,
+        limits: RateLimits,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Rate Limit Status
@@ -1229,23 +1280,23 @@ pub struct RateLimitStatus {
 /// Adaptive Algorithms Trait
 pub trait AdaptiveAlgorithms: Send + Sync {
     /// Adapt cache configuration based on patterns
-    async fn adapt_cache_config(
+    fn adapt_cache_config(
         &self,
         metrics: &CacheStats,
         patterns: &AccessPatterns,
-    ) -> SecretonResult<CacheConfig>;
+    ) -> impl std::future::Future<Output = SecretonResult<CacheConfig>> + Send;
 
     /// Adapt load balancing based on performance
-    async fn adapt_load_balancing(
+    fn adapt_load_balancing(
         &self,
         metrics: &LoadBalancingStats,
-    ) -> SecretonResult<LoadBalancingConfig>;
+    ) -> impl std::future::Future<Output = SecretonResult<LoadBalancingConfig>> + Send;
 
     /// Adapt scaling thresholds based on history
-    async fn adapt_scaling_thresholds(
+    fn adapt_scaling_thresholds(
         &self,
         history: &[ScalingMetrics],
-    ) -> SecretonResult<AutoScalingConfig>;
+    ) -> impl std::future::Future<Output = SecretonResult<AutoScalingConfig>> + Send;
 }
 
 /// Access Patterns
@@ -1297,19 +1348,27 @@ pub enum PatternType {
 /// Performance Predictor Trait
 pub trait PerformancePredictor: Send + Sync {
     /// Predict future performance metrics
-    async fn predict_metrics(&self, time_horizon: Duration) -> SecretonResult<PredictedMetrics>;
+    fn predict_metrics(
+        &self,
+        time_horizon: Duration,
+    ) -> impl std::future::Future<Output = SecretonResult<PredictedMetrics>> + Send;
 
     /// Predict resource requirements
-    async fn predict_resources(
+    fn predict_resources(
         &self,
         load_forecast: &LoadForecast,
-    ) -> SecretonResult<ResourceForecast>;
+    ) -> impl std::future::Future<Output = SecretonResult<ResourceForecast>> + Send;
 
     /// Train prediction model with new data
-    async fn train_model(&self, training_data: &[PerformanceSnapshot]) -> SecretonResult<()>;
+    fn train_model(
+        &self,
+        training_data: &[PerformanceSnapshot],
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get prediction accuracy
-    async fn get_accuracy(&self) -> SecretonResult<PredictionAccuracy>;
+    fn get_accuracy(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<PredictionAccuracy>> + Send;
 }
 
 /// Predicted Metrics
@@ -1422,29 +1481,14 @@ impl PerformanceEngine {
     pub fn new(config: PerformanceConfig) -> SecretonResult<Self> {
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
-            cache_manager: None,
-            load_balancer: None,
-            auto_scaler: None,
-            perf_monitor: None,
-            resource_manager: None,
-            circuit_breaker: None,
-            rate_limiter: None,
             metrics: Arc::new(RwLock::new(PerformanceMetrics::default())),
-            adaptive_algorithms: None,
-            predictor: None,
         })
     }
 
     /// Start performance monitoring and optimization
     pub async fn start(&self) -> SecretonResult<()> {
-        // Start performance monitoring
-        if let Some(_perf_monitor) = &self.perf_monitor {
-            // Performance monitoring would be started here
-        }
-
         // Initialize performance optimization loop
         self.start_optimization_loop().await?;
-
         Ok(())
     }
 

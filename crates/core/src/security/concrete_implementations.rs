@@ -242,25 +242,25 @@ impl MfaRiskAssessor for ConcreteMfaRiskAssessor {
 
 /// Factory functions for creating concrete implementations
 impl MemoryAuditStorage {
-    pub fn new() -> Arc<dyn AuditStorage> {
+    pub fn create() -> Arc<dyn AuditStorage> {
         Arc::new(Self::default())
     }
 }
 
 impl SimpleAnomalyDetector {
-    pub fn new() -> Arc<dyn AnomalyDetector> {
+    pub fn create() -> Arc<dyn AnomalyDetector> {
         Arc::new(Self::default())
     }
 }
 
 impl ConcreteRiskAssessmentEngine {
-    pub fn new() -> Arc<dyn RiskAssessmentEngine> {
+    pub fn create() -> Arc<dyn RiskAssessmentEngine> {
         Arc::new(Self)
     }
 }
 
 impl ConcreteMfaRiskAssessor {
-    pub fn new() -> Arc<dyn MfaRiskAssessor> {
+    pub fn create() -> Arc<dyn MfaRiskAssessor> {
         Arc::new(Self)
     }
 }

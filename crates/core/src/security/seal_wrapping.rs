@@ -7,6 +7,7 @@
 //! capabilities with multi-layer encryption, quantum-resistant wrapping, and zero-trust
 //! architecture for Critical Security Parameters (CSPs).
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -22,12 +23,10 @@ pub struct SealWrappingEngine {
     seal_providers: Arc<RwLock<Vec<SealProviderWithPriority>>>,
     /// Wrapping configuration per data type
     wrapping_configs: Arc<RwLock<HashMap<DataType, WrapConfig>>>,
-    /// Multi-seal support for maximum security
-    multi_seal_config: Arc<RwLock<MultiSealConfig>>,
     /// Quantum-resistant wrapper
-    quantum_wrapper: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    quantum_wrapper: Option<Arc<dyn QuantumSealWrapper>>,
     /// Audit logger for seal operations
-    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
+    audit_logger: Option<Arc<dyn SealAuditLogger>>,
     /// Performance metrics
     metrics: Arc<RwLock<SealMetrics>>,
 }
@@ -42,6 +41,7 @@ pub struct SealProviderWithPriority {
 }
 
 /// Advanced Seal Provider Trait
+#[async_trait]
 pub trait SealProvider: Send + Sync {
     /// Initialize the seal provider
     async fn initialize(&mut self) -> SecretonResult<()>;
@@ -378,6 +378,7 @@ pub struct PerformanceCharacteristics {
 }
 
 /// Quantum Seal Wrapper Trait
+#[async_trait]
 pub trait QuantumSealWrapper: Send + Sync {
     /// Wrap data with quantum-resistant algorithms
     async fn quantum_wrap(
@@ -409,6 +410,7 @@ pub enum QuantumResistanceLevel {
 }
 
 /// Seal Audit Logger Trait
+#[async_trait]
 pub trait SealAuditLogger: Send + Sync {
     /// Log seal wrap operation
     async fn log_wrap(
@@ -477,7 +479,6 @@ impl SealWrappingEngine {
         Ok(Self {
             seal_providers: Arc::new(RwLock::new(Vec::new())),
             wrapping_configs: Arc::new(RwLock::new(Self::default_wrap_configs())),
-            multi_seal_config: Arc::new(RwLock::new(MultiSealConfig::default())),
             quantum_wrapper: None,
             audit_logger: None,
             metrics: Arc::new(RwLock::new(SealMetrics::default())),

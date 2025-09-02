@@ -7,6 +7,7 @@
 //! with automatic key rotation, quantum-safe key generation, HSM integration, and
 //! enterprise-grade key governance policies.
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -23,16 +24,16 @@ pub struct ManagedKeysEngine {
     managed_keys: Arc<RwLock<HashMap<ManagedKeyId, ManagedKey>>>,
     /// Key lifecycle policies
     lifecycle_policies: Arc<RwLock<HashMap<KeyType, LifecyclePolicy>>>,
-    /// Key usage tracker
-    usage_tracker: Arc<RwLock<KeyUsageTracker>>,
-    /// Automatic rotation scheduler
-    rotation_scheduler: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Key governance engine
-    governance: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
-    /// Audit logger
-    audit_logger: Option<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Performance metrics
     metrics: Arc<RwLock<KeyMetrics>>,
+    /// Key usage tracking
+    usage_tracker: Arc<RwLock<KeyUsageTracker>>,
+    /// Optional rotation scheduler
+    rotation_scheduler: Option<Arc<dyn crate::security::optimized_traits::RotationScheduler>>,
+    /// Key governance engine
+    governance: Arc<dyn crate::security::optimized_traits::KeyGovernance>,
+    /// Audit logger
+    audit_logger: Arc<dyn crate::security::optimized_traits::KeyAuditLogger>,
 }
 
 /// Key Provider with Configuration
@@ -45,6 +46,7 @@ pub struct KeyProviderWithConfig {
 }
 
 /// Advanced Key Provider Trait
+#[async_trait]
 pub trait KeyProvider: Send + Sync {
     /// Initialize the key provider
     async fn initialize(&mut self) -> SecretonResult<()>;
@@ -1029,11 +1031,11 @@ impl ManagedKeysEngine {
             key_providers: Arc::new(RwLock::new(Vec::new())),
             managed_keys: Arc::new(RwLock::new(HashMap::new())),
             lifecycle_policies: Arc::new(RwLock::new(Self::default_lifecycle_policies())),
+            metrics: Arc::new(RwLock::new(KeyMetrics::default())),
             usage_tracker: Arc::new(RwLock::new(KeyUsageTracker::default())),
             rotation_scheduler: None,
-            governance: None,
-            audit_logger: None,
-            metrics: Arc::new(RwLock::new(KeyMetrics::default())),
+            governance: Arc::new(crate::security::optimized_traits::DefaultKeyGovernance),
+            audit_logger: Arc::new(crate::security::optimized_traits::DefaultKeyAuditLogger),
         })
     }
 
@@ -1124,9 +1126,8 @@ impl ManagedKeysEngine {
         self.update_generation_metrics().await;
 
         // Audit log
-        if let Some(_logger) = &self.audit_logger {
-            // Would log key generation here - placeholder
-        }
+        let _logger = &self.audit_logger;
+        // Would log key generation here - placeholder
 
         Ok(managed_key)
     }
@@ -1137,7 +1138,7 @@ impl ManagedKeysEngine {
         key_id: &ManagedKeyId,
         _reason: RotationReason,
     ) -> SecretonResult<RotatedKey> {
-        if let (managed_key, _provider) = {
+        let (managed_key, _provider) = {
             let keys = self.managed_keys.read().await;
             let managed_key = keys
                 .get(key_id)
@@ -1152,59 +1153,56 @@ impl ManagedKeysEngine {
                 .clone();
 
             (managed_key, provider)
-        } {
-            // Perform the rotation - placeholder implementation
-            let new_key_id = uuid::Uuid::new_v4().to_string();
+        };
 
-            // Create rotated key result
-            let rotated_at = chrono::Utc::now();
-            let rotated_key = RotatedKey {
-                old_key_id: managed_key.id.clone(),
-                new_key_id: new_key_id.clone(),
-                rotated_at,
-            };
+        // Perform the rotation - placeholder implementation
+        let new_key_id = uuid::Uuid::new_v4().to_string();
 
-            // Update managed key record
-            {
-                let mut keys = self.managed_keys.write().await;
-                if let Some(key) = keys.get_mut(&managed_key.id) {
-                    key.state = KeyState::Deprecated;
-                }
+        // Create rotated key result
+        let rotated_at = chrono::Utc::now();
+        let rotated_key = RotatedKey {
+            old_key_id: managed_key.id.clone(),
+            new_key_id: new_key_id.clone(),
+            rotated_at,
+        };
 
-                // Create new key record for the rotated key
-                let mut new_managed_key = managed_key.clone();
-                new_managed_key.id = new_key_id.clone();
-                new_managed_key.state = KeyState::Active;
-                new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
-                new_managed_key.lifecycle.next_rotation = self
-                    .calculate_next_rotation(&new_managed_key.key_type)
-                    .await;
-
-                keys.insert(new_key_id.clone(), new_managed_key);
+        // Update managed key record
+        {
+            let mut keys = self.managed_keys.write().await;
+            if let Some(key) = keys.get_mut(&managed_key.id) {
+                key.state = KeyState::Deprecated;
             }
 
-            // Schedule next rotation
-            if let Some(_next_rotation) = self
-                .managed_keys
-                .read()
-                .await
-                .get(key_id)
-                .and_then(|k| k.lifecycle.next_rotation)
-            {
-                if let Some(_scheduler) = &self.rotation_scheduler {
-                    // Would schedule rotation here - placeholder
-                }
-            }
+            // Create new key record for the rotated key
+            let mut new_managed_key = managed_key.clone();
+            new_managed_key.id = new_key_id.clone();
+            new_managed_key.state = KeyState::Active;
+            new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
+            new_managed_key.lifecycle.next_rotation = self
+                .calculate_next_rotation(&new_managed_key.key_type)
+                .await;
 
-            // Audit log
-            if let Some(_logger) = &self.audit_logger {
-                // Would log key rotation here - placeholder
-            }
-
-            Ok(rotated_key)
-        } else {
-            Err(crate::error::SecretonError::KeyNotFound)
+            keys.insert(new_key_id.clone(), new_managed_key);
         }
+
+        // Schedule next rotation
+        if let Some(_next_rotation) = self
+            .managed_keys
+            .read()
+            .await
+            .get(key_id)
+            .and_then(|k| k.lifecycle.next_rotation)
+        {
+            if let Some(_scheduler) = &self.rotation_scheduler {
+                // Would schedule rotation here - placeholder
+            }
+        }
+
+        // Audit log
+        let _logger = &self.audit_logger;
+        // Would log key rotation here - placeholder
+
+        Ok(rotated_key)
     }
 
     /// Get default lifecycle policies
@@ -1264,32 +1262,6 @@ impl ManagedKeysEngine {
             .find(|p| p.capabilities.supported_key_types.contains(key_type))
             .cloned()
             .ok_or(crate::error::SecretonError::NoSuitableProvider)
-    }
-
-    /// Query provider capabilities
-    async fn query_provider_capabilities(
-        &self,
-        _provider_id: &str,
-    ) -> SecretonResult<KeyProviderCapabilities> {
-        // This would query the actual provider for its capabilities
-        // For now, return default capabilities
-        Ok(KeyProviderCapabilities {
-            supported_key_types: HashSet::new(),
-            supported_algorithms: HashSet::new(),
-            max_key_size: 4096,
-            key_generation: true,
-            key_import: true,
-            key_rotation: true,
-            key_backup: false,
-            hsm_backed: false,
-            fips_level: None,
-            performance: KeyProviderPerformance {
-                generation_rate: 100,
-                signature_rate: 1000,
-                encryption_rate: 1000,
-                avg_latency_ms: 10,
-            },
-        })
     }
 
     /// Calculate next rotation time

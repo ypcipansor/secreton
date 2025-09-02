@@ -145,11 +145,18 @@ impl AdvancedSecurityManager {
         use crate::security::concrete_implementations::*;
 
         // Initialize all security components with proper dependencies
-        let entropy_engine = EntropyAugmentationEngine::new(Default::default());
+        let entropy_engine = EntropyAugmentationEngine::new(Default::default())
+            .await
+            .map_err(|e| {
+                CoreError::from(anyhow::anyhow!(
+                    "Failed to initialize entropy engine: {}",
+                    e
+                ))
+            })?;
         let hsm_manager = HsmManager::new();
 
-        let audit_storage = MemoryAuditStorage::new();
-        let anomaly_detector = SimpleAnomalyDetector::new();
+        let audit_storage = MemoryAuditStorage::create();
+        let anomaly_detector = SimpleAnomalyDetector::create();
         let audit_system = AdvancedAuditSystem::new(
             audit_storage,
             "node-1".to_string(),
@@ -160,10 +167,10 @@ impl AdvancedSecurityManager {
             CoreError::from(anyhow::anyhow!("Failed to initialize audit system: {}", e))
         })?;
 
-        let risk_engine = ConcreteRiskAssessmentEngine::new();
+        let risk_engine = ConcreteRiskAssessmentEngine::create();
         let zero_trust_engine = ZeroTrustEngine::new(risk_engine, Default::default());
 
-        let mfa_risk_assessor = ConcreteMfaRiskAssessor::new();
+        let mfa_risk_assessor = ConcreteMfaRiskAssessor::create();
         let mfa_engine = AdvancedMfaEngine::new(mfa_risk_assessor, Default::default());
 
         let compliance_engine = ComplianceGovernanceEngine::new(Default::default());

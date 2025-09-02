@@ -17,6 +17,9 @@ tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 
+# API Documentation
+aide.workspace = true
+
 # Async
 tokio.workspace = true
 async-trait.workspace = true

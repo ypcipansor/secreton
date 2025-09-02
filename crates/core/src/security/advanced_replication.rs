@@ -732,19 +732,22 @@ pub struct StreamMetrics {
 /// Conflict Resolution Trait
 pub trait ConflictResolver: Send + Sync {
     /// Resolve conflict between two versions of the same data
-    async fn resolve_conflict(
+    fn resolve_conflict(
         &self,
         path: &str,
         local_version: &ConflictVersion,
         remote_version: &ConflictVersion,
         context: &ConflictContext,
-    ) -> SecretonResult<ConflictResolution>;
+    ) -> impl std::future::Future<Output = SecretonResult<ConflictResolution>> + Send;
 
     /// Get supported conflict resolution methods
     fn supported_methods(&self) -> Vec<ConflictResolutionMethod>;
 
     /// Configure conflict resolution policy
-    async fn configure_policy(&self, policy: ConflictResolutionPolicy) -> SecretonResult<()>;
+    fn configure_policy(
+        &self,
+        policy: ConflictResolutionPolicy,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Conflict Version
@@ -839,23 +842,35 @@ pub struct ConflictResolutionPolicy {
 /// Disaster Recovery Coordinator Trait
 pub trait DisasterRecoveryCoordinator: Send + Sync {
     /// Initiate disaster recovery procedure
-    async fn initiate_recovery(&self, scenario: DisasterScenario) -> SecretonResult<RecoveryPlan>;
+    fn initiate_recovery(
+        &self,
+        scenario: DisasterScenario,
+    ) -> impl std::future::Future<Output = SecretonResult<RecoveryPlan>> + Send;
 
     /// Execute recovery plan
-    async fn execute_recovery(&self, plan: &RecoveryPlan) -> SecretonResult<RecoveryResult>;
+    fn execute_recovery(
+        &self,
+        plan: &RecoveryPlan,
+    ) -> impl std::future::Future<Output = SecretonResult<RecoveryResult>> + Send;
 
     /// Monitor recovery progress
-    async fn monitor_recovery(&self, recovery_id: &str) -> SecretonResult<RecoveryStatus>;
+    fn monitor_recovery(
+        &self,
+        recovery_id: &str,
+    ) -> impl std::future::Future<Output = SecretonResult<RecoveryStatus>> + Send;
 
     /// Create backup for disaster recovery
-    async fn create_backup(&self, backup_spec: BackupSpec) -> SecretonResult<Backup>;
+    fn create_backup(
+        &self,
+        backup_spec: BackupSpec,
+    ) -> impl std::future::Future<Output = SecretonResult<Backup>> + Send;
 
     /// Restore from backup
-    async fn restore_from_backup(
+    fn restore_from_backup(
         &self,
         backup: &Backup,
         target_node: &NodeId,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Disaster Scenarios
@@ -1041,23 +1056,33 @@ pub struct Backup {
 /// Replication State Manager Trait
 pub trait ReplicationStateManager: Send + Sync {
     /// Get current replication state
-    async fn get_state(&self, node_id: &NodeId) -> SecretonResult<ReplicationState>;
+    fn get_state(
+        &self,
+        node_id: &NodeId,
+    ) -> impl std::future::Future<Output = SecretonResult<ReplicationState>> + Send;
 
     /// Update replication state
-    async fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> SecretonResult<()>;
+    fn update_state(
+        &self,
+        node_id: &NodeId,
+        state: ReplicationState,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get replication log position
-    async fn get_position(&self, node_id: &NodeId) -> SecretonResult<ReplicationPosition>;
+    fn get_position(
+        &self,
+        node_id: &NodeId,
+    ) -> impl std::future::Future<Output = SecretonResult<ReplicationPosition>> + Send;
 
     /// Update replication log position
-    async fn update_position(
+    fn update_position(
         &self,
         node_id: &NodeId,
         position: ReplicationPosition,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Persist state to storage
-    async fn persist_state(&self) -> SecretonResult<()>;
+    fn persist_state(&self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Replication State
@@ -1080,27 +1105,37 @@ pub struct ReplicationState {
 /// Replication Security Manager Trait
 pub trait ReplicationSecurityManager: Send + Sync {
     /// Establish secure channel with peer
-    async fn establish_secure_channel(&self, peer_node: &NodeId) -> SecretonResult<SecureChannel>;
+    fn establish_secure_channel(
+        &self,
+        peer_node: &NodeId,
+    ) -> impl std::future::Future<Output = SecretonResult<SecureChannel>> + Send;
 
     /// Encrypt replication data
-    async fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> SecretonResult<Vec<u8>>;
+    fn encrypt_data(
+        &self,
+        data: &[u8],
+        channel: &SecureChannel,
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Decrypt replication data
-    async fn decrypt_data(
+    fn decrypt_data(
         &self,
         encrypted_data: &[u8],
         channel: &SecureChannel,
-    ) -> SecretonResult<Vec<u8>>;
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Rotate encryption keys
-    async fn rotate_keys(&self, channel: &mut SecureChannel) -> SecretonResult<()>;
+    fn rotate_keys(
+        &self,
+        channel: &mut SecureChannel,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Authenticate peer
-    async fn authenticate_peer(
+    fn authenticate_peer(
         &self,
         peer_node: &NodeId,
         credentials: &PeerCredentials,
-    ) -> SecretonResult<bool>;
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 }
 
 /// Secure Channel
@@ -1185,19 +1220,28 @@ pub enum ReplicationEvent {
 /// Replication Audit Logger Trait
 pub trait ReplicationAuditLogger: Send + Sync {
     /// Log replication event
-    async fn log_event(&self, event: &ReplicationEvent) -> SecretonResult<()>;
+    fn log_event(
+        &self,
+        event: &ReplicationEvent,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log security event
-    async fn log_security_event(&self, event: &SecurityEvent) -> SecretonResult<()>;
+    fn log_security_event(
+        &self,
+        event: &SecurityEvent,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log performance metrics
-    async fn log_metrics(&self, metrics: &ReplicationMetrics) -> SecretonResult<()>;
+    fn log_metrics(
+        &self,
+        metrics: &ReplicationMetrics,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log disaster recovery operation
-    async fn log_disaster_recovery(
+    fn log_disaster_recovery(
         &self,
         operation: &DisasterRecoveryOperation,
-    ) -> SecretonResult<()>;
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Security Events

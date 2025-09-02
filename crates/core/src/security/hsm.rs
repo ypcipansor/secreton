@@ -9,6 +9,8 @@
 //! - Quantum-safe key generation
 //! - Hardware attestation and verification
 
+#![allow(clippy::await_holding_lock)] // HSM operations require careful lock management
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -434,6 +436,7 @@ impl HsmManager {
     }
 
     /// Generate a seal key in the active HSM
+    #[allow(clippy::await_holding_lock)]
     pub async fn generate_seal_key(&self, seal_name: &str) -> Result<String, HsmError> {
         let active_name = {
             let active = self.active_provider.lock().unwrap();
@@ -442,23 +445,25 @@ impl HsmManager {
 
         let key_id = format!("brankas_seal_key_{}", seal_name);
 
-        let providers = self.providers.read().unwrap();
-        if let Some(provider) = providers.get(&active_name) {
-            let _metadata = provider
-                .generate_key(HsmKeyType::SealMaster, 256, &key_id)
-                .await?;
-
-            // Store the mapping
-            {
-                let mut seal_keys = self.seal_keys.lock().unwrap();
-                seal_keys.insert(seal_name.to_string(), key_id.clone());
+        let _metadata = {
+            let providers = self.providers.read().unwrap();
+            if let Some(provider) = providers.get(&active_name) {
+                provider
+                    .generate_key(HsmKeyType::SealMaster, 256, &key_id)
+                    .await?
+            } else {
+                return Err(HsmError::NoHealthyHsm);
             }
+        };
 
-            info!("Generated seal key {} in HSM {}", key_id, active_name);
-            Ok(key_id)
-        } else {
-            Err(HsmError::NoHealthyHsm)
+        // Store the mapping
+        {
+            let mut seal_keys = self.seal_keys.lock().unwrap();
+            seal_keys.insert(seal_name.to_string(), key_id.clone());
         }
+
+        info!("Generated seal key {} in HSM {}", key_id, active_name);
+        Ok(key_id)
     }
 
     /// Seal operation using HSM
