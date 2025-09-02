@@ -13,6 +13,14 @@ use uuid::Uuid;
 
 use crate::{error::CoreError, ResourceId, SecurityLevel};
 
+// Include the crate root audit module for compatibility
+#[path = "../audit/mod.rs"]
+mod audit_root;
+pub use audit_root::*;
+
+// Re-export types from the crate root audit module for compatibility
+pub use audit_root::{AuditLog, AuditStatus};
+
 /// Security event types for comprehensive audit logging
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SecurityEventType {

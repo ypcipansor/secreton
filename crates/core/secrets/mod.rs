@@ -1,33 +1,38 @@
-use aes_gcm::{Aes256Gcm, Key, Nonce, KeyInit};
 use aes_gcm::aead::Aead;
+use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
+use anyhow::Result;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use rand::RngCore;
 use serde_json::Value;
-use anyhow::Result;
-use tracing::info;
 use std::sync::Arc;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use tracing::info;
 
 use crate::storage::Storage;
 use crate::utils::config::Config;
+
+pub mod engine;
 
 pub fn auto_unseal_master_key(config: &Config) -> Option<String> {
     if config.auto_unseal_enabled == Some(true) {
         match config.auto_unseal_provider.as_deref() {
             Some("kms") => {
                 // TODO: Integrasi AWS KMS/GCP KMS/Azure KeyVault
-                println!("[Auto-Unseal] Menggunakan provider KMS, key_id: {:?}", config.auto_unseal_key_id);
+                println!(
+                    "[Auto-Unseal] Menggunakan provider KMS, key_id: {:?}",
+                    config.auto_unseal_key_id
+                );
                 Some("dummy_master_key_from_kms".to_string())
-            },
+            }
             Some("hsm") => {
                 println!("[Auto-Unseal] Menggunakan provider HSM");
                 Some("dummy_master_key_from_hsm".to_string())
-            },
+            }
             Some("cloud") => {
                 println!("[Auto-Unseal] Menggunakan provider Cloud");
                 Some("dummy_master_key_from_cloud".to_string())
-            },
-            _ => None
+            }
+            _ => None,
         }
     } else {
         None
@@ -56,7 +61,11 @@ impl SecretManager {
         })
     }
 
-    pub async fn initialize_vault(&mut self, secret_shares: u32, secret_threshold: u32) -> Result<(Vec<String>, String)> {
+    pub async fn initialize_vault(
+        &mut self,
+        secret_shares: u32,
+        secret_threshold: u32,
+    ) -> Result<(Vec<String>, String)> {
         if secret_shares < secret_threshold {
             return Err(anyhow::anyhow!("Secret shares must be >= threshold"));
         }
@@ -78,13 +87,18 @@ impl SecretManager {
         self.sealed = false;
 
         // Store vault state
-        self.storage.set_vault_state(false, Some(&hex::encode(&master_key))).await?;
+        self.storage
+            .set_vault_state(false, Some(&hex::encode(&master_key)))
+            .await?;
 
         // Generate root token
         let root_token = self.generate_root_token()?;
 
-        info!("Vault initialized with {} shares and {} threshold", secret_shares, secret_threshold);
-        
+        info!(
+            "Vault initialized with {} shares and {} threshold",
+            secret_shares, secret_threshold
+        );
+
         Ok((keys, root_token))
     }
 
@@ -92,7 +106,7 @@ impl SecretManager {
         // In a real implementation, you would use shamir secret sharing
         // For now, we'll use a simple key comparison
         let (sealed, stored_key) = self.storage.get_vault_state().await?;
-        
+
         if !sealed {
             return Ok(()); // Already unsealed
         }
@@ -116,7 +130,10 @@ impl SecretManager {
             return Err(anyhow::anyhow!("Vault is sealed"));
         }
         let encrypted_data = self.encrypt_data(data)?;
-        let version = self.storage.store_secret_versioned(path, &encrypted_data).await?;
+        let version = self
+            .storage
+            .store_secret_versioned(path, &encrypted_data)
+            .await?;
         info!("Created secret at path: {} version: {}", path, version);
         Ok(version)
     }
@@ -130,7 +147,7 @@ impl SecretManager {
                 let decrypted_data = self.decrypt_data(&encrypted_data)?;
                 Ok(decrypted_data)
             }
-            None => Err(anyhow::anyhow!("Secret not found"))
+            None => Err(anyhow::anyhow!("Secret not found")),
         }
     }
 
@@ -139,7 +156,10 @@ impl SecretManager {
             return Err(anyhow::anyhow!("Vault is sealed"));
         }
         let encrypted_data = self.encrypt_data(data)?;
-        let version = self.storage.store_secret_versioned(path, &encrypted_data).await?;
+        let version = self
+            .storage
+            .store_secret_versioned(path, &encrypted_data)
+            .await?;
         info!("Updated secret at path: {} version: {}", path, version);
         Ok(version)
     }
@@ -178,7 +198,8 @@ impl SecretManager {
         let cipher = Aes256Gcm::new(key);
 
         // Encrypt
-        let ciphertext = cipher.encrypt(nonce, data_bytes)
+        let ciphertext = cipher
+            .encrypt(nonce, data_bytes)
             .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
 
         // Combine nonce and ciphertext
@@ -214,7 +235,8 @@ impl SecretManager {
         let cipher = Aes256Gcm::new(key);
 
         // Decrypt
-        let plaintext = cipher.decrypt(nonce, ciphertext)
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
         let data_json = String::from_utf8(plaintext)?;
         let data: Value = serde_json::from_str(&data_json)?;
@@ -243,8 +265,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_encryption_decryption() {
-        let manager = SecretManager::new("test_key_32_bytes_long_for_aes").await.unwrap();
-        
+        let manager = SecretManager::new("test_key_32_bytes_long_for_aes")
+            .await
+            .unwrap();
+
         let test_data = json!({
             "username": "test_user",
             "password": "test_pass"
@@ -255,4 +279,4 @@ mod tests {
 
         assert_eq!(test_data, decrypted);
     }
-} 
+}

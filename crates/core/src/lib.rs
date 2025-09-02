@@ -7,16 +7,36 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
-
 pub mod api;
+#[path = "../audit/mod.rs"]
 pub mod audit;
+pub mod auth;
+#[path = "../config.rs"]
+pub mod config;
+#[path = "../crypto.rs"]
+pub mod crypto;
 pub mod error;
+#[path = "../models/mod.rs"]
+pub mod models;
+pub mod secrets;
 pub mod security;
+#[path = "../server.rs"]
+pub mod server;
+#[path = "../services/mod.rs"]
+pub mod services;
+#[path = "../storage/mod.rs"]
+pub mod storage;
 pub mod types;
+#[path = "../utils/mod.rs"]
+pub mod utils;
 
 pub use api::{start_security_server, SecurityAPI};
-pub use audit::{AuditEntry, AuditLogger, AuditStorage};
+pub use audit::{AuditLog, AuditLogger, AuditStatus};
+pub use auth::mfa::MfaMethod;
 pub use error::CoreError;
+pub use secrets::engine::{
+    CreateKeyRequest, DecryptRequest, EncryptRequest, SecretsEngine, TransitSecretsEngine,
+};
 pub use security::{
     // Audit Systems
     AdvancedAuditSystem,
@@ -50,7 +70,9 @@ pub use security::{
     // Zero Trust Architecture
     ZeroTrustEngine,
 };
+pub use storage::{MemoryStorage, Storage};
 pub use types::{Environment, HealthStatus, Pagination, TimeRange, Version};
+pub use utils::error::AppError;
 
 /// Security classification levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]

@@ -670,7 +670,10 @@ pub trait ResourceQuotaManager: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get current resource usage
-    fn get_usage(&self, namespace_id: &NamespaceId) -> impl std::future::Future<Output = SecretonResult<ResourceUsage>> + Send;
+    fn get_usage(
+        &self,
+        namespace_id: &NamespaceId,
+    ) -> impl std::future::Future<Output = SecretonResult<ResourceUsage>> + Send;
 
     /// Set quota for namespace
     fn set_quota(

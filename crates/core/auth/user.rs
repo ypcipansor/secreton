@@ -1,13 +1,13 @@
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
+use anyhow::{anyhow, Result};
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+use chrono::{DateTime, Utc};
 use rand_core::OsRng;
-use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -58,15 +58,15 @@ impl User {
             .hash_password(password.as_bytes(), &salt)
             .map_err(|e| anyhow!(e.to_string()))?
             .to_string();
-        
+
         Ok(password_hash)
     }
 
     /// Verify a password against the stored hash
     pub fn verify_password(&self, password: &str) -> Result<bool> {
-        let parsed_hash = PasswordHash::new(&self.password_hash)
-            .map_err(|e| anyhow!(e.to_string()))?;
-        
+        let parsed_hash =
+            PasswordHash::new(&self.password_hash).map_err(|e| anyhow!(e.to_string()))?;
+
         Ok(Argon2::default()
             .verify_password(password.as_bytes(), &parsed_hash)
             .is_ok())
@@ -133,9 +133,9 @@ mod tests {
         .unwrap();
 
         assert!(user.verify_password("oldpassword").unwrap());
-        
+
         user.update_password("newpassword").unwrap();
-        
+
         assert!(!user.verify_password("oldpassword").unwrap());
         assert!(user.verify_password("newpassword").unwrap());
     }
@@ -151,10 +151,10 @@ mod tests {
         .unwrap();
 
         assert!(!user.has_role("admin"));
-        
+
         user.add_role("admin");
         assert!(user.has_role("admin"));
-        
+
         user.remove_role("admin");
         assert!(!user.has_role("admin"));
     }

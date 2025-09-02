@@ -1,3 +1,4 @@
+use config;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -18,29 +19,37 @@ pub struct DatabaseConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     #[serde(default = "default_token_ttl")]
-    pub token_ttl: i64,  // in seconds
-    
+    pub token_ttl: i64, // in seconds
+
     #[serde(default = "default_refresh_token_ttl")]
-    pub refresh_token_ttl: i64,  // in seconds
-    
+    pub refresh_token_ttl: i64, // in seconds
+
     #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
-    
+
     #[serde(default = "default_refresh_secret")]
     pub refresh_secret: String,
-    
+
     #[serde(default = "default_password_reset_ttl")]
-    pub password_reset_ttl: i64,  // in seconds
-    
+    pub password_reset_ttl: i64, // in seconds
+
     #[serde(default = "default_mfa_enabled")]
     pub mfa_enabled: bool,
 }
 
 // Default configuration values
-fn default_token_ttl() -> i64 { 3600 }  // 1 hour
-fn default_refresh_token_ttl() -> i64 { 2_592_000 }  // 30 days
-fn default_password_reset_ttl() -> i64 { 3600 }  // 1 hour
-fn default_mfa_enabled() -> bool { true }
+fn default_token_ttl() -> i64 {
+    3600
+} // 1 hour
+fn default_refresh_token_ttl() -> i64 {
+    2_592_000
+} // 30 days
+fn default_password_reset_ttl() -> i64 {
+    3600
+} // 1 hour
+fn default_mfa_enabled() -> bool {
+    true
+}
 
 fn default_jwt_secret() -> String {
     // In production, this should be overridden via environment variables

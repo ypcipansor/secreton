@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use super::{Secret, SecretMetadata, SecretsEngine, SecretsError};
-use crate::error::AppError;
+use crate::AppError;
 
 /// KV (Key-Value) secrets engine
 pub struct KVSecretsEngine {
@@ -17,12 +16,12 @@ impl KVSecretsEngine {
     /// Create a new KV secrets engine
     pub fn new(base_path: impl AsRef<Path>) -> Result<Self, AppError> {
         let base_path = base_path.as_ref().to_path_buf();
-        
+
         // Create base directory if it doesn't exist
         if !base_path.exists() {
             std::fs::create_dir_all(&base_path)?;
         }
-        
+
         Ok(Self { base_path })
     }
 
@@ -50,6 +49,8 @@ impl SecretsEngine for KVSecretsEngine {
             created_at: now,
             updated_at: now,
             version: 1,
+            ttl: None,
+            expired_at: None,
             custom_metadata: None,
         };
 
@@ -61,7 +62,7 @@ impl SecretsEngine for KVSecretsEngine {
         };
 
         let secret_path = self.get_secret_path(path);
-        
+
         // Create parent directories if they don't exist
         if let Some(parent) = secret_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
@@ -79,14 +80,17 @@ impl SecretsEngine for KVSecretsEngine {
 
     async fn read_secret(&self, path: &str) -> Result<Secret, SecretsError> {
         let secret_path = self.get_secret_path(path);
-        
+
         if !secret_path.exists() {
-            return Err(SecretsError::NotFound);
+            return Err(SecretsError::NotFound(format!(
+                "Secret not found: {}",
+                path
+            )));
         }
 
         let secret_data = fs::read_to_string(&secret_path).await?;
         let secret: Secret = serde_json::from_str(&secret_data)?;
-        
+
         Ok(secret)
     }
 
@@ -97,7 +101,7 @@ impl SecretsEngine for KVSecretsEngine {
         _options: Option<Value>,
     ) -> Result<Secret, SecretsError> {
         let mut secret = self.read_secret(path).await?;
-        
+
         // Update the secret data and metadata
         secret.data = data;
         secret.metadata.updated_at = chrono::Utc::now();
@@ -114,9 +118,12 @@ impl SecretsEngine for KVSecretsEngine {
 
     async fn delete_secret(&self, path: &str) -> Result<(), SecretsError> {
         let secret_path = self.get_secret_path(path);
-        
+
         if !secret_path.exists() {
-            return Err(SecretsError::NotFound);
+            return Err(SecretsError::NotFound(format!(
+                "Secret not found: {}",
+                path
+            )));
         }
 
         fs::remove_file(secret_path).await?;
@@ -155,8 +162,10 @@ mod tests {
 
         // Test creating a secret
         let secret_data = serde_json::json!({ "username": "testuser", "password": "testpass" });
-        let secret = engine.create_secret("test/secret", secret_data.clone(), None).await?;
-        
+        let secret = engine
+            .create_secret("test/secret", secret_data.clone(), None)
+            .await?;
+
         assert_eq!(secret.path, "test/secret");
         assert_eq!(secret.data, secret_data);
         assert_eq!(secret.metadata.version, 1);
@@ -166,9 +175,12 @@ mod tests {
         assert_eq!(read_secret.data, secret_data);
 
         // Test updating the secret
-        let updated_data = serde_json::json!({ "username": "updateduser", "password": "updatedpass" });
-        let updated_secret = engine.update_secret("test/secret", updated_data.clone(), None).await?;
-        
+        let updated_data =
+            serde_json::json!({ "username": "updateduser", "password": "updatedpass" });
+        let updated_secret = engine
+            .update_secret("test/secret", updated_data.clone(), None)
+            .await?;
+
         assert_eq!(updated_secret.data, updated_data);
         assert_eq!(updated_secret.metadata.version, 2);
 

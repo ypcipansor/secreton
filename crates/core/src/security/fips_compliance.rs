@@ -351,26 +351,51 @@ pub trait HsmProviderTrait: Send + Sync {
     fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Generate a new key in HSM
-    fn generate_key(&self, algorithm: FipsAlgorithm, key_size: u32)
-        -> impl std::future::Future<Output = SecretonResult<String>> + Send;
+    fn generate_key(
+        &self,
+        algorithm: FipsAlgorithm,
+        key_size: u32,
+    ) -> impl std::future::Future<Output = SecretonResult<String>> + Send;
 
     /// Encrypt data using HSM key
-    fn encrypt(&self, key_id: &str, plaintext: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn encrypt(
+        &self,
+        key_id: &str,
+        plaintext: &[u8],
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Decrypt data using HSM key
-    fn decrypt(&self, key_id: &str, ciphertext: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn decrypt(
+        &self,
+        key_id: &str,
+        ciphertext: &[u8],
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Sign data using HSM key
-    fn sign(&self, key_id: &str, data: &[u8]) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn sign(
+        &self,
+        key_id: &str,
+        data: &[u8],
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Verify signature using HSM key
-    fn verify(&self, key_id: &str, data: &[u8], signature: &[u8]) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
+    fn verify(
+        &self,
+        key_id: &str,
+        data: &[u8],
+        signature: &[u8],
+    ) -> impl std::future::Future<Output = SecretonResult<bool>> + Send;
 
     /// Generate random bytes using HSM RNG
-    fn generate_random(&self, byte_count: u32) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn generate_random(
+        &self,
+        byte_count: u32,
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Check HSM health status
-    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<HsmHealthStatus>> + Send;
+    fn health_check(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<HsmHealthStatus>> + Send;
 
     /// Get HSM provider information
     fn provider_info(&self) -> HsmProviderInfo;
@@ -389,7 +414,10 @@ pub struct HsmProviderInfo {
 /// FIPS Audit Logger Trait
 pub trait FipsAuditLogger: Send + Sync {
     /// Log FIPS compliance event
-    fn log_compliance_event(&self, event: ComplianceEvent) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn log_compliance_event(
+        &self,
+        event: ComplianceEvent,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log algorithm usage
     fn log_algorithm_usage(
@@ -399,10 +427,17 @@ pub trait FipsAuditLogger: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log self-test results
-    fn log_self_test(&self, results: &SelfTestResults) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn log_self_test(
+        &self,
+        results: &SelfTestResults,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log HSM operations
-    fn log_hsm_operation(&self, operation: &str, success: bool) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn log_hsm_operation(
+        &self,
+        operation: &str,
+        success: bool,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 }
 
 /// FIPS Compliance Events
@@ -438,16 +473,25 @@ pub enum EventSeverity {
 /// Self-Test Runner Trait
 pub trait SelfTestRunner: Send + Sync {
     /// Run power-on self-tests
-    fn run_power_on_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
+    fn run_power_on_tests(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Run conditional self-tests
-    fn run_conditional_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
+    fn run_conditional_tests(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Run periodic self-tests
-    fn run_periodic_tests(&self) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
+    fn run_periodic_tests(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<SelfTestResults>> + Send;
 
     /// Test specific algorithm implementation
-    fn test_algorithm(&self, algorithm: FipsAlgorithm) -> impl std::future::Future<Output = SecretonResult<TestResult>> + Send;
+    fn test_algorithm(
+        &self,
+        algorithm: FipsAlgorithm,
+    ) -> impl std::future::Future<Output = SecretonResult<TestResult>> + Send;
 }
 
 impl FipsComplianceEngine {

@@ -16,25 +16,26 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+config.workspace = true
 
 # Async
 tokio.workspace = true
 async-trait.workspace = true
 futures = "0.3"
 
-# Database - Using postgres crate for better dependency isolation
-postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-postgres-types = { version = "0.2", features = ["derive"] }
-
-# Database
+# Database - PostgreSQL with native drivers (removing sqlx RSA vulnerability)
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
+postgres-native-tls = "0.5"  # TLS support for PostgreSQL
+# SQLx temporarily disabled due to RSA vulnerability in MySQL backend
+# sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
 
 # Security dependencies for advanced features
 rand = "0.8"
 aes-gcm = "0.10"
 sha2 = "0.10"
 hmac = "0.12"
+hkdf = "0.12"
 sha1 = "0.10"
 data-encoding = "2.5"
 base64 = "0.21"
@@ -44,21 +45,41 @@ urlencoding = "2.1"
 # Advanced Security Dependencies
 ring = "0.17"
 rand_chacha = "0.3"
+getrandom = "0.2"
 regex = "1.0"
 zeroize = "1.7"
 rand_core = "0.6"
 base32 = "0.5"
+
 qrcode = "0.14"
 argon2 = "0.5"
 bcrypt = "0.15"
 scrypt = "0.11"
 jsonwebtoken = "9.2"
 x25519-dalek = "2.0"
+axum = "0.7"
+totp-rs = { version = "5.4", default-features = false }
+dashmap = "5.5"
+tempfile = "3.8"
 ed25519-dalek = "2.0"
 p256 = "0.13"
 k256 = "0.13"
 aes = "0.8"
 chacha20poly1305 = "0.10"
+parking_lot = "0.12"
+toml = "0.8"
+log = "0.4"
+libloading = "0.8"
+aws-config = "1.0"
+aws-sdk-iam = "1.0"
+# OAuth2 with Ed25519 (removing RSA vulnerability)
+oauth2 = "4.4"  # Alternative OAuth2 implementation without RSA
+# openidconnect = "3.5"  # Disabled temporarily due to RSA dependency
+glob = "0.3"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = "1.0"
+tracing-subscriber = { workspace = true }
+wasmtime = "34.0.2"  # Updated to address RUSTSEC-2025-0046
 
 # HTTP API
 warp = "0.3"
@@ -69,7 +90,37 @@ granular_revocation = { path = "./granular_revocation" }
 audit_log = { path = "./audit_log" }
 flate2 = "1.1.2"
 
+# Azure SDK Dependencies - Temporarily disabled for build
+# azure_identity = "0.18"
+# azure_security_keyvault = "0.18"
+# azure_storage_blobs = "0.18"
+# azure_storage_queues = "0.18"
+# azure_core = "0.18"
+
+# GCP SDK Dependencies - Temporarily disabled for build
+# gcp-auth = "0.10"
+# google-cloud-auth = "0.16"
+# google-cloud-storage = "0.16"
+# google-cloud-secretmanager = "0.16"
+# google-cloud-bigquery = "0.16"
+# google-cloud-iam = "0.16"
+reqwest = { version = "0.11", features = ["json"] }
+
+# LDAP Dependencies
+ldap3 = { version = "0.11", features = ["tls"] }
+
+# RADIUS Dependencies
+md5 = "0.7"
+
+# X.509 Certificate Dependencies
+x509-parser = "0.15"
+rustls-pemfile = "1.0"
+rcgen = "0.13"  # Updated to use newer ring version
+yasna = "0.5"
+
 [features]
 default = ["postgres", "redis"]
 postgres = ["tokio-postgres", "deadpool-postgres"]
 redis = []
+wasm = []
+distributed = []

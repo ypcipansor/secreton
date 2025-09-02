@@ -37,19 +37,19 @@ impl std::fmt::Display for MfaMethod {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfaSetupRequest {
     pub method: MfaMethod,
-    pub email: Option<String>,  // Required if method is Email
+    pub email: Option<String>, // Required if method is Email
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfaSetupResponse {
-    pub qr_code_url: Option<String>,  // For TOTP
-    pub secret: Option<String>,       // For TOTP
-    pub webauthn_register_options: Option<serde_json::Value>,  // For WebAuthn
+    pub qr_code_url: Option<String>,                          // For TOTP
+    pub secret: Option<String>,                               // For TOTP
+    pub webauthn_register_options: Option<serde_json::Value>, // For WebAuthn
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfaVerifyRequest {
-    pub code: String,  // TOTP code or recovery code
+    pub code: String, // TOTP code or recovery code
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ pub struct MfaStatusResponse {
 pub struct MfaLoginRequest {
     pub username: String,
     pub password: String,
-    pub code: Option<String>,  // MFA code if MFA is enabled
+    pub code: Option<String>, // MFA code if MFA is enabled
 }
 
 #[derive(Debug, Serialize, Deserialize)]

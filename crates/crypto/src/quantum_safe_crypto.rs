@@ -5,9 +5,9 @@
 
 use crate::error::CryptoError;
 type CryptoResult<T> = Result<T, CryptoError>;
-use serde::{Serialize, Deserialize};
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::collections::HashSet;
 
 /// Quantum-safe key types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,15 +60,16 @@ pub fn is_quantum_safe(algorithm: &str) -> bool {
         "falcon-1024",
         // Ed25519 (considered quantum-resistant)
         "ed25519",
-    ].iter().cloned().collect();
+    ]
+    .iter()
+    .cloned()
+    .collect();
 
     quantum_safe_algorithms.contains(algorithm)
 }
 
 /// Generate a quantum-safe key pair
-pub fn generate_key_pair(
-    algorithm: QuantumSafeAlgorithm,
-) -> CryptoResult<(Vec<u8>, Vec<u8>)> {
+pub fn generate_key_pair(algorithm: QuantumSafeAlgorithm) -> CryptoResult<(Vec<u8>, Vec<u8>)> {
     match algorithm {
         QuantumSafeAlgorithm::XmssSha256 => {
             // Placeholder for XMSS key generation
@@ -76,9 +77,10 @@ pub fn generate_key_pair(
             let private_key = vec![0u8; 128];
             Ok((public_key, private_key))
         }
-        _ => Err(CryptoError::KeyGenerationFailed(
-            format!("Quantum-safe algorithm not yet implemented: {:?}", algorithm)
-        )),
+        _ => Err(CryptoError::KeyGenerationFailed(format!(
+            "Quantum-safe algorithm not yet implemented: {:?}",
+            algorithm
+        ))),
     }
 }
 
@@ -97,9 +99,10 @@ pub fn sign(
             signature.copy_from_slice(&hash);
             Ok(signature)
         }
-        _ => Err(CryptoError::SigningFailed(
-            format!("Quantum-safe signing not yet implemented for: {:?}", algorithm)
-        )),
+        _ => Err(CryptoError::SigningFailed(format!(
+            "Quantum-safe signing not yet implemented for: {:?}",
+            algorithm
+        ))),
     }
 }
 
@@ -117,9 +120,10 @@ pub fn verify(
             let hash = sha2::Sha256::digest(data);
             Ok(signature == hash.as_slice())
         }
-        _ => Err(CryptoError::VerificationFailed(
-            format!("Quantum-safe verification not yet implemented for: {:?}", algorithm)
-        )),
+        _ => Err(CryptoError::VerificationFailed(format!(
+            "Quantum-safe verification not yet implemented for: {:?}",
+            algorithm
+        ))),
     }
 }
 
@@ -147,11 +151,11 @@ mod tests {
     fn test_sign_verify() {
         let data = b"test message";
         let algorithm = QuantumSafeAlgorithm::XmssSha256;
-        
+
         let (pk, sk) = generate_key_pair(algorithm).unwrap();
         let signature = sign(&sk, data, algorithm).unwrap();
         let is_valid = verify(&pk, data, &signature, algorithm).unwrap();
-        
+
         assert!(is_valid);
     }
 }

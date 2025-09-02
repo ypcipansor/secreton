@@ -2,9 +2,9 @@
 //! Maximum Security, Zero Trust, Forensic Logging
 
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
-use std::fs::{OpenOptions};
-use std::io::{Write, Result as IoResult};
+use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+use std::io::{Result as IoResult, Write};
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,7 +20,15 @@ pub struct AuditEvent {
 }
 
 impl AuditEvent {
-    pub fn new(event_id: String, event_type: String, actor: String, target: String, details: String, prev_hash: Option<String>, hash: String) -> Self {
+    pub fn new(
+        event_id: String,
+        event_type: String,
+        actor: String,
+        target: String,
+        details: String,
+        prev_hash: Option<String>,
+        hash: String,
+    ) -> Self {
         Self {
             event_id,
             event_type,
@@ -41,13 +49,19 @@ pub struct AuditLog {
 
 impl AuditLog {
     pub fn new(file_path: &str) -> Self {
-        Self { events: Vec::new(), file_path: file_path.to_string() }
+        Self {
+            events: Vec::new(),
+            file_path: file_path.to_string(),
+        }
     }
 
     pub fn append_event(&mut self, event: AuditEvent) -> IoResult<()> {
         self.events.push(event.clone());
         let serialized = serde_json::to_string(&event).unwrap();
-        let mut file = OpenOptions::new().create(true).append(true).open(&self.file_path)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)?;
         writeln!(file, "{}", serialized)?;
         Ok(())
     }

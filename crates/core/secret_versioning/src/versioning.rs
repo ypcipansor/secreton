@@ -1,4 +1,4 @@
-use audit_log::{AuditLog, AuditEvent};
+use audit_log::{AuditEvent, AuditLog};
 impl SecretHistory {
     /// Utility: Log a secret event to the audit log
     pub fn log_audit_event(
@@ -25,7 +25,7 @@ impl SecretHistory {
 // Secret Versioning & Audit Trail Module - Maximum Security, Zero Trust, Forever Secret
 
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +54,13 @@ impl SecretHistory {
         }
     }
 
-    pub fn put_secret(&mut self, value: String, created_by: String, diff: Option<String>, audit_id: String) -> u64 {
+    pub fn put_secret(
+        &mut self,
+        value: String,
+        created_by: String,
+        diff: Option<String>,
+        audit_id: String,
+    ) -> u64 {
         self.current_version += 1;
         let version = self.current_version;
         let secret_version = SecretVersion {
@@ -83,7 +89,12 @@ impl SecretHistory {
     pub fn rollback(&mut self, version: u64, by: String, audit_id: String) -> Option<u64> {
         if let Some(secret) = self.versions.get(&version) {
             let rollback_value = secret.value.clone();
-            Some(self.put_secret(rollback_value, by, Some(format!("rollback to v{}", version)), audit_id))
+            Some(self.put_secret(
+                rollback_value,
+                by,
+                Some(format!("rollback to v{}", version)),
+                audit_id,
+            ))
         } else {
             None
         }

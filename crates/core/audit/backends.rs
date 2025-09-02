@@ -1,63 +1,76 @@
 //! Audit log storage backends
 
-use async_trait::async_trait;
-use sqlx::{Pool, Sqlite};
-use std::path::Path;
 use super::*;
+use async_trait::async_trait;
+use deadpool_postgres::Pool;
+use std::path::Path;
 
-/// SQLite backend for audit logs
-pub struct SqliteBackend {
-    pool: Pool<Sqlite>,
+/// PostgreSQL backend for audit logs
+pub struct PostgreSqlBackend {
+    pool: Pool,
 }
 
-impl SqliteBackend {
-    /// Create a new SQLite backend
-    pub async fn new(db_path: impl AsRef<Path>) -> Result<Self, sqlx::Error> {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect(db_path.as_ref().to_str().unwrap())
+impl PostgreSqlBackend {
+    /// Create a new PostgreSQL backend
+    pub async fn new(pool: Pool) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Create audit logs table if it doesn't exist
+        let client = pool.get().await?;
+        client
+            .execute(
+                "CREATE TABLE IF NOT EXISTS audit_logs (
+                    id UUID PRIMARY KEY,
+                    timestamp TIMESTAMPTZ NOT NULL,
+                    action TEXT NOT NULL,
+                    actor_id TEXT,
+                    resource_type TEXT,
+                    resource_id TEXT,
+                    status TEXT NOT NULL,
+                    ip TEXT,
+                    user_agent TEXT,
+                    metadata JSONB
+                )",
+                &[],
+            )
             .await?;
-            
-        // Create the audit logs table if it doesn't exist
-        sqlx::migrate!("./migrations/audit")
-            .run(&pool)
-            .await?;
-            
+
         Ok(Self { pool })
     }
 }
 
 #[async_trait]
-impl AuditBackend for SqliteBackend {
+impl AuditBackend for PostgreSqlBackend {
     async fn log(&self, entry: AuditLog) -> Result<(), AuditError> {
+        let client = self.pool.get().await
+            .map_err(|e| AuditError::LoggingError(e.to_string()))?;
+        
         let metadata = serde_json::to_string(&entry.metadata)
             .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-            
-        sqlx::query!(
-            r#"
-            INSERT INTO audit_logs (
-                id, timestamp, action, actor_id, resource_type, 
+
+        client.execute(
+            "INSERT INTO audit_logs (
+                id, timestamp, action, actor_id, resource_type,
                 resource_id, status, ip, user_agent, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-            entry.id.to_string(),
-            entry.timestamp,
-            entry.action,
-            entry.actor.map(|id| id.to_string()),
-            entry.resource_type,
-            entry.resource_id,
-            match entry.status {
-                AuditStatus::Success => "success",
-                AuditStatus::Failure => "failure",
-                AuditStatus::Denied => "denied",
-            },
-            entry.ip,
-            entry.user_agent,
-            metadata,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            &[
+                &entry.id,
+                &entry.timestamp,
+                &entry.action,
+                &entry.actor.as_ref().map(|id| id.to_string()),
+                &entry.resource_type,
+                &entry.resource_id,
+                &match entry.status {
+                    AuditStatus::Success => "success",
+                    AuditStatus::Failure => "failure", 
+                    AuditStatus::Denied => "denied",
+                },
+                &entry.ip,
+                &entry.user_agent,
+                &metadata,
+            ],
         )
-        .execute(&self.pool)
         .await
         .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-        
+
         Ok(())
     }
 }
@@ -86,7 +99,7 @@ impl FileBackend {
             .append(true)
             .open(path)
             .await?;
-            
+
         Ok(Self {
             file: tokio::sync::Mutex::new(file),
         })
@@ -97,15 +110,17 @@ impl FileBackend {
 impl AuditBackend for FileBackend {
     async fn log(&self, entry: AuditLog) -> Result<(), AuditError> {
         let mut file = self.file.lock().await;
-        let line = serde_json::to_string(&entry)
-            .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-            
+        let line =
+            serde_json::to_string(&entry).map_err(|e| AuditError::LoggingError(e.to_string()))?;
+
         use tokio::io::AsyncWriteExt;
-        file.write_all(line.as_bytes()).await
+        file.write_all(line.as_bytes())
+            .await
             .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-        file.write_all(b"\n").await
+        file.write_all(b"\n")
+            .await
             .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-            
+
         Ok(())
     }
 }

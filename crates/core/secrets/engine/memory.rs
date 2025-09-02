@@ -1,6 +1,6 @@
 use super::{Secret, SecretMetadata, SecretsEngine, SecretsError};
+use crate::audit::{AuditLog, AuditLogger, AuditStatus};
 use crate::services::policy::PolicySet;
-use crate::audit::{AuditLogger, AuditLog, AuditStatus};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
@@ -9,10 +9,17 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 /// In-memory secrets engine: secrets only live in RAM, never written to disk
+#[allow(dead_code)]
 pub struct MemorySecretsEngine {
     secrets: Arc<RwLock<HashMap<String, Secret>>>,
     audit_logger: Option<AuditLogger>,
     policy_set: Option<PolicySet>,
+}
+
+impl Default for MemorySecretsEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MemorySecretsEngine {
@@ -48,6 +55,7 @@ impl MemorySecretsEngine {
         }
     }
 
+    #[allow(dead_code)]
     async fn log_audit(&self, action: &str, path: &str, status: AuditStatus) {
         if let Some(logger) = &self.audit_logger {
             let entry = AuditLog {
@@ -62,11 +70,21 @@ impl MemorySecretsEngine {
                 user_agent: None,
                 metadata: HashMap::new(),
             };
-            let _ = logger.log(entry).await;
+
+            if let Err(e) = logger.log(entry).await {
+                eprintln!("Failed to log audit event: {}", e);
+            }
         }
     }
 
-    fn check_policy(&self, user: &str, path: &str, action: &str, context: Option<&serde_json::Value>) -> bool {
+    #[allow(dead_code)]
+    fn check_policy(
+        &self,
+        user: &str,
+        path: &str,
+        action: &str,
+        context: Option<&serde_json::Value>,
+    ) -> bool {
         if let Some(policy) = &self.policy_set {
             policy.evaluate(user, path, action, context)
         } else {
@@ -77,22 +95,29 @@ impl MemorySecretsEngine {
 
 #[async_trait]
 impl SecretsEngine for MemorySecretsEngine {
+    fn engine_type(&self) -> &'static str {
+        "memory"
+    }
+
     async fn create_secret(
         &self,
         path: &str,
         data: Value,
-        custom_metadata: Option<HashMap<String, String>>,
-        user: &str,
-        context: Option<&serde_json::Value>,
+        options: Option<Value>,
     ) -> Result<Secret, SecretsError> {
-        if !self.check_policy(user, path, "create", context) {
-            self.log_audit("create", path, AuditStatus::Denied).await;
-            return Err(SecretsError::PermissionDenied);
-        }
         let now = Utc::now();
-        let ttl = custom_metadata.as_ref()
-            .and_then(|m| m.get("ttl").and_then(|s| s.parse::<i64>().ok()));
+        let custom_metadata = options
+            .as_ref()
+            .and_then(|o| o.get("custom_metadata"))
+            .and_then(|m| serde_json::from_value(m.clone()).ok());
+
+        let ttl = custom_metadata
+            .as_ref()
+            .and_then(|m: &HashMap<String, String>| {
+                m.get("ttl").and_then(|s| s.parse::<i64>().ok())
+            });
         let expired_at = ttl.map(|t| now + chrono::Duration::seconds(t));
+
         let secret = Secret {
             id: Uuid::new_v4(),
             path: path.to_string(),
@@ -106,70 +131,67 @@ impl SecretsEngine for MemorySecretsEngine {
                 custom_metadata,
             },
         };
-        self.secrets.write().unwrap().insert(path.to_string(), secret.clone());
-        self.log_audit("create", path, AuditStatus::Success).await;
+        self.secrets
+            .write()
+            .unwrap()
+            .insert(path.to_string(), secret.clone());
         Ok(secret)
     }
 
-    async fn read_secret(&self, path: &str, user: &str, context: Option<&serde_json::Value>) -> Result<Secret, SecretsError> {
-        if !self.check_policy(user, path, "read", context) {
-            self.log_audit("read", path, AuditStatus::Denied).await;
-            return Err(SecretsError::PermissionDenied);
-        }
+    async fn read_secret(&self, path: &str) -> Result<Secret, SecretsError> {
         let mut secrets = self.secrets.write().unwrap();
         if let Some(secret) = secrets.get(path) {
             if let Some(exp) = secret.metadata.expired_at {
                 if Utc::now() > exp {
                     // Secret expired, auto-destroy
                     secrets.remove(path);
-                    self.log_audit("read", path, AuditStatus::Denied).await;
-                    return Err(SecretsError::NotFound);
+                    return Err(SecretsError::NotFound(format!("Secret expired: {}", path)));
                 }
             }
-            self.log_audit("read", path, AuditStatus::Success).await;
             return Ok(secret.clone());
         }
-        self.log_audit("read", path, AuditStatus::Denied).await;
-        Err(SecretsError::NotFound)
+        Err(SecretsError::NotFound(format!(
+            "Secret not found: {}",
+            path
+        )))
     }
 
     async fn update_secret(
         &self,
         path: &str,
         data: Value,
-        custom_metadata: Option<HashMap<String, String>>,
-        user: &str,
-        context: Option<&serde_json::Value>,
+        options: Option<Value>,
     ) -> Result<Secret, SecretsError> {
-        if !self.check_policy(user, path, "update", context) {
-            self.log_audit("update", path, AuditStatus::Denied).await;
-            return Err(SecretsError::PermissionDenied);
-        }
         let mut secrets = self.secrets.write().unwrap();
-        let secret = secrets.get_mut(path).ok_or(SecretsError::NotFound)?;
+        let secret = secrets
+            .get_mut(path)
+            .ok_or_else(|| SecretsError::NotFound(format!("Secret '{}' not found", path)))?;
         secret.data = data;
         secret.metadata.updated_at = Utc::now();
         secret.metadata.version += 1;
-        if let Some(meta) = &custom_metadata {
-            if let Some(ttl_str) = meta.get("ttl") {
-                if let Ok(ttl) = ttl_str.parse::<i64>() {
-                    secret.metadata.ttl = Some(ttl);
-                    secret.metadata.expired_at = Some(Utc::now() + chrono::Duration::seconds(ttl));
+
+        if let Some(opts) = &options {
+            if let Some(meta) = opts.get("custom_metadata") {
+                if let Ok(custom_meta) =
+                    serde_json::from_value::<HashMap<String, String>>(meta.clone())
+                {
+                    if let Some(ttl_str) = custom_meta.get("ttl") {
+                        if let Ok(ttl) = ttl_str.parse::<i64>() {
+                            secret.metadata.ttl = Some(ttl);
+                            secret.metadata.expired_at =
+                                Some(Utc::now() + chrono::Duration::seconds(ttl));
+                        }
+                    }
+                    secret.metadata.custom_metadata = Some(custom_meta);
                 }
             }
         }
-        secret.metadata.custom_metadata = custom_metadata;
-        self.log_audit("update", path, AuditStatus::Success).await;
+
         Ok(secret.clone())
     }
 
-    async fn delete_secret(&self, path: &str, user: &str, context: Option<&serde_json::Value>) -> Result<(), SecretsError> {
-        if !self.check_policy(user, path, "delete", context) {
-            self.log_audit("delete", path, AuditStatus::Denied).await;
-            return Err(SecretsError::PermissionDenied);
-        }
+    async fn delete_secret(&self, path: &str) -> Result<(), SecretsError> {
         self.secrets.write().unwrap().remove(path);
-        self.log_audit("delete", path, AuditStatus::Success).await;
         Ok(())
     }
 

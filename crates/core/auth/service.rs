@@ -1,29 +1,16 @@
-use std::sync::Arc;
-use chrono::{Utc, Duration};
-use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
-use uuid::Uuid;
-use anyhow::{Result, anyhow};
-use argon2::{
-    password_hash::{PasswordHash, PasswordVerifier, SaltString},
-    Argon2,
-};
-use rand_core::OsRng;
+use anyhow::{anyhow, Result};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use uuid::Uuid;
 
-use crate::{
-    core::error::AppError,
-    auth::{
-        user::User,
-        refresh_token::RefreshToken,
-    },
-};
+use super::{refresh_token::RefreshToken, user::User};
 
 #[derive(Debug, Clone)]
 pub struct AuthService {
     jwt_secret: String,
     refresh_secret: String,
-    access_token_ttl: i64, // in seconds
+    access_token_ttl: i64,  // in seconds
     refresh_token_ttl: i64, // in seconds
 }
 
@@ -35,13 +22,13 @@ pub struct TokenPair {
     pub expires_in: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: Uuid,         // user ID
-    pub exp: i64,          // expiration time
-    pub iat: i64,          // issued at
-    pub email: String,     // user email
-    pub username: String,  // username
+    pub sub: Uuid,          // user ID
+    pub exp: i64,           // expiration time
+    pub iat: i64,           // issued at
+    pub email: String,      // user email
+    pub username: String,   // username
     pub roles: Vec<String>, // user roles
     pub scopes: Vec<String>,
 }
@@ -82,16 +69,12 @@ impl AuthService {
 
         // Generate tokens
         let token_pair = self.generate_token_pair(&user, vec!["read", "write"])?;
-        
+
         Ok((user, token_pair))
     }
 
     /// Generate a new access and refresh token pair
-    pub fn generate_token_pair(
-        &self,
-        user: &User,
-        scopes: Vec<&str>,
-    ) -> Result<TokenPair> {
+    pub fn generate_token_pair(&self, user: &User, scopes: Vec<&str>) -> Result<TokenPair> {
         let access_token = self.generate_access_token(user, &scopes)?;
         let refresh_token = self.generate_refresh_token(user, &scopes)?;
 
@@ -139,7 +122,7 @@ impl AuthService {
         )?;
 
         // TODO: Store refresh token in database
-        
+
         Ok(refresh_token.token)
     }
 
@@ -165,13 +148,13 @@ impl AuthService {
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair> {
         // TODO: Verify refresh token from database
         // For now, we'll just validate the JWT structure
-        
+
         // In a real implementation, we would:
         // 1. Verify the refresh token signature
         // 2. Check if it exists in the database and isn't revoked
         // 3. Get the associated user
         // 4. Generate a new token pair
-        
+
         // This is a mock implementation
         if refresh_token.is_empty() {
             return Err(anyhow!("Invalid refresh token"));
@@ -189,7 +172,7 @@ impl AuthService {
     }
 
     /// Invalidate a refresh token
-    pub async fn revoke_refresh_token(&self, token: &str) -> Result<()> {
+    pub async fn revoke_refresh_token(&self, _token: &str) -> Result<()> {
         // TODO: Implement token revocation in database
         Ok(())
     }
@@ -215,7 +198,7 @@ mod tests {
     async fn test_authenticate_success() {
         let service = create_test_service();
         let (user, tokens) = service.authenticate("admin", "admin").await.unwrap();
-        
+
         assert_eq!(user.username, "admin");
         assert!(!tokens.access_token.is_empty());
         assert!(!tokens.refresh_token.is_empty());
@@ -226,7 +209,7 @@ mod tests {
     async fn test_token_verification() {
         let service = create_test_service();
         let (user, tokens) = service.authenticate("admin", "admin").await.unwrap();
-        
+
         let claims = service.verify_access_token(&tokens.access_token).unwrap();
         assert_eq!(claims.sub, user.id);
         assert_eq!(claims.username, "admin");
@@ -236,12 +219,14 @@ mod tests {
     async fn test_token_refresh() {
         let service = create_test_service();
         let (_, tokens) = service.authenticate("admin", "admin").await.unwrap();
-        
+
         let new_tokens = service.refresh_token(&tokens.refresh_token).await.unwrap();
         assert!(!new_tokens.access_token.is_empty());
-        
+
         // Verify the new access token
-        let claims = service.verify_access_token(&new_tokens.access_token).unwrap();
+        let claims = service
+            .verify_access_token(&new_tokens.access_token)
+            .unwrap();
         assert_eq!(claims.username, "admin");
     }
 }

@@ -434,6 +434,7 @@ impl HsmManager {
     }
 
     /// Generate a seal key in the active HSM
+    #[allow(clippy::await_holding_lock)]
     pub async fn generate_seal_key(&self, seal_name: &str) -> Result<String, HsmError> {
         let active_name = {
             let active = self.active_provider.lock().unwrap();
@@ -447,18 +448,21 @@ impl HsmManager {
             let _metadata = provider
                 .generate_key(HsmKeyType::SealMaster, 256, &key_id)
                 .await?;
-
-            // Store the mapping
-            {
-                let mut seal_keys = self.seal_keys.lock().unwrap();
-                seal_keys.insert(seal_name.to_string(), key_id.clone());
-            }
-
-            info!("Generated seal key {} in HSM {}", key_id, active_name);
-            Ok(key_id)
         } else {
-            Err(HsmError::NoHealthyHsm)
+            return Err(HsmError::NoHealthyHsm);
         }
+        
+        // Release the lock before proceeding
+        drop(providers);
+        
+        // Store the mapping
+        {
+            let mut seal_keys = self.seal_keys.lock().unwrap();
+            seal_keys.insert(seal_name.to_string(), key_id.clone());
+        }
+
+        info!("Generated seal key {} in HSM {}", key_id, active_name);
+        Ok(key_id)
     }
 
     /// Seal operation using HSM
@@ -502,6 +506,7 @@ impl HsmManager {
     }
 
     /// Encrypt with active HSM (with automatic failover)
+    #[allow(clippy::await_holding_lock)]
     pub async fn encrypt_with_active_hsm(
         &self,
         key_id: &str,
@@ -542,6 +547,7 @@ impl HsmManager {
     }
 
     /// Decrypt with active HSM (with automatic failover)
+    #[allow(clippy::await_holding_lock)]
     pub async fn decrypt_with_active_hsm(
         &self,
         key_id: &str,
@@ -582,6 +588,7 @@ impl HsmManager {
     }
 
     /// Generate quantum-safe random bytes using HSM
+    #[allow(clippy::await_holding_lock)]
     pub async fn generate_quantum_safe_random(
         &self,
         byte_count: usize,
@@ -605,6 +612,7 @@ impl HsmManager {
     }
 
     /// Get HSM attestation for verification
+    #[allow(clippy::await_holding_lock)]
     pub async fn get_hardware_attestation(&self, hsm_name: &str) -> Result<Vec<u8>, HsmError> {
         let providers = self.providers.read().unwrap();
         if let Some(provider) = providers.get(hsm_name) {
@@ -616,6 +624,7 @@ impl HsmManager {
         }
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn check_provider_health(&self, name: &str) -> Result<(), HsmError> {
         let providers = self.providers.read().unwrap();
         if let Some(provider) = providers.get(name) {

@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppRole {
     pub role_id: String,
     pub secret_id: String,
     pub policies: Vec<String>,
-} 
+}

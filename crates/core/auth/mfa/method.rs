@@ -74,8 +74,14 @@ mod tests {
     fn test_mfa_method_deserialization() {
         assert_eq!("totp".parse::<MfaMethod>().unwrap(), MfaMethod::Totp);
         assert_eq!("email".parse::<MfaMethod>().unwrap(), MfaMethod::Email);
-        assert_eq!("webauthn".parse::<MfaMethod>().unwrap(), MfaMethod::WebAuthn);
-        assert_eq!("recovery".parse::<MfaMethod>().unwrap(), MfaMethod::Recovery);
+        assert_eq!(
+            "webauthn".parse::<MfaMethod>().unwrap(),
+            MfaMethod::WebAuthn
+        );
+        assert_eq!(
+            "recovery".parse::<MfaMethod>().unwrap(),
+            MfaMethod::Recovery
+        );
         assert!("invalid".parse::<MfaMethod>().is_err());
     }
 }

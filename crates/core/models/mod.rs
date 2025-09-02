@@ -1,8 +1,10 @@
-pub mod user;
-pub mod secret;
-pub mod policy;
-pub mod lease;
-pub mod sentinel;
 pub mod approle;
-pub mod plugin;
+pub mod auth;
+pub mod lease;
 pub mod mfa;
+pub mod pki;
+pub mod plugin;
+pub mod policy;
+pub mod secret;
+pub mod sentinel;
+pub mod user;

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginCatalogEntry {
@@ -8,4 +8,4 @@ pub struct PluginCatalogEntry {
     pub artifact_path: String,
     pub pinned: bool,
     pub metadata: Option<serde_json::Value>,
-} 
+}

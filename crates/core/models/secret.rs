@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Secret {
@@ -10,4 +10,4 @@ pub struct Secret {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub namespace: String,
-} 
+}

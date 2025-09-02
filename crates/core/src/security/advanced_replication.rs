@@ -746,7 +746,10 @@ pub trait ConflictResolver: Send + Sync {
     fn supported_methods(&self) -> Vec<ConflictResolutionMethod>;
 
     /// Configure conflict resolution policy
-    fn configure_policy(&self, policy: ConflictResolutionPolicy) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn configure_policy(
+        &self,
+        policy: ConflictResolutionPolicy,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 }
 
 /// Conflict Version
@@ -841,16 +844,28 @@ pub struct ConflictResolutionPolicy {
 /// Disaster Recovery Coordinator Trait
 pub trait DisasterRecoveryCoordinator: Send + Sync {
     /// Initiate disaster recovery procedure
-    fn initiate_recovery(&self, scenario: DisasterScenario) -> impl Future<Output = SecretonResult<RecoveryPlan>> + Send;
+    fn initiate_recovery(
+        &self,
+        scenario: DisasterScenario,
+    ) -> impl Future<Output = SecretonResult<RecoveryPlan>> + Send;
 
     /// Execute recovery plan
-    fn execute_recovery(&self, plan: &RecoveryPlan) -> impl Future<Output = SecretonResult<RecoveryResult>> + Send;
+    fn execute_recovery(
+        &self,
+        plan: &RecoveryPlan,
+    ) -> impl Future<Output = SecretonResult<RecoveryResult>> + Send;
 
     /// Monitor recovery progress
-    fn monitor_recovery(&self, recovery_id: &str) -> impl Future<Output = SecretonResult<RecoveryStatus>> + Send;
+    fn monitor_recovery(
+        &self,
+        recovery_id: &str,
+    ) -> impl Future<Output = SecretonResult<RecoveryStatus>> + Send;
 
     /// Create backup for disaster recovery
-    fn create_backup(&self, backup_spec: BackupSpec) -> impl Future<Output = SecretonResult<Backup>> + Send;
+    fn create_backup(
+        &self,
+        backup_spec: BackupSpec,
+    ) -> impl Future<Output = SecretonResult<Backup>> + Send;
 
     /// Restore from backup
     fn restore_from_backup(
@@ -1043,13 +1058,23 @@ pub struct Backup {
 /// Replication State Manager Trait
 pub trait ReplicationStateManager: Send + Sync {
     /// Get current replication state
-    fn get_state(&self, node_id: &NodeId) -> impl Future<Output = SecretonResult<ReplicationState>> + Send;
+    fn get_state(
+        &self,
+        node_id: &NodeId,
+    ) -> impl Future<Output = SecretonResult<ReplicationState>> + Send;
 
     /// Update replication state
-    fn update_state(&self, node_id: &NodeId, state: ReplicationState) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn update_state(
+        &self,
+        node_id: &NodeId,
+        state: ReplicationState,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Get replication log position
-    fn get_position(&self, node_id: &NodeId) -> impl Future<Output = SecretonResult<ReplicationPosition>> + Send;
+    fn get_position(
+        &self,
+        node_id: &NodeId,
+    ) -> impl Future<Output = SecretonResult<ReplicationPosition>> + Send;
 
     /// Update replication log position
     fn update_position(
@@ -1082,10 +1107,17 @@ pub struct ReplicationState {
 /// Replication Security Manager Trait
 pub trait ReplicationSecurityManager: Send + Sync {
     /// Establish secure channel with peer
-    fn establish_secure_channel(&self, peer_node: &NodeId) -> impl Future<Output = SecretonResult<SecureChannel>> + Send;
+    fn establish_secure_channel(
+        &self,
+        peer_node: &NodeId,
+    ) -> impl Future<Output = SecretonResult<SecureChannel>> + Send;
 
     /// Encrypt replication data
-    fn encrypt_data(&self, data: &[u8], channel: &SecureChannel) -> impl Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn encrypt_data(
+        &self,
+        data: &[u8],
+        channel: &SecureChannel,
+    ) -> impl Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Decrypt replication data
     fn decrypt_data(
@@ -1095,7 +1127,10 @@ pub trait ReplicationSecurityManager: Send + Sync {
     ) -> impl Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Rotate encryption keys
-    fn rotate_keys(&self, channel: &mut SecureChannel) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn rotate_keys(
+        &self,
+        channel: &mut SecureChannel,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Authenticate peer
     fn authenticate_peer(
@@ -1187,13 +1222,22 @@ pub enum ReplicationEvent {
 /// Replication Audit Logger Trait
 pub trait ReplicationAuditLogger: Send + Sync {
     /// Log replication event
-    fn log_event(&self, event: &ReplicationEvent) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn log_event(
+        &self,
+        event: &ReplicationEvent,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log security event
-    fn log_security_event(&self, event: &SecurityEvent) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn log_security_event(
+        &self,
+        event: &SecurityEvent,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log performance metrics
-    fn log_metrics(&self, metrics: &ReplicationMetrics) -> impl Future<Output = SecretonResult<()>> + Send;
+    fn log_metrics(
+        &self,
+        metrics: &ReplicationMetrics,
+    ) -> impl Future<Output = SecretonResult<()>> + Send;
 
     /// Log disaster recovery operation
     fn log_disaster_recovery(

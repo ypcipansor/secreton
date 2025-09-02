@@ -250,7 +250,7 @@ impl Default for MigrationConfig {
 }
 
 /// Audit configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditConfig {
     /// Enable audit logging
     pub enabled: bool,
@@ -336,7 +336,7 @@ pub enum ConfigError {
     Missing { field: String },
     
     #[error("Configuration load error: {source}")]
-    LoadError { source: String },
+    LoadError { source: Box<dyn std::error::Error> },
     
     #[error("Configuration validation error: {message}")]
     ValidationError { message: String },

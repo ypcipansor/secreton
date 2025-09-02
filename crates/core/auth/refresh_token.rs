@@ -1,18 +1,18 @@
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc, Duration};
-use uuid::Uuid;
-use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
-use anyhow::{Result, anyhow};
 use std::collections::HashSet;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RefreshTokenClaims {
-    pub sub: Uuid,          // User ID
-    pub jti: Uuid,          // Token ID
-    pub exp: i64,           // Expiration time
-    pub iat: i64,           // Issued at
-    pub scope: String,      // Token scope
-    pub client_id: String,  // Client identifier
+    pub sub: Uuid,         // User ID
+    pub jti: Uuid,         // Token ID
+    pub exp: i64,          // Expiration time
+    pub iat: i64,          // Issued at
+    pub scope: String,     // Token scope
+    pub client_id: String, // Client identifier
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -113,14 +113,15 @@ mod tests {
         let user_id = Uuid::new_v4();
         let scopes = vec!["read", "write"];
         let client_id = "test_client";
-        
+
         let token = RefreshToken::new(
             user_id,
             3600, // 1 hour
             scopes.clone(),
             client_id,
             TEST_SECRET,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(token.user_id, user_id);
         assert!(!token.revoked);
@@ -144,12 +145,13 @@ mod tests {
             vec!["read"],
             "test_client",
             TEST_SECRET,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(token.is_valid());
-        
+
         token.revoke();
-        
+
         assert!(!token.is_valid());
         assert!(token.verify(TEST_SECRET).is_err());
     }
@@ -162,7 +164,8 @@ mod tests {
             vec!["read"],
             "test_client",
             TEST_SECRET,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(!token.is_valid());
         assert!(token.verify(TEST_SECRET).is_err());

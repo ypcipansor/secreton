@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lease {
@@ -11,4 +11,4 @@ pub struct Lease {
     pub expired_at: DateTime<Utc>,
     pub status: String, // "active", "revoked", "expired"
     pub namespace: String,
-} 
+}

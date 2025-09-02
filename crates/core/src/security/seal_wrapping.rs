@@ -47,7 +47,11 @@ pub trait SealProvider: Send + Sync {
     fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Wrap data with the seal
-    fn wrap(&self, data: &[u8], context: &WrapContext) -> impl std::future::Future<Output = SecretonResult<WrappedData>> + Send;
+    fn wrap(
+        &self,
+        data: &[u8],
+        context: &WrapContext,
+    ) -> impl std::future::Future<Output = SecretonResult<WrappedData>> + Send;
 
     /// Unwrap sealed data
     fn unwrap(
@@ -57,13 +61,21 @@ pub trait SealProvider: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Generate a new wrapping key
-    fn generate_key(&self, algorithm: SealAlgorithm) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
+    fn generate_key(
+        &self,
+        algorithm: SealAlgorithm,
+    ) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
 
     /// Rotate wrapping keys
-    fn rotate_key(&self, key_id: &SealKeyId) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
+    fn rotate_key(
+        &self,
+        key_id: &SealKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<SealKeyId>> + Send;
 
     /// Health check for the seal provider
-    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<SealProviderHealth>> + Send;
+    fn health_check(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<SealProviderHealth>> + Send;
 
     /// Get provider information
     fn provider_info(&self) -> SealProviderInfo;
@@ -387,7 +399,10 @@ pub trait QuantumSealWrapper: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<WrappedData>> + Send;
 
     /// Unwrap quantum-sealed data
-    fn quantum_unwrap(&self, wrapped: &WrappedData) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
+    fn quantum_unwrap(
+        &self,
+        wrapped: &WrappedData,
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Check quantum resistance level
     fn quantum_resistance_level(&self) -> QuantumResistanceLevel;

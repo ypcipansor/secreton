@@ -1,7 +1,7 @@
-use sqlx::PgPool;
+use chrono::{Duration, Utc};
 use rand::{distributions::Alphanumeric, Rng};
-use chrono::{Utc, Duration};
 use serde::Serialize;
+use deadpool_postgres::Pool;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct DynamicDbCredential {
@@ -50,22 +50,27 @@ pub trait RevocableCredential {
 }
 
 impl RevocableCredential for DynamicMysqlCredential {
-    fn revoke(&self) { /* TODO: implementasi revoke user MySQL */ }
+    fn revoke(&self) { /* TODO: implementasi revoke user MySQL */
+    }
 }
 impl RevocableCredential for DynamicMongoCredential {
-    fn revoke(&self) { /* TODO: implementasi revoke user MongoDB */ }
+    fn revoke(&self) { /* TODO: implementasi revoke user MongoDB */
+    }
 }
 impl RevocableCredential for DynamicAwsCredential {
-    fn revoke(&self) { /* TODO: implementasi revoke AWS IAM user */ }
+    fn revoke(&self) { /* TODO: implementasi revoke AWS IAM user */
+    }
 }
 impl RevocableCredential for DynamicGcpCredential {
-    fn revoke(&self) { /* TODO: implementasi revoke GCP service account */ }
+    fn revoke(&self) { /* TODO: implementasi revoke GCP service account */
+    }
 }
 impl RevocableCredential for DynamicAzureCredential {
-    fn revoke(&self) { /* TODO: implementasi revoke Azure client */ }
+    fn revoke(&self) { /* TODO: implementasi revoke Azure client */
+    }
 }
 
-pub async fn generate_db_credential_postgres(pool: &PgPool, role: &str) -> DynamicDbCredential {
+pub async fn generate_db_credential_postgres(pool: &Pool, role: &str) -> DynamicDbCredential {
     let username = format!("{}_{}", role, Utc::now().timestamp());
     let password: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -73,11 +78,25 @@ pub async fn generate_db_credential_postgres(pool: &PgPool, role: &str) -> Dynam
         .map(char::from)
         .collect();
     let expires_at = (Utc::now() + Duration::minutes(30)).to_rfc3339();
-    // Buat user di Postgres
-    let _ = sqlx::query(&format!("CREATE ROLE \"{}\" LOGIN PASSWORD '{}' VALID UNTIL '{}';", username, password, expires_at))
-        .execute(pool)
-        .await;
-    DynamicDbCredential { username, password, expires_at }
+    
+    // Create user in Postgres
+    if let Ok(client) = pool.get().await {
+        let _ = client
+            .execute(
+                &format!(
+                    "CREATE ROLE \"{}\" LOGIN PASSWORD '{}' VALID UNTIL '{}'",
+                    username, password, expires_at
+                ),
+                &[],
+            )
+            .await;
+    }
+    
+    DynamicDbCredential {
+        username,
+        password,
+        expires_at,
+    }
 }
 
 pub async fn generate_mysql_credential(role: &str) -> DynamicMysqlCredential {
@@ -96,7 +115,7 @@ pub async fn generate_mongo_credential(role: &str) -> DynamicMongoCredential {
         expires_at: chrono::Utc::now().to_rfc3339(),
     }
 }
-pub async fn generate_aws_credential(role: &str) -> DynamicAwsCredential {
+pub async fn generate_aws_credential(_role: &str) -> DynamicAwsCredential {
     // TODO: implementasi create AWS IAM user
     DynamicAwsCredential {
         access_key: "AKIA...".to_string(),
@@ -104,14 +123,14 @@ pub async fn generate_aws_credential(role: &str) -> DynamicAwsCredential {
         expires_at: chrono::Utc::now().to_rfc3339(),
     }
 }
-pub async fn generate_gcp_credential(role: &str) -> DynamicGcpCredential {
+pub async fn generate_gcp_credential(_role: &str) -> DynamicGcpCredential {
     // TODO: implementasi create GCP service account
     DynamicGcpCredential {
         service_account_key: "gcp-key-json".to_string(),
         expires_at: chrono::Utc::now().to_rfc3339(),
     }
 }
-pub async fn generate_azure_credential(role: &str) -> DynamicAzureCredential {
+pub async fn generate_azure_credential(_role: &str) -> DynamicAzureCredential {
     // TODO: implementasi create Azure client
     DynamicAzureCredential {
         client_id: "azure-client-id".to_string(),
@@ -121,4 +140,4 @@ pub async fn generate_azure_credential(role: &str) -> DynamicAzureCredential {
     }
 }
 
-pub mod aws; 
+pub mod aws;

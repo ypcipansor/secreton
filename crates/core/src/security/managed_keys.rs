@@ -50,19 +50,34 @@ pub trait KeyProvider: Send + Sync {
     fn initialize(&mut self) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Generate a new managed key
-    fn generate_key(&self, spec: &KeyGenerationSpec) -> impl std::future::Future<Output = SecretonResult<GeneratedKey>> + Send;
+    fn generate_key(
+        &self,
+        spec: &KeyGenerationSpec,
+    ) -> impl std::future::Future<Output = SecretonResult<GeneratedKey>> + Send;
 
     /// Import an existing key
-    fn import_key(&self, spec: &KeyImportSpec) -> impl std::future::Future<Output = SecretonResult<ImportedKey>> + Send;
+    fn import_key(
+        &self,
+        spec: &KeyImportSpec,
+    ) -> impl std::future::Future<Output = SecretonResult<ImportedKey>> + Send;
 
     /// Rotate a managed key
-    fn rotate_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<RotatedKey>> + Send;
+    fn rotate_key(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<RotatedKey>> + Send;
 
     /// Delete a managed key (secure destruction)
-    fn delete_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn delete_key(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get key metadata
-    fn get_key_metadata(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<KeyMetadata>> + Send;
+    fn get_key_metadata(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<KeyMetadata>> + Send;
 
     /// Sign data with managed key
     fn sign(
@@ -96,13 +111,21 @@ pub trait KeyProvider: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<Vec<u8>>> + Send;
 
     /// Backup key (if supported)
-    fn backup_key(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<KeyBackup>> + Send;
+    fn backup_key(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<KeyBackup>> + Send;
 
     /// Restore key from backup
-    fn restore_key(&self, backup: &KeyBackup) -> impl std::future::Future<Output = SecretonResult<ManagedKeyId>> + Send;
+    fn restore_key(
+        &self,
+        backup: &KeyBackup,
+    ) -> impl std::future::Future<Output = SecretonResult<ManagedKeyId>> + Send;
 
     /// Health check
-    fn health_check(&self) -> impl std::future::Future<Output = SecretonResult<KeyProviderHealth>> + Send;
+    fn health_check(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<KeyProviderHealth>> + Send;
 
     /// Provider information
     fn provider_info(&self) -> KeyProviderInfo;
@@ -773,13 +796,21 @@ pub trait RotationScheduler: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Cancel scheduled rotation
-    fn cancel_rotation(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn cancel_rotation(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Get next scheduled rotations
-    fn get_next_rotations(&self, limit: usize) -> impl std::future::Future<Output = SecretonResult<Vec<ScheduledRotation>>> + Send;
+    fn get_next_rotations(
+        &self,
+        limit: usize,
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<ScheduledRotation>>> + Send;
 
     /// Process due rotations
-    fn process_due_rotations(&self) -> impl std::future::Future<Output = SecretonResult<Vec<RotationResult>>> + Send;
+    fn process_due_rotations(
+        &self,
+    ) -> impl std::future::Future<Output = SecretonResult<Vec<RotationResult>>> + Send;
 }
 
 /// Scheduled Rotation
@@ -853,7 +884,10 @@ pub trait KeyGovernance: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<Vec<PolicyAction>>> + Send;
 
     /// Audit key compliance
-    fn audit_compliance(&self, key_id: &ManagedKeyId) -> impl std::future::Future<Output = SecretonResult<ComplianceReport>> + Send;
+    fn audit_compliance(
+        &self,
+        key_id: &ManagedKeyId,
+    ) -> impl std::future::Future<Output = SecretonResult<ComplianceReport>> + Send;
 
     /// Get required approvals for operation
     fn get_required_approvals(
@@ -979,7 +1013,10 @@ pub trait KeyAuditLogger: Send + Sync {
     ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log key rotation
-    fn log_key_rotation(&self, result: &RotationResult) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
+    fn log_key_rotation(
+        &self,
+        result: &RotationResult,
+    ) -> impl std::future::Future<Output = SecretonResult<()>> + Send;
 
     /// Log policy violation
     fn log_policy_violation(
@@ -1163,46 +1200,46 @@ impl ManagedKeysEngine {
             old_key_id: managed_key.id.clone(),
             new_key_id: new_key_id.clone(),
             rotated_at,
-            };
+        };
 
-            // Update managed key record
-            {
-                let mut keys = self.managed_keys.write().await;
-                if let Some(key) = keys.get_mut(&managed_key.id) {
-                    key.state = KeyState::Deprecated;
-                }
-
-                // Create new key record for the rotated key
-                let mut new_managed_key = managed_key.clone();
-                new_managed_key.id = new_key_id.clone();
-                new_managed_key.state = KeyState::Active;
-                new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
-                new_managed_key.lifecycle.next_rotation = self
-                    .calculate_next_rotation(&new_managed_key.key_type)
-                    .await;
-
-                keys.insert(new_key_id.clone(), new_managed_key);
+        // Update managed key record
+        {
+            let mut keys = self.managed_keys.write().await;
+            if let Some(key) = keys.get_mut(&managed_key.id) {
+                key.state = KeyState::Deprecated;
             }
 
-            // Schedule next rotation
-            if let Some(_next_rotation) = self
-                .managed_keys
-                .read()
-                .await
-                .get(key_id)
-                .and_then(|k| k.lifecycle.next_rotation)
-            {
-                if let Some(_scheduler) = &self.rotation_scheduler {
-                    // Would schedule rotation here - placeholder
-                }
-            }
+            // Create new key record for the rotated key
+            let mut new_managed_key = managed_key.clone();
+            new_managed_key.id = new_key_id.clone();
+            new_managed_key.state = KeyState::Active;
+            new_managed_key.lifecycle.last_rotation = Some(rotated_key.rotated_at);
+            new_managed_key.lifecycle.next_rotation = self
+                .calculate_next_rotation(&new_managed_key.key_type)
+                .await;
 
-            // Audit log
-            if let Some(_logger) = &self.audit_logger {
-                // Would log key rotation here - placeholder
-            }
+            keys.insert(new_key_id.clone(), new_managed_key);
+        }
 
-            Ok(rotated_key)
+        // Schedule next rotation
+        if let Some(_next_rotation) = self
+            .managed_keys
+            .read()
+            .await
+            .get(key_id)
+            .and_then(|k| k.lifecycle.next_rotation)
+        {
+            if let Some(_scheduler) = &self.rotation_scheduler {
+                // Would schedule rotation here - placeholder
+            }
+        }
+
+        // Audit log
+        if let Some(_logger) = &self.audit_logger {
+            // Would log key rotation here - placeholder
+        }
+
+        Ok(rotated_key)
     }
 
     /// Get default lifecycle policies
@@ -1290,7 +1327,6 @@ impl ManagedKeysEngine {
     //         },
     //     })
     // }
-
     /// Calculate next rotation time
     async fn calculate_next_rotation(
         &self,

@@ -6,7 +6,7 @@ pub struct Policy {
     pub role: String,
     pub path: String, // sekarang support glob/wildcard
     pub action: String,
-    pub effect: String, // "allow" atau "deny"
+    pub effect: String,               // "allow" atau "deny"
     pub entity_alias: Option<String>, // mapping user OIDC/LDAP/AppRole
     pub namespace: String,
 }
@@ -19,10 +19,10 @@ pub struct ControlGroup {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyRule {
-    pub effect: String, // "allow" atau "deny"
-    pub action: String, // misal "read", "write"
-    pub path: String,   // glob/wildcard path
+    pub effect: String,                       // "allow" atau "deny"
+    pub action: String,                       // misal "read", "write"
+    pub path: String,                         // glob/wildcard path
     pub condition: Option<serde_json::Value>, // ekspresi/logic opsional
-    pub control_group: Option<ControlGroup>, // multi-approval
-    pub mfa: Option<bool>, // butuh MFA?
-} 
+    pub control_group: Option<ControlGroup>,  // multi-approval
+    pub mfa: Option<bool>,                    // butuh MFA?
+}

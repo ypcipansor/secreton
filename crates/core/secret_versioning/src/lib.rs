@@ -1,7 +1,7 @@
 //! Public API for Secret Versioning & Audit Trail
 
-pub mod versioning;
 pub mod audit;
+pub mod versioning;
 
-pub use versioning::*;
 pub use audit::*;
+pub use versioning::*;

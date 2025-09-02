@@ -38,7 +38,7 @@ pub enum KeyError {
 }
 
 /// Key manager for cryptographic operations
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct KeyManager {
     store: Arc<RwLock<KeyStore>>,
     config: KeyManagerConfig,

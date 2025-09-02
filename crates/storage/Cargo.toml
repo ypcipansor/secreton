@@ -40,6 +40,10 @@ toml.workspace = true
 bincode.workspace = true
 ciborium = "0.2"
 
+# Google Cloud Storage Dependencies
+google-cloud-storage = "0.16"
+futures = "0.3"
+
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true

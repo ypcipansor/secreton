@@ -18,7 +18,7 @@ pub struct AuditLog {
     pub id: Uuid,
     pub timestamp: chrono::DateTime<Utc>,
     pub action: String,
-    pub actor: Option<Uuid>,
+    pub actor: Option<String>,
     pub resource_type: String,
     pub resource_id: String,
     pub status: AuditStatus,
@@ -80,18 +80,18 @@ impl AuditLogger {
     pub fn new(backends: Vec<Arc<dyn AuditBackend>>) -> Self {
         Self { backends }
     }
-    
+
     /// Log an audit event
     pub async fn log(&self, mut entry: AuditLog) -> Result<(), AuditError> {
         entry.id = Uuid::new_v4();
         entry.timestamp = Utc::now();
-        
+
         for backend in &self.backends {
             if let Err(e) = backend.log(entry.clone()).await {
                 tracing::error!("Failed to write to audit log: {}", e);
             }
         }
-        
+
         Ok(())
     }
 }

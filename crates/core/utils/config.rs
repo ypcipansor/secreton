@@ -1,6 +1,6 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -74,18 +74,17 @@ impl Config {
         Self {
             database_url: std::env::var("VAULT_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:vault.db".to_string()),
-            jwt_secret: std::env::var("VAULT_JWT_SECRET")
-                .unwrap_or_else(|_| "your-super-secret-jwt-key-change-this-in-production".to_string()),
+            jwt_secret: std::env::var("VAULT_JWT_SECRET").unwrap_or_else(|_| {
+                "your-super-secret-jwt-key-change-this-in-production".to_string()
+            }),
             encryption_key: std::env::var("VAULT_ENCRYPTION_KEY")
                 .unwrap_or_else(|_| "your-32-byte-encryption-key-here".to_string()),
-            server_host: std::env::var("VAULT_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            server_host: std::env::var("VAULT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             server_port: std::env::var("VAULT_PORT")
                 .unwrap_or_else(|_| "8080".to_string())
                 .parse()
                 .unwrap_or(8080),
-            log_level: std::env::var("VAULT_LOG_LEVEL")
-                .unwrap_or_else(|_| "info".to_string()),
+            log_level: std::env::var("VAULT_LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
             backend: None,
             is_leader: false,
             dynamic_db_url: None,
@@ -108,4 +107,4 @@ impl Config {
             audit_devices: None,
         }
     }
-} 
+}

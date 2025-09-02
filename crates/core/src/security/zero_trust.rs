@@ -607,6 +607,7 @@ impl ZeroTrustEngine {
     }
 
     /// Register a new entity in the zero trust system
+    #[allow(clippy::await_holding_lock)]
     pub async fn register_entity(&self, entity: ZeroTrustEntity) -> Result<(), ZeroTrustError> {
         let mut entities = self.entities.write().unwrap();
 

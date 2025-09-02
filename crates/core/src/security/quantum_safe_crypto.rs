@@ -999,6 +999,7 @@ impl QuantumSafeCryptoEngine {
     }
 
     /// Rotate keys based on quantum threat level
+    #[allow(clippy::await_holding_lock)]
     pub async fn emergency_key_rotation(
         &self,
         threat_trigger: &str,

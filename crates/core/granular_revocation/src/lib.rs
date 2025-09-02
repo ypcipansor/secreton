@@ -1,4 +1,4 @@
-use audit_log::{AuditLog, AuditEvent};
+use audit_log::{AuditEvent, AuditLog};
 impl RevocationRegistry {
     /// Utility: Log a revocation event to the audit log
     pub fn log_audit_event(
@@ -25,16 +25,16 @@ impl RevocationRegistry {
 // Granular Revocation Module - Maximum Security, Zero Trust, Tamper-Evident
 
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RevocationScope {
-    Secret(String),      // Single secret by name
-    Subtree(String),     // All secrets under a path/prefix
-    User(String),        // All secrets accessed by a user
-    Session(String),     // All secrets in a session
-    Type(String),        // All secrets of a type (e.g., API key)
+    Secret(String),  // Single secret by name
+    Subtree(String), // All secrets under a path/prefix
+    User(String),    // All secrets accessed by a user
+    Session(String), // All secrets in a session
+    Type(String),    // All secrets of a type (e.g., API key)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,10 +54,19 @@ pub struct RevocationRegistry {
 
 impl RevocationRegistry {
     pub fn new() -> Self {
-        Self { revoked: HashSet::new(), events: Vec::new() }
+        Self {
+            revoked: HashSet::new(),
+            events: Vec::new(),
+        }
     }
 
-    pub fn revoke(&mut self, scope: RevocationScope, reason: String, actor: String, audit_id: String) {
+    pub fn revoke(
+        &mut self,
+        scope: RevocationScope,
+        reason: String,
+        actor: String,
+        audit_id: String,
+    ) {
         self.revoked.insert(scope.clone());
         self.events.push(RevocationEvent {
             scope,

@@ -1,7 +1,5 @@
-use aws_sdk_iam::Client;
-use aws_config::meta::region::RegionProviderChain;
 use crate::utils::config::Config;
-use chrono::{Utc, Duration};
+use chrono::{Duration, Utc};
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug)]
@@ -12,17 +10,22 @@ pub struct AwsCredential {
     pub expires_at: String,
 }
 
-pub async fn generate_aws_credential(config: &Config, role: &str) -> Result<AwsCredential, String> {
+pub async fn generate_aws_credential(_config: &Config, role: &str) -> Result<AwsCredential, String> {
     // Dummy: generate random access_key/secret_key, expiry
     // (Bisa dikembangkan: create IAM user, attach policy, generate access key)
     let username = format!("{}_{}", role, Utc::now().timestamp());
     let access_key = format!("AKIA{}", username);
     let secret_key = format!("SK{}", username);
     let expires_at = (Utc::now() + Duration::minutes(30)).to_rfc3339();
-    Ok(AwsCredential { access_key, secret_key, username, expires_at })
+    Ok(AwsCredential {
+        access_key,
+        secret_key,
+        username,
+        expires_at,
+    })
 }
 
-pub async fn revoke_aws_credential(config: &Config, username: &str) {
+pub async fn revoke_aws_credential(_config: &Config, username: &str) {
     // Dummy: print, bisa dikembangkan ke AWS SDK
     println!("[REVOKE] AWS user {} revoked", username);
-} 
+}
