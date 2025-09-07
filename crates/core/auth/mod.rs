@@ -9,12 +9,15 @@ pub mod user;
 pub mod traits;
 
 // Authentication methods
+pub mod approle;
 pub mod ldap;
 
 pub use refresh_token::RefreshToken;
 pub use service::{AuthService, TokenPair};
 pub use user::User;
 pub use traits::{AuthMethod, AuthResult, Credentials, TokenInfo, AuthMethodRegistry};
+pub use approle::AppRoleAuth;
+pub use ldap::LdapAuth;
 
 use axum::{
     extract::State,

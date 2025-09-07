@@ -5,6 +5,38 @@ All notable changes to the Secreton Security Vault System by Cipherce will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2025-09-07
+
+### 🎉 **ENTERPRISE AUTHENTICATION EXPANSION - AppRole Integration**
+
+#### 🌟 **NEW CRITICAL ENTERPRISE FEATURES**
+- **🤖 AppRole Authentication**: ✅ **PRODUCTION READY**
+  - Machine-to-machine authentication for CI/CD and automation systems
+  - Role-based credential distribution with secure secret ID management
+  - Advanced IP restriction with comprehensive CIDR validation
+  - Secure argon2 password hashing for secret ID protection
+  - Configurable TTL and usage limits for enhanced security
+  - Complete audit logging for enterprise compliance
+
+#### 📊 **Implementation Progress Update**
+- **Authentication Methods**: **3/10 Complete** (30% Achievement!)
+  - ✅ JWT/Token, LDAP, **AppRole**
+- **Enterprise Readiness**: Critical machine-to-machine authentication completed
+- **Security Features**: Advanced IP validation and access control
+
+#### 🔧 **Technical Achievements**
+- **Complete Test Coverage**: 19/19 AppRole tests passing
+- **CIDR IP Validation**: Custom IPv4 subnet matching with ip_to_u32 conversion
+- **Secure Secret Management**: Comprehensive secret ID lifecycle with expiration
+- **Audit Integration**: Full audit trail for authentication events
+- **Type Safety**: Fixed async/sync compatibility and proper error handling
+
+#### 🛡️ **Security & Compliance Enhancements**
+- **Machine Authentication**: Secure CI/CD pipeline integration
+- **Access Control**: CIDR-based IP restrictions for enhanced security
+- **Credential Rotation**: Automatic secret ID rotation and management
+- **Enterprise Audit**: Complete audit trail for compliance requirements
+
 ## [2.5.0] - 2025-09-07
 
 ### 🎉 **MAJOR ENTERPRISE RELEASE - Critical AWS & LDAP Integration**
