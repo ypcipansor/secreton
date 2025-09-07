@@ -36,6 +36,14 @@ redis = { version = "0.24", features = ["aio", "tokio-comp"] }  # Redis async cl
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
 
+# AWS SDK
+aws-config = { workspace = true }
+aws-sdk-iam = { workspace = true }
+aws-sdk-sts = { workspace = true }
+
+# Threading and concurrency
+parking_lot = { workspace = true }
+
 # Security dependencies for advanced features
 rand = "0.8"
 aes-gcm = "0.10"
@@ -72,12 +80,9 @@ p256 = "0.13"
 k256 = "0.13"
 aes = "0.8"
 chacha20poly1305 = "0.10"
-parking_lot = "0.12"
 toml = "0.8"
 log = "0.4"
 libloading = "0.8"
-aws-config = "1.0"
-aws-sdk-iam = "1.0"
 # OAuth2 with Ed25519 (removing RSA vulnerability)
 oauth2 = "4.4"  # Alternative OAuth2 implementation without RSA
 # openidconnect = "3.5"  # Disabled temporarily due to RSA dependency

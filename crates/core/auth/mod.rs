@@ -5,10 +5,16 @@ pub mod refresh_token;
 pub mod service;
 #[path = "user.rs"]
 pub mod user;
+#[path = "traits.rs"]
+pub mod traits;
+
+// Authentication methods
+pub mod ldap;
 
 pub use refresh_token::RefreshToken;
 pub use service::{AuthService, TokenPair};
 pub use user::User;
+pub use traits::{AuthMethod, AuthResult, Credentials, TokenInfo, AuthMethodRegistry};
 
 use axum::{
     extract::State,

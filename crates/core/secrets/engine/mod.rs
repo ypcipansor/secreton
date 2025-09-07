@@ -3,6 +3,7 @@
 //! This module provides the core abstractions and implementations for different
 //! types of secrets engines.
 
+pub mod aws;
 mod database;
 mod kv;
 mod memory;
@@ -27,6 +28,7 @@ use tracing::error;
 // Import AppError from the re-export
 use crate::AppError;
 
+pub use aws::AwsEngine;
 pub use database::DatabaseEngine;
 pub use kv::KVSecretsEngine;
 pub use memory::MemorySecretsEngine;

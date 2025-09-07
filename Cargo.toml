@@ -104,6 +104,14 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression"] }
 prost = "0.12"
 
+# AWS SDK
+aws-config = "1.0"
+aws-sdk-iam = "1.0"
+aws-sdk-sts = "1.0"
+
+# Threading and concurrency
+parking_lot = "0.12"
+
 # Database - Using postgres crate for better dependency isolation and security
 # Replaced sqlx with postgres crate to avoid RSA vulnerabilities from sqlx-mysql
 postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
