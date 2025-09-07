@@ -1,9 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use deadpool_postgres::Pool;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use deadpool_postgres::Pool;
 use std::any::Any;
 use std::collections::HashMap;
 use tracing::info;
@@ -143,11 +143,11 @@ impl PostgresStorage {
         Self::create_tables(&pool).await?;
         Ok(Self { pool })
     }
-    
+
     pub async fn from_url(database_url: &str) -> Result<Self> {
         use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
         use tokio_postgres::{Config as PgConfig, NoTls};
-        
+
         let _pg_config = database_url.parse::<PgConfig>()?;
         let mgr_config = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
@@ -156,16 +156,17 @@ impl PostgresStorage {
             manager: Some(mgr_config),
             ..Default::default()
         };
-        
+
         let pool = config.create_pool(Some(Runtime::Tokio1), NoTls)?;
         Self::new(pool).await
     }
     async fn create_tables(pool: &Pool) -> Result<()> {
         let client = pool.get().await?;
-        
+
         // Create MFA tables
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS mfa_secrets (
                 id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -176,12 +177,13 @@ impl PostgresStorage {
                 UNIQUE(user_id, method)
             )
             "#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS user_mfa_settings (
                 user_id TEXT PRIMARY KEY,
                 is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -189,13 +191,14 @@ impl PostgresStorage {
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
             "#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
 
         // Create main tables
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS secrets (
                 id SERIAL PRIMARY KEY,
                 path TEXT NOT NULL,
@@ -206,12 +209,13 @@ impl PostgresStorage {
                 UNIQUE(path, version)
             )
             "#,
-            &[],
-        )
-        .await?;
-        
-        client.execute(
-            r#"
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
@@ -219,12 +223,13 @@ impl PostgresStorage {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
             "#,
-            &[],
-        )
-        .await?;
-        
-        client.execute(
-            r#"
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS vault_state (
                 id SERIAL PRIMARY KEY,
                 sealed BOOLEAN NOT NULL DEFAULT TRUE,
@@ -232,12 +237,13 @@ impl PostgresStorage {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
             "#,
-            &[],
-        )
-        .await?;
-        
-        client.execute(
-            r#"
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id SERIAL PRIMARY KEY,
                 user TEXT,
@@ -247,17 +253,18 @@ impl PostgresStorage {
                 timestamp TIMESTAMPTZ DEFAULT NOW()
             )
             "#,
-            &[],
-        )
-        .await?;
-        
+                &[],
+            )
+            .await?;
+
         Ok(())
     }
 
     pub async fn migrate_tokens(&self) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS tokens (
                 token TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -268,45 +275,63 @@ impl PostgresStorage {
                 created_at TIMESTAMP NOT NULL
             )
         "#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn insert_token(&self, t: &Token) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO tokens (token, username, expires_at, orphan, batch, locked, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
-            &[&t.token, &t.user, &t.expires_at, &t.orphan, &t.batch, &t.locked, &t.created_at],
-        )
-        .await?;
+                &[
+                    &t.token,
+                    &t.user,
+                    &t.expires_at,
+                    &t.orphan,
+                    &t.batch,
+                    &t.locked,
+                    &t.created_at,
+                ],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn update_token_expiry(&self, token: &str, expires_at: DateTime<Utc>) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             UPDATE tokens SET expires_at = $1 WHERE token = $2
         "#,
-            &[&expires_at, &token],
-        ).await?;
+                &[&expires_at, &token],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn delete_token(&self, token: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM tokens WHERE token = $1", &[&token]).await?;
+        client
+            .execute("DELETE FROM tokens WHERE token = $1", &[&token])
+            .await?;
         Ok(())
     }
 
     pub async fn lockout_user_tokens(&self, user: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE tokens SET locked = TRUE WHERE username = $1", &[&user]).await?;
+        client
+            .execute(
+                "UPDATE tokens SET locked = TRUE WHERE username = $1",
+                &[&user],
+            )
+            .await?;
         Ok(())
     }
 
@@ -342,14 +367,20 @@ impl PostgresStorage {
 
     pub async fn cleanup_expired_tokens(&self) -> Result<u64> {
         let client = self.pool.get().await?;
-        let res = client.execute("DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < NOW()", &[]).await?;
+        let res = client
+            .execute(
+                "DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < NOW()",
+                &[],
+            )
+            .await?;
         Ok(res)
     }
 
     pub async fn migrate_plugin_catalog(&self) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS plugin_catalog (
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
@@ -360,28 +391,41 @@ impl PostgresStorage {
                 PRIMARY KEY (name, version)
             )
         "#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn insert_plugin(&self, p: &PluginCatalogEntry) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO plugin_catalog (name, version, checksum, artifact_path, pinned, metadata)
             VALUES ($1, $2, $3, $4, $5, $6)
         "#,
-            &[&p.name, &p.version, &p.checksum, &p.artifact_path, &p.pinned, &p.metadata],
-        )
-        .await?;
+                &[
+                    &p.name,
+                    &p.version,
+                    &p.checksum,
+                    &p.artifact_path,
+                    &p.pinned,
+                    &p.metadata,
+                ],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn pin_plugin(&self, name: &str, version: &str, pinned: bool) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE plugin_catalog SET pinned = $1 WHERE name = $2 AND version = $3", &[&pinned, &name, &version]).await?;
+        client
+            .execute(
+                "UPDATE plugin_catalog SET pinned = $1 WHERE name = $2 AND version = $3",
+                &[&pinned, &name, &version],
+            )
+            .await?;
         Ok(())
     }
 
@@ -411,20 +455,32 @@ impl PostgresStorage {
         data: &serde_json::Value,
     ) -> Result<u32> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT MAX(version) FROM secrets WHERE path = $1", &[&path]).await?;
+        let rows = client
+            .query("SELECT MAX(version) FROM secrets WHERE path = $1", &[&path])
+            .await?;
         let version = if let Some(row) = rows.first() {
             let max_version: Option<i64> = row.get(0);
             max_version.unwrap_or(0) + 1
         } else {
             1
         };
-        client.execute("INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)", &[&path, &(version as i64), &data]).await?;
+        client
+            .execute(
+                "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
+                &[&path, &(version as i64), &data],
+            )
+            .await?;
         Ok(version as u32)
     }
 
     pub async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, serde_json::Value)>> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC", &[&path]).await?;
+        let rows = client
+            .query(
+                "SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC",
+                &[&path],
+            )
+            .await?;
         let mut result = Vec::new();
         for row in rows {
             let version: i64 = row.get(0);
@@ -436,10 +492,9 @@ impl PostgresStorage {
 
     pub async fn backup_data(&self) -> Result<serde_json::Value> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            "SELECT path, version, data FROM secrets",
-            &[],
-        ).await?;
+        let rows = client
+            .query("SELECT path, version, data FROM secrets", &[])
+            .await?;
 
         let secrets_json: Vec<_> = rows.iter().map(|row| serde_json::json!({"path": row.get::<_, String>("path"), "version": row.get::<_, i64>("version"), "data": row.get::<_, serde_json::Value>("data")})).collect();
         Ok(serde_json::json!({"secrets": secrets_json}))
@@ -461,8 +516,9 @@ impl PostgresStorage {
 
     pub async fn migrate_sentinel_policy_versions(&self) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS sentinel_policies (
                 id SERIAL PRIMARY KEY,
                 namespace TEXT NOT NULL,
@@ -475,9 +531,9 @@ impl PostgresStorage {
                 created_at TIMESTAMP NOT NULL
             )
         "#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         Ok(())
     }
 
@@ -506,18 +562,16 @@ impl PostgresStorage {
 
         Ok(rows
             .iter()
-            .map(|row| {
-                crate::models::sentinel::SentinelPolicy {
-                    id: row.get("id"),
-                    namespace: row.get("namespace"),
-                    name: row.get("name"),
-                    version: row.get::<_, i32>("version") as u32,
-                    policy_type: row.get("policy_type"),
-                    source_code: row.get("source_code"),
-                    egp: row.get("egp"),
-                    rgp: row.get("rgp"),
-                    created_at: row.get("created_at"),
-                }
+            .map(|row| crate::models::sentinel::SentinelPolicy {
+                id: row.get("id"),
+                namespace: row.get("namespace"),
+                name: row.get("name"),
+                version: row.get::<_, i32>("version") as u32,
+                policy_type: row.get("policy_type"),
+                source_code: row.get("source_code"),
+                egp: row.get("egp"),
+                rgp: row.get("rgp"),
+                created_at: row.get("created_at"),
             })
             .collect())
     }
@@ -529,16 +583,22 @@ impl PostgresStorage {
         version: u32,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
-            &[&namespace, &name, &version],
-        )
-        .await?;
+        client
+            .execute(
+                "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
+                &[&namespace, &name, &version],
+            )
+            .await?;
         Ok(())
     }
     pub async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM secrets WHERE path = $1 AND namespace = $2", &[&path, &namespace]).await?;
+        client
+            .execute(
+                "DELETE FROM secrets WHERE path = $1 AND namespace = $2",
+                &[&path, &namespace],
+            )
+            .await?;
         Ok(())
     }
 }
@@ -563,16 +623,17 @@ impl StorageBackend for PostgresStorage {
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO mfa_secrets (user_id, method, secret)
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, method) 
             DO UPDATE SET secret = $3, updated_at = NOW()
             "#,
-            &[&user_id, &method_str, &secret],
-        )
-        .await?;
+                &[&user_id, &method_str, &secret],
+            )
+            .await?;
         Ok(())
     }
 
@@ -589,19 +650,31 @@ impl StorageBackend for PostgresStorage {
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
 
-        let rows = client.query("SELECT secret FROM mfa_secrets WHERE user_id = $1 AND method = $2", &[&user_id, &method_str])
+        let rows = client
+            .query(
+                "SELECT secret FROM mfa_secrets WHERE user_id = $1 AND method = $2",
+                &[&user_id, &method_str],
+            )
             .await?;
 
-        rows.get(0).map(|r| r.get::<_, String>("secret"))
+        rows.get(0)
+            .map(|r| r.get::<_, String>("secret"))
             .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
     }
 
     async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT is_enabled FROM user_mfa_settings WHERE user_id = $1", &[&user_id])
+        let rows = client
+            .query(
+                "SELECT is_enabled FROM user_mfa_settings WHERE user_id = $1",
+                &[&user_id],
+            )
             .await?;
 
-        Ok(rows.get(0).map(|r| r.get::<_, bool>("is_enabled")).unwrap_or(false))
+        Ok(rows
+            .get(0)
+            .map(|r| r.get::<_, bool>("is_enabled"))
+            .unwrap_or(false))
     }
 
     async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
@@ -613,31 +686,33 @@ impl StorageBackend for PostgresStorage {
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO user_mfa_settings (user_id, is_enabled, method)
             VALUES ($1, TRUE, $2)
             ON CONFLICT (user_id) 
             DO UPDATE SET is_enabled = TRUE, method = $2, updated_at = NOW()
             "#,
-            &[&user_id, &method_str],
-        )
-        .await?;
+                &[&user_id, &method_str],
+            )
+            .await?;
 
         Ok(())
     }
 
     async fn disable_mfa(&self, user_id: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             UPDATE user_mfa_settings 
             SET is_enabled = FALSE, updated_at = NOW()
             WHERE user_id = $1
             "#,
-            &[&user_id],
-        )
-        .await?;
+                &[&user_id],
+            )
+            .await?;
 
         Ok(())
     }
@@ -655,14 +730,15 @@ impl StorageBackend for PostgresStorage {
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             DELETE FROM mfa_secrets 
             WHERE user_id = $1 AND method = $2
             "#,
-            &[&user_id, &method_str],
-        )
-        .await?;
+                &[&user_id, &method_str],
+            )
+            .await?;
 
         Ok(())
     }
@@ -672,11 +748,12 @@ impl StorageBackend for PostgresStorage {
         user_id: &str,
     ) -> Result<Vec<crate::auth::mfa::MfaMethod>> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            "SELECT method FROM user_mfa_settings WHERE user_id = $1 AND is_enabled = TRUE",
-            &[&user_id],
-        )
-        .await?;
+        let rows = client
+            .query(
+                "SELECT method FROM user_mfa_settings WHERE user_id = $1 AND is_enabled = TRUE",
+                &[&user_id],
+            )
+            .await?;
 
         let methods = rows
             .into_iter()
@@ -691,7 +768,11 @@ impl StorageBackend for PostgresStorage {
         user_id: &str,
     ) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = $1", &[&user_id])
+        let rows = client
+            .query(
+                "SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = $1",
+                &[&user_id],
+            )
             .await?;
 
         let mut status = std::collections::HashMap::new();
@@ -718,27 +799,29 @@ impl StorageBackend for PostgresStorage {
 
     async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()> {
         let client = self.pool.get().await?;
-        
+
         // Delete existing codes
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             DELETE FROM mfa_recovery_codes 
             WHERE user_id = $1
             "#,
-            &[&user_id],
-        )
-        .await?;
+                &[&user_id],
+            )
+            .await?;
 
         // Insert new codes
         for code in codes {
-            client.execute(
-                r#"
+            client
+                .execute(
+                    r#"
                 INSERT INTO mfa_recovery_codes (user_id, code, is_used)
                 VALUES ($1, $2, FALSE)
                 "#,
-                &[&user_id, code],
-            )
-            .await?;
+                    &[&user_id, code],
+                )
+                .await?;
         }
 
         Ok(())
@@ -746,7 +829,11 @@ impl StorageBackend for PostgresStorage {
 
     async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT code FROM mfa_recovery_codes WHERE user_id = $1 AND is_used = FALSE", &[&user_id])
+        let rows = client
+            .query(
+                "SELECT code FROM mfa_recovery_codes WHERE user_id = $1 AND is_used = FALSE",
+                &[&user_id],
+            )
             .await?;
 
         let codes = rows
@@ -758,35 +845,38 @@ impl StorageBackend for PostgresStorage {
 
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
         let client = self.pool.get().await?;
-        
+
         // Get the latest version
-        let row = client.query_opt(
-            "SELECT COALESCE(MAX(version), 0) as max_version FROM secrets WHERE path = $1",
-            &[&path],
-        )
-        .await?;
-        
+        let row = client
+            .query_opt(
+                "SELECT COALESCE(MAX(version), 0) as max_version FROM secrets WHERE path = $1",
+                &[&path],
+            )
+            .await?;
+
         let version: i32 = row.map_or(0, |r| r.get("max_version"));
         let new_version = version + 1;
-        
+
         let data_str = serde_json::to_string(data)?;
-        client.execute(
-            "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
-            &[&path, &new_version, &data_str],
-        )
-        .await?;
-        
+        client
+            .execute(
+                "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
+                &[&path, &new_version, &data_str],
+            )
+            .await?;
+
         Ok(new_version as u32)
     }
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>> {
         let client = self.pool.get().await?;
-        
-        let row = client.query_opt(
-            "SELECT data, version FROM secrets WHERE path = $1 ORDER BY version DESC LIMIT 1",
-            &[&path],
-        )
-        .await?;
-        
+
+        let row = client
+            .query_opt(
+                "SELECT data, version FROM secrets WHERE path = $1 ORDER BY version DESC LIMIT 1",
+                &[&path],
+            )
+            .await?;
+
         if let Some(row) = row {
             let data: String = row.get("data");
             let version: i32 = row.get("version");
@@ -798,13 +888,14 @@ impl StorageBackend for PostgresStorage {
     }
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>> {
         let client = self.pool.get().await?;
-        
-        let rows = client.query(
-            "SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC",
-            &[&path],
-        )
-        .await?;
-        
+
+        let rows = client
+            .query(
+                "SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC",
+                &[&path],
+            )
+            .await?;
+
         let mut result = Vec::new();
         for row in rows {
             let version: i32 = row.get("version");
@@ -817,18 +908,23 @@ impl StorageBackend for PostgresStorage {
     async fn create_user(&self, username: &str, password: &str) -> Result<()> {
         let client = self.pool.get().await?;
         let hash = Storage::hash_password(password)?;
-        client.execute(
-            "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
-            &[&username, &hash],
-        )
-        .await?;
+        client
+            .execute(
+                "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
+                &[&username, &hash],
+            )
+            .await?;
         Ok(())
     }
     async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT password_hash FROM users WHERE username = $1", &[&username])
+        let rows = client
+            .query(
+                "SELECT password_hash FROM users WHERE username = $1",
+                &[&username],
+            )
             .await?;
-            
+
         if let Some(row) = rows.get(0) {
             let hash: String = row.get("password_hash");
             Ok(Storage::verify_password(&hash, password)?)
@@ -838,39 +934,49 @@ impl StorageBackend for PostgresStorage {
     }
     async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        
+
         // Ensure tables exist
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS roles (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS roles (
                 id SERIAL PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL
             )"#,
-            &[],
-        ).await?;
-        
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS user_roles (
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS user_roles (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 role_id INTEGER NOT NULL,
                 UNIQUE(user_id, role_id)
             )"#,
-            &[],
-        ).await?;
-        
-        // Insert role if not exists
-        client.execute("INSERT INTO roles (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", &[&role])
+                &[],
+            )
             .await?;
-            
+
+        // Insert role if not exists
+        client
+            .execute(
+                "INSERT INTO roles (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
+                &[&role],
+            )
+            .await?;
+
         // Get user_id and role_id
-        let user_row = client.query_one("SELECT id FROM users WHERE username = $1", &[&username])
+        let user_row = client
+            .query_one("SELECT id FROM users WHERE username = $1", &[&username])
             .await?;
         let user_id: i32 = user_row.get("id");
-        
-        let role_row = client.query_one("SELECT id FROM roles WHERE name = $1", &[&role])
+
+        let role_row = client
+            .query_one("SELECT id FROM roles WHERE name = $1", &[&role])
             .await?;
         let role_id: i32 = role_row.get("id");
-        
+
         // Insert into user_roles
         client.execute("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id, role_id) DO NOTHING", &[&user_id, &role_id])
             .await?;
@@ -884,10 +990,11 @@ impl StorageBackend for PostgresStorage {
         effect: &str,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        
+
         // Ensure policies table exists
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS policies (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS policies (
                 id SERIAL PRIMARY KEY,
                 role TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -895,51 +1002,64 @@ impl StorageBackend for PostgresStorage {
                 effect TEXT NOT NULL,
                 entity_alias TEXT
             )"#,
-            &[],
-        ).await?;
-        
-        client.execute("INSERT INTO policies (role, path, action, effect) VALUES ($1, $2, $3, $4)", &[&role, &path, &action, &effect])
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "INSERT INTO policies (role, path, action, effect) VALUES ($1, $2, $3, $4)",
+                &[&role, &path, &action, &effect],
+            )
             .await?;
         Ok(())
     }
     async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let row = client.query_one(
-            r#"
+        let row = client
+            .query_one(
+                r#"
             SELECT COUNT(*) as count FROM user_roles ur
             JOIN users u ON ur.user_id = u.id
             JOIN roles r ON ur.role_id = r.id
             JOIN policies p ON p.role = r.name
             WHERE u.username = $1 AND p.path = $2 AND p.action = $3 AND p.effect = 'allow'
             "#,
-            &[&username, &path, &action],
-        )
-        .await?;
+                &[&username, &path, &action],
+            )
+            .await?;
         let count: i64 = row.get("count");
         Ok(count > 0)
     }
     async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<()> {
         let client = self.pool.get().await?;
-        
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS tokens (
+
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS tokens (
                 id SERIAL PRIMARY KEY,
                 user TEXT NOT NULL,
                 token TEXT NOT NULL,
                 expires_at TIMESTAMPTZ
             )"#,
-            &[],
-        ).await?;
-        
-        client.execute("INSERT INTO tokens (user, token, expires_at) VALUES ($1, $2, $3)", &[&user, &token, &expires_at])
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                "INSERT INTO tokens (user, token, expires_at) VALUES ($1, $2, $3)",
+                &[&user, &token, &expires_at],
+            )
             .await?;
         Ok(())
     }
     async fn is_token_valid(&self, token: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let row = client.query_opt("SELECT expires_at FROM tokens WHERE token = $1", &[&token])
+        let row = client
+            .query_opt("SELECT expires_at FROM tokens WHERE token = $1", &[&token])
             .await?;
-            
+
         if let Some(row) = row {
             let expires_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("expires_at").ok();
             if let Some(exp) = expires_at {
@@ -953,13 +1073,18 @@ impl StorageBackend for PostgresStorage {
     }
     async fn revoke_token(&self, token: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM tokens WHERE token = $1", &[&token])
+        client
+            .execute("DELETE FROM tokens WHERE token = $1", &[&token])
             .await?;
         Ok(())
     }
     async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("INSERT INTO audit_logs (user, action, path, status) VALUES ($1, $2, $3, $4)", &[&user, &action, &path, &status])
+        client
+            .execute(
+                "INSERT INTO audit_logs (user, action, path, status) VALUES ($1, $2, $3, $4)",
+                &[&user, &action, &path, &status],
+            )
             .await?;
         Ok(())
     }
@@ -970,10 +1095,11 @@ impl StorageBackend for PostgresStorage {
     ) -> Result<Vec<Policy>> {
         let client = self.pool.get().await?;
         let mut policies = Vec::new();
-        
+
         // Get policies based on user_id (via role)
-        let rows = client.query(
-            r#"
+        let rows = client
+            .query(
+                r#"
             SELECT p.id, r.name as role, p.path, p.action, p.effect, p.entity_alias
             FROM user_roles ur
             JOIN users u ON ur.user_id = u.id
@@ -981,9 +1107,9 @@ impl StorageBackend for PostgresStorage {
             JOIN policies p ON p.role = r.name
             WHERE u.username = $1
             "#,
-            &[&user_id],
-        )
-        .await?;
+                &[&user_id],
+            )
+            .await?;
         for row in rows {
             policies.push(Policy {
                 id: row.get("id"),
@@ -997,19 +1123,20 @@ impl StorageBackend for PostgresStorage {
                     .unwrap_or_else(|| "default".to_string()),
             });
         }
-        
+
         // If entity_alias exists, get matching policies
         if let Some(alias) = entity_alias {
-            let rows = client.query(
-                r#"
+            let rows = client
+                .query(
+                    r#"
                 SELECT id, role, path, action, effect, entity_alias
                 FROM policies
                 WHERE entity_alias = $1
                 "#,
-                &[&alias],
-            )
-            .await?;
-            
+                    &[&alias],
+                )
+                .await?;
+
             for row in rows {
                 policies.push(Policy {
                     id: row.get("id"),
@@ -1049,21 +1176,19 @@ impl StorageBackend for PostgresStorage {
             &[&namespace, &name]
         )
         .await?;
-        
+
         Ok(rows
             .into_iter()
-            .map(|row| {
-                crate::models::sentinel::SentinelPolicy {
-                    id: row.get("id"),
-                    namespace: row.get("namespace"),
-                    name: row.get("name"),
-                    version: row.get::<_, i32>("version") as u32,
-                    policy_type: row.get("policy_type"),
-                    source_code: row.get("source_code"),
-                    egp: row.get("egp"),
-                    rgp: row.get("rgp"),
-                    created_at: row.get("created_at"),
-                }
+            .map(|row| crate::models::sentinel::SentinelPolicy {
+                id: row.get("id"),
+                namespace: row.get("namespace"),
+                name: row.get("name"),
+                version: row.get::<_, i32>("version") as u32,
+                policy_type: row.get("policy_type"),
+                source_code: row.get("source_code"),
+                egp: row.get("egp"),
+                rgp: row.get("rgp"),
+                created_at: row.get("created_at"),
             })
             .collect())
     }
@@ -1075,17 +1200,22 @@ impl StorageBackend for PostgresStorage {
         version: u32,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
-            &[&namespace, &name, &version],
-        )
-        .await?;
+        client
+            .execute(
+                "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
+                &[&namespace, &name, &version],
+            )
+            .await?;
         Ok(())
     }
 
     async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM secrets WHERE path = $1 AND namespace = $2", &[&path, &namespace])
+        client
+            .execute(
+                "DELETE FROM secrets WHERE path = $1 AND namespace = $2",
+                &[&path, &namespace],
+            )
             .await?;
         Ok(())
     }
@@ -1144,7 +1274,12 @@ impl StorageBackend for Storage {
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
 
-        let rows = client.query("SELECT secret FROM mfa_secrets WHERE user_id = $1 AND method = $2", &[&user_id, &method_str]).await?;
+        let rows = client
+            .query(
+                "SELECT secret FROM mfa_secrets WHERE user_id = $1 AND method = $2",
+                &[&user_id, &method_str],
+            )
+            .await?;
 
         rows.get(0)
             .map(|r| r.get::<_, String>("secret"))
@@ -1153,9 +1288,17 @@ impl StorageBackend for Storage {
 
     async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT is_enabled FROM user_mfa_settings WHERE user_id = $1", &[&user_id]).await?;
+        let rows = client
+            .query(
+                "SELECT is_enabled FROM user_mfa_settings WHERE user_id = $1",
+                &[&user_id],
+            )
+            .await?;
 
-        Ok(rows.get(0).map(|r| r.get::<_, bool>("is_enabled")).unwrap_or(false))
+        Ok(rows
+            .get(0)
+            .map(|r| r.get::<_, bool>("is_enabled"))
+            .unwrap_or(false))
     }
 
     async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
@@ -1196,7 +1339,12 @@ impl StorageBackend for Storage {
             crate::auth::mfa::MfaMethod::Email => "email",
             crate::auth::mfa::MfaMethod::Recovery => "recovery",
         };
-        client.execute("DELETE FROM mfa_secrets WHERE user_id = $1 AND method = $2", &[&user_id, &method_str]).await?;
+        client
+            .execute(
+                "DELETE FROM mfa_secrets WHERE user_id = $1 AND method = $2",
+                &[&user_id, &method_str],
+            )
+            .await?;
         Ok(())
     }
     async fn get_user_mfa_methods(
@@ -1204,10 +1352,12 @@ impl StorageBackend for Storage {
         user_id: &str,
     ) -> Result<Vec<crate::auth::mfa::MfaMethod>> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            "SELECT method FROM user_mfa_settings WHERE user_id = $1 AND is_enabled = true",
-            &[&user_id],
-        ).await?;
+        let rows = client
+            .query(
+                "SELECT method FROM user_mfa_settings WHERE user_id = $1 AND is_enabled = true",
+                &[&user_id],
+            )
+            .await?;
 
         let mut methods = Vec::new();
         for row in &rows {
@@ -1229,7 +1379,12 @@ impl StorageBackend for Storage {
         user_id: &str,
     ) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = $1", &[&user_id]).await?;
+        let rows = client
+            .query(
+                "SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = $1",
+                &[&user_id],
+            )
+            .await?;
 
         let mut status = std::collections::HashMap::new();
         for row in &rows {
@@ -1245,7 +1400,7 @@ impl StorageBackend for Storage {
                 status.insert(mm, enabled);
             }
         }
-        
+
         // Ensure all methods are represented
         for method in [
             crate::auth::mfa::MfaMethod::Totp,
@@ -1259,8 +1414,13 @@ impl StorageBackend for Storage {
 
     async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM mfa_recovery_codes WHERE user_id = $1", &[&user_id]).await?;
-        
+        client
+            .execute(
+                "DELETE FROM mfa_recovery_codes WHERE user_id = $1",
+                &[&user_id],
+            )
+            .await?;
+
         for c in codes {
             client.execute("INSERT INTO mfa_recovery_codes (user_id, code, is_used) VALUES ($1, $2, false)", &[&user_id, c]).await?;
         }
@@ -1268,12 +1428,14 @@ impl StorageBackend for Storage {
     }
     async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>> {
         let client = self.pool.get().await?;
-        let rows = client.query("SELECT code FROM mfa_recovery_codes WHERE user_id = $1 AND is_used = false", &[&user_id]).await?;
+        let rows = client
+            .query(
+                "SELECT code FROM mfa_recovery_codes WHERE user_id = $1 AND is_used = false",
+                &[&user_id],
+            )
+            .await?;
 
-        Ok(rows
-            .iter()
-            .map(|r| r.get::<_, String>("code"))
-            .collect())
+        Ok(rows.iter().map(|r| r.get::<_, String>("code")).collect())
     }
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
         self.store_secret_versioned(path, data).await
@@ -1313,7 +1475,12 @@ impl StorageBackend for Storage {
     }
     async fn revoke_token(&self, token: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE tokens SET revoked = true WHERE token = $1", &[&token]).await?;
+        client
+            .execute(
+                "UPDATE tokens SET revoked = true WHERE token = $1",
+                &[&token],
+            )
+            .await?;
         Ok(())
     }
     async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<()> {
@@ -1327,16 +1494,18 @@ impl StorageBackend for Storage {
         let client = self.pool.get().await?;
         let mut policies = Vec::new();
         // Ambil policies berdasarkan user_id (via role)
-        let rows = client.query(
-            r#"
+        let rows = client
+            .query(
+                r#"
             SELECT p.id, r.name as role, p.path, p.action, p.effect, p.entity_alias
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             JOIN policies p ON p.role = r.name
             WHERE ur.user_id = (SELECT id FROM users WHERE username = $1)
             "#,
-            &[&user_id],
-        ).await?;
+                &[&user_id],
+            )
+            .await?;
         for row in rows {
             policies.push(Policy {
                 id: row.get("id"),
@@ -1352,15 +1521,17 @@ impl StorageBackend for Storage {
         }
         // Jika entity_alias ada, ambil policies yang entity_alias-nya cocok
         if let Some(alias) = entity_alias {
-            let rows = client.query(
-            r#"
+            let rows = client
+                .query(
+                    r#"
                 SELECT id, role, path, action, effect, entity_alias
                 FROM policies
                 WHERE entity_alias = $1
                 "#,
-            &[&alias],
-        ).await?;
-            
+                    &[&alias],
+                )
+                .await?;
+
             for row in &rows {
                 policies.push(Policy {
                     id: row.get("id"),
@@ -1403,7 +1574,12 @@ impl StorageBackend for Storage {
     }
     async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM secrets WHERE path = $1 AND namespace = $2", &[&path, &namespace]).await?;
+        client
+            .execute(
+                "DELETE FROM secrets WHERE path = $1 AND namespace = $2",
+                &[&path, &namespace],
+            )
+            .await?;
         Ok(())
     }
 }
@@ -1416,7 +1592,7 @@ impl Storage {
     pub async fn new(database_url: &str) -> Result<Self> {
         use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
         use tokio_postgres::{Config as PgConfig, NoTls};
-        
+
         let _pg_config = database_url.parse::<PgConfig>()?;
         let mgr_config = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
@@ -1425,7 +1601,7 @@ impl Storage {
             manager: Some(mgr_config),
             ..Default::default()
         };
-        
+
         let pool = config.create_pool(Some(Runtime::Tokio1), NoTls)?;
 
         // Create tables if they don't exist
@@ -1436,10 +1612,11 @@ impl Storage {
 
     async fn create_tables(pool: &Pool) -> Result<()> {
         let client = pool.get().await?;
-        
+
         // Create MFA tables first
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS mfa_secrets (
                 id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -1450,11 +1627,13 @@ impl Storage {
                 UNIQUE(user_id, method)
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS user_mfa_settings (
                 user_id TEXT PRIMARY KEY,
                 is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1462,12 +1641,14 @@ impl Storage {
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
         // Create main tables
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS secrets (
                 id SERIAL PRIMARY KEY,
                 path TEXT NOT NULL,
@@ -1478,11 +1659,13 @@ impl Storage {
                 UNIQUE(path, version)
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
@@ -1490,11 +1673,13 @@ impl Storage {
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS vault_state (
                 id INTEGER PRIMARY KEY,
                 sealed BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1502,11 +1687,13 @@ impl Storage {
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id SERIAL PRIMARY KEY,
                 user_name TEXT,
@@ -1516,32 +1703,38 @@ impl Storage {
                 timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS roles (
                 id SERIAL PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL
             )
             "#,
-            &[],
-        ).await?;
-        
-        client.execute(
-            r#"
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS user_roles (
                 user_id INTEGER,
                 role_id INTEGER,
                 PRIMARY KEY (user_id, role_id)
             )
             "#,
-            &[],
-        ).await?;
-        
-        client.execute(
-            r#"
+                &[],
+            )
+            .await?;
+
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS policies (
                 id SERIAL PRIMARY KEY,
                 role_id INTEGER,
@@ -1550,11 +1743,13 @@ impl Storage {
                 effect TEXT NOT NULL
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS tokens (
                 id SERIAL PRIMARY KEY,
                 user_name TEXT NOT NULL,
@@ -1564,11 +1759,13 @@ impl Storage {
                 revoked BOOLEAN DEFAULT FALSE
             )
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             CREATE TABLE IF NOT EXISTS leases (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -1578,18 +1775,21 @@ impl Storage {
                 expired_at TIMESTAMPTZ NOT NULL,
                 status TEXT NOT NULL
             )"#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
         // Insert default user admin:admin (hashed)
         let admin_hash = Self::hash_password("admin")?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO users (username, password_hash) VALUES ($1, $2) 
             ON CONFLICT (username) DO NOTHING
             "#,
-            &[&"admin", &admin_hash],
-        ).await?;
+                &[&"admin", &admin_hash],
+            )
+            .await?;
 
         Ok(())
     }
@@ -1623,10 +1823,12 @@ impl Storage {
 
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let row = client.query_opt(
-            r#"SELECT password_hash FROM users WHERE username = $1"#,
-            &[&username]
-        ).await?;
+        let row = client
+            .query_opt(
+                r#"SELECT password_hash FROM users WHERE username = $1"#,
+                &[&username],
+            )
+            .await?;
 
         match row {
             Some(row) => {
@@ -1641,16 +1843,18 @@ impl Storage {
         let client = self.pool.get().await?;
         let data_json = serde_json::to_string(data)?;
 
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO secrets (path, data, updated_at)
             VALUES ($1, $2, CURRENT_TIMESTAMP)
             ON CONFLICT (path) DO UPDATE SET 
                 data = EXCLUDED.data,
                 updated_at = EXCLUDED.updated_at
             "#,
-            &[&path, &data_json],
-        ).await?;
+                &[&path, &data_json],
+            )
+            .await?;
 
         info!("Stored secret at path: {}", path);
         Ok(())
@@ -1658,36 +1862,39 @@ impl Storage {
 
     pub async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
         let client = self.pool.get().await?;
-        
+
         // Get the latest version
-        let latest_version: Option<i32> = client.query_opt(
-            "SELECT MAX(version) FROM secrets WHERE path = $1",
-            &[&path]
-        ).await?
-        .map(|row| row.get(0));
-        
+        let latest_version: Option<i32> = client
+            .query_opt("SELECT MAX(version) FROM secrets WHERE path = $1", &[&path])
+            .await?
+            .map(|row| row.get(0));
+
         let new_version = latest_version.unwrap_or(0) + 1;
         let data_json = serde_json::to_string(data)?;
-        
-        client.execute(
-            r#"
+
+        client
+            .execute(
+                r#"
             INSERT INTO secrets (path, version, data, updated_at)
             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
             "#,
-            &[&path, &new_version, &data_json],
-        ).await?;
-        
+                &[&path, &new_version, &data_json],
+            )
+            .await?;
+
         Ok(new_version as u32)
     }
 
     pub async fn get_secret(&self, path: &str) -> Result<Option<Value>> {
         let client = self.pool.get().await?;
-        let row = client.query_opt(
-            r#"
+        let row = client
+            .query_opt(
+                r#"
             SELECT data FROM secrets WHERE path = $1
             "#,
-            &[&path],
-        ).await?;
+                &[&path],
+            )
+            .await?;
 
         match row {
             Some(row) => {
@@ -1701,12 +1908,14 @@ impl Storage {
 
     pub async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>> {
         let client = self.pool.get().await?;
-        let row = client.query_opt(
-            r#"
+        let row = client
+            .query_opt(
+                r#"
             SELECT data, version FROM secrets WHERE path = $1 ORDER BY version DESC LIMIT 1
             "#,
-            &[&path],
-        ).await?;
+                &[&path],
+            )
+            .await?;
 
         match row {
             Some(row) => {
@@ -1721,13 +1930,15 @@ impl Storage {
 
     pub async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            r#"
+        let rows = client
+            .query(
+                r#"
             SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC
             "#,
-            &[&path],
-        ).await?;
-        
+                &[&path],
+            )
+            .await?;
+
         let mut versions = Vec::new();
         for row in rows {
             let version: i32 = row.get("version");
@@ -1740,24 +1951,28 @@ impl Storage {
 
     pub async fn delete_secret(&self, path: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let result = client.execute(
-            r#"
+        let result = client
+            .execute(
+                r#"
             DELETE FROM secrets WHERE path = $1
             "#,
-            &[&path],
-        ).await?;
+                &[&path],
+            )
+            .await?;
 
         Ok(result > 0)
     }
 
     pub async fn list_secrets(&self, prefix: &str) -> Result<Vec<String>> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            r#"
+        let rows = client
+            .query(
+                r#"
             SELECT path FROM secrets WHERE path LIKE $1
             "#,
-            &[&format!("{}%", prefix)],
-        ).await?;
+                &[&format!("{}%", prefix)],
+            )
+            .await?;
 
         let paths: Vec<String> = rows
             .iter()
@@ -1769,28 +1984,32 @@ impl Storage {
 
     pub async fn set_vault_state(&self, sealed: bool, master_key: Option<&str>) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"
+        client
+            .execute(
+                r#"
             INSERT INTO vault_state (id, sealed, master_key)
             VALUES (1, $1, $2)
             ON CONFLICT (id) DO UPDATE SET 
                 sealed = EXCLUDED.sealed,
                 master_key = EXCLUDED.master_key
             "#,
-            &[&sealed, &master_key],
-        ).await?;
+                &[&sealed, &master_key],
+            )
+            .await?;
 
         Ok(())
     }
 
     pub async fn get_vault_state(&self) -> Result<(bool, Option<String>)> {
         let client = self.pool.get().await?;
-        let row = client.query_opt(
-            r#"
+        let row = client
+            .query_opt(
+                r#"
             SELECT sealed, master_key FROM vault_state WHERE id = 1
             "#,
-            &[],
-        ).await?;
+                &[],
+            )
+            .await?;
 
         match row {
             Some(row) => {
@@ -1819,25 +2038,22 @@ impl Storage {
 
     pub async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        let user_id: i64 = client.query_one(
-            "SELECT id FROM users WHERE username = $1",
-            &[&username],
-        )
-        .await?
-        .get("id");
-        
-        let role_id: i64 = client.query_one(
-            "SELECT id FROM roles WHERE name = $1",
-            &[&role],
-        )
-        .await?
-        .get("id");
-        
-        client.execute(
-            "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            &[&user_id, &role_id],
-        )
-        .await?;
+        let user_id: i64 = client
+            .query_one("SELECT id FROM users WHERE username = $1", &[&username])
+            .await?
+            .get("id");
+
+        let role_id: i64 = client
+            .query_one("SELECT id FROM roles WHERE name = $1", &[&role])
+            .await?
+            .get("id");
+
+        client
+            .execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                &[&user_id, &role_id],
+            )
+            .await?;
         Ok(())
     }
 
@@ -1849,41 +2065,39 @@ impl Storage {
         effect: &str,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        let role_id: i64 = client.query_one(
-            "SELECT id FROM roles WHERE name = $1",
-            &[&role],
-        )
-        .await?
-        .get("id");
-        
-        client.execute(
-            "INSERT INTO policies (role_id, path, action, effect) VALUES ($1, $2, $3, $4)",
-            &[&role_id, &path, &action, &effect],
-        )
-        .await?;
+        let role_id: i64 = client
+            .query_one("SELECT id FROM roles WHERE name = $1", &[&role])
+            .await?
+            .get("id");
+
+        client
+            .execute(
+                "INSERT INTO policies (role_id, path, action, effect) VALUES ($1, $2, $3, $4)",
+                &[&role_id, &path, &action, &effect],
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let user_id_row = client.query_opt(
-            "SELECT id FROM users WHERE username = $1",
-            &[&username],
-        )
-        .await?;
-        
+        let user_id_row = client
+            .query_opt("SELECT id FROM users WHERE username = $1", &[&username])
+            .await?;
+
         if let Some(row) = user_id_row {
             let user_id: i64 = row.get("id");
-            let rows = client.query(
-                r#"
+            let rows = client
+                .query(
+                    r#"
                 SELECT p.effect FROM user_roles ur
                 JOIN policies p ON ur.role_id = p.role_id
                 WHERE ur.user_id = $1 AND $2 LIKE p.path AND p.action = $3
                 "#,
-                &[&user_id, &path, &action],
-            )
-            .await?;
-            
+                    &[&user_id, &path, &action],
+                )
+                .await?;
+
             for row in rows {
                 let effect: String = row.get("effect");
                 if effect == "deny" {
@@ -1903,18 +2117,24 @@ impl Storage {
         expires_at: Option<&str>,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("INSERT INTO tokens (user, token, expires_at) VALUES ($1, $2, $3)", &[&user, &token, &expires_at])
+        client
+            .execute(
+                "INSERT INTO tokens (user, token, expires_at) VALUES ($1, $2, $3)",
+                &[&user, &token, &expires_at],
+            )
             .await?;
         Ok(())
     }
 
     pub async fn is_token_valid(&self, token: &str) -> Result<bool> {
         let client = self.pool.get().await?;
-        let rows = client.query(
-            "SELECT revoked, expires_at FROM tokens WHERE token = $1 ORDER BY id DESC LIMIT 1",
-            &[&token],
-        ).await?;
-        
+        let rows = client
+            .query(
+                "SELECT revoked, expires_at FROM tokens WHERE token = $1 ORDER BY id DESC LIMIT 1",
+                &[&token],
+            )
+            .await?;
+
         if let Some(row) = rows.first() {
             let revoked: bool = row.get("revoked");
             let expires_at: Option<String> = row.get("expires_at");
@@ -1941,7 +2161,8 @@ impl Storage {
         user: &str,
     ) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE tokens SET revoked = 1 WHERE token = $1", &[&token])
+        client
+            .execute("UPDATE tokens SET revoked = 1 WHERE token = $1", &[&token])
             .await?;
         self.log_audit(user, "revoke_token", token, "success")
             .await?;
@@ -1950,8 +2171,9 @@ impl Storage {
 
     pub async fn create_lease_db(&self, lease: &Lease) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS leases (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS leases (
                 id TEXT PRIMARY KEY,
                 user TEXT NOT NULL,
                 resource TEXT NOT NULL,
@@ -1960,9 +2182,10 @@ impl Storage {
                 expired_at TIMESTAMPTZ NOT NULL,
                 status TEXT NOT NULL
             )"#,
-            &[],
-        ).await?;
-        
+                &[],
+            )
+            .await?;
+
         client.execute(
             "INSERT INTO leases (id, user, resource, resource_type, issued_at, expired_at, status) VALUES ($1, $2, $3, $4, $5, $6, $7)",
             &[&lease.id, &lease.user, &lease.resource, &lease.resource_type, &lease.issued_at, &lease.expired_at, &lease.status]
@@ -1975,7 +2198,7 @@ impl Storage {
             "SELECT id, user, resource, resource_type, issued_at, expired_at, status FROM leases WHERE id = $1",
             &[&id],
         ).await?;
-        
+
         if let Some(row) = rows.get(0) {
             Ok(Some(Lease {
                 id: row.get("id"),
@@ -2002,7 +2225,8 @@ impl Storage {
     }
     pub async fn revoke_lease_db(&self, id: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE leases SET status = 'revoked' WHERE id = $1", &[&id])
+        client
+            .execute("UPDATE leases SET status = 'revoked' WHERE id = $1", &[&id])
             .await?;
         Ok(())
     }
@@ -2041,7 +2265,7 @@ impl Storage {
             String::from("SELECT user, action, path, status, timestamp FROM audit_logs WHERE 1=1");
         let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
         let mut idx = 1;
-        
+
         if let Some(ref u) = user {
             query.push_str(&format!(" AND user = ${}", idx));
             params.push(u);
@@ -2057,7 +2281,7 @@ impl Storage {
             params.push(s);
         }
         query.push_str(&format!(" ORDER BY timestamp DESC LIMIT {}", limit));
-        
+
         let rows = client.query(&query, &params).await?;
         let mut logs = Vec::new();
         for row in rows {
@@ -2078,34 +2302,46 @@ impl Storage {
 
     pub async fn create_namespace(&self, name: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS namespaces (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS namespaces (
                 name TEXT PRIMARY KEY
             )"#,
-            &[],
-        )
-        .await?;
-        client.execute("INSERT INTO namespaces (name) VALUES ($1) ON CONFLICT DO NOTHING", &[&name])
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO namespaces (name) VALUES ($1) ON CONFLICT DO NOTHING",
+                &[&name],
+            )
             .await?;
         Ok(())
     }
     pub async fn list_namespaces(&self) -> Result<Vec<String>> {
         let client = self.pool.get().await?;
-        client.execute("CREATE TABLE IF NOT EXISTS namespaces (name TEXT PRIMARY KEY)", &[]).await?;
+        client
+            .execute(
+                "CREATE TABLE IF NOT EXISTS namespaces (name TEXT PRIMARY KEY)",
+                &[],
+            )
+            .await?;
         let rows = client.query("SELECT name FROM namespaces", &[]).await?;
         Ok(rows.iter().map(|row| row.get("name")).collect())
     }
     pub async fn delete_namespace(&self, name: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM namespaces WHERE name = $1", &[&name])
+        client
+            .execute("DELETE FROM namespaces WHERE name = $1", &[&name])
             .await?;
         Ok(())
     }
 
     pub async fn create_ca(&self, ca: &PkiCa) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS pki_ca (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS pki_ca (
                 id SERIAL PRIMARY KEY,
                 namespace TEXT NOT NULL,
                 common_name TEXT NOT NULL,
@@ -2113,9 +2349,9 @@ impl Storage {
                 private_key TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL
             )"#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         client.execute("INSERT INTO pki_ca (namespace, common_name, pem, private_key, created_at) VALUES ($1, $2, $3, $4, $5)",
             &[&ca.namespace, &ca.common_name, &ca.pem, &ca.private_key, &ca.created_at])
             .await?;
@@ -2124,7 +2360,7 @@ impl Storage {
     pub async fn get_ca(&self, namespace: &str, common_name: &str) -> Result<Option<PkiCa>> {
         let client = self.pool.get().await?;
         let rows = client.query("SELECT id, namespace, common_name, pem, private_key, created_at FROM pki_ca WHERE namespace = $1 AND common_name = $2 ORDER BY created_at DESC LIMIT 1", &[&namespace, &common_name]).await?;
-        
+
         if let Some(row) = rows.get(0) {
             Ok(Some(PkiCa {
                 id: row.get("id"),
@@ -2140,8 +2376,9 @@ impl Storage {
     }
     pub async fn create_cert(&self, cert: &PkiCert) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS pki_cert (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS pki_cert (
                 id SERIAL PRIMARY KEY,
                 namespace TEXT NOT NULL,
                 common_name TEXT NOT NULL,
@@ -2153,9 +2390,9 @@ impl Storage {
                 expires_at TIMESTAMPTZ NOT NULL,
                 revoked BOOLEAN NOT NULL
             )"#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         client.execute("INSERT INTO pki_cert (namespace, common_name, pem, private_key, ca_id, serial, issued_at, expires_at, revoked) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             &[&cert.namespace, &cert.common_name, &cert.pem, &cert.private_key, &cert.ca_id, &cert.serial, &cert.issued_at, &cert.expires_at, &cert.revoked])
             .await?;
@@ -2164,7 +2401,7 @@ impl Storage {
     pub async fn get_cert(&self, namespace: &str, serial: &str) -> Result<Option<PkiCert>> {
         let client = self.pool.get().await?;
         let rows = client.query("SELECT id, namespace, common_name, pem, private_key, ca_id, serial, issued_at, expires_at, revoked FROM pki_cert WHERE namespace = $1 AND serial = $2", &[&namespace, &serial]).await?;
-        
+
         if let Some(row) = rows.get(0) {
             Ok(Some(PkiCert {
                 id: row.get("id"),
@@ -2177,6 +2414,27 @@ impl Storage {
                 issued_at: row.get("issued_at"),
                 expires_at: row.get("expires_at"),
                 revoked: row.get("revoked"),
+                // Default values for new fields
+                serial_number: row.get::<_, String>("serial").clone(),
+                certificate: row.get::<_, String>("pem").clone(),
+                issuing_ca: "".to_string(),
+                ca_chain: vec![],
+                private_key_type: "RSA".to_string(),
+                alt_names: vec![],
+                ip_sans: vec![],
+                uri_sans: vec![],
+                other_sans: vec![],
+                ou: vec![],
+                organization: vec![],
+                country: vec![],
+                locality: vec![],
+                province: vec![],
+                street_address: vec![],
+                postal_code: vec![],
+                not_before: row.get("issued_at"),
+                not_after: row.get("expires_at"),
+                revocation_time: None,
+                revocation_time_rfc3339: None,
             }))
         } else {
             Ok(None)
@@ -2184,15 +2442,20 @@ impl Storage {
     }
     pub async fn revoke_cert(&self, namespace: &str, serial: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("UPDATE pki_cert SET revoked = TRUE WHERE namespace = $1 AND serial = $2", &[&namespace, &serial])
+        client
+            .execute(
+                "UPDATE pki_cert SET revoked = TRUE WHERE namespace = $1 AND serial = $2",
+                &[&namespace, &serial],
+            )
             .await?;
         Ok(())
     }
 
     pub async fn create_sentinel_policy(&self, policy: &SentinelPolicy) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute(
-            r#"CREATE TABLE IF NOT EXISTS sentinel_policy (
+        client
+            .execute(
+                r#"CREATE TABLE IF NOT EXISTS sentinel_policy (
                 id SERIAL PRIMARY KEY,
                 namespace TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -2200,9 +2463,9 @@ impl Storage {
                 source_code TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL
             )"#,
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
         client.execute("INSERT INTO sentinel_policy (namespace, name, policy_type, source_code, created_at) VALUES ($1, $2, $3, $4, $5)",
             &[&policy.namespace, &policy.name, &policy.policy_type, &policy.source_code, &policy.created_at])
             .await?;
@@ -2211,7 +2474,7 @@ impl Storage {
     pub async fn list_sentinel_policies(&self, namespace: &str) -> Result<Vec<SentinelPolicy>> {
         let client = self.pool.get().await?;
         let rows = client.query("SELECT id, namespace, name, policy_type, source_code, created_at FROM sentinel_policy WHERE namespace = $1", &[&namespace]).await?;
-        
+
         Ok(rows
             .iter()
             .map(|row| SentinelPolicy {
@@ -2229,7 +2492,11 @@ impl Storage {
     }
     pub async fn delete_sentinel_policy(&self, namespace: &str, name: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client.execute("DELETE FROM sentinel_policy WHERE namespace = $1 AND name = $2", &[&namespace, &name])
+        client
+            .execute(
+                "DELETE FROM sentinel_policy WHERE namespace = $1 AND name = $2",
+                &[&namespace, &name],
+            )
             .await?;
         Ok(())
     }
@@ -2239,9 +2506,17 @@ impl Storage {
 #[async_trait]
 impl StorageEngine for Storage {
     async fn get(&self, key: &str) -> Result<Option<StorageEntry>, CoreError> {
-        let client = self.pool.get().await
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
-        let rows = client.query("SELECT value, metadata FROM kv_store WHERE key = $1", &[&key]).await
+        let rows = client
+            .query(
+                "SELECT value, metadata FROM kv_store WHERE key = $1",
+                &[&key],
+            )
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
 
         if let Some(row) = rows.get(0) {
@@ -2261,35 +2536,50 @@ impl StorageEngine for Storage {
     }
 
     async fn put(&self, entry: StorageEntry) -> Result<(), CoreError> {
-        let client = self.pool.get().await
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
         let metadata_json =
             serde_json::to_string(&entry.metadata).map_err(|e| CoreError::Serialization(e))?;
 
-        client.execute(
-            "INSERT INTO kv_store (key, value, metadata, created_at, updated_at) 
+        client
+            .execute(
+                "INSERT INTO kv_store (key, value, metadata, created_at, updated_at) 
              VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT (key) DO UPDATE SET 
              value = EXCLUDED.value, metadata = EXCLUDED.metadata, updated_at = NOW()",
-            &[&entry.key, &entry.value, &metadata_json],
-        ).await
-        .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
+                &[&entry.key, &entry.value, &metadata_json],
+            )
+            .await
+            .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
         Ok(())
     }
 
     async fn delete(&self, key: &str) -> Result<(), CoreError> {
-        let client = self.pool.get().await
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
-        client.execute("DELETE FROM kv_store WHERE key = $1", &[&key]).await
+        client
+            .execute("DELETE FROM kv_store WHERE key = $1", &[&key])
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
 
         Ok(())
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<String>, CoreError> {
-        let client = self.pool.get().await
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
         let pattern = format!("{}%", prefix);
-        let rows = client.query("SELECT key FROM kv_store WHERE key LIKE $1", &[&pattern]).await
+        let rows = client
+            .query("SELECT key FROM kv_store WHERE key LIKE $1", &[&pattern])
+            .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
 
         let keys: Vec<String> = rows

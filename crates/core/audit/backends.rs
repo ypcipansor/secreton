@@ -40,36 +40,40 @@ impl PostgreSqlBackend {
 #[async_trait]
 impl AuditBackend for PostgreSqlBackend {
     async fn log(&self, entry: AuditLog) -> Result<(), AuditError> {
-        let client = self.pool.get().await
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| AuditError::LoggingError(e.to_string()))?;
-        
+
         let metadata = serde_json::to_string(&entry.metadata)
             .map_err(|e| AuditError::LoggingError(e.to_string()))?;
 
-        client.execute(
-            "INSERT INTO audit_logs (
+        client
+            .execute(
+                "INSERT INTO audit_logs (
                 id, timestamp, action, actor_id, resource_type,
                 resource_id, status, ip, user_agent, metadata
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            &[
-                &entry.id,
-                &entry.timestamp,
-                &entry.action,
-                &entry.actor.as_ref().map(|id| id.to_string()),
-                &entry.resource_type,
-                &entry.resource_id,
-                &match entry.status {
-                    AuditStatus::Success => "success",
-                    AuditStatus::Failure => "failure", 
-                    AuditStatus::Denied => "denied",
-                },
-                &entry.ip,
-                &entry.user_agent,
-                &metadata,
-            ],
-        )
-        .await
-        .map_err(|e| AuditError::LoggingError(e.to_string()))?;
+                &[
+                    &entry.id,
+                    &entry.timestamp,
+                    &entry.action,
+                    &entry.actor.as_ref().map(|id| id.to_string()),
+                    &entry.resource_type,
+                    &entry.resource_id,
+                    &match entry.status {
+                        AuditStatus::Success => "success",
+                        AuditStatus::Failure => "failure",
+                        AuditStatus::Denied => "denied",
+                    },
+                    &entry.ip,
+                    &entry.user_agent,
+                    &metadata,
+                ],
+            )
+            .await
+            .map_err(|e| AuditError::LoggingError(e.to_string()))?;
 
         Ok(())
     }

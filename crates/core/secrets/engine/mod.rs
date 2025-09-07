@@ -3,9 +3,10 @@
 //! This module provides the core abstractions and implementations for different
 //! types of secrets engines.
 
+mod database;
 mod kv;
 mod memory;
-// mod pki; // TODO: Re-enable when crypto types are implemented
+mod pki; // Re-enabled for PKI certificate management
 mod ssh;
 mod totp;
 pub mod transit;
@@ -26,9 +27,10 @@ use tracing::error;
 // Import AppError from the re-export
 use crate::AppError;
 
+pub use database::DatabaseEngine;
 pub use kv::KVSecretsEngine;
 pub use memory::MemorySecretsEngine;
-// pub use pki::PkiSecretsEngine; // TODO: Re-enable when crypto types are implemented
+pub use pki::PkiSecretsEngine; // Re-enabled for PKI certificate management
 pub use ssh::SshSecretsEngine;
 pub use totp::TotpSecretsEngine;
 pub use transit::TransitSecretsEngine;
@@ -186,45 +188,51 @@ pub async fn init_default_engines(
 
     // Create storage instance using test utilities
     use std::collections::HashMap;
-    
+
     #[derive(Debug)]
     struct TestStorageEngine {
         data: Arc<tokio::sync::RwLock<HashMap<String, crate::storage::StorageEntry>>>,
     }
-    
+
     #[async_trait::async_trait]
     impl StorageEngine for TestStorageEngine {
-        async fn get(&self, key: &str) -> Result<Option<crate::storage::StorageEntry>, crate::error::CoreError> {
+        async fn get(
+            &self,
+            key: &str,
+        ) -> Result<Option<crate::storage::StorageEntry>, crate::error::CoreError> {
             let data = self.data.read().await;
             Ok(data.get(key).cloned())
         }
-        
-        async fn put(&self, entry: crate::storage::StorageEntry) -> Result<(), crate::error::CoreError> {
+
+        async fn put(
+            &self,
+            entry: crate::storage::StorageEntry,
+        ) -> Result<(), crate::error::CoreError> {
             let mut data = self.data.write().await;
             data.insert(entry.key.clone(), entry);
             Ok(())
         }
-        
+
         async fn delete(&self, key: &str) -> Result<(), crate::error::CoreError> {
             let mut data = self.data.write().await;
             data.remove(key);
             Ok(())
         }
-        
+
         async fn list(&self, prefix: &str) -> Result<Vec<String>, crate::error::CoreError> {
             let data = self.data.read().await;
-            Ok(data.keys()
+            Ok(data
+                .keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
                 .collect())
         }
     }
-    
-    let storage: Arc<RwLock<dyn StorageEngine + Send + Sync>> = Arc::new(RwLock::new(
-        TestStorageEngine {
+
+    let storage: Arc<RwLock<dyn StorageEngine + Send + Sync>> =
+        Arc::new(RwLock::new(TestStorageEngine {
             data: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        }
-    ));
+        }));
 
     // Initialize and register the KV secrets engine
     let kv_base_path = data_dir.as_ref().join("kv");

@@ -350,10 +350,7 @@ impl AdvancedSecurityOrchestrator {
         let mut report = SecurityHealthReport::default();
 
         // Use the actual health check methods from each engine
-        report.entropy_health = self
-            .entropy_engine
-            .get_health_metrics()
-            .await;
+        report.entropy_health = self.entropy_engine.get_health_metrics().await;
         report.hsm_health = self.hsm_manager.get_metrics(); // This returns HsmHealthStatus directly
         report.audit_health = self.audit_system.get_health_status().await;
         report.zero_trust_health = self.zero_trust_engine.get_health_metrics().await;
@@ -481,10 +478,7 @@ impl AdvancedSecurityOrchestrator {
     /// Collect metrics from all security modules
     pub async fn collect_metrics(&self) -> AggregatedSecurityMetrics {
         AggregatedSecurityMetrics {
-            entropy_metrics: self
-                .entropy_engine
-                .get_health_metrics()
-                .await,
+            entropy_metrics: self.entropy_engine.get_health_metrics().await,
             hsm_metrics: self.hsm_manager.get_metrics(),
             audit_metrics: self.audit_system.get_health_metrics().await,
             zero_trust_metrics: self.zero_trust_engine.get_health_metrics().await,

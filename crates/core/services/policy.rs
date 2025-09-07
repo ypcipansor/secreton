@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(feature = "wasm")]
-use wasmtime::{Engine, Func, Instance, Module, Store};
+use wasmtime::{Engine, Instance, Module, Store};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyRule {
@@ -70,7 +70,7 @@ impl PolicySet {
 
 pub async fn evaluate_with_sentinel(
     _sentinel_policies: &[SentinelPolicy],
-    _user: &str,
+    user: &str,
     _path: &str,
     _action: &str,
     _context: Option<&serde_json::Value>,
@@ -97,7 +97,7 @@ pub async fn evaluate_with_sentinel(
             let _ = log_audit_external(
                 &state.external_audit_devices,
                 "sentinel_eval",
-                _user,
+                user,
                 &pol.name,
                 "denied",
             )
@@ -139,7 +139,7 @@ pub async fn evaluate_with_sentinel(
                     let _ = log_audit_external(
                         &state.external_audit_devices,
                         "sentinel_eval",
-                        _user,
+                        user,
                         &pol.name,
                         "allowed",
                     )
@@ -151,7 +151,7 @@ pub async fn evaluate_with_sentinel(
                 let _ = log_audit_external(
                     &state.external_audit_devices,
                     "sentinel_eval",
-                    _user,
+                    user,
                     &pol.name,
                     if allowed { "allowed" } else { "denied" },
                 )

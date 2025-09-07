@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
+use deadpool_postgres::Pool;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Serialize;
-use deadpool_postgres::Pool;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct DynamicDbCredential {
@@ -78,7 +78,7 @@ pub async fn generate_db_credential_postgres(pool: &Pool, role: &str) -> Dynamic
         .map(char::from)
         .collect();
     let expires_at = (Utc::now() + Duration::minutes(30)).to_rfc3339();
-    
+
     // Create user in Postgres
     if let Ok(client) = pool.get().await {
         let _ = client
@@ -91,7 +91,7 @@ pub async fn generate_db_credential_postgres(pool: &Pool, role: &str) -> Dynamic
             )
             .await;
     }
-    
+
     DynamicDbCredential {
         username,
         password,

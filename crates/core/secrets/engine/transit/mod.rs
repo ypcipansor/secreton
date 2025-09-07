@@ -692,7 +692,7 @@ pub fn new_transit_engine(storage: Arc<dyn crate::storage::StorageEngine>) -> Bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{StorageEntry};
+    use crate::storage::StorageEntry;
     use crate::test_utils::create_test_storage;
 
     async fn setup_engine() -> TransitSecretsEngine {

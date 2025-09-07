@@ -470,7 +470,7 @@ pub struct SecureStorage {
     keys: RwLock<HashMap<String, KeyEntry>>,
     key_config: KeyConfig,
     key_store: Arc<dyn KeyStore>,
-    master_key: Vec<u8>,  // Add master key for rotation
+    master_key: Vec<u8>, // Add master key for rotation
 }
 
 impl SecureStorage {
@@ -856,25 +856,28 @@ impl SecureStorage {
             // Update keys in storage
             {
                 let mut keys = self.keys.write().await;
-                
+
                 // Set expiration on old key
                 if let Some(old_key) = keys.get_mut(&self.current_key_id) {
                     old_key.expires_at = Some(now + self.key_config.key_retention_period);
                 }
-                
+
                 // Add new key
                 keys.insert(new_key_id.clone(), new_key);
-                
+
                 // Persist to key store
                 self.key_store.save_keys(&keys).await?;
                 self.key_store.set_current_key_id(&new_key_id).await?;
             }
 
-            info!("Key rotation completed: {} -> {}", self.current_key_id, new_key_id);
-            
+            info!(
+                "Key rotation completed: {} -> {}",
+                self.current_key_id, new_key_id
+            );
+
             // NOTE: current_cipher and current_key_id cannot be updated in-place
             // They will be updated when SecureStorage is recreated from key store
-            
+
             // Simple cleanup
             self.cleanup_expired_keys().await?;
         }
@@ -1108,7 +1111,7 @@ mod tests {
         // Create a key config with very short rotation interval for testing
         let key_config = KeyConfig {
             rotation_interval: 1,    // 1 second for testing
-            key_retention_period: 5, // 5 seconds for testing  
+            key_retention_period: 5, // 5 seconds for testing
             min_key_lifetime: 0,     // No minimum for testing
             max_key_lifetime: 10,    // 10 seconds for testing
         };
@@ -1146,10 +1149,10 @@ mod tests {
         // Check if rotation happened by examining key store directly
         let keys = key_store.load_keys().await.unwrap();
         let current_key_id_from_store = key_store.get_current_key_id().await.unwrap().unwrap();
-        
+
         println!("Keys in store: {}", keys.len());
         println!("Current key from store: {}", current_key_id_from_store);
-        
+
         // Both encrypted values should still be decryptable
         let decrypted1: TestData = shared_storage.decrypt_value(&encrypted).await.unwrap();
         let decrypted2: TestData = shared_storage.decrypt_value(&encrypted2).await.unwrap();
@@ -1177,13 +1180,13 @@ mod tests {
             .unwrap();
 
         let plaintext = b"hello, world!";
-        
+
         // Debug: print current key info
         println!("Current key ID: {}", secure_storage.current_key_id);
-        
+
         let encrypted = secure_storage.encrypt(plaintext).await.unwrap();
         println!("Encrypted: {}", encrypted);
-        
+
         // Try decrypt immediately after encrypt to ensure key is available
         let decrypted = secure_storage.decrypt(&encrypted).await.unwrap();
 
@@ -1209,7 +1212,7 @@ mod tests {
 
         let encrypted = secure_storage.encrypt_value(&test_data).await.unwrap();
         println!("Encrypted value: {}", encrypted);
-        
+
         let decrypted: TestData = secure_storage.decrypt_value(&encrypted).await.unwrap();
 
         assert_eq!(test_data, decrypted);
@@ -1235,10 +1238,10 @@ mod tests {
     async fn debug_just_create_storage() {
         println!("Creating key store...");
         let key_store = Arc::new(MemoryKeyStore::new());
-        
+
         println!("Creating key config...");
         let key_config = KeyConfig {
-            rotation_interval: 60,    // 60 seconds - no rotation
+            rotation_interval: 60, // 60 seconds - no rotation
             key_retention_period: 3600,
             min_key_lifetime: 0,
             max_key_lifetime: 7200,
@@ -1272,7 +1275,7 @@ mod tests {
         println!("Creating setup for rotation test...");
         let key_store = Arc::new(MemoryKeyStore::new());
         let key_config = KeyConfig {
-            rotation_interval: 1,    // 1 second - should rotate
+            rotation_interval: 1, // 1 second - should rotate
             key_retention_period: 5,
             min_key_lifetime: 0,
             max_key_lifetime: 10,
@@ -1299,10 +1302,10 @@ mod tests {
         println!("Testing decryption...");
         let dec1 = storage.decrypt(&encrypted1).await.unwrap();
         let dec2 = storage.decrypt(&encrypted2).await.unwrap();
-        
+
         assert_eq!(dec1, b"test1");
         assert_eq!(dec2, b"test2");
-        
+
         println!("Both decryptions successful");
         println!("Rotation test completed successfully!");
     }

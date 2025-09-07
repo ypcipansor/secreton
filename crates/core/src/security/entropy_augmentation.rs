@@ -578,9 +578,11 @@ impl EntropyAugmentationEngine {
                 // Find the matching source and collect entropy without holding lock across await
                 let matching_source_idx = {
                     let sources_guard = self.sources.read().unwrap();
-                    sources_guard.iter().position(|source| source.get_config().name == source_config.name)
+                    sources_guard
+                        .iter()
+                        .position(|source| source.get_config().name == source_config.name)
                 };
-                
+
                 if let Some(idx) = matching_source_idx {
                     // We need to be careful here - we can't hold the lock across await
                     // So we'll need to use Arc<dyn EntropySource> or similar approach

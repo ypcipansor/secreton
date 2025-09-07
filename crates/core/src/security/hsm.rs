@@ -453,10 +453,10 @@ impl HsmManager {
         } else {
             return Err(HsmError::NoHealthyHsm);
         }
-        
+
         // Release the lock before proceeding
         drop(providers);
-        
+
         // Store the mapping
         {
             let mut seal_keys = self.seal_keys.lock().unwrap();

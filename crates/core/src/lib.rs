@@ -16,7 +16,6 @@ pub mod audit;
 pub mod auth;
 #[path = "../config.rs"]
 pub mod config;
-#[path = "../crypto.rs"]
 pub mod crypto;
 pub mod error;
 #[path = "../models/mod.rs"]

@@ -259,7 +259,9 @@ impl AuthManager {
     }
 
     pub fn extract_token_from_header(auth_header: &str) -> Option<String> {
-        auth_header.strip_prefix("Bearer ").map(|token| token.to_string())
+        auth_header
+            .strip_prefix("Bearer ")
+            .map(|token| token.to_string())
     }
 }
 

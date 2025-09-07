@@ -8,40 +8,48 @@ use serde_json::json;
 async fn create_test_storage() -> std::sync::Arc<dyn secreton_core::storage::StorageEngine> {
     use std::collections::HashMap;
     use std::sync::Arc;
-    
+
     #[derive(Debug)]
     struct TestStorage {
         data: Arc<tokio::sync::RwLock<HashMap<String, secreton_core::storage::StorageEntry>>>,
     }
-    
+
     #[async_trait::async_trait]
     impl secreton_core::storage::StorageEngine for TestStorage {
-        async fn get(&self, key: &str) -> Result<Option<secreton_core::storage::StorageEntry>, secreton_core::error::CoreError> {
+        async fn get(
+            &self,
+            key: &str,
+        ) -> Result<Option<secreton_core::storage::StorageEntry>, secreton_core::error::CoreError>
+        {
             let data = self.data.read().await;
             Ok(data.get(key).cloned())
         }
-        
-        async fn put(&self, entry: secreton_core::storage::StorageEntry) -> Result<(), secreton_core::error::CoreError> {
+
+        async fn put(
+            &self,
+            entry: secreton_core::storage::StorageEntry,
+        ) -> Result<(), secreton_core::error::CoreError> {
             let mut data = self.data.write().await;
             data.insert(entry.key.clone(), entry);
             Ok(())
         }
-        
+
         async fn delete(&self, key: &str) -> Result<(), secreton_core::error::CoreError> {
             let mut data = self.data.write().await;
             data.remove(key);
             Ok(())
         }
-        
+
         async fn list(&self, prefix: &str) -> Result<Vec<String>, secreton_core::error::CoreError> {
             let data = self.data.read().await;
-            Ok(data.keys()
+            Ok(data
+                .keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
                 .collect())
         }
     }
-    
+
     Arc::new(TestStorage {
         data: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     })

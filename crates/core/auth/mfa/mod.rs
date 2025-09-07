@@ -13,7 +13,6 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use totp_rs::{Algorithm, TOTP};
 
@@ -166,11 +165,10 @@ where
             .storage
             .get_mfa_secret(user_id, MfaMethod::Totp)
             .await?;
-        let secret_bytes =
-            decrypt_data(&encrypted_secret).map_err(|e| MfaError::Crypto(e.to_string()))?;
+        let secret_bytes = decrypt_data(&encrypted_secret, "default-key")
+            .map_err(|e| MfaError::Crypto(e.to_string()))?;
 
-        let secret_base32 =
-            String::from_utf8(secret_bytes).map_err(|_| MfaError::VerificationFailed)?;
+        let secret_base32 = secret_bytes;
 
         // Verify the code
         let totp =
@@ -296,7 +294,7 @@ where
     ) -> MfaResult<()> {
         // Encrypt the secret before storing
         let encrypted_secret =
-            encrypt_data(secret.as_bytes()).map_err(|e| MfaError::Crypto(e.to_string()))?;
+            encrypt_data(secret, "default-key").map_err(|e| MfaError::Crypto(e.to_string()))?;
 
         // Store the encrypted secret
         self.storage
@@ -328,11 +326,12 @@ where
 
     // --- Rate limiting helpers ---
 
+    #[allow(unused_variables)]
     async fn check_rate_limit(&self, user_id: &str) -> MfaResult<()> {
         #[cfg(not(feature = "distributed"))]
         {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
 
@@ -353,11 +352,12 @@ where
         Ok(())
     }
 
+    #[allow(unused_variables)]
     async fn increment_attempt(&self, user_id: &str) -> MfaResult<()> {
         #[cfg(not(feature = "distributed"))]
         {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
 
@@ -376,6 +376,7 @@ where
         Ok(())
     }
 
+    #[allow(unused_variables)]
     async fn reset_attempts(&self, user_id: &str) {
         #[cfg(not(feature = "distributed"))]
         {

@@ -1,13 +1,12 @@
+use crate::crypto::{Certificate, PrivateKey, SignatureAlgorithm};
+use crate::models::lease::Lease;
+use crate::models::pki::PkiCert;
+use crate::storage::{Storage, StorageEngine};
+use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{Utc, Duration};
-use serde::{Deserialize, Serialize};
-use async_trait::async_trait;
-use crate::storage::Storage;
-use crate::models::lease::Lease;
-// use crate::crypto::{Certificate, PrivateKey, PublicKey, SignatureAlgorithm}; // TODO: Implement crypto types
-use crate::models::pki::{PkiCa, PkiCert};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PkiConfig {
@@ -132,14 +131,18 @@ pub struct PkiSecretsEngine {
 }
 
 impl PkiSecretsEngine {
-    pub async fn new(config: PkiConfig, storage: Arc<Storage>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(
+        config: PkiConfig,
+        storage: Arc<Storage>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // TODO: Parse PEM certificates properly
         let ca_private_key = config.ca_private_key.clone(); // TODO: Use PrivateKey::from_pem
         let ca_certificate = config.ca_certificate.clone(); // TODO: Use Certificate::from_pem
 
         // Load existing certificates from storage
         let issued_certificates = Self::load_certificates_from_storage(&storage, "issued").await?;
-        let revoked_certificates = Self::load_certificates_from_storage(&storage, "revoked").await?;
+        let revoked_certificates =
+            Self::load_certificates_from_storage(&storage, "revoked").await?;
 
         Ok(Self {
             config,
@@ -198,15 +201,22 @@ impl PkiSecretsEngine {
         // Create PKI certificate record
         let serial_number = certificate.serial_number()?;
         let pki_cert = PkiCert {
+            id: 0, // Will be set by database
+            namespace: "default".to_string(),
+            common_name: request.common_name.clone(),
+            pem: certificate.to_pem()?,
+            private_key: private_key.to_pem()?,
+            ca_id: 1, // Default CA ID
+            serial: serial_number.clone(),
+            issued_at: Utc::now(),
+            expires_at: Utc::now()
+                + Duration::seconds(request.ttl.unwrap_or(self.config.default_ttl)),
+            revoked: false,
             serial_number: serial_number.clone(),
             certificate: certificate.to_pem()?,
-            revocation_time: None,
-            revocation_time_rfc3339: None,
-            issuing_ca: self.ca_certificate.to_pem()?,
-            ca_chain: vec![self.ca_certificate.to_pem()?],
-            private_key: Some(private_key.to_pem()?),
+            issuing_ca: self.ca_certificate.clone(),
+            ca_chain: vec![self.ca_certificate.clone()],
             private_key_type: request.key_type.clone(),
-            common_name: request.common_name.clone(),
             alt_names: request.alt_names.clone(),
             ip_sans: request.ip_sans.clone(),
             uri_sans: request.uri_sans.clone(),
@@ -219,7 +229,10 @@ impl PkiSecretsEngine {
             street_address: request.street_address.clone(),
             postal_code: request.postal_code.clone(),
             not_before: Utc::now(),
-            not_after: Utc::now() + Duration::seconds(request.ttl.unwrap_or(self.config.default_ttl)),
+            not_after: Utc::now()
+                + Duration::seconds(request.ttl.unwrap_or(self.config.default_ttl)),
+            revocation_time: None,
+            revocation_time_rfc3339: None,
         };
 
         // Store certificate
@@ -230,23 +243,25 @@ impl PkiSecretsEngine {
         self.save_certificates_to_storage("issued", &{
             let issued = self.issued_certificates.read().await;
             issued.clone()
-        }).await?;
+        })
+        .await?;
 
         // Create lease
         let lease_id = format!("pki/cert/{}", serial_number);
-        let lease = crate::services::lease::create_lease(
-            &self.storage,
-            "pki-engine",
-            "certificate",
-            &serial_number,
-            lease_duration,
-        ).await?;
+        // TODO: Implement lease creation service
+        // let lease = crate::services::lease::create_lease(
+        //     &self.storage,
+        //     "pki-engine",
+        //     "certificate",
+        //     &serial_number,
+        //     lease_duration,
+        // ).await?;
 
         Ok(CertificateResponse {
             certificate: pki_cert.certificate.clone(),
             issuing_ca: pki_cert.issuing_ca.clone(),
             ca_chain: pki_cert.ca_chain.clone(),
-            private_key: pki_cert.private_key.clone(),
+            private_key: Some(pki_cert.private_key.clone()),
             private_key_type: pki_cert.private_key_type.clone(),
             serial_number,
             lease_id,
@@ -288,11 +303,13 @@ impl PkiSecretsEngine {
             self.save_certificates_to_storage("issued", &{
                 let issued = self.issued_certificates.read().await;
                 issued.clone()
-            }).await?;
+            })
+            .await?;
             self.save_certificates_to_storage("revoked", &{
                 let revoked = self.revoked_certificates.read().await;
                 revoked.clone()
-            }).await?;
+            })
+            .await?;
 
             Ok(RevocationResponse {
                 revocation_time: revocation_time.timestamp(),
@@ -340,7 +357,9 @@ impl PkiSecretsEngine {
         Err(format!("Certificate with serial number {} not found", serial_number).into())
     }
 
-    pub async fn list_certificates(&self) -> Result<CertificateListResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn list_certificates(
+        &self,
+    ) -> Result<CertificateListResponse, Box<dyn std::error::Error + Send + Sync>> {
         let mut keys = Vec::new();
         let mut key_info = HashMap::new();
 
@@ -349,14 +368,17 @@ impl PkiSecretsEngine {
             let issued = self.issued_certificates.read().await;
             for (serial, cert) in issued.iter() {
                 keys.push(serial.clone());
-                key_info.insert(serial.clone(), CertificateInfo {
-                    serial_number: cert.serial_number.clone(),
-                    certificate: cert.certificate.clone(),
-                    issuing_ca: cert.issuing_ca.clone(),
-                    ca_chain: cert.ca_chain.clone(),
-                    revocation_time: None,
-                    revocation_time_rfc3339: None,
-                });
+                key_info.insert(
+                    serial.clone(),
+                    CertificateInfo {
+                        serial_number: cert.serial_number.clone(),
+                        certificate: cert.certificate.clone(),
+                        issuing_ca: cert.issuing_ca.clone(),
+                        ca_chain: cert.ca_chain.clone(),
+                        revocation_time: None,
+                        revocation_time_rfc3339: None,
+                    },
+                );
             }
         }
 
@@ -367,25 +389,30 @@ impl PkiSecretsEngine {
                 if !keys.contains(serial) {
                     keys.push(serial.clone());
                 }
-                key_info.insert(serial.clone(), CertificateInfo {
-                    serial_number: cert.serial_number.clone(),
-                    certificate: cert.certificate.clone(),
-                    issuing_ca: cert.issuing_ca.clone(),
-                    ca_chain: cert.ca_chain.clone(),
-                    revocation_time: cert.revocation_time,
-                    revocation_time_rfc3339: cert.revocation_time_rfc3339.clone(),
-                });
+                key_info.insert(
+                    serial.clone(),
+                    CertificateInfo {
+                        serial_number: cert.serial_number.clone(),
+                        certificate: cert.certificate.clone(),
+                        issuing_ca: cert.issuing_ca.clone(),
+                        ca_chain: cert.ca_chain.clone(),
+                        revocation_time: cert.revocation_time,
+                        revocation_time_rfc3339: cert.revocation_time_rfc3339.clone(),
+                    },
+                );
             }
         }
 
         Ok(CertificateListResponse { keys, key_info })
     }
 
-    pub async fn get_ca_certificate(&self) -> Result<CaResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_ca_certificate(
+        &self,
+    ) -> Result<CaResponse, Box<dyn std::error::Error + Send + Sync>> {
         Ok(CaResponse {
-            certificate: self.ca_certificate.to_pem()?,
-            issuing_ca: self.ca_certificate.to_pem()?,
-            ca_chain: vec![self.ca_certificate.to_pem()?],
+            certificate: self.ca_certificate.clone(),
+            issuing_ca: self.ca_certificate.clone(),
+            ca_chain: vec![self.ca_certificate.clone()],
         })
     }
 
@@ -450,7 +477,11 @@ impl PkiSecretsEngine {
         // Validate TTL
         let ttl = request.ttl.unwrap_or(self.config.default_ttl);
         if ttl > self.config.max_ttl {
-            return Err(format!("TTL {} exceeds maximum allowed TTL {}", ttl, self.config.max_ttl).into());
+            return Err(format!(
+                "TTL {} exceeds maximum allowed TTL {}",
+                ttl, self.config.max_ttl
+            )
+            .into());
         }
 
         // Validate domains if hostname enforcement is enabled
@@ -464,7 +495,10 @@ impl PkiSecretsEngine {
         Ok(())
     }
 
-    fn validate_hostname(&self, hostname: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn validate_hostname(
+        &self,
+        hostname: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Check if hostname is in allowed domains
         if !self.config.allowed_domains.is_empty() {
             let mut allowed = false;
@@ -473,7 +507,9 @@ impl PkiSecretsEngine {
                     allowed = true;
                     break;
                 }
-                if self.config.allow_subdomains && hostname.ends_with(&format!(".{}", allowed_domain)) {
+                if self.config.allow_subdomains
+                    && hostname.ends_with(&format!(".{}", allowed_domain))
+                {
                     allowed = true;
                     break;
                 }
@@ -514,17 +550,18 @@ impl PkiSecretsEngine {
         cert_builder.subject_common_name(&request.common_name)?;
 
         if !request.organization.is_empty() {
-            cert_builder.subject_organization(&request.organization[0])?;
+            cert_builder.subject_organization(&request.organization)?;
         }
 
         if !request.country.is_empty() {
-            cert_builder.subject_country(&request.country[0])?;
+            cert_builder.subject_country(&request.country)?;
         }
 
         // Set validity period
         let not_before = Utc::now();
-        let not_after = not_before + Duration::seconds(request.ttl.unwrap_or(self.config.default_ttl));
-        cert_builder.validity_period(not_before, not_after)?;
+        let not_after =
+            not_before + Duration::seconds(request.ttl.unwrap_or(self.config.default_ttl));
+        cert_builder.validity_period(&not_before.to_rfc3339(), &not_after.to_rfc3339())?;
 
         // Set public key
         cert_builder.public_key(&public_key)?;
@@ -555,7 +592,7 @@ impl PkiSecretsEngine {
 
     async fn generate_crl(
         &self,
-        revoked_serials: Vec<String>,
+        _revoked_serials: Vec<String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Simplified CRL generation
         // In a full implementation, this would generate a proper CRL
@@ -579,7 +616,8 @@ pub async fn create_lease_for_pki_certificate(
         "certificate",
         serial_number,
         ttl_seconds,
-    ).await?;
+    )
+    .await?;
 
     Ok(lease)
 }
