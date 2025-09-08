@@ -53,19 +53,25 @@ impl LdapAuth {
 impl AuthMethod for LdapAuth {
     /// Authenticate user against LDAP
     async fn authenticate(&self, credentials: &Credentials) -> Result<AuthResult> {
-        let auth_request = match serde_json::from_value::<LdapAuthRequest>(credentials.data.clone()) {
-            Ok(req) => req,
-            Err(e) => {
-                warn!("Invalid LDAP authentication request format: {}", e);
+        let (username, password) = match credentials {
+            Credentials::Ldap { username, password } => (username, password),
+            _ => {
+                warn!("Invalid credential type for LDAP authentication");
                 return Ok(AuthResult {
                     success: false,
                     token: None,
                     user_info: None,
                     policies: vec![],
                     metadata: HashMap::new(),
-                    error: Some("Invalid request format".to_string()),
+                    error: Some("Invalid credential type".to_string()),
                 });
             }
+        };
+        
+        let auth_request = LdapAuthRequest {
+            username: username.clone(),
+            password: password.clone(),
+            metadata: None,
         };
         
         debug!("Authenticating user: {}", auth_request.username);
@@ -276,13 +282,14 @@ mod tests {
         let config = LdapConfig::default();
         let ldap_auth = LdapAuth::new(config);
         
-        let invalid_credentials = Credentials {
-            data: json!({"invalid": "data"}),
-        };
+        // Using invalid credentials - we'll use a different variant than LDAP
+        let invalid_credentials = Credentials::Token("invalid-token".to_string());
         
-        let result = ldap_auth.authenticate(&invalid_credentials).await.unwrap();
-        assert!(!result.success);
-        assert!(result.error.is_some());
+        let result = ldap_auth.authenticate(&invalid_credentials).await;
+        assert!(result.is_ok()); // Should return Ok but with success = false
+        let auth_result = result.unwrap();
+        assert!(!auth_result.success); // Authentication should fail
+        assert!(auth_result.error.is_some()); // Should have error message
     }
 
     #[tokio::test]

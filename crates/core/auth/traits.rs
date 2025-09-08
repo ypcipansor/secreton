@@ -6,9 +6,26 @@ use std::collections::HashMap;
 
 /// Authentication credentials structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credentials {
-    /// Authentication data (username/password, token, certificate, etc.)
-    pub data: Value,
+pub enum Credentials {
+    /// Username/password credentials
+    Password { username: String, password: String },
+    /// Token-based credentials
+    Token(String),
+    /// AppRole credentials
+    AppRole { role_id: String, secret_id: String },
+    /// Certificate credentials
+    Certificate { 
+        client_cert: Vec<u8>, 
+        cert_chain: Vec<u8>,
+        fingerprint: String,
+        subject: String,
+        issuer: String,
+        serial_number: String,
+    },
+    /// LDAP credentials
+    Ldap { username: String, password: String },
+    /// Generic credentials data
+    Generic(Value),
 }
 
 /// Token information
@@ -132,14 +149,18 @@ mod tests {
 
     #[test]
     fn test_credentials_creation() {
-        let creds = Credentials {
-            data: serde_json::json!({
-                "username": "testuser",
-                "password": "testpass"
-            }),
+        let creds = Credentials::Password {
+            username: "testuser".to_string(),
+            password: "testpass".to_string(),
         };
         
-        assert!(creds.data.is_object());
+        match creds {
+            Credentials::Password { username, password } => {
+                assert_eq!(username, "testuser");
+                assert_eq!(password, "testpass");
+            }
+            _ => panic!("Expected Password variant"),
+        }
     }
 
     #[test]

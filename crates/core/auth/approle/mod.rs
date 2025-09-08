@@ -484,12 +484,10 @@ impl AppRoleAuth {
 impl AuthMethod for AppRoleAuth {
     async fn authenticate(&self, credentials: &Credentials) -> Result<CoreAuthResult> {
         // Extract role_id and secret_id from credentials
-        let role_id = credentials.data.get("role_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing role_id in credentials"))?;
-        let secret_id = credentials.data.get("secret_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing secret_id in credentials"))?;
+        let (role_id, secret_id) = match credentials {
+            Credentials::AppRole { role_id, secret_id } => (role_id, secret_id),
+            _ => return Err(anyhow!("Invalid credential type for AppRole authentication")),
+        };
             
         match self.login(role_id, secret_id).await {
             Ok(response) => {

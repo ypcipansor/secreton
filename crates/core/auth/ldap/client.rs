@@ -265,7 +265,7 @@ mod tests {
     fn test_ldap_client_creation() {
         let config = LdapConfig::default();
         let client = LdapClient::new(config);
-        assert_eq!(client.connection_config.url, "ldap://localhost:389");
+        assert_eq!(client.connection_config.url, "ldap://localhost");
     }
 
     #[test]

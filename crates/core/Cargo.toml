@@ -92,6 +92,10 @@ hyper = "1.0"
 tracing-subscriber = { workspace = true }
 wasmtime = "34.0.2"  # Updated to address RUSTSEC-2025-0046
 
+# Certificate validation
+x509-parser = "0.15"
+pem = "3.0"
+
 # HTTP API
 warp = "0.3"
 
@@ -124,7 +128,6 @@ ldap3 = { version = "0.11", features = ["tls"] }
 md5 = "0.7"
 
 # X.509 Certificate Dependencies
-x509-parser = "0.15"
 rustls-pemfile = "1.0"
 rcgen = "0.13"  # Updated to use newer ring version
 yasna = "0.5"
