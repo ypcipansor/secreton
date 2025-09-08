@@ -12,6 +12,7 @@ pub mod traits;
 pub mod approle;
 pub mod certificate;
 pub mod ldap;
+pub mod oidc;
 
 pub use refresh_token::RefreshToken;
 pub use service::{AuthService, TokenPair};
@@ -20,6 +21,7 @@ pub use traits::{AuthMethod, AuthResult, Credentials, TokenInfo, AuthMethodRegis
 pub use approle::AppRoleAuth;
 pub use certificate::CertificateAuth;
 pub use ldap::LdapAuth;
+pub use oidc::OidcAuth;
 
 use axum::{
     extract::State,

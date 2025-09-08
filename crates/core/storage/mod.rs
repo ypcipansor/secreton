@@ -23,9 +23,11 @@ use crate::services::audit::AuditDevice;
 // Re-export storage types
 pub mod mfa;
 pub mod secure;
+pub mod in_memory;
 
 pub use mfa::{MfaRecoveryCodes, MfaSecret, MfaStorage};
 pub use secure::{SecureStorage, SharedSecureStorage};
+pub use in_memory::InMemoryStorage;
 
 // Core storage types needed by engines
 #[derive(Debug, Clone, Serialize, Deserialize)]

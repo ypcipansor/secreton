@@ -24,6 +24,12 @@ pub enum Credentials {
     },
     /// LDAP credentials
     Ldap { username: String, password: String },
+    /// OIDC credentials
+    Oidc { 
+        jwt_token: String,
+        provider: Option<String>,
+        context: HashMap<String, String>,
+    },
     /// Generic credentials data
     Generic(Value),
 }

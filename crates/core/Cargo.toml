@@ -86,6 +86,7 @@ libloading = "0.8"
 # OAuth2 with Ed25519 (removing RSA vulnerability)
 oauth2 = "4.4"  # Alternative OAuth2 implementation without RSA
 # openidconnect = "3.5"  # Disabled temporarily due to RSA dependency
+url = "2.5"  # URL parsing for OIDC discovery
 glob = "0.3"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 hyper = "1.0"

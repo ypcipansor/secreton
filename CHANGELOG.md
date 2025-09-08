@@ -5,6 +5,33 @@ All notable changes to the Secreton Security Vault System by Cipherce will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2025-09-08
+
+### 🎉 **ENTERPRISE AUTHENTICATION MILESTONE - OIDC Authentication Complete**
+
+#### 🌟 **NEW CRITICAL ENTERPRISE FEATURES**
+- **🔗 OIDC Authentication**: ✅ **PRODUCTION READY**
+  - Complete OpenID Connect authentication for Auth0, Okta, Azure AD
+  - Enterprise-grade JWT validation with JWKS key rotation
+  - Advanced user provisioning with automatic group/role mapping
+  - Production-ready external identity provider integration
+  - Comprehensive claims mapping and policy assignment
+  - High-performance JWT validation with caching
+  - Full audit logging for enterprise compliance
+
+#### 📊 **Implementation Progress Update**
+- **Authentication Methods**: **5/10 Complete** (50% Achievement!)
+  - ✅ JWT/Token, LDAP, AppRole, X.509 Certificate, **OIDC**
+- **Enterprise Readiness**: Half of authentication methods completed
+- **Major Milestone**: External identity provider integration complete
+
+#### 🏗️ **Technical Implementation Details**
+- **Configuration**: Flexible OIDC provider configuration with validation
+- **JWT Validation**: Complete JWT parsing and cryptographic verification
+- **User Management**: Automatic user provisioning and deactivation
+- **Caching**: High-performance JWKS and discovery document caching
+- **Provider Support**: Auth0, Okta, Azure AD with custom provider capability
+
 ## [2.7.0] - 2025-09-08
 
 ### 🎉 **ENTERPRISE AUTHENTICATION MILESTONE - X.509 Certificate Authentication**
