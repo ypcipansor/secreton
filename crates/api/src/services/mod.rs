@@ -48,7 +48,7 @@ impl ServiceContainer {
         // Initialize crypto service
         let crypto = Arc::new(CryptoService::new(SecurityParams::default())?);
         
-        // Initialize audit logger
+        // Initialize audit logger (memory/raft backends currently); Postgres wiring removed due to trait divergence
         let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
         
         // Initialize authentication service

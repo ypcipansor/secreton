@@ -18,6 +18,8 @@ use crate::{
     handlers::AppState,
     ApiResponse, ApiResult, ApiError,
 };
+use brankas_core::audit::SecurityEventType;
+use brankas_core::audit::{AuditFilters, ExportFormat};
 
 /// Create vault operation routes
 pub fn create_routes() -> Router<AppState> {
@@ -62,6 +64,84 @@ pub fn create_routes() -> Router<AppState> {
         .route("/backup/:backup_id", get(get_backup))
         .route("/backup/:backup_id/restore", post(restore_backup))
         .route("/backup/:backup_id", delete(delete_backup))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    pub user_id: Option<String>,
+    pub action: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+pub async fn get_audit_logs(
+    State(state): State<AppState>,
+    Query(query): Query<AuditQuery>,
+) -> ApiResult<Json<ApiResponse<Vec<brankas_core::audit::AuditEntry>>>> {
+    let mut builder = AuditFilters::builder();
+    if let Some(user_id) = query.user_id.clone() {
+        builder = builder.user_id(user_id);
+    }
+    if let Some(action) = query.action.clone() {
+        builder = builder.action(action);
+    }
+    if let Some(limit) = query.limit {
+        builder = builder.paginate(limit, query.offset.unwrap_or(0));
+    }
+    let filters = builder.build();
+
+    let entries = state
+        .audit
+        .get_entries(filters)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(entries)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditExportQuery {
+    pub format: Option<String>,
+    pub user_id: Option<String>,
+    pub action: Option<String>,
+}
+
+pub async fn export_audit_logs(
+    State(state): State<AppState>,
+    Query(query): Query<AuditExportQuery>,
+) -> ApiResult<Json<ApiResponse<String>>> {
+    let mut builder = AuditFilters::builder();
+    if let Some(user_id) = query.user_id.clone() {
+        builder = builder.user_id(user_id);
+    }
+    if let Some(action) = query.action.clone() {
+        builder = builder.action(action);
+    }
+    let filters = builder.build();
+
+    let format = match query
+        .format
+        .as_deref()
+        .unwrap_or("JSON")
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "CSV" => ExportFormat::CSV,
+        "XML" => ExportFormat::XML,
+        "SIEM" => ExportFormat::SIEM,
+        "CEF" => ExportFormat::CEF,
+        "LEEF" => ExportFormat::LEEF,
+        _ => ExportFormat::JSON,
+    };
+
+    let bytes = state
+        .audit
+        .export_data(format, filters)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let data = String::from_utf8_lossy(&bytes).to_string();
+    Ok(Json(ApiResponse::success(data)))
 }
 
 #[cfg(test)]
@@ -330,9 +410,13 @@ pub struct PolicyResponse {
 
 /// Secret operations
 pub async fn get_secret(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    // RBAC check (placeholder user)
+    if let Ok(false) = state.storage.check_policy("unknown", &path, "read").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement secret retrieval
     let secret = SecretResponse {
         path: path.clone(),
@@ -358,10 +442,14 @@ pub async fn get_secret(
 }
 
 pub async fn create_secret(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    // RBAC check (placeholder user)
+    if let Ok(false) = state.storage.check_policy("unknown", &path, "create").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement secret creation
     let secret = SecretResponse {
         path: path.clone(),
@@ -373,14 +461,33 @@ pub async fn create_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
+    // Audit: SecretCreation
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::SecretCreation {
+                secret_path: path.clone(),
+                user: "unknown".to_string(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(secret)))
 }
 
 pub async fn update_secret(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    // RBAC check (placeholder user)
+    if let Ok(false) = state.storage.check_policy("unknown", &path, "update").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement secret update
     let secret = SecretResponse {
         path: path.clone(),
@@ -392,26 +499,66 @@ pub async fn update_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
+    // Audit: SecretVersionChange
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::SecretVersionChange {
+                secret_path: path.clone(),
+                old_version: 1,
+                new_version: 2,
+                user: "unknown".to_string(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(secret)))
 }
 
 pub async fn delete_secret(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // RBAC check (placeholder user)
+    if let Ok(false) = state.storage.check_policy("unknown", &path, "delete").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement secret deletion
     let data = serde_json::json!({
         "message": "Secret deleted successfully",
         "path": path
     });
 
+    // Audit: SecretDeletion
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::SecretDeletion {
+                secret_path: path.clone(),
+                user: "unknown".to_string(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(data)))
 }
 
 pub async fn list_secrets(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecretListItem>>>> {
+    // RBAC check could be resource-specific; allow listing with generic check
+    if let Ok(false) = state.storage.check_policy("unknown", "secrets:list", "read").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement secret listing
     let secrets = vec![
         SecretListItem {
@@ -433,9 +580,13 @@ pub async fn list_secrets(
 
 /// Key operations
 pub async fn create_key(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
+    // RBAC check
+    if let Ok(false) = state.storage.check_policy("unknown", "keys", "create").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement key creation
     let key = KeyResponse {
         id: uuid::Uuid::new_v4().to_string(),
@@ -451,13 +602,33 @@ pub async fn create_key(
         public_key: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string()),
     };
 
+    // Audit: KeyGeneration
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::KeyGeneration {
+                key_type: key.key_type.clone(),
+                key_id: key.id.clone(),
+                algorithm: key.algorithm.clone(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(key)))
 }
 
 pub async fn get_key(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
+    // RBAC check
+    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}", key_id), "read").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement key retrieval
     let key = KeyResponse {
         id: key_id,
@@ -477,9 +648,12 @@ pub async fn get_key(
 }
 
 pub async fn list_keys(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
+    if let Ok(false) = state.storage.check_policy("unknown", "keys", "read").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement key listing
     let keys = vec![
         KeyResponse {
@@ -501,9 +675,13 @@ pub async fn list_keys(
 }
 
 pub async fn rotate_key(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
+    // RBAC check
+    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/rotate", key_id), "update").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement key rotation
     let key = KeyResponse {
         id: key_id,
@@ -519,14 +697,34 @@ pub async fn rotate_key(
         public_key: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string()),
     };
 
+    // Audit: KeyRotation
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::KeyRotation {
+                old_key_id: key_id.clone(),
+                new_key_id: key.id.clone(),
+                algorithm: key.algorithm.clone(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(key)))
 }
 
 /// Cryptographic operations
 pub async fn encrypt_data(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
+    // RBAC check
+    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/encrypt", request.key_id), "create").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement encryption
     let response = EncryptResponse {
         ciphertext: "encrypted_data_base64".to_string(),
@@ -534,18 +732,54 @@ pub async fn encrypt_data(
         algorithm: request.algorithm.unwrap_or("AES-GCM".to_string()),
     };
 
+    // Audit: EncryptionOperation
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::EncryptionOperation {
+                key_id: request.key_id.clone(),
+                user: "unknown".to_string(),
+                data_size: request.plaintext.len() as u64,
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
     Ok(Json(ApiResponse::success(response)))
 }
 
 pub async fn decrypt_data(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
+    // RBAC check
+    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/decrypt", request.key_id), "create").await {
+        return Err(ApiError::Unauthorized);
+    }
     // TODO: Implement decryption
     let response = DecryptResponse {
         plaintext: "decrypted_data".to_string(),
         key_version: 1,
     };
+
+    // Audit: DecryptionOperation
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::DecryptionOperation {
+                key_id: request.key_id.clone(),
+                user: "unknown".to_string(),
+                data_size: request.ciphertext.len() as u64,
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(response)))
 }

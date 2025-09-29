@@ -18,6 +18,7 @@ use crate::{
     handlers::AppState,
     ApiResponse, ApiResult, ApiError,
 };
+use brankas_core::audit::SecurityEventType;
 
 /// Create authentication routes
 pub fn create_routes() -> Router<AppState> {
@@ -190,7 +191,7 @@ pub struct SessionInfo {
 
 /// User login endpoint
 pub async fn login(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // TODO: Implement authentication logic
@@ -216,13 +217,27 @@ pub async fn login(
         },
         mfa_required: false,
     };
+    // Audit: authentication success (placeholder always success here)
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::AuthenticationSuccess {
+                user: response.user.username.clone(),
+                method: "password".to_string(),
+            },
+            Some(response.user.id.clone()),
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(response)))
 }
 
 /// User logout endpoint
 pub async fn logout(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // TODO: Implement logout logic
@@ -234,13 +249,28 @@ pub async fn logout(
     let data = serde_json::json!({
         "message": "Successfully logged out"
     });
+    // Audit: session terminated (without real session id here)
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::SessionTerminated {
+                user: "unknown".to_string(),
+                session_id: "unknown".to_string(),
+                reason: "logout".to_string(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(data)))
 }
 
 /// Refresh access token
 pub async fn refresh_token(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // TODO: Implement token refresh logic
@@ -265,6 +295,20 @@ pub async fn refresh_token(
         },
         mfa_required: false,
     };
+    // Audit: token refresh
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::AuthenticationSuccess {
+                user: response.user.username.clone(),
+                method: "refresh_token".to_string(),
+            },
+            Some(response.user.id.clone()),
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(response)))
 }
@@ -324,7 +368,7 @@ pub async fn setup_mfa(
 
 /// Verify MFA code
 pub async fn verify_mfa(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<MfaVerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // TODO: Implement MFA verification
@@ -337,13 +381,27 @@ pub async fn verify_mfa(
         "message": "MFA successfully enabled",
         "method": request.method
     });
+    // Audit: MFASuccess (no real user context yet)
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::MFASuccess {
+                user: "unknown".to_string(),
+                method: request.method.clone(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(data)))
 }
 
 /// Disable MFA for user
 pub async fn disable_mfa(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // TODO: Implement MFA disable
     // 1. Validate user authentication
@@ -354,6 +412,20 @@ pub async fn disable_mfa(
     let data = serde_json::json!({
         "message": "MFA successfully disabled"
     });
+    // Audit: MFARemoval
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::MFARemoval {
+                user: "unknown".to_string(),
+                method: "unknown".to_string(),
+            },
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
 
     Ok(Json(ApiResponse::success(data)))
 }

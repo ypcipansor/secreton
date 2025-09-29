@@ -24,9 +24,10 @@ aide.workspace = true
 # Async
 tokio.workspace = true
 async-trait.workspace = true
-futures = "0.3"
 
-# Database - PostgreSQL with native drivers (removing sqlx RSA vulnerability)
+# Storage
+secreton-storage.workspace = true
+
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
 postgres-native-tls = "0.5"  # TLS support for PostgreSQL
