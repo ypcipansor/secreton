@@ -361,6 +361,12 @@ pub struct MemoryKeyStore {
     current_key_id: RwLock<Option<String>>,
 }
 
+impl Default for MemoryKeyStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryKeyStore {
     /// Creates a new, empty in-memory key store
     pub fn new() -> Self {
@@ -526,8 +532,8 @@ impl SecureStorage {
         // Create a key entry
         let key_entry = KeyEntry {
             id: Uuid::new_v4().to_string(),
-            key: BASE64.encode(&key),
-            salt: BASE64.encode(&salt),
+            key: BASE64.encode(key),
+            salt: BASE64.encode(salt),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| anyhow!("Time went backwards: {}", e))
@@ -603,8 +609,8 @@ impl SecureStorage {
         // Create and return the key entry
         Ok(KeyEntry {
             id: Uuid::new_v4().to_string(),
-            key: BASE64.encode(&key),
-            salt: BASE64.encode(&salt),
+            key: BASE64.encode(key),
+            salt: BASE64.encode(salt),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| anyhow!("Time went backwards: {}", e))?

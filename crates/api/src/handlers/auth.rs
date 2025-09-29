@@ -35,6 +35,78 @@ pub fn create_routes() -> Router<AppState> {
         .route("/sessions/:session_id", delete(revoke_session))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ApiConfig;
+    use crate::services::ServiceContainer;
+    use axum_test::TestServer;
+    use std::sync::Arc;
+
+    async fn create_test_server() -> TestServer {
+        let config = ApiConfig::default();
+        let services = Arc::new(
+            ServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+
+        let app = create_routes().with_state(services);
+        TestServer::new(app).expect("Failed to create test server")
+    }
+
+    #[tokio::test]
+    async fn test_login_endpoint_returns_tokens() {
+        let server = create_test_server().await;
+        let request = LoginRequest {
+            username: "alice".to_string(),
+            password: "password123".to_string(),
+            mfa_code: None,
+            remember_me: Some(true),
+        };
+
+        let response = server.post("/login").json(&request).await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<LoginResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.expect("login response");
+        assert_eq!(data.token_type, "Bearer");
+        assert_eq!(data.user.username, "alice");
+        assert!(!data.mfa_required);
+    }
+
+    #[tokio::test]
+    async fn test_mfa_setup_rejects_unsupported_method() {
+        let server = create_test_server().await;
+        let request = MfaSetupRequest {
+            method: "sms".to_string(),
+            phone_number: None,
+            email: None,
+        };
+
+        let response = server.post("/mfa/setup").json(&request).await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let body: ApiResponse<serde_json::Value> = response.json();
+        assert!(!body.success);
+        let error = body.error.expect("error payload");
+        assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[tokio::test]
+    async fn test_oauth_login_returns_authorization_url() {
+        let server = create_test_server().await;
+        let response = server.get("/oauth/github").await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<serde_json::Value> = response.json();
+        assert!(body.success);
+        let data = body.data.expect("oauth payload");
+        assert_eq!(data["provider"], "github");
+        assert!(data["auth_url"].as_str().unwrap().contains("https://oauth.provider.com"));
+    }
+}
+
 /// Login request
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {

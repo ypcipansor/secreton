@@ -294,6 +294,7 @@ impl ValidationErrorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_api_error_status_codes() {
@@ -346,6 +347,46 @@ mod tests {
                 assert_eq!(details.get("pattern"), Some(&"alphanumeric".to_string()));
             }
             _ => panic!("Expected validation error"),
+        }
+    }
+
+    #[test]
+    fn test_api_error_into_response_serialization() {
+        let error = ApiError::validation_field("Invalid input", "email");
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = response.into_body();
+        let runtime = tokio::runtime::Runtime::new().expect("create runtime");
+        let bytes = runtime
+            .block_on(hyper::body::to_bytes(body))
+            .expect("read body");
+        let payload: ApiResponse<Option<serde_json::Value>> = serde_json::from_slice(&bytes).unwrap();
+
+        assert!(!payload.success);
+        assert!(payload.data.is_none());
+        let error = payload.error.expect("error payload");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.message.contains("Invalid input"));
+    }
+
+    #[test]
+    fn test_validation_with_details_helper() {
+        let mut details = HashMap::new();
+        details.insert("field1".to_string(), "missing".to_string());
+        details.insert("field2".to_string(), "invalid".to_string());
+
+        let error = ApiError::validation_with_details("Multiple issues", Some("root".to_string()), details);
+
+        if let ApiError::Validation { message, field, details } = error {
+            assert_eq!(message, "Multiple issues");
+            assert_eq!(field, Some("root".to_string()));
+            let details = details.expect("details map");
+            assert_eq!(details.get("field1"), Some(&"missing".to_string()));
+            assert_eq!(details.get("field2"), Some(&"invalid".to_string()));
+        } else {
+            panic!("expected validation variant");
         }
     }
 }

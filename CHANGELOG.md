@@ -5,6 +5,15 @@ All notable changes to the Secreton Security Vault System by Cipherce will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Updated workspace `redis` dependency to version 0.27.6 via workspace-managed manifest.
+- Added placeholder coverage tests for CLI config/output and API services (auth, admin, vault).
+
+### Testing
+- `cargo test`
+
 ## [2.8.0] - 2025-09-08
 
 ### 🎉 **ENTERPRISE AUTHENTICATION MILESTONE - OIDC Authentication Complete**

@@ -3,10 +3,10 @@
 pub mod refresh_token;
 #[path = "service.rs"]
 pub mod service;
-#[path = "user.rs"]
-pub mod user;
 #[path = "traits.rs"]
 pub mod traits;
+#[path = "user.rs"]
+pub mod user;
 
 // Authentication methods
 pub mod approle;
@@ -14,14 +14,14 @@ pub mod certificate;
 pub mod ldap;
 pub mod oidc;
 
-pub use refresh_token::RefreshToken;
-pub use service::{AuthService, TokenPair};
-pub use user::User;
-pub use traits::{AuthMethod, AuthResult, Credentials, TokenInfo, AuthMethodRegistry};
 pub use approle::AppRoleAuth;
 pub use certificate::CertificateAuth;
 pub use ldap::LdapAuth;
 pub use oidc::OidcAuth;
+pub use refresh_token::RefreshToken;
+pub use service::{AuthService, TokenPair};
+pub use traits::{AuthMethod, AuthMethodRegistry, AuthResult, Credentials, TokenInfo};
+pub use user::User;
 
 use axum::{
     extract::State,

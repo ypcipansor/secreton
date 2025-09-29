@@ -64,6 +64,89 @@ pub fn create_routes() -> Router<AppState> {
         .route("/backup/:backup_id", delete(delete_backup))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ApiConfig;
+    use crate::services::ServiceContainer;
+    use axum_test::TestServer;
+    use std::sync::Arc;
+
+    async fn server_with_routes() -> TestServer {
+        let config = ApiConfig::default();
+        let services = Arc::new(
+            ServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+
+        let app = create_routes().with_state(services);
+        TestServer::new(app).expect("failed to start test server")
+    }
+
+    #[tokio::test]
+    async fn test_get_secret_returns_placeholder_data() {
+        let server = server_with_routes().await;
+        let response = server.get("/secrets/app/config").await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<SecretResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.expect("secret payload");
+        assert_eq!(data.path, "app/config");
+        assert!(data.data.contains_key("key1"));
+    }
+
+    #[tokio::test]
+    async fn test_create_secret_accepts_payload() {
+        let server = server_with_routes().await;
+        let payload = serde_json::json!({
+            "data": {"username": "admin"},
+            "metadata": {
+                "description": "Admin credentials",
+                "tags": ["auth"],
+                "owner": "security",
+                "classification": "secret"
+            },
+            "ttl": 90
+        });
+
+        let response = server
+            .post("/secrets/app/admin")
+            .json(&payload)
+            .await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<SecretResponse> = response.json();
+        assert!(body.success);
+        let secret = body.data.expect("secret response");
+        assert_eq!(secret.path, "app/admin");
+        assert!(secret.expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_create_key_returns_public_key() {
+        let server = server_with_routes().await;
+        let request = serde_json::json!({
+            "name": "signing-key",
+            "key_type": "Ed25519",
+            "algorithm": "Ed25519",
+            "usage": ["sign", "verify"],
+            "exportable": true
+        });
+
+        let response = server.post("/keys").json(&request).await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<KeyResponse> = response.json();
+        assert!(body.success);
+        let key = body.data.expect("key response");
+        assert_eq!(key.name, "signing-key");
+        assert_eq!(key.algorithm, "Ed25519");
+        assert!(key.public_key.is_some());
+    }
+}
+
 /// Query parameters for listing operations
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {

@@ -321,14 +321,18 @@ mod tests {
     use crate::services::ServiceContainer;
     use std::sync::Arc;
 
+    fn create_state() -> Arc<ServiceContainer> {
+        let config = ApiConfig::default();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(ServiceContainer::new(&config))
+            .expect("Failed to create services")
+            .into()
+    }
+
     #[tokio::test]
     async fn test_simple_health_check() {
-        let config = ApiConfig::default();
-        let services = Arc::new(
-            ServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services")
-        );
+        let services = create_state();
 
         let result = simple_health_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
@@ -339,17 +343,53 @@ mod tests {
 
     #[tokio::test]
     async fn test_liveness_check() {
-        let config = ApiConfig::default();
-        let services = Arc::new(
-            ServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services")
-        );
+        let services = create_state();
 
         let result = liveness_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
         
         let response = result.unwrap().0;
         assert!(response.alive);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_response() {
+        let services = create_state();
+        let result = health_check(axum::extract::State(services)).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap().0;
+        assert!(response.success);
+        let health = response.data.expect("health data");
+        assert_eq!(health.status, "healthy");
+        assert_eq!(health.dependencies.database, "healthy");
+    }
+
+    #[tokio::test]
+    async fn test_readiness_check_marks_ready() {
+        let services = create_state();
+        let result = readiness_check(axum::extract::State(services)).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap().0;
+        assert!(response.ready);
+        assert_eq!(response.version, env!("CARGO_PKG_VERSION"));
+        assert!(response.checks.contains_key("database"));
+        assert!(response.checks.contains_key("cache"));
+        assert!(response.checks.contains_key("crypto"));
+    }
+
+    #[tokio::test]
+    async fn test_detailed_health_overall_status() {
+        let services = create_state();
+        let result = detailed_health_check(axum::extract::State(services)).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap().0;
+        assert!(response.success);
+        let payload = response.data.expect("detailed data");
+        assert_eq!(payload.status, "healthy");
+        assert_eq!(payload.checks.len(), 4);
+        assert!(payload.checks.values().all(|check| check.status == "healthy"));
     }
 }

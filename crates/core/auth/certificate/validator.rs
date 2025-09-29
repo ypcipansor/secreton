@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use chrono::{DateTime, Utc};
-use anyhow::{Result, Context, anyhow};
-use x509_parser::prelude::*;
-use x509_parser::certificate::X509Certificate;
-use x509_parser::public_key::PublicKey;
 use super::config::ValidationLevel;
+use anyhow::{anyhow, Context, Result};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::*;
+use x509_parser::public_key::PublicKey;
 
 /// Certificate validation result
 #[derive(Debug)]
@@ -37,6 +37,12 @@ pub struct CertificateValidator {
     max_chain_depth: usize,
     validation_level: ValidationLevel,
     trusted_roots: Vec<Vec<u8>>,
+}
+
+impl Default for CertificateValidator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CertificateValidator {
@@ -194,7 +200,7 @@ impl CertificateValidator {
             // TODO: Implement proper extension parsing when x509-parser API stabilizes
             extensions.insert(
                 extension.oid.to_string(),
-                "extension_value".to_string() // Placeholder
+                "extension_value".to_string(), // Placeholder
             );
         }
 
@@ -217,7 +223,7 @@ impl CertificateValidator {
 
     /// Calculate certificate fingerprint
     fn calculate_fingerprint(&self, cert: &X509Certificate) -> Result<String> {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         // Use the serial number and subject as fingerprint basis for now
         // TODO: Use proper certificate DER encoding when x509-parser API allows
@@ -237,7 +243,11 @@ impl CertificateValidator {
     ) -> Result<()> {
         // Check chain depth
         if chain_certs.len() > self.max_chain_depth {
-            errors.push(format!("Certificate chain too deep: {} > {}", chain_certs.len(), self.max_chain_depth));
+            errors.push(format!(
+                "Certificate chain too deep: {} > {}",
+                chain_certs.len(),
+                self.max_chain_depth
+            ));
             return Ok(());
         }
 
@@ -419,8 +429,14 @@ mod tests {
             .with_ocsp_url(Some("http://ocsp.example.com".to_string()))
             .with_max_chain_depth(5);
 
-        assert_eq!(validator.crl_url, Some("http://crl.example.com".to_string()));
-        assert_eq!(validator.ocsp_url, Some("http://ocsp.example.com".to_string()));
+        assert_eq!(
+            validator.crl_url,
+            Some("http://crl.example.com".to_string())
+        );
+        assert_eq!(
+            validator.ocsp_url,
+            Some("http://ocsp.example.com".to_string())
+        );
         assert_eq!(validator.max_chain_depth, 5);
     }
 
@@ -430,11 +446,9 @@ mod tests {
 
         // This would normally contain a real certificate
         // For testing, we'll just ensure the method exists
-        let result = validator.validate_certificate(
-            b"dummy cert",
-            b"dummy chain",
-            ValidationLevel::Basic,
-        ).await;
+        let result = validator
+            .validate_certificate(b"dummy cert", b"dummy chain", ValidationLevel::Basic)
+            .await;
 
         // Should fail with parsing error, which is expected
         assert!(result.is_err());

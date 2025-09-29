@@ -63,7 +63,7 @@ pub fn resolve_user_roles(
             }
         }
         // fallback: user_id langsung sebagai role
-        if &policy.role == user_id {
+        if policy.role == user_id {
             roles.push(policy.role.clone());
         }
     }

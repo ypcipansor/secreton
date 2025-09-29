@@ -55,6 +55,105 @@ pub enum StorageError {
     MigrationError { message: String },
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_vault_entry_initialization_defaults() {
+        let owner = Uuid::new_v4();
+        let entry = VaultEntry::new(
+            "secret/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "aes-256-gcm".to_string(),
+                key_id: "key-123".to_string(),
+                iv: vec![0; 12],
+                auth_tag: Some(vec![0; 16]),
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Secret,
+            owner,
+        );
+
+        assert_eq!(entry.path, "secret/path");
+        assert_eq!(entry.version, 1);
+        assert_eq!(entry.security_level, SecurityLevel::Secret);
+        assert_eq!(entry.owner_id, owner);
+        assert!(entry.metadata.is_empty());
+        assert!(entry.tags.is_empty());
+        assert!(!entry.is_expired());
+    }
+
+    #[test]
+    fn test_vault_entry_tag_and_metadata_helpers() {
+        let owner = Uuid::new_v4();
+        let entry = VaultEntry::new(
+            "secret/path".to_string(),
+            vec![],
+            EncryptionMetadata {
+                algorithm: "aes-256-gcm".to_string(),
+                key_id: "key-123".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            owner,
+        )
+        .add_metadata("env".to_string(), "prod".to_string())
+        .add_metadata("region".to_string(), "apac".to_string())
+        .add_tag("finance".to_string())
+        .add_tag("finance".to_string())
+        .add_tag("internal".to_string());
+
+        assert_eq!(entry.metadata.get("env"), Some(&"prod".to_string()));
+        assert_eq!(entry.metadata.get("region"), Some(&"apac".to_string()));
+
+        let tag_set: HashSet<_> = entry.tags.iter().collect();
+        assert_eq!(tag_set.len(), 2);
+        assert!(tag_set.contains(&"finance".to_string()));
+        assert!(tag_set.contains(&"internal".to_string()));
+    }
+
+    #[test]
+    fn test_query_params_helpers() {
+        let owner = Uuid::new_v4();
+        let params = QueryParams::new()
+            .with_path_prefix("apps/".to_string())
+            .with_security_level(SecurityLevel::Internal)
+            .with_tag("pci".to_string())
+            .with_tag("finance".to_string())
+            .with_owner(owner)
+            .with_limit(50);
+
+        assert_eq!(params.path_prefix.as_deref(), Some("apps/"));
+        assert_eq!(params.security_level, Some(SecurityLevel::Internal));
+        assert_eq!(params.tags.len(), 2);
+        assert_eq!(params.owner_id, Some(owner));
+        assert_eq!(params.limit, Some(50));
+    }
+
+    #[test]
+    fn test_storage_error_debug_and_display() {
+        let error = StorageError::NotFound {
+            resource_type: "vault_entry".to_string(),
+            id: "123".to_string(),
+        };
+
+        let display = format!("{}", error);
+        assert!(display.contains("Not found"));
+        assert!(display.contains("vault_entry"));
+        assert!(display.contains("123"));
+
+        let debug = format!("{:?}", error);
+        assert!(debug.contains("NotFound"));
+    }
+}
+
 /// Type alias for Results with StorageError
 pub type StorageResult<T> = Result<T, StorageError>;
 
@@ -438,7 +537,7 @@ impl StorageBackend for MockStorageBackend {
         } else {
             Err(StorageError::NotFound {
                 resource_type: "VaultEntry".to_string(),
-                id: entry.path.clone(),
+                id: entry.id.to_string(),
             })
         }
     }
@@ -447,8 +546,13 @@ impl StorageBackend for MockStorageBackend {
         let mut id_index = self.id_index.write().unwrap();
         if let Some(path) = id_index.remove(&id) {
             let mut data = self.data.write().unwrap();
-            data.remove(&path);
-            Ok(true)
+            if data.remove(&path).is_some() {
+                Ok(true)
+            } else {
+                // restore index consistency if data missing unexpectedly
+                id_index.insert(id, path);
+                Ok(false)
+            }
         } else {
             Ok(false)
         }

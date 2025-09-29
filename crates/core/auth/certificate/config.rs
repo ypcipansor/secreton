@@ -215,6 +215,9 @@ mod tests {
         let deserialized = CertificateConfig::from_json_value(json_value).unwrap();
 
         assert_eq!(config.crl_url, deserialized.crl_url);
-        assert!(matches!(deserialized.validation_level, ValidationLevel::Standard));
+        assert!(matches!(
+            deserialized.validation_level,
+            ValidationLevel::Standard
+        ));
     }
 }

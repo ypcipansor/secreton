@@ -447,7 +447,7 @@ impl AuthService {
 mod tests {
     use super::*;
     use crate::config::AuthConfig;
-    use brankas_crypto::SecurityParams;
+    use brankas_crypto::{CryptoService, SecurityParams};
     use brankas_storage::MockStorageBackend;
 
     #[tokio::test]
@@ -475,5 +475,119 @@ mod tests {
         let hash = auth_service.hash_password(password).unwrap();
         assert!(auth_service.verify_password(password, &hash).unwrap());
         assert!(!auth_service.verify_password("wrong_password", &hash).unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_requires_mfa_code() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let mut config = AuthConfig::default();
+        config.jwt_secret = "secret".into();
+        let auth_service = AuthService::new(storage.clone(), crypto, &config)
+            .await
+            .expect("service");
+
+        // Insert a user with MFA enabled by mocking storage behavior via store_user and get_user_by_username
+        let user = User {
+            id: "user123".into(),
+            username: "alice".into(),
+            email: "alice@example.com".into(),
+            password_hash: auth_service.hash_password("password").unwrap(),
+            full_name: None,
+            enabled: true,
+            roles: vec!["user".into()],
+            mfa_enabled: true,
+            mfa_secret: Some("secret".into()),
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        auth_service.store_user(&user).await.unwrap();
+
+        let result = auth_service
+            .authenticate("alice", "password", None, "127.0.0.1", "test-agent")
+            .await;
+        assert!(matches!(result, Err(AuthError::MfaRequired)));
+
+        let result = auth_service
+            .authenticate(
+                "alice",
+                "password",
+                Some("123456"),
+                "127.0.0.1",
+                "test-agent",
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_has_permission_with_wildcard_role() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let auth_service = AuthService::new(storage.clone(), crypto, &AuthConfig::default())
+            .await
+            .expect("service");
+
+        let user = User {
+            id: "user1".into(),
+            username: "wildcard".into(),
+            email: "wildcard@example.com".into(),
+            password_hash: "".into(),
+            full_name: None,
+            enabled: true,
+            roles: vec!["admin".into()],
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        // admin role already initialized in service with "*"
+        let allowed = auth_service
+            .has_permission(&user, "vault:delete")
+            .await
+            .expect("has permission");
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn test_initialize_default_roles_only_once() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let config = AuthConfig::default();
+
+        // First creation initializes roles
+        let service = AuthService::new(storage.clone(), crypto.clone(), &config)
+            .await
+            .expect("service");
+        // Second creation should not fail if roles already exist
+        let result = AuthService::new(storage, crypto, &config).await;
+        assert!(result.is_ok());
+        // Basic permission check still works
+        let user = User {
+            id: "user2".into(),
+            username: "viewer".into(),
+            email: "viewer@example.com".into(),
+            password_hash: "".into(),
+            full_name: None,
+            enabled: true,
+            roles: vec!["viewer".into()],
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        };
+        let allowed = service
+            .has_permission(&user, "vault:read")
+            .await
+            .expect("permission");
+        assert!(allowed);
     }
 }

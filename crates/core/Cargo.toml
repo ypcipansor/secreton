@@ -32,7 +32,7 @@ deadpool-postgres = { workspace = true, optional = true }
 postgres-native-tls = "0.5"  # TLS support for PostgreSQL
 mysql_async = "0.34"  # MySQL async client
 mongodb = "3.3"  # MongoDB driver
-redis = { version = "0.24", features = ["aio", "tokio-comp"] }  # Redis async client
+redis = { workspace = true, features = ["aio", "tokio-comp"] }  # Redis async client
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
 
@@ -91,7 +91,7 @@ glob = "0.3"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 hyper = "1.0"
 tracing-subscriber = { workspace = true }
-wasmtime = "34.0.2"  # Updated to address RUSTSEC-2025-0046
+wasmtime = "36.0.1"  # Updated to remove unmaintained fxhash dependency
 
 # Certificate validation
 x509-parser = "0.15"

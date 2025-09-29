@@ -61,6 +61,73 @@ pub fn create_routes() -> Router<AppState> {
         .route("/security/incidents/:incident_id", get(get_security_incident))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ApiConfig;
+    use crate::services::ServiceContainer;
+    use axum_test::TestServer;
+    use std::sync::Arc;
+
+    async fn server_with_routes() -> TestServer {
+        let config = ApiConfig::default();
+        let services = Arc::new(
+            ServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+
+        let app = create_routes().with_state(services);
+        TestServer::new(app).expect("Failed to start test server")
+    }
+
+    #[tokio::test]
+    async fn test_list_users_returns_placeholder_user() {
+        let server = server_with_routes().await;
+        let response = server.get("/users").await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<Vec<UserResponse>> = response.json();
+        assert!(body.success);
+        let users = body.data.expect("users payload");
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].username, "admin");
+    }
+
+    #[tokio::test]
+    async fn test_create_role_endpoint() {
+        let server = server_with_routes().await;
+        let request = CreateRoleRequest {
+            name: "auditor".to_string(),
+            description: Some("Audit role".to_string()),
+            permissions: vec!["vault:read".to_string()],
+            metadata: None,
+        };
+
+        let response = server.post("/roles").json(&request).await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<RoleResponse> = response.json();
+        assert!(body.success);
+        let role = body.data.expect("role payload");
+        assert_eq!(role.name, "auditor");
+        assert!(role.permissions.contains(&"vault:read".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_config_returns_security_info() {
+        let server = server_with_routes().await;
+        let response = server.get("/config").await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<SystemConfig> = response.json();
+        assert!(body.success);
+        let config = body.data.expect("config payload");
+        assert!(config.security.mfa_enabled);
+        assert_eq!(config.api.version, "1.0.0");
+    }
+}
+
 /// User management models
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
@@ -360,19 +427,6 @@ pub async fn update_user(
     };
 
     Ok(Json(ApiResponse::success(user)))
-}
-
-pub async fn delete_user(
-    State(_state): State<AppState>,
-    Path(user_id): Path<String>,
-) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    // TODO: Implement user deletion
-    let data = serde_json::json!({
-        "message": "User deleted successfully",
-        "user_id": user_id
-    });
-
-    Ok(Json(ApiResponse::success(data)))
 }
 
 /// System configuration endpoints

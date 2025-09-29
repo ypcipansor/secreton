@@ -3,29 +3,29 @@ use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_iam::Client as IamClient;
 use aws_sdk_sts::Client as StsClient;
+use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
-use chrono::Utc;
 
-use crate::secrets::engine::{SecretsEngine, SecretMetadata, Secret, SecretsError};
+use crate::secrets::engine::{Secret, SecretMetadata, SecretsEngine, SecretsError};
 use crate::storage::StorageEngine;
 
 pub mod config;
 pub mod iam;
 pub mod sts;
 
-use config::{AwsConfig, AwsCredentials, AwsCredentialType, AwsRoleConfig};
+use config::{AwsConfig, AwsCredentialType, AwsCredentials, AwsRoleConfig};
 use iam::IamHandler;
 use sts::StsHandler;
 
 /// AWS Secrets Engine
-/// 
+///
 /// Provides dynamic AWS credential generation for:
 /// - IAM users with access keys
-/// - IAM roles 
+/// - IAM roles
 /// - Assumed role credentials (STS)
 /// - Federation tokens
 /// - Session tokens
@@ -39,11 +39,11 @@ pub struct AwsEngine {
 
 impl AwsEngine {
     /// Create new AWS secrets engine
-    pub async fn new(
-        storage: Arc<dyn StorageEngine>,
-        config: AwsConfig,
-    ) -> Result<Self> {
-        info!("Initializing AWS secrets engine for region: {}", config.region);
+    pub async fn new(storage: Arc<dyn StorageEngine>, config: AwsConfig) -> Result<Self> {
+        info!(
+            "Initializing AWS secrets engine for region: {}",
+            config.region
+        );
 
         // Build AWS SDK config
         let mut aws_config_builder = aws_config::defaults(BehaviorVersion::latest())
@@ -51,15 +51,14 @@ impl AwsEngine {
 
         // Configure credentials
         if let (Some(access_key), Some(secret_key)) = (&config.access_key, &config.secret_key) {
-            aws_config_builder = aws_config_builder.credentials_provider(
-                aws_sdk_sts::config::Credentials::new(
+            aws_config_builder =
+                aws_config_builder.credentials_provider(aws_sdk_sts::config::Credentials::new(
                     access_key,
                     secret_key,
                     None,
                     None,
                     "secreton-aws-engine",
-                )
-            );
+                ));
         }
 
         let aws_config = aws_config_builder.load().await;
@@ -99,7 +98,7 @@ impl AwsEngine {
 
         let mut roles = self.roles.write();
         roles.insert(role_config.name.clone(), role_config);
-        
+
         info!("Created AWS role configuration: {}", roles.len());
         Ok(())
     }
@@ -119,7 +118,8 @@ impl AwsEngine {
     /// Delete role configuration
     pub fn delete_role(&self, name: &str) -> Result<()> {
         let mut roles = self.roles.write();
-        roles.remove(name)
+        roles
+            .remove(name)
             .map(|_| ())
             .ok_or_else(|| anyhow::anyhow!("Role not found: {}", name))
     }
@@ -130,33 +130,48 @@ impl AwsEngine {
         role_name: &str,
         lease_id: &str,
     ) -> Result<AwsCredentials> {
-        let role_config = self.get_role(role_name)
+        let role_config = self
+            .get_role(role_name)
             .ok_or_else(|| anyhow::anyhow!("Role not found: {}", role_name))?;
 
-        info!("Generating AWS credentials for role: {} (type: {:?})", role_name, role_config.credential_type);
+        info!(
+            "Generating AWS credentials for role: {} (type: {:?})",
+            role_name, role_config.credential_type
+        );
 
         match role_config.credential_type {
             AwsCredentialType::User => {
-                self.iam_handler.create_user_credentials(&role_config, lease_id).await
+                self.iam_handler
+                    .create_user_credentials(&role_config, lease_id)
+                    .await
             }
             AwsCredentialType::Role => {
-                self.iam_handler.create_role_credentials(&role_config, lease_id).await
+                self.iam_handler
+                    .create_role_credentials(&role_config, lease_id)
+                    .await
             }
             AwsCredentialType::AssumedRole => {
                 self.sts_handler.assume_role(&role_config, lease_id).await
             }
             AwsCredentialType::FederationToken => {
-                self.sts_handler.get_federation_token(&role_config, lease_id).await
+                self.sts_handler
+                    .get_federation_token(&role_config, lease_id)
+                    .await
             }
             AwsCredentialType::SessionToken => {
-                self.sts_handler.get_session_token(&role_config, lease_id, None, None).await
+                self.sts_handler
+                    .get_session_token(&role_config, lease_id, None, None)
+                    .await
             }
         }
     }
 
     /// Revoke AWS credentials
     pub async fn revoke_credentials(&self, credentials: &AwsCredentials) -> Result<()> {
-        info!("Revoking AWS credentials: {} (type: {:?})", credentials.arn, credentials.credential_type);
+        info!(
+            "Revoking AWS credentials: {} (type: {:?})",
+            credentials.arn, credentials.credential_type
+        );
 
         match credentials.credential_type {
             AwsCredentialType::User => {
@@ -169,9 +184,9 @@ impl AwsEngine {
                     self.iam_handler.delete_role(&role_name).await?;
                 }
             }
-            AwsCredentialType::AssumedRole | 
-            AwsCredentialType::FederationToken | 
-            AwsCredentialType::SessionToken => {
+            AwsCredentialType::AssumedRole
+            | AwsCredentialType::FederationToken
+            | AwsCredentialType::SessionToken => {
                 // Temporary credentials automatically expire, no cleanup needed
                 info!("Temporary credentials will expire automatically");
             }
@@ -189,7 +204,9 @@ impl AwsEngine {
 
         // Validate credentials configuration
         if !Self::validate_credentials(role) {
-            return Err(anyhow::anyhow!("Role must have either policy_document or policy_arns"));
+            return Err(anyhow::anyhow!(
+                "Role must have either policy_document or policy_arns"
+            ));
         }
 
         // Validate TTL
@@ -210,8 +227,8 @@ impl AwsEngine {
 
     fn validate_ttl(ttl: Option<u64>) -> bool {
         match ttl {
-            Some(t) => t >= 900 && t <= 43200, // 15 minutes to 12 hours
-            None => true, // TTL is optional
+            Some(t) => (900..=43200).contains(&t), // 15 minutes to 12 hours
+            None => true,                      // TTL is optional
         }
     }
 }
@@ -222,19 +239,34 @@ impl SecretsEngine for AwsEngine {
         "aws"
     }
 
-    async fn create_secret(&self, path: &str, _data: Value, _options: Option<Value>) -> Result<Secret, SecretsError> {
+    async fn create_secret(
+        &self,
+        path: &str,
+        _data: Value,
+        _options: Option<Value>,
+    ) -> Result<Secret, SecretsError> {
         info!("Creating AWS secret at path: {}", path);
 
         // Generate unique lease ID
         let lease_id = Uuid::new_v4().to_string();
 
         // Extract role name from path (format: aws/creds/{role_name})
-        let role_name = path.strip_prefix("aws/creds/")
-            .ok_or_else(|| SecretsError::InvalidData("Invalid AWS path format. Expected: aws/creds/{role_name}".to_string()))?;
+        let role_name = path.strip_prefix("aws/creds/").ok_or_else(|| {
+            SecretsError::InvalidData(
+                "Invalid AWS path format. Expected: aws/creds/{role_name}".to_string(),
+            )
+        })?;
 
         // Generate AWS credentials
-        let credentials = self.generate_credentials(role_name, &lease_id).await
-            .map_err(|e| SecretsError::ExecutionError(format!("Failed to generate credentials for role {}: {}", role_name, e)))?;
+        let credentials = self
+            .generate_credentials(role_name, &lease_id)
+            .await
+            .map_err(|e| {
+                SecretsError::ExecutionError(format!(
+                    "Failed to generate credentials for role {}: {}",
+                    role_name, e
+                ))
+            })?;
 
         // Calculate TTL
         let ttl = if let Some(role_config) = self.get_role(role_name) {
@@ -259,13 +291,15 @@ impl SecretsEngine for AwsEngine {
         let storage_key = format!("aws_credentials_{}", lease_id);
         let credential_entry = crate::storage::StorageEntry {
             key: storage_key.clone(),
-            value: serde_json::to_vec(&credentials)
-                .map_err(|e| SecretsError::ExecutionError(format!("Failed to serialize credentials: {}", e)))?,
+            value: serde_json::to_vec(&credentials).map_err(|e| {
+                SecretsError::ExecutionError(format!("Failed to serialize credentials: {}", e))
+            })?,
             metadata: HashMap::new(),
         };
 
-        self.storage.put(credential_entry).await
-            .map_err(|e| SecretsError::ExecutionError(format!("Failed to store credential metadata: {}", e)))?;
+        self.storage.put(credential_entry).await.map_err(|e| {
+            SecretsError::ExecutionError(format!("Failed to store credential metadata: {}", e))
+        })?;
 
         // Create secret with metadata
         let metadata = SecretMetadata {
@@ -277,7 +311,10 @@ impl SecretsEngine for AwsEngine {
             custom_metadata: Some(HashMap::from([
                 ("lease_id".to_string(), lease_id),
                 ("role_name".to_string(), role_name.to_string()),
-                ("credential_type".to_string(), format!("{:?}", credentials.credential_type)),
+                (
+                    "credential_type".to_string(),
+                    format!("{:?}", credentials.credential_type),
+                ),
             ])),
         };
 
@@ -288,7 +325,10 @@ impl SecretsEngine for AwsEngine {
             metadata,
         };
 
-        info!("Successfully created AWS credentials for role: {}", role_name);
+        info!(
+            "Successfully created AWS credentials for role: {}",
+            role_name
+        );
         Ok(secret)
     }
 
@@ -297,9 +337,17 @@ impl SecretsEngine for AwsEngine {
         self.create_secret(path, Value::Null, None).await
     }
 
-    async fn update_secret(&self, path: &str, data: Value, options: Option<Value>) -> Result<Secret, SecretsError> {
+    async fn update_secret(
+        &self,
+        path: &str,
+        data: Value,
+        options: Option<Value>,
+    ) -> Result<Secret, SecretsError> {
         // AWS credentials are typically not updated in place, but regenerated
-        warn!("Updating AWS credentials by regenerating for path: {}", path);
+        warn!(
+            "Updating AWS credentials by regenerating for path: {}",
+            path
+        );
         self.create_secret(path, data, options).await
     }
 
@@ -309,11 +357,13 @@ impl SecretsEngine for AwsEngine {
         // Extract role name and try to find lease_id
         if let Some(_role_name) = path.strip_prefix("roles/") {
             // Try to clean up any stored credentials for this role
-            let prefix = format!("aws_credentials_");
+            let prefix = "aws_credentials_".to_string();
             if let Ok(keys) = self.storage.list(&prefix).await {
                 for key in keys {
                     if let Ok(Some(entry)) = self.storage.get(&key).await {
-                        if let Ok(credentials) = serde_json::from_slice::<AwsCredentials>(&entry.value) {
+                        if let Ok(credentials) =
+                            serde_json::from_slice::<AwsCredentials>(&entry.value)
+                        {
                             if let Err(e) = self.revoke_credentials(&credentials).await {
                                 warn!("Failed to revoke AWS credentials during deletion: {}", e);
                             }
@@ -349,11 +399,17 @@ mod tests {
 
         #[async_trait::async_trait]
         impl crate::storage::StorageEngine for TestStorage {
-            async fn get(&self, _key: &str) -> Result<Option<crate::storage::StorageEntry>, crate::error::CoreError> {
+            async fn get(
+                &self,
+                _key: &str,
+            ) -> Result<Option<crate::storage::StorageEntry>, crate::error::CoreError> {
                 Ok(None)
             }
 
-            async fn put(&self, _entry: crate::storage::StorageEntry) -> Result<(), crate::error::CoreError> {
+            async fn put(
+                &self,
+                _entry: crate::storage::StorageEntry,
+            ) -> Result<(), crate::error::CoreError> {
                 Ok(())
             }
 
@@ -395,10 +451,10 @@ mod tests {
         };
 
         // Skip actual AWS engine creation in tests - just test validation logic
-        let valid = AwsEngine::validate_role_name(&valid_role.name) 
+        let valid = AwsEngine::validate_role_name(&valid_role.name)
             && AwsEngine::validate_credentials(&valid_role)
             && AwsEngine::validate_ttl(valid_role.ttl);
-        
+
         assert!(valid);
     }
 
@@ -419,7 +475,7 @@ mod tests {
         // Test individual validation functions
         let name_valid = AwsEngine::validate_role_name(&invalid_role.name);
         let creds_valid = AwsEngine::validate_credentials(&invalid_role);
-        
+
         assert!(!name_valid); // Should fail due to empty name
         assert!(!creds_valid); // Should fail due to no policies
     }

@@ -6,31 +6,31 @@ use std::collections::HashMap;
 pub struct AwsConfig {
     /// AWS region to operate in
     pub region: String,
-    
+
     /// Access key ID for AWS API access
     pub access_key: Option<String>,
-    
+
     /// Secret access key for AWS API access
     pub secret_key: Option<String>,
-    
+
     /// Maximum TTL for generated credentials
     pub max_ttl: u64,
-    
+
     /// Default TTL for generated credentials (in seconds)
     pub default_ttl: u64,
-    
+
     /// IAM path prefix for created users/roles
     pub iam_path_prefix: String,
-    
+
     /// Tags to apply to created resources
     pub default_tags: HashMap<String, String>,
-    
+
     /// Whether to use instance profile credentials
     pub use_instance_profile: bool,
-    
+
     /// ARN of role to assume for operations
     pub assume_role_arn: Option<String>,
-    
+
     /// External ID for role assumption
     pub external_id: Option<String>,
 }
@@ -57,81 +57,78 @@ impl Default for AwsConfig {
 pub struct AwsRoleConfig {
     /// Name of the role
     pub name: String,
-    
+
     /// Type of credential to generate (user, role, assumed_role, federation_token)
     pub credential_type: AwsCredentialType,
-    
+
     /// IAM policy document to attach (JSON string)
     pub policy_document: Option<String>,
-    
+
     /// ARNs of managed policies to attach
     pub policy_arns: Vec<String>,
-    
+
     /// TTL for generated credentials
     pub ttl: Option<u64>,
-    
+
     /// Role ARN to assume (for assumed_role type)
     pub role_arn: Option<String>,
-    
+
     /// Session name for assumed role
     pub session_name: Option<String>,
-    
+
     /// External ID for role assumption
     pub external_id: Option<String>,
-    
+
     /// Tags to apply to generated resources
     pub tags: HashMap<String, String>,
 }
 
 /// Types of AWS credentials that can be generated
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AwsCredentialType {
     /// Create IAM user with access keys
+    #[default]
     User,
-    
+
     /// Create IAM role
     Role,
-    
+
     /// Assume an existing role
     AssumedRole,
-    
+
     /// Generate federation token
     FederationToken,
-    
+
     /// Generate STS session token
     SessionToken,
 }
 
-impl Default for AwsCredentialType {
-    fn default() -> Self {
-        Self::User
-    }
-}
 
 /// AWS credential response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsCredentials {
     /// Access key ID
     pub access_key_id: String,
-    
+
     /// Secret access key
     pub secret_access_key: String,
-    
+
     /// Session token (for temporary credentials)
     pub session_token: Option<String>,
-    
+
     /// Expiration time (for temporary credentials)
     pub expiration: Option<chrono::DateTime<chrono::Utc>>,
-    
+
     /// ARN of the created/assumed identity
     pub arn: String,
-    
+
     /// User ID of the identity
     pub user_id: String,
-    
+
     /// Type of credential generated
     pub credential_type: AwsCredentialType,
-    
+
     /// Lease ID for revocation
     pub lease_id: String,
 }
@@ -166,7 +163,7 @@ mod tests {
 
         let serialized = serde_json::to_string(&role_config).unwrap();
         let deserialized: AwsRoleConfig = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(role_config.name, deserialized.name);
         assert_eq!(role_config.ttl, deserialized.ttl);
     }

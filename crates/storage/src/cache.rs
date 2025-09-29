@@ -190,6 +190,73 @@ pub struct CachedStorage<S: crate::StorageBackend, C: CacheBackend> {
     default_ttl: Duration,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    #[tokio::test]
+    async fn test_in_memory_cache_set_get_and_stats() {
+        let cache = InMemoryCache::new();
+        let key = "vault:test";
+
+        // Miss before value set
+        assert!(cache.get(key).await.unwrap().is_none());
+
+        cache
+            .set(key, b"encrypted-data".to_vec(), None)
+            .await
+            .unwrap();
+
+        let cached = cache.get(key).await.unwrap();
+        assert_eq!(cached, Some(b"encrypted-data".to_vec()));
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.hit_count, 1);
+        assert_eq!(stats.miss_count, 1);
+        assert_eq!(stats.entry_count, 1);
+        assert!(stats.hit_rate > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_cache_expiration() {
+        let cache = InMemoryCache::new();
+        let key = "vault:expiring";
+
+        cache
+            .set(key, b"temp".to_vec(), Some(Duration::from_millis(50)))
+            .await
+            .unwrap();
+
+        assert!(cache.get(key).await.unwrap().is_some());
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(cache.get(key).await.unwrap().is_none());
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.entry_count, 0);
+        assert!(stats.eviction_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_cache_exists_and_clear() {
+        let cache = InMemoryCache::new();
+        let key = "vault:clear";
+
+        cache.set(key, b"value".to_vec(), None).await.unwrap();
+        assert!(cache.exists(key).await.unwrap());
+
+        cache.clear().await.unwrap();
+        assert!(!cache.exists(key).await.unwrap());
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.memory_usage_bytes, 0);
+    }
+}
+
 impl<S, C> CachedStorage<S, C>
 where
     S: crate::StorageBackend,

@@ -78,6 +78,12 @@ pub struct DatabaseCredentials {
     pub role_name: String,
 }
 
+impl Default for DatabaseEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DatabaseEngine {
     /// Create a new database engine
     pub fn new() -> Self {

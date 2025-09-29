@@ -215,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .create_secret(
                             "transit/decrypt/test-key",
                             json!(DecryptRequest {
-                                ciphertext: ciphertext,
+                                ciphertext,
                                 context: None,
                                 nonce: None,
                                 associated_data: None,

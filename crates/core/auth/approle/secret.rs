@@ -1,5 +1,5 @@
 //! Secret ID Management for AppRole
-//! 
+//!
 //! Handles secret ID generation, validation, and lifecycle management
 
 use serde::{Deserialize, Serialize};
@@ -9,34 +9,34 @@ use std::collections::HashMap;
 pub struct SecretId {
     /// Hashed secret ID for secure storage
     pub secret_id_hash: String,
-    
+
     /// Unique accessor for the secret ID
     pub accessor: String,
-    
+
     /// Role name this secret ID belongs to
     pub role_name: String,
-    
+
     /// Metadata associated with the secret ID
     pub metadata: HashMap<String, String>,
-    
+
     /// Creation timestamp (Unix timestamp)
     pub creation_time: u64,
-    
+
     /// Expiration timestamp (Unix timestamp), None for no expiration
     pub expiration_time: Option<u64>,
-    
+
     /// Maximum number of uses, None for unlimited
     pub num_uses: Option<u32>,
-    
+
     /// Current usage count
     pub used_count: u32,
-    
+
     /// CIDR blocks from which this secret ID can be used
     pub cidr_list: Option<Vec<String>>,
-    
+
     /// Whether this secret ID is currently active
     pub active: bool,
-    
+
     /// Token bound to this secret ID (if any)
     pub token_bound_cidrs: Option<Vec<String>>,
 }
@@ -55,7 +55,7 @@ impl SecretId {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-            
+
         Self {
             secret_id_hash,
             accessor,
@@ -70,7 +70,7 @@ impl SecretId {
             token_bound_cidrs: None,
         }
     }
-    
+
     /// Check if the secret ID is expired
     pub fn is_expired(&self) -> bool {
         if let Some(expiration) = self.expiration_time {
@@ -83,7 +83,7 @@ impl SecretId {
             false
         }
     }
-    
+
     /// Check if the secret ID has exceeded usage limits
     pub fn is_usage_exceeded(&self) -> bool {
         if let Some(max_uses) = self.num_uses {
@@ -92,27 +92,27 @@ impl SecretId {
             false
         }
     }
-    
+
     /// Check if the secret ID is valid for use
     pub fn is_valid(&self) -> bool {
         self.active && !self.is_expired() && !self.is_usage_exceeded()
     }
-    
+
     /// Increment the usage count
     pub fn increment_usage(&mut self) -> Result<(), String> {
         if !self.is_valid() {
             return Err("Secret ID is not valid for use".to_string());
         }
-        
+
         self.used_count += 1;
         Ok(())
     }
-    
+
     /// Deactivate the secret ID
     pub fn deactivate(&mut self) {
         self.active = false;
     }
-    
+
     /// Check if authentication is allowed from the given IP address
     pub fn is_ip_allowed(&self, ip: &str) -> bool {
         match &self.cidr_list {
@@ -130,24 +130,24 @@ impl SecretId {
             None => true, // No restrictions
         }
     }
-    
+
     /// Check if an IP address is within a CIDR range
     fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
         let parts: Vec<&str> = cidr.split('/').collect();
         if parts.len() != 2 {
             return false;
         }
-        
+
         let network_ip = parts[0];
         let prefix_len: u32 = match parts[1].parse() {
             Ok(len) => len,
             Err(_) => return false,
         };
-        
+
         // Simple IPv4 CIDR matching
         let ip_bytes = Self::ip_to_u32(ip);
         let network_bytes = Self::ip_to_u32(network_ip);
-        
+
         match (ip_bytes, network_bytes) {
             (Some(ip_val), Some(net_val)) => {
                 let mask = (!0u32) << (32 - prefix_len);
@@ -156,14 +156,14 @@ impl SecretId {
             _ => false,
         }
     }
-    
+
     /// Convert IPv4 address string to u32
     fn ip_to_u32(ip: &str) -> Option<u32> {
         let parts: Vec<&str> = ip.split('.').collect();
         if parts.len() != 4 {
             return None;
         }
-        
+
         let mut result = 0u32;
         for (i, part) in parts.iter().enumerate() {
             let byte: u8 = part.parse().ok()?;
@@ -171,12 +171,12 @@ impl SecretId {
         }
         Some(result)
     }
-    
+
     /// Get remaining uses for this secret ID
     pub fn remaining_uses(&self) -> Option<u32> {
         self.num_uses.map(|max| max.saturating_sub(self.used_count))
     }
-    
+
     /// Get time remaining until expiration (in seconds)
     pub fn time_until_expiration(&self) -> Option<u64> {
         self.expiration_time.map(|expiration| {
@@ -187,7 +187,7 @@ impl SecretId {
             expiration.saturating_sub(now)
         })
     }
-    
+
     /// Convert to a response format (without sensitive data)
     pub fn to_response(&self) -> SecretIdResponse {
         SecretIdResponse {
@@ -203,41 +203,41 @@ impl SecretId {
             time_until_expiration: self.time_until_expiration(),
         }
     }
-    
+
     /// Create a secret ID with CIDR restrictions
     pub fn with_cidr_list(mut self, cidrs: Vec<String>) -> Self {
         self.cidr_list = Some(cidrs);
         self
     }
-    
+
     /// Create a secret ID with token bound CIDRs
     pub fn with_token_bound_cidrs(mut self, cidrs: Vec<String>) -> Self {
         self.token_bound_cidrs = Some(cidrs);
         self
     }
-    
+
     /// Validate the secret ID configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.accessor.is_empty() {
             return Err("Secret ID accessor cannot be empty".to_string());
         }
-        
+
         if self.role_name.is_empty() {
             return Err("Role name cannot be empty".to_string());
         }
-        
+
         if let Some(expiration) = self.expiration_time {
             if expiration <= self.creation_time {
                 return Err("Expiration time must be after creation time".to_string());
             }
         }
-        
+
         if let Some(num_uses) = self.num_uses {
             if num_uses == 0 {
                 return Err("Number of uses must be greater than 0".to_string());
             }
         }
-        
+
         if let Some(cidrs) = &self.cidr_list {
             for cidr in cidrs {
                 if cidr.is_empty() {
@@ -246,7 +246,7 @@ impl SecretId {
                 // TODO: Add proper CIDR validation
             }
         }
-        
+
         Ok(())
     }
 }
@@ -266,6 +266,7 @@ pub struct SecretIdResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SecretIdGenerateRequest {
     pub metadata: Option<HashMap<String, String>>,
     pub cidr_list: Option<Vec<String>>,
@@ -282,17 +283,6 @@ pub struct SecretIdGenerateResponse {
     pub secret_id_num_uses: Option<u32>,
 }
 
-impl Default for SecretIdGenerateRequest {
-    fn default() -> Self {
-        Self {
-            metadata: None,
-            cidr_list: None,
-            token_bound_cidrs: None,
-            num_uses: None,
-            ttl: None,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -308,7 +298,7 @@ mod tests {
             Some(1234567890),
             Some(10),
         );
-        
+
         assert_eq!(secret_id.accessor, "accessor_123");
         assert_eq!(secret_id.role_name, "test_role");
         assert_eq!(secret_id.expiration_time, Some(1234567890));
@@ -327,10 +317,10 @@ mod tests {
             Some(1), // Very old timestamp
             None,
         );
-        
+
         assert!(expired_secret.is_expired());
         assert!(!expired_secret.is_valid());
-        
+
         let valid_secret = SecretId::new(
             "hash".to_string(),
             "accessor".to_string(),
@@ -339,7 +329,7 @@ mod tests {
             None, // No expiration
             None,
         );
-        
+
         assert!(!valid_secret.is_expired());
         assert!(valid_secret.is_valid());
     }
@@ -354,21 +344,21 @@ mod tests {
             None,
             Some(2), // Max 2 uses
         );
-        
+
         assert_eq!(secret_id.remaining_uses(), Some(2));
-        
+
         // First use
         assert!(secret_id.increment_usage().is_ok());
         assert_eq!(secret_id.used_count, 1);
         assert_eq!(secret_id.remaining_uses(), Some(1));
         assert!(secret_id.is_valid());
-        
+
         // Second use
         assert!(secret_id.increment_usage().is_ok());
         assert_eq!(secret_id.used_count, 2);
         assert_eq!(secret_id.remaining_uses(), Some(0));
         assert!(!secret_id.is_valid()); // Should be invalid now
-        
+
         // Third use should fail
         assert!(secret_id.increment_usage().is_err());
     }
@@ -383,9 +373,9 @@ mod tests {
             None,
             None,
         );
-        
+
         assert!(secret_id.is_valid());
-        
+
         secret_id.deactivate();
         assert!(!secret_id.is_valid());
     }
@@ -399,12 +389,13 @@ mod tests {
             HashMap::new(),
             None,
             None,
-        ).with_cidr_list(vec!["192.168.1.0/24".to_string(), "10.0.0.1".to_string()]);
-        
+        )
+        .with_cidr_list(vec!["192.168.1.0/24".to_string(), "10.0.0.1".to_string()]);
+
         assert!(secret_id.is_ip_allowed("192.168.1.100"));
         assert!(secret_id.is_ip_allowed("10.0.0.1"));
         assert!(!secret_id.is_ip_allowed("172.16.0.1"));
-        
+
         let unrestricted_secret = SecretId::new(
             "hash".to_string(),
             "accessor".to_string(),
@@ -413,7 +404,7 @@ mod tests {
             None,
             None,
         );
-        
+
         assert!(unrestricted_secret.is_ip_allowed("any.ip"));
     }
 
@@ -428,7 +419,7 @@ mod tests {
             Some(5),
         );
         assert!(valid_secret.validate().is_ok());
-        
+
         let invalid_secret = SecretId::new(
             "hash".to_string(),
             String::new(), // Empty accessor
@@ -450,7 +441,7 @@ mod tests {
             Some(9999999999), // Future timestamp
             Some(5),
         );
-        
+
         let response = secret_id.to_response();
         assert_eq!(response.accessor, "accessor");
         assert_eq!(response.role_name, "role");

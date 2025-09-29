@@ -21,3 +21,27 @@ impl CliConfig {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_default_server_url() {
+        let config = CliConfig::default();
+        assert_eq!(config.server_url, "http://127.0.0.1:8200");
+    }
+
+    #[tokio::test]
+    async fn test_load_from_file() {
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        tokio::fs::write(tmp.path(), "server_url = \"https://vault.example.com\"")
+            .await
+            .expect("write config");
+
+        let loaded = CliConfig::load_from_file(tmp.path().to_str().unwrap())
+            .await
+            .expect("load config");
+        assert_eq!(loaded.server_url, "https://vault.example.com");
+    }
+}

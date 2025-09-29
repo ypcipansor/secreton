@@ -98,6 +98,12 @@ pub struct CertificateBuilder {
     serial_number: Option<String>,
 }
 
+impl Default for CertificateBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CertificateBuilder {
     pub fn new() -> Self {
         Self {

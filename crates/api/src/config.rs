@@ -372,7 +372,7 @@ pub struct TlsConfig {
 pub struct MonitoringConfig {
     /// Enable metrics
     pub metrics: bool,
-    
+
     /// Metrics endpoint
     pub metrics_path: String,
     
@@ -381,23 +381,11 @@ pub struct MonitoringConfig {
     
     /// Enable tracing
     pub tracing: bool,
-    
+
     /// Jaeger configuration
     pub jaeger: Option<JaegerConfig>,
 }
 
-/// Jaeger tracing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JaegerConfig {
-    /// Jaeger endpoint
-    pub endpoint: String,
-    
-    /// Service name
-    pub service_name: String,
-    
-    /// Sample rate
-    pub sample_rate: f64,
-}
 
 /// CORS configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -655,5 +643,177 @@ impl Default for LoggingConfig {
             file: None,
             rotation: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::time::Duration;
+
+    fn sample_api_config() -> ApiConfig {
+        ApiConfig {
+            http: HttpConfig {
+                bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8200),
+                timeout: Duration::from_secs(30),
+                max_body_size: 5 * 1024 * 1024,
+                keep_alive: Duration::from_secs(15),
+                compression: true,
+                static_files: None,
+            },
+            grpc: GrpcConfig {
+                enabled: true,
+                bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8201),
+                timeout: Duration::from_secs(30),
+                max_message_size: 16 * 1024 * 1024,
+                reflection: true,
+                health_check: true,
+            },
+            auth: AuthConfig {
+                jwt: JwtConfig {
+                    secret: "super-secret-key".to_string(),
+                    expiration: Duration::from_secs(3600),
+                    refresh_expiration: Duration::from_secs(86400),
+                    algorithm: "HS256".to_string(),
+                    issuer: "secreton".to_string(),
+                    audience: "vault-users".to_string(),
+                },
+                oauth2: None,
+                mtls: Some(MtlsConfig {
+                    required: true,
+                    ca_cert: PathBuf::from("/etc/ssl/ca.pem"),
+                    allowed_subjects: vec!["CN=trusted".to_string()],
+                    crl: None,
+                }),
+                session: SessionConfig {
+                    timeout: Duration::from_secs(1800),
+                    store: SessionStore::Memory,
+                    cookie: CookieConfig {
+                        name: "secreton-session".to_string(),
+                        domain: Some("example.com".to_string()),
+                        path: "/".to_string(),
+                        secure: true,
+                        http_only: true,
+                        same_site: "Strict".to_string(),
+                    },
+                },
+                mfa: MfaConfig {
+                    enabled: true,
+                    totp: TotpConfig {
+                        issuer: "Secreton Vault".to_string(),
+                        secret_length: 32,
+                        time_step: 30,
+                        code_length: 6,
+                        skew_tolerance: 1,
+                    },
+                    sms: None,
+                    email: None,
+                    webauthn: Some(WebAuthnConfig {
+                        rp_name: "Secreton Vault".to_string(),
+                        rp_id: "vault.example.com".to_string(),
+                        origin: "https://vault.example.com".to_string(),
+                    }),
+                },
+            },
+            rate_limit: RateLimitConfig {
+                enabled: true,
+                global: RateLimitRule {
+                    requests: 1000,
+                    window: Duration::from_secs(60),
+                    burst: Some(100),
+                },
+                endpoints: vec![EndpointRateLimit {
+                    pattern: "/v1/auth/login".to_string(),
+                    rule: RateLimitRule {
+                        requests: 20,
+                        window: Duration::from_secs(60),
+                        burst: Some(10),
+                    },
+                }],
+                per_user: Some(RateLimitRule {
+                    requests: 200,
+                    window: Duration::from_secs(60),
+                    burst: None,
+                }),
+                per_ip: None,
+            },
+            tls: Some(TlsConfig {
+                cert_file: PathBuf::from("/etc/tls/server.crt"),
+                key_file: PathBuf::from("/etc/tls/server.key"),
+                ca_file: None,
+                min_version: "TLS1.3".to_string(),
+                cipher_suites: vec!["TLS_AES_256_GCM_SHA384".to_string()],
+                alpn_protocols: vec!["h2".to_string(), "http/1.1".to_string()],
+            }),
+            monitoring: MonitoringConfig {
+                metrics: true,
+                metrics_path: "/metrics".to_string(),
+                health_path: "/health".to_string(),
+                tracing: true,
+                jaeger: Some(JaegerConfig {
+                    endpoint: "http://jaeger:14268/api/traces".to_string(),
+                    service_name: "secreton-api".to_string(),
+                    sample_rate: 0.5,
+                }),
+            },
+            cors: CorsConfig {
+                enabled: true,
+                allowed_origins: vec!["https://vault.example.com".to_string()],
+                allowed_methods: vec!["GET".to_string(), "POST".to_string()],
+                allowed_headers: vec!["Authorization".to_string()],
+                exposed_headers: vec![],
+                max_age: Some(Duration::from_secs(600)),
+                allow_credentials: true,
+            },
+            logging: LoggingConfig {
+                level: "info".to_string(),
+                format: "json".to_string(),
+                json: true,
+                file: None,
+                rotation: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_api_config_structure() {
+        let config = sample_api_config();
+        assert_eq!(config.http.bind_address.port(), 8200);
+        assert!(config.grpc.enabled);
+        assert_eq!(config.auth.jwt.algorithm, "HS256");
+        assert!(config.auth.mfa.enabled);
+        assert!(config.rate_limit.enabled);
+        assert!(config.tls.is_some());
+        assert!(config.monitoring.metrics);
+        assert_eq!(config.cors.allowed_origins.len(), 1);
+        assert!(config.logging.json);
+    }
+
+    #[test]
+    fn test_rate_limit_rule_burst_defaults() {
+        let rule = RateLimitRule {
+            requests: 50,
+            window: Duration::from_secs(10),
+            burst: None,
+        };
+        assert_eq!(rule.requests, 50);
+        assert!(rule.burst.is_none());
+    }
+
+    #[test]
+    fn test_cookie_config_flags() {
+        let cookie = CookieConfig {
+            name: "session".to_string(),
+            domain: None,
+            path: "/".to_string(),
+            secure: true,
+            http_only: true,
+            same_site: "Lax".to_string(),
+        };
+
+        assert!(cookie.secure);
+        assert!(cookie.http_only);
+        assert_eq!(cookie.same_site, "Lax");
     }
 }

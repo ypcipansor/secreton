@@ -3,13 +3,13 @@ use aws_sdk_sts::Client as StsClient;
 use chrono::Utc;
 use tracing::info;
 
-use super::config::{AwsCredentials, AwsCredentialType, AwsRoleConfig};
+use super::config::{AwsCredentialType, AwsCredentials, AwsRoleConfig};
 
 /// Helper function to convert AWS SDK DateTime to chrono DateTime
-fn convert_aws_datetime(aws_datetime: Option<&aws_sdk_sts::primitives::DateTime>) -> Option<chrono::DateTime<Utc>> {
-    aws_datetime.and_then(|dt| {
-        chrono::DateTime::from_timestamp(dt.secs(), dt.subsec_nanos())
-    })
+fn convert_aws_datetime(
+    aws_datetime: Option<&aws_sdk_sts::primitives::DateTime>,
+) -> Option<chrono::DateTime<Utc>> {
+    aws_datetime.and_then(|dt| chrono::DateTime::from_timestamp(dt.secs(), dt.subsec_nanos()))
 }
 
 /// STS operations handler for AWS secrets engine
@@ -34,9 +34,7 @@ impl StsHandler {
             .context("Role ARN is required for assumed role credentials")?;
 
         let session_name = role_config
-            .session_name
-            .as_ref()
-            .map(|s| s.clone())
+            .session_name.clone()
             .unwrap_or_else(|| format!("secreton-{}-{}", role_config.name, &lease_id[..8]));
 
         info!("Assuming role: {} with session: {}", role_arn, session_name);
@@ -101,10 +99,7 @@ impl StsHandler {
 
         info!("Getting federation token: {}", name);
 
-        let mut federation_request = self
-            .client
-            .get_federation_token()
-            .name(&name);
+        let mut federation_request = self.client.get_federation_token().name(&name);
 
         // Add duration if TTL is specified
         if let Some(ttl) = role_config.ttl {
@@ -165,9 +160,7 @@ impl StsHandler {
 
         // Add MFA if provided
         if let (Some(serial), Some(token)) = (serial_number, token_code) {
-            session_request = session_request
-                .serial_number(serial)
-                .token_code(token);
+            session_request = session_request.serial_number(serial).token_code(token);
         }
 
         let response = session_request
@@ -229,7 +222,7 @@ impl StsHandler {
     /// Calculate appropriate TTL based on credential type
     pub fn calculate_ttl(credential_type: &AwsCredentialType, requested_ttl: Option<u64>) -> u64 {
         let max_ttl = match credential_type {
-            AwsCredentialType::AssumedRole => 43200,    // 12 hours
+            AwsCredentialType::AssumedRole => 43200,      // 12 hours
             AwsCredentialType::FederationToken => 129600, // 36 hours
             AwsCredentialType::SessionToken => 129600,    // 36 hours
             AwsCredentialType::User => u64::MAX,          // No limit for permanent users
@@ -256,7 +249,7 @@ mod tests {
     fn test_validate_role_arn_invalid() {
         let arn = "arn:aws:iam::123456789012:user/test-user";
         assert!(StsHandler::validate_role_arn(arn).is_err());
-        
+
         let arn = "invalid-arn";
         assert!(StsHandler::validate_role_arn(arn).is_err());
     }

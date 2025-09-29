@@ -21,13 +21,13 @@ use crate::models::user::Token;
 use crate::services::audit::AuditDevice;
 
 // Re-export storage types
+pub mod in_memory;
 pub mod mfa;
 pub mod secure;
-pub mod in_memory;
 
+pub use in_memory::InMemoryStorage;
 pub use mfa::{MfaRecoveryCodes, MfaSecret, MfaStorage};
 pub use secure::{SecureStorage, SharedSecureStorage};
-pub use in_memory::InMemoryStorage;
 
 // Core storage types needed by engines
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,7 +659,7 @@ impl StorageBackend for PostgresStorage {
             )
             .await?;
 
-        rows.get(0)
+        rows.first()
             .map(|r| r.get::<_, String>("secret"))
             .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
     }
@@ -673,8 +673,7 @@ impl StorageBackend for PostgresStorage {
             )
             .await?;
 
-        Ok(rows
-            .get(0)
+        Ok(rows.first()
             .map(|r| r.get::<_, bool>("is_enabled"))
             .unwrap_or(false))
     }
@@ -927,7 +926,7 @@ impl StorageBackend for PostgresStorage {
             )
             .await?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             let hash: String = row.get("password_hash");
             Ok(Storage::verify_password(&hash, password)?)
         } else {
@@ -1283,7 +1282,7 @@ impl StorageBackend for Storage {
             )
             .await?;
 
-        rows.get(0)
+        rows.first()
             .map(|r| r.get::<_, String>("secret"))
             .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
     }
@@ -1297,8 +1296,7 @@ impl StorageBackend for Storage {
             )
             .await?;
 
-        Ok(rows
-            .get(0)
+        Ok(rows.first()
             .map(|r| r.get::<_, bool>("is_enabled"))
             .unwrap_or(false))
     }
@@ -2144,7 +2142,7 @@ impl Storage {
                 return Ok(false);
             }
             if let Some(exp) = expires_at.as_deref() {
-                if let Ok(exp_time) = chrono::DateTime::parse_from_rfc3339(&exp) {
+                if let Ok(exp_time) = chrono::DateTime::parse_from_rfc3339(exp) {
                     if chrono::Utc::now() > exp_time.with_timezone(&chrono::Utc) {
                         return Ok(false);
                     }
@@ -2201,7 +2199,7 @@ impl Storage {
             &[&id],
         ).await?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             Ok(Some(Lease {
                 id: row.get("id"),
                 user: row.get("user"),
@@ -2363,7 +2361,7 @@ impl Storage {
         let client = self.pool.get().await?;
         let rows = client.query("SELECT id, namespace, common_name, pem, private_key, created_at FROM pki_ca WHERE namespace = $1 AND common_name = $2 ORDER BY created_at DESC LIMIT 1", &[&namespace, &common_name]).await?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             Ok(Some(PkiCa {
                 id: row.get("id"),
                 namespace: row.get("namespace"),
@@ -2404,7 +2402,7 @@ impl Storage {
         let client = self.pool.get().await?;
         let rows = client.query("SELECT id, namespace, common_name, pem, private_key, ca_id, serial, issued_at, expires_at, revoked FROM pki_cert WHERE namespace = $1 AND serial = $2", &[&namespace, &serial]).await?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             Ok(Some(PkiCert {
                 id: row.get("id"),
                 namespace: row.get("namespace"),
@@ -2521,7 +2519,7 @@ impl StorageEngine for Storage {
             .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             let value: Vec<u8> = row.get("value");
             let metadata_json: String = row.get("metadata");
             let metadata: HashMap<String, String> =
@@ -2544,7 +2542,7 @@ impl StorageEngine for Storage {
             .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!(e.to_string())))?;
         let metadata_json =
-            serde_json::to_string(&entry.metadata).map_err(|e| CoreError::Serialization(e))?;
+            serde_json::to_string(&entry.metadata).map_err(CoreError::Serialization)?;
 
         client
             .execute(

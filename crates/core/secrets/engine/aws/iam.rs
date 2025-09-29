@@ -4,7 +4,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-use super::config::{AwsCredentials, AwsCredentialType, AwsRoleConfig};
+use super::config::{AwsCredentialType, AwsCredentials, AwsRoleConfig};
 
 /// IAM operations handler for AWS secrets engine
 pub struct IamHandler {
@@ -14,7 +14,11 @@ pub struct IamHandler {
 }
 
 impl IamHandler {
-    pub fn new(client: IamClient, path_prefix: String, default_tags: HashMap<String, String>) -> Self {
+    pub fn new(
+        client: IamClient,
+        path_prefix: String,
+        default_tags: HashMap<String, String>,
+    ) -> Self {
         Self {
             client,
             path_prefix,
@@ -29,7 +33,7 @@ impl IamHandler {
         lease_id: &str,
     ) -> Result<AwsCredentials> {
         let username = format!("secreton-{}-{}", role_config.name, &lease_id[..8]);
-        
+
         info!("Creating IAM user: {}", username);
 
         // Create user
@@ -67,26 +71,28 @@ impl IamHandler {
         }
 
         // Create access key
-        let access_key_response = self.client
+        let access_key_response = self
+            .client
             .create_access_key()
             .user_name(&username)
             .send()
             .await
             .context("Failed to create access key")?;
 
-        let access_key = access_key_response.access_key()
+        let access_key = access_key_response
+            .access_key()
             .context("No access key in response")?;
 
         // Get user info for ARN
-        let user_response = self.client
+        let user_response = self
+            .client
             .get_user()
             .user_name(&username)
             .send()
             .await
             .context("Failed to get user info")?;
 
-        let user = user_response.user()
-            .context("No user in response")?;
+        let user = user_response.user().context("No user in response")?;
 
         Ok(AwsCredentials {
             access_key_id: access_key.access_key_id().to_string(),
@@ -107,7 +113,7 @@ impl IamHandler {
         lease_id: &str,
     ) -> Result<AwsCredentials> {
         let role_name = format!("secreton-{}-{}", role_config.name, &lease_id[..8]);
-        
+
         info!("Creating IAM role: {}", role_name);
 
         // Default assume role policy document (can be assumed by current account)
@@ -126,7 +132,8 @@ impl IamHandler {
 
         // Create role
         let role_path = format!("{}{}/", self.path_prefix, role_config.name);
-        let create_role_response = self.client
+        let create_role_response = self
+            .client
             .create_role()
             .role_name(&role_name)
             .path(&role_path)
@@ -135,8 +142,7 @@ impl IamHandler {
             .await
             .context("Failed to create IAM role")?;
 
-        let role = create_role_response.role()
-            .context("No role in response")?;
+        let role = create_role_response.role().context("No role in response")?;
 
         // Attach inline policy if provided
         if let Some(policy_doc) = &role_config.policy_document {
@@ -180,7 +186,8 @@ impl IamHandler {
         info!("Deleting IAM user: {}", username);
 
         // Delete access keys
-        let list_keys_response = self.client
+        let list_keys_response = self
+            .client
             .list_access_keys()
             .user_name(username)
             .send()
@@ -189,7 +196,8 @@ impl IamHandler {
         if let Ok(response) = list_keys_response {
             for access_key in response.access_key_metadata() {
                 if let Some(access_key_id) = access_key.access_key_id() {
-                    if let Err(e) = self.client
+                    if let Err(e) = self
+                        .client
                         .delete_access_key()
                         .user_name(username)
                         .access_key_id(access_key_id)
@@ -203,7 +211,8 @@ impl IamHandler {
         }
 
         // Detach managed policies
-        let list_policies_response = self.client
+        let list_policies_response = self
+            .client
             .list_attached_user_policies()
             .user_name(username)
             .send()
@@ -211,20 +220,26 @@ impl IamHandler {
 
         if let Ok(response) = list_policies_response {
             for policy in response.attached_policies() {
-                if let Err(e) = self.client
+                if let Err(e) = self
+                    .client
                     .detach_user_policy()
                     .user_name(username)
                     .policy_arn(policy.policy_arn().unwrap_or(""))
                     .send()
                     .await
                 {
-                    warn!("Failed to detach policy {}: {}", policy.policy_name().unwrap_or(""), e);
+                    warn!(
+                        "Failed to detach policy {}: {}",
+                        policy.policy_name().unwrap_or(""),
+                        e
+                    );
                 }
             }
         }
 
         // Delete inline policies
-        let list_inline_policies_response = self.client
+        let list_inline_policies_response = self
+            .client
             .list_user_policies()
             .user_name(username)
             .send()
@@ -232,7 +247,8 @@ impl IamHandler {
 
         if let Ok(response) = list_inline_policies_response {
             for policy_name in response.policy_names() {
-                if let Err(e) = self.client
+                if let Err(e) = self
+                    .client
                     .delete_user_policy()
                     .user_name(username)
                     .policy_name(policy_name)
@@ -261,7 +277,8 @@ impl IamHandler {
         info!("Deleting IAM role: {}", role_name);
 
         // Detach managed policies
-        let list_policies_response = self.client
+        let list_policies_response = self
+            .client
             .list_attached_role_policies()
             .role_name(role_name)
             .send()
@@ -269,20 +286,26 @@ impl IamHandler {
 
         if let Ok(response) = list_policies_response {
             for policy in response.attached_policies() {
-                if let Err(e) = self.client
+                if let Err(e) = self
+                    .client
                     .detach_role_policy()
                     .role_name(role_name)
                     .policy_arn(policy.policy_arn().unwrap_or(""))
                     .send()
                     .await
                 {
-                    warn!("Failed to detach policy {}: {}", policy.policy_name().unwrap_or(""), e);
+                    warn!(
+                        "Failed to detach policy {}: {}",
+                        policy.policy_name().unwrap_or(""),
+                        e
+                    );
                 }
             }
         }
 
         // Delete inline policies
-        let list_inline_policies_response = self.client
+        let list_inline_policies_response = self
+            .client
             .list_role_policies()
             .role_name(role_name)
             .send()
@@ -290,7 +313,8 @@ impl IamHandler {
 
         if let Ok(response) = list_inline_policies_response {
             for policy_name in response.policy_names() {
-                if let Err(e) = self.client
+                if let Err(e) = self
+                    .client
                     .delete_role_policy()
                     .role_name(role_name)
                     .policy_name(policy_name)
@@ -319,7 +343,7 @@ impl IamHandler {
         // ARN format: arn:aws:iam::account:user/path/username
         if let Some(user_part) = arn.strip_prefix("arn:aws:iam::") {
             if let Some(username_part) = user_part.split_once(":user/") {
-                return Some(username_part.1.split('/').last()?.to_string());
+                return Some(username_part.1.split('/').next_back()?.to_string());
             }
         }
         None
@@ -330,7 +354,7 @@ impl IamHandler {
         // ARN format: arn:aws:iam::account:role/path/rolename
         if let Some(role_part) = arn.strip_prefix("arn:aws:iam::") {
             if let Some(role_name_part) = role_part.split_once(":role/") {
-                return Some(role_name_part.1.split('/').last()?.to_string());
+                return Some(role_name_part.1.split('/').next_back()?.to_string());
             }
         }
         None

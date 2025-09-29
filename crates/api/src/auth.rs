@@ -435,4 +435,66 @@ mod tests {
         assert!(auth_service.check_permission(&claims, Permission::Decrypt));
         assert!(!auth_service.check_permission(&claims, Permission::DeleteKey));
     }
+
+    #[test]
+    fn test_admin_role_grants_all_permissions() {
+        let config = AuthConfig::default();
+        let auth_service = AuthService::new(config);
+
+        let claims = Claims {
+            sub: "admin-user".to_string(),
+            name: "Admin".to_string(),
+            email: "admin@example.com".to_string(),
+            roles: vec!["admin".to_string()],
+            permissions: vec![],
+            exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
+            iat: Utc::now().timestamp() as usize,
+            iss: "secreton-vault".to_string(),
+            aud: "secreton-api".to_string(),
+            jti: Uuid::new_v4().to_string(),
+        };
+
+        assert!(auth_service.check_permission(&claims, Permission::ManageUsers));
+        assert!(auth_service.check_permission(&claims, Permission::AccessAuditLogs));
+    }
+
+    #[test]
+    fn test_generate_token_includes_role_permissions() {
+        let config = AuthConfig::default();
+        let auth_service = AuthService::new(config);
+
+        let token = auth_service
+            .generate_token(
+                "vault-admin",
+                "Vault Admin",
+                "vault.admin@example.com",
+                vec!["vault-admin".to_string()],
+            )
+            .expect("token generation");
+
+        let data = auth_service
+            .validate_token(&token)
+            .expect("token validation");
+        let permissions = data.claims.permissions;
+
+        assert!(permissions.contains(&Permission::AccessAuditLogs.as_string()));
+        assert!(permissions.contains(&Permission::Encrypt.as_string()));
+        assert!(permissions.contains(&Permission::HashData.as_string()));
+    }
+
+    #[test]
+    fn test_extract_bearer_token() {
+        let header = HeaderValue::from_str("Bearer secret-token").unwrap();
+        let token = extract_bearer_token(&header).expect("token expected");
+        assert_eq!(token, "secret-token");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_invalid_format() {
+        let header = HeaderValue::from_str("Basic abc123").unwrap();
+        assert!(extract_bearer_token(&header).is_none());
+
+        let header = HeaderValue::from_str("Bearer").unwrap();
+        assert!(extract_bearer_token(&header).is_none());
+    }
 }

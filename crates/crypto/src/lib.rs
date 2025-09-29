@@ -155,3 +155,65 @@ pub fn generate_nonce(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
         Err(CryptoError::InvalidNonceLength)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_security_params_for_symmetric_algorithms() {
+        let aes_params = SecurityParams::new(AlgorithmId::Aes256Gcm);
+        assert_eq!(aes_params.key_size, 32);
+        assert_eq!(aes_params.iterations, None);
+        assert_eq!(aes_params.salt_size, Some(12));
+        assert!(aes_params.is_secure());
+
+        let chacha_params = SecurityParams::new(AlgorithmId::ChaCha20Poly1305);
+        assert_eq!(chacha_params.key_size, 32);
+        assert!(chacha_params.is_secure());
+    }
+
+    #[test]
+    fn test_security_params_for_kdf_algorithms() {
+        let pbkdf2_params = SecurityParams::new(AlgorithmId::Pbkdf2);
+        assert_eq!(pbkdf2_params.iterations, Some(100_000));
+        assert!(pbkdf2_params.is_secure());
+
+        let mut unsafe_pbkdf2 = pbkdf2_params.clone();
+        unsafe_pbkdf2.iterations = Some(10_000);
+        assert!(!unsafe_pbkdf2.is_secure());
+
+        let argon_params = SecurityParams::new(AlgorithmId::Argon2id);
+        assert_eq!(argon_params.iterations, Some(3));
+        assert!(argon_params.is_secure());
+
+        let mut unsafe_argon = argon_params.clone();
+        unsafe_argon.iterations = Some(1);
+        assert!(!unsafe_argon.is_secure());
+    }
+
+    #[test]
+    fn test_generate_key_lengths_match_algorithm_requirements() {
+        let aes_key = generate_key(AlgorithmId::Aes256Gcm).expect("AES key generation failed");
+        assert_eq!(aes_key.len(), 32);
+
+        let argon_key = generate_key(AlgorithmId::Argon2id).expect("Argon2 key generation failed");
+        assert_eq!(argon_key.len(), 32);
+    }
+
+    #[test]
+    fn test_generate_nonce_respects_algorithm_requirements() {
+        let aes_nonce = generate_nonce(AlgorithmId::Aes256Gcm).expect("nonce generation failed");
+        assert_eq!(aes_nonce.len(), 12);
+
+        let err =
+            generate_nonce(AlgorithmId::Sha256).expect_err("expected nonce generation to fail");
+        assert_eq!(err, CryptoError::InvalidNonceLength);
+    }
+
+    #[test]
+    fn test_generate_random_bytes_produces_requested_length() {
+        let bytes = generate_random_bytes(64).expect("random generation failed");
+        assert_eq!(bytes.len(), 64);
+    }
+}

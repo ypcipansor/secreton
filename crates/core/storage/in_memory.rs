@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 use super::{StorageEngine, StorageEntry};
@@ -40,13 +40,13 @@ impl StorageEngine for InMemoryStorage {
     async fn list(&self, prefix: &str) -> Result<Vec<String>, CoreError> {
         let data_map = self.data.read().await;
         let mut results = Vec::new();
-        
+
         for key in data_map.keys() {
             if key.starts_with(prefix) {
                 results.push(key.clone());
             }
         }
-        
+
         results.sort();
         Ok(results)
     }

@@ -298,6 +298,7 @@ mod tests {
     use brankas_crypto::SecurityParams;
     use brankas_storage::MockStorageBackend;
     use crate::config::AuthConfig;
+    use brankas_core::audit::AuditLogger;
 
     #[tokio::test]
     async fn test_admin_service_creation() {
@@ -309,5 +310,48 @@ mod tests {
 
         let admin_service = AdminService::new(storage, auth, audit).await;
         assert!(admin_service.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_system_stats_placeholder() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let config = AuthConfig::default();
+        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = AdminService::new(storage, auth, audit).await.unwrap();
+
+        let stats = service.get_system_stats().await.expect("stats");
+        assert_eq!(stats.uptime_seconds, 86400);
+        assert_eq!(stats.total_users, 125);
+        assert!(stats.cache_hit_rate > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_create_backup_returns_metadata() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let config = AuthConfig::default();
+        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = AdminService::new(storage, auth, audit).await.unwrap();
+
+        let backup = service.create_backup().await.expect("backup");
+        assert!(backup.encrypted);
+        assert!(backup.metadata.contains_key("version"));
+    }
+
+    #[tokio::test]
+    async fn test_run_garbage_collection_returns_details() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let config = AuthConfig::default();
+        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = AdminService::new(storage, auth, audit).await.unwrap();
+
+        let result = service.run_garbage_collection().await.expect("gc");
+        assert_eq!(result.operation, "garbage_collection");
+        assert!(result.details.contains_key("cleaned_objects"));
     }
 }

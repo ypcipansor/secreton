@@ -225,6 +225,9 @@ mod tests {
     use super::*;
     use brankas_crypto::SecurityParams;
     use brankas_storage::MockStorageBackend;
+    use crate::config::AuthConfig;
+    use crate::services::auth::AuthService;
+    use brankas_core::audit::AuditLogger;
 
     #[tokio::test]
     async fn test_vault_service_creation() {
@@ -234,5 +237,43 @@ mod tests {
 
         let vault_service = VaultService::new(storage, crypto, audit).await;
         assert!(vault_service.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_secret_placeholder() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = VaultService::new(storage, crypto, audit).await.unwrap();
+
+        let secret = service.get_secret("app/config", "user1").await.unwrap();
+        assert_eq!(secret.path, "app/config");
+        assert!(secret.data.contains_key("key1"));
+    }
+
+    #[tokio::test]
+    async fn test_put_secret_placeholder() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = VaultService::new(storage, crypto, audit).await.unwrap();
+
+        let mut data = HashMap::new();
+        data.insert("username".to_string(), "admin".to_string());
+        let secret = service.put_secret("app/admin", data, "user1").await.unwrap();
+        assert_eq!(secret.path, "app/admin");
+        assert!(secret.data.contains_key("username"));
+    }
+
+    #[tokio::test]
+    async fn test_encrypt_placeholder_response() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = VaultService::new(storage, crypto, audit).await.unwrap();
+
+        let result = service.encrypt("key1", "plaintext", "user1").await.unwrap();
+        assert_eq!(result.ciphertext, "encrypted_data");
+        assert_eq!(result.key_version, 1);
     }
 }
