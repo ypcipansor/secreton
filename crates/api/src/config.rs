@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Main API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ApiConfig {
     /// HTTP server configuration
     pub http: HttpConfig,
@@ -83,6 +84,7 @@ pub struct GrpcConfig {
 
 /// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AuthConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
@@ -219,6 +221,7 @@ pub struct CookieConfig {
 
 /// Multi-factor authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct MfaConfig {
     /// Enable MFA
     pub enabled: bool,
@@ -472,20 +475,6 @@ pub struct LogRotationConfig {
     pub frequency: String,
 }
 
-impl Default for ApiConfig {
-    fn default() -> Self {
-        Self {
-            http: HttpConfig::default(),
-            grpc: GrpcConfig::default(),
-            auth: AuthConfig::default(),
-            rate_limit: RateLimitConfig::default(),
-            tls: None,
-            monitoring: MonitoringConfig::default(),
-            cors: CorsConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
-}
 
 impl Default for HttpConfig {
     fn default() -> Self {
@@ -513,17 +502,6 @@ impl Default for GrpcConfig {
     }
 }
 
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            jwt: JwtConfig::default(),
-            oauth2: None,
-            mtls: None,
-            session: SessionConfig::default(),
-            mfa: MfaConfig::default(),
-        }
-    }
-}
 
 impl Default for JwtConfig {
     fn default() -> Self {
@@ -561,17 +539,6 @@ impl Default for CookieConfig {
     }
 }
 
-impl Default for MfaConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            totp: TotpConfig::default(),
-            sms: None,
-            email: None,
-            webauthn: None,
-        }
-    }
-}
 
 impl Default for TotpConfig {
     fn default() -> Self {

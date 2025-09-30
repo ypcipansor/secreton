@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
-use super::{Secret, SecretMetadata, SecretsEngine, SecretsError};
+use super::{EngineMetrics, Secret, SecretMetadata, SecretsEngine, SecretsError};
 
 mod connection;
 mod plugins;
@@ -448,6 +448,21 @@ impl SecretsEngine for DatabaseEngine {
         }
 
         Ok(secrets)
+    }
+
+    async fn collect_metrics(&self) -> Result<EngineMetrics, SecretsError> {
+        // For now, return default metrics since we don't have persistent storage of metrics
+        Ok(EngineMetrics {
+            engine_type: "database".to_string(),
+            secrets_created: 0,
+            secrets_read: 0,
+            secrets_updated: 0,
+            secrets_deleted: 0,
+            avg_response_time_ms: 0.0,
+            error_count: 0,
+            active_secrets: (self.connections.len() + self.roles.len()) as u64,
+            storage_size_bytes: 0,
+        })
     }
 }
 

@@ -5,10 +5,10 @@ use tokio::time::interval;
 use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
+mod collector;
 mod config;
 mod metrics;
 mod monitor;
-mod collector;
 
 use config::AgentConfig;
 use metrics::MetricsServer;
@@ -29,8 +29,7 @@ async fn main() -> Result<()> {
         .with_target(false)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     info!("Starting Brankas Monitoring Agent");
 
@@ -39,7 +38,7 @@ async fn main() -> Result<()> {
     info!("Configuration loaded successfully");
 
     // Initialize metrics server
-    let metrics_server = MetricsServer::new(config.metrics_port).await?;
+    let metrics_server = MetricsServer::new(config.metrics_port()).await?;
     let metrics_handle = tokio::spawn(async move {
         if let Err(e) = metrics_server.serve().await {
             error!("Metrics server error: {}", e);
@@ -48,12 +47,15 @@ async fn main() -> Result<()> {
 
     // Initialize system monitor
     let mut system_monitor = SystemMonitor::new(&config).await?;
-    
+
     // Start monitoring loop
-    let mut collection_interval = interval(Duration::from_secs(config.collection_interval));
-    let mut report_interval = interval(Duration::from_secs(config.report_interval));
-    
-    info!("Agent started successfully, collecting metrics every {}s", config.collection_interval);
+    let mut collection_interval = interval(Duration::from_secs(config.collection_interval()));
+    let mut report_interval = interval(Duration::from_secs(config.report_interval()));
+
+    info!(
+        "Agent started successfully, collecting metrics every {}s",
+        config.collection_interval()
+    );
 
     loop {
         tokio::select! {
@@ -78,6 +80,6 @@ async fn main() -> Result<()> {
     // Wait for metrics server to finish
     metrics_handle.abort();
     info!("Brankas Monitoring Agent stopped");
-    
+
     Ok(())
 }

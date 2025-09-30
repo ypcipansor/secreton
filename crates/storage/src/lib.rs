@@ -13,10 +13,18 @@ use uuid::Uuid;
 
 pub mod backends;
 pub mod cache;
+pub mod factory;
 pub mod models;
 
 // Re-export common backends
 pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend, RedisBackend};
+
+// Re-export new backends
+pub use backends::{ConsulStorage, ConsulStorageConfig};
+pub use backends::{EtcdStorage, EtcdStorageConfig};
+
+// Re-export factory
+pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
 /// Storage operation errors
 #[derive(Error, Debug)]

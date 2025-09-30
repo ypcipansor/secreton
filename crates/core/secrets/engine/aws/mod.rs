@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::secrets::engine::{Secret, SecretMetadata, SecretsEngine, SecretsError};
+use crate::secrets::engine::{EngineMetrics, Secret, SecretMetadata, SecretsEngine, SecretsError};
 use crate::storage::StorageEngine;
 
 pub mod config;
@@ -385,6 +385,21 @@ impl SecretsEngine for AwsEngine {
         } else {
             Ok(vec![])
         }
+    }
+
+    async fn collect_metrics(&self) -> Result<EngineMetrics, SecretsError> {
+        // For now, return default metrics since we don't have persistent storage of metrics
+        Ok(EngineMetrics {
+            engine_type: "aws".to_string(),
+            secrets_created: 0,
+            secrets_read: 0,
+            secrets_updated: 0,
+            secrets_deleted: 0,
+            avg_response_time_ms: 0.0,
+            error_count: 0,
+            active_secrets: self.list_roles().len() as u64,
+            storage_size_bytes: 0,
+        })
     }
 }
 

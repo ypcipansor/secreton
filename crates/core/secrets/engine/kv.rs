@@ -1,25 +1,24 @@
+use super::{EngineMetrics, Secret, SecretMetadata, SecretsEngine, SecretsError};
+use anyhow;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-use super::{Secret, SecretMetadata, SecretsEngine, SecretsError};
-use crate::AppError;
-
-/// KV (Key-Value) secrets engine
+/// KV Secrets Engine for file-based secret storage
 pub struct KVSecretsEngine {
     base_path: PathBuf,
 }
 
 impl KVSecretsEngine {
-    /// Create a new KV secrets engine
-    pub fn new(base_path: impl AsRef<Path>) -> Result<Self, AppError> {
+    /// Create a new KV secrets engine with the specified base path
+    pub async fn new<P: AsRef<Path>>(base_path: P) -> Result<Self, SecretsError> {
         let base_path = base_path.as_ref().to_path_buf();
 
         // Create base directory if it doesn't exist
         if !base_path.exists() {
-            std::fs::create_dir_all(&base_path)?;
+            fs::create_dir_all(&base_path).await?;
         }
 
         Ok(Self { base_path })
@@ -147,6 +146,38 @@ impl SecretsEngine for KVSecretsEngine {
 
         Ok(secrets)
     }
+
+    /// Collect metrics for this engine
+    async fn collect_metrics(&self) -> Result<EngineMetrics, super::SecretsError> {
+        let mut metrics = EngineMetrics {
+            engine_type: self.engine_type().to_string(),
+            secrets_created: 0,
+            secrets_read: 0,
+            secrets_updated: 0,
+            secrets_deleted: 0,
+            avg_response_time_ms: 0.0,
+            error_count: 0,
+            active_secrets: 0,
+            storage_size_bytes: 0,
+        };
+
+        // Calculate active secrets and storage size
+        let mut entries = fs::read_dir(&self.base_path).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if let Ok(file_name) = entry.file_name().into_string() {
+                if file_name.ends_with(".json") {
+                    metrics.active_secrets += 1;
+
+                    // Calculate storage size
+                    let file_path = self.base_path.join(&file_name);
+                    let file_size = fs::metadata(&file_path).await?.len();
+                    metrics.storage_size_bytes += file_size;
+                }
+            }
+        }
+
+        Ok(metrics)
+    }
 }
 
 #[cfg(test)]
@@ -155,10 +186,10 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_kv_secrets_engine() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_kv_secrets_engine() -> anyhow::Result<()> {
         // Create a temporary directory for testing
         let temp_dir = tempdir()?;
-        let engine = KVSecretsEngine::new(temp_dir.path())?;
+        let engine = KVSecretsEngine::new(temp_dir.path()).await?;
 
         // Test creating a secret
         let secret_data = serde_json::json!({ "username": "testuser", "password": "testpass" });
@@ -187,6 +218,12 @@ mod tests {
         // Test listing secrets
         let secrets = engine.list_secrets("test").await?;
         assert_eq!(secrets, vec!["secret"]);
+
+        // Test metrics collection
+        let metrics = engine.collect_metrics().await?;
+        assert_eq!(metrics.engine_type, "kv");
+        assert_eq!(metrics.active_secrets, 1);
+        assert!(metrics.storage_size_bytes > 0);
 
         // Test deleting the secret
         engine.delete_secret("test/secret").await?;

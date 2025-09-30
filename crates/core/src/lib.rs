@@ -11,25 +11,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 pub mod api;
-#[path = "../audit/mod.rs"]
 pub mod audit;
 pub mod auth;
-#[path = "../config.rs"]
 pub mod config;
 pub mod crypto;
 pub mod error;
-#[path = "../models/mod.rs"]
 pub mod models;
 pub mod secrets;
 pub mod security;
-#[path = "../server.rs"]
 pub mod server;
-#[path = "../services/mod.rs"]
 pub mod services;
-#[path = "../storage/mod.rs"]
 pub mod storage;
 pub mod types;
-#[path = "../utils/mod.rs"]
 pub mod utils;
 
 // Test utilities - available for tests, integration tests, and examples

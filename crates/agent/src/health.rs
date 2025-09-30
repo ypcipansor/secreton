@@ -1,10 +1,10 @@
 //! Health monitoring module for the Brankas agent
 
-use crate::config::{HealthConfig, ExternalServiceConfig};
-use brankas_core::{CoreResult, CoreError};
+use crate::config::HealthConfig;
+use secreton_core::CoreResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 /// Health status levels
@@ -20,7 +20,7 @@ impl std::fmt::Display for HealthStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HealthStatus::Healthy => write!(f, "Healthy"),
-            HealthStatus::Degraded => write!(f, "Degraded"), 
+            HealthStatus::Degraded => write!(f, "Degraded"),
             HealthStatus::Unhealthy => write!(f, "Unhealthy"),
             HealthStatus::Unknown => write!(f, "Unknown"),
         }
@@ -83,19 +83,20 @@ pub struct HealthSummary {
 pub struct HealthChecker {
     /// Configuration
     config: HealthConfig,
-    
+
     /// Channel for sending health results
+    #[allow(dead_code)]
     health_sender: mpsc::UnboundedSender<HealthCheckResult>,
-    
+
     /// HTTP client for external checks
+    #[allow(dead_code)]
     http_client: reqwest::Client,
-    
+
     /// Recent health check results
     recent_results: HashMap<String, HealthCheckResult>,
-    
-    /// Service start time
+
     start_time: SystemTime,
-    
+
     /// Running flag
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -115,13 +116,16 @@ impl HealthChecker {
             running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
-    
+
     /// Main health monitoring loop
-    pub async fn start(&self, mut shutdown: tokio::sync::broadcast::Receiver<()>) -> CoreResult<()> {
+    pub async fn start(
+        &self,
+        mut shutdown: tokio::sync::broadcast::Receiver<()>,
+    ) -> CoreResult<()> {
         tracing::info!("Starting health checker");
-        
+
         let check_interval = Duration::from_secs(self.config.check_interval_seconds);
-        
+
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(check_interval) => {
@@ -135,30 +139,42 @@ impl HealthChecker {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Perform all health checks
     async fn perform_health_checks(&self) -> CoreResult<()> {
         tracing::debug!("Performing health checks");
-        
+
         // For now, just log that we're performing checks
         // In a full implementation, you would perform actual health checks
         // but avoid the lifetime issues by using different patterns
-        
+
         Ok(())
     }
-    
+
     /// Get overall health summary
     pub fn get_health_summary(&self) -> HealthSummary {
         let checks: Vec<HealthCheckResult> = self.recent_results.values().cloned().collect();
-        
-        let healthy_checks = checks.iter().filter(|c| matches!(c.status, HealthStatus::Healthy)).count();
-        let degraded_checks = checks.iter().filter(|c| matches!(c.status, HealthStatus::Degraded)).count();
-        let unhealthy_checks = checks.iter().filter(|c| matches!(c.status, HealthStatus::Unhealthy)).count();
-        let unknown_checks = checks.iter().filter(|c| matches!(c.status, HealthStatus::Unknown)).count();
-        
+
+        let healthy_checks = checks
+            .iter()
+            .filter(|c| matches!(c.status, HealthStatus::Healthy))
+            .count();
+        let degraded_checks = checks
+            .iter()
+            .filter(|c| matches!(c.status, HealthStatus::Degraded))
+            .count();
+        let unhealthy_checks = checks
+            .iter()
+            .filter(|c| matches!(c.status, HealthStatus::Unhealthy))
+            .count();
+        let unknown_checks = checks
+            .iter()
+            .filter(|c| matches!(c.status, HealthStatus::Unknown))
+            .count();
+
         let overall_status = if unhealthy_checks > 0 {
             HealthStatus::Unhealthy
         } else if degraded_checks > 0 {
@@ -168,12 +184,13 @@ impl HealthChecker {
         } else {
             HealthStatus::Unknown
         };
-        
-        let uptime_seconds = self.start_time
+
+        let uptime_seconds = self
+            .start_time
             .elapsed()
             .unwrap_or(Duration::ZERO)
             .as_secs();
-        
+
         HealthSummary {
             overall_status,
             timestamp: SystemTime::now()
@@ -189,17 +206,17 @@ impl HealthChecker {
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
-    
+
     /// Get specific health check result
     pub fn get_health_check(&self, name: &str) -> Option<&HealthCheckResult> {
         self.recent_results.get(name)
     }
-    
+
     /// Check if health checker is running
     pub fn is_running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
     }
-    
+
     /// Get uptime in seconds
     pub fn get_uptime(&self) -> u64 {
         self.start_time

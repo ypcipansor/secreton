@@ -296,7 +296,9 @@ mod tests {
         let ldap_auth = LdapAuth::new(config);
 
         // Using invalid credentials - we'll use a different variant than LDAP
-        let invalid_credentials = Credentials::Token("invalid-token".to_string());
+        let invalid_credentials = Credentials::Token {
+            token: "invalid-token".to_string(),
+        };
 
         let result = ldap_auth.authenticate(&invalid_credentials).await;
         assert!(result.is_ok()); // Should return Ok but with success = false

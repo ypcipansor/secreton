@@ -19,6 +19,10 @@ uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 
+# HTTP client for Consul/etcd
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+base64 = "0.21"
+
 # Database - Using postgres crate for better dependency isolation
 postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
 postgres-types = { version = "0.2", features = ["derive"] }
@@ -27,6 +31,7 @@ postgres-types = { version = "0.2", features = ["derive"] }
 tokio-postgres.workspace = true
 deadpool-postgres.workspace = true
 redis.workspace = true
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 
 # Cryptography
 secreton-crypto = { path = "../crypto" }

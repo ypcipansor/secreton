@@ -5,28 +5,27 @@
 //! Real-time monitoring, alerting, and security enforcement agent
 //! for the Brankas security system.
 
-use tokio::time::{Duration, sleep};
-use tracing::{info, warn, error, debug};
-use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, warn};
 
-pub mod monitoring;
 pub mod alerting;
-pub mod security;
+pub mod config;
 pub mod health;
 pub mod metrics;
-pub mod config;
+pub mod monitoring;
+pub mod security;
 
-pub use monitoring::*;
 pub use alerting::*;
-pub use security::*;
+pub use config::*;
 pub use health::*;
 pub use metrics::*;
-pub use config::*;
+pub use monitoring::*;
+pub use security::*;
 
-use brankas_core::{CoreResult, CoreError};
+use secreton_core::{CoreError, CoreResult};
 
 /// Main agent structure
 #[derive(Debug)]
@@ -43,23 +42,29 @@ pub struct BrankasAgent {
 impl BrankasAgent {
     /// Create a new Brankas Agent
     pub async fn new(config: AgentConfig) -> CoreResult<Self> {
-        info!("Initializing Brankas Security Agent v{}", env!("CARGO_PKG_VERSION"));
+        info!(
+            "Initializing Brankas Security Agent v{}",
+            env!("CARGO_PKG_VERSION")
+        );
 
         // Create monitoring event channel
-        let (monitoring_tx, monitoring_rx) = tokio::sync::mpsc::unbounded_channel();
-        
+        let (monitoring_tx, _monitoring_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Create alert channel
+        let (_alert_tx, alert_rx) = tokio::sync::mpsc::unbounded_channel();
+
         // Create security event channel
-        let (security_tx, _security_rx) = tokio::sync::mpsc::unbounded_channel();
-        
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+
         // Create health check channel
         let (health_tx, _health_rx) = tokio::sync::mpsc::unbounded_channel();
-        
+
         // Create metrics channel
-        let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let monitor = Arc::new(SystemMonitor::new(config.monitoring.clone(), monitoring_tx));
-        let alerter = Arc::new(AlertManager::new(config.alerting.clone(), monitoring_rx));
-        let security_enforcer = Arc::new(SecurityEnforcer::new(config.security.clone(), security_tx));
+        let alerter = Arc::new(AlertManager::new(config.alerting.clone(), alert_rx));
+        let security_enforcer = Arc::new(SecurityEnforcer::new(config.security.clone(), event_tx));
         let health_checker = Arc::new(HealthChecker::new(config.health.clone(), health_tx));
         let metrics_collector = Arc::new(MetricsCollector::new(config.metrics.clone(), metrics_rx));
 
@@ -114,12 +119,12 @@ impl BrankasAgent {
 
         // Give services time to cleanup
         sleep(Duration::from_secs(2)).await;
-        
+
         info!("Brankas Security Agent shutdown complete");
         Ok(())
     }
 
-        /// Start monitoring service
+    /// Start monitoring service
     async fn start_monitoring_service(
         &self,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
@@ -140,9 +145,13 @@ impl BrankasAgent {
                     }
                 }
             }
-            
+
             Ok::<(), CoreError>(())
-        }).await.map_err(|e| CoreError::Internal(anyhow::anyhow!("Monitoring service task failed: {}", e)))??;
+        })
+        .await
+        .map_err(|e| {
+            CoreError::Internal(anyhow::anyhow!("Monitoring service task failed: {}", e))
+        })??;
 
         Ok(())
     }
@@ -152,18 +161,18 @@ impl BrankasAgent {
         &self,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> CoreResult<()> {
-        let alerter = Arc::clone(&self.alerter);
+        let _alerter = Arc::clone(&self.alerter);
 
         tokio::spawn(async move {
             // We can't clone AlertManager, so we need to work around this
             // For now, let's just run a simple loop that processes alerts
             let interval = Duration::from_secs(10);
             let mut interval_timer = tokio::time::interval(interval);
-            
+
             loop {
                 tokio::select! {
                     _ = interval_timer.tick() => {
-                        // Since we can't call start() on a shared reference, 
+                        // Since we can't call start() on a shared reference,
                         // we'll need to redesign this or create a different approach
                         tracing::debug!("Alerting service tick");
                     }
@@ -173,9 +182,13 @@ impl BrankasAgent {
                     }
                 }
             }
-            
+
             Ok::<(), CoreError>(())
-        }).await.map_err(|e| CoreError::Internal(anyhow::anyhow!("Alerting service task failed: {}", e)))??;
+        })
+        .await
+        .map_err(|e| {
+            CoreError::Internal(anyhow::anyhow!("Alerting service task failed: {}", e))
+        })??;
 
         Ok(())
     }
@@ -185,12 +198,12 @@ impl BrankasAgent {
         &self,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> CoreResult<()> {
-        let enforcer = Arc::clone(&self.security_enforcer);
+        let _enforcer = Arc::clone(&self.security_enforcer);
 
         tokio::spawn(async move {
             let interval = Duration::from_secs(300); // 5 minutes
             let mut interval_timer = tokio::time::interval(interval);
-            
+
             loop {
                 tokio::select! {
                     _ = interval_timer.tick() => {
@@ -203,9 +216,13 @@ impl BrankasAgent {
                     }
                 }
             }
-            
+
             Ok::<(), CoreError>(())
-        }).await.map_err(|e| CoreError::Internal(anyhow::anyhow!("Security service task failed: {}", e)))??;
+        })
+        .await
+        .map_err(|e| {
+            CoreError::Internal(anyhow::anyhow!("Security service task failed: {}", e))
+        })??;
 
         Ok(())
     }
@@ -229,12 +246,12 @@ impl BrankasAgent {
         &self,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> CoreResult<()> {
-        let collector = Arc::clone(&self.metrics_collector);
+        let _collector = Arc::clone(&self.metrics_collector);
 
         tokio::spawn(async move {
             let interval = Duration::from_secs(60);
             let mut interval_timer = tokio::time::interval(interval);
-            
+
             loop {
                 tokio::select! {
                     _ = interval_timer.tick() => {
@@ -247,9 +264,13 @@ impl BrankasAgent {
                     }
                 }
             }
-            
+
             Ok::<(), CoreError>(())
-        }).await.map_err(|e| CoreError::Internal(anyhow::anyhow!("Metrics service task failed: {}", e)))??;
+        })
+        .await
+        .map_err(|e| {
+            CoreError::Internal(anyhow::anyhow!("Metrics service task failed: {}", e))
+        })??;
 
         Ok(())
     }
@@ -260,7 +281,7 @@ impl BrankasAgent {
             agent_id: self.config.agent_id.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             started_at: Utc::now(), // Should track actual start time
-            uptime_seconds: 0, // Should calculate actual uptime
+            uptime_seconds: 0,      // Should calculate actual uptime
             monitoring_active: true,
             alerting_active: true,
             security_active: true,

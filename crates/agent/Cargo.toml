@@ -26,3 +26,13 @@ reqwest = { workspace = true }
 futures = { workspace = true }
 toml = { workspace = true }
 rand = { workspace = true }
+
+# System monitoring dependencies
+sysinfo = "0.30"
+
+# HTTP server for metrics
+axum = { workspace = true }
+hyper = { workspace = true }
+
+# Cryptography for file hashing
+sha2 = { workspace = true }

@@ -13,13 +13,19 @@ pub mod approle;
 pub mod certificate;
 pub mod ldap;
 pub mod oidc;
+pub mod radius;
+pub mod saml;
+pub mod token;
 
 pub use approle::AppRoleAuth;
 pub use certificate::CertificateAuth;
 pub use ldap::LdapAuth;
 pub use oidc::OidcAuth;
+pub use radius::RadiusAuth;
 pub use refresh_token::RefreshToken;
+pub use saml::SamlAuth;
 pub use service::{AuthService, TokenPair};
+pub use token::TokenAuth;
 pub use traits::{AuthMethod, AuthMethodRegistry, AuthResult, Credentials, TokenInfo};
 pub use user::User;
 

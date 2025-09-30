@@ -619,4 +619,23 @@ impl SecretsEngine for SshSecretsEngine {
             _ => Ok(vec![]),
         }
     }
+
+    /// Collect metrics for this engine (optional)
+    async fn collect_metrics(&self) -> Result<super::EngineMetrics, super::SecretsError> {
+        // Count roles from storage
+        let roles = self.list_roles().await.unwrap_or_default();
+        let active_secrets = roles.len() as u64;
+
+        Ok(super::EngineMetrics {
+            engine_type: self.engine_type().to_string(),
+            secrets_created: 0,        // Would be tracked by engine
+            secrets_read: 0,           // Would be tracked by engine
+            secrets_updated: 0,        // Would be tracked by engine
+            secrets_deleted: 0,        // Would be tracked by engine
+            avg_response_time_ms: 0.0, // Would be calculated from timing data
+            error_count: 0,            // Would be tracked by engine
+            active_secrets,
+            storage_size_bytes: 0, // SSH engine doesn't track storage size
+        })
+    }
 }

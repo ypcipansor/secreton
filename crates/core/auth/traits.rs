@@ -9,10 +9,15 @@ use std::collections::HashMap;
 pub enum Credentials {
     /// Username/password credentials
     Password { username: String, password: String },
-    /// Token-based credentials
-    Token(String),
     /// AppRole credentials
     AppRole { role_id: String, secret_id: String },
+    /// LDAP credentials
+    Ldap { username: String, password: String },
+    /// SAML credentials
+    Saml {
+        response: String,
+        relay_state: Option<String>,
+    },
     /// Certificate credentials
     Certificate {
         client_cert: Vec<u8>,
@@ -22,14 +27,14 @@ pub enum Credentials {
         issuer: String,
         serial_number: String,
     },
-    /// LDAP credentials
-    Ldap { username: String, password: String },
     /// OIDC credentials
     Oidc {
         jwt_token: String,
         provider: Option<String>,
         context: HashMap<String, String>,
     },
+    /// Token-based authentication
+    Token { token: String },
     /// Generic credentials data
     Generic(Value),
 }

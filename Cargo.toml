@@ -2,12 +2,15 @@
 resolver = "2"
 members = [
     "crates/core",
-    # "crates/agent", # Temporarily disabled - has module issues
+    "crates/agent",
     "crates/ui",
     "crates/crypto",
     "crates/storage",
     "crates/api",
-    "crates/cli"
+    "crates/cli",
+    "crates/core/audit_log",
+    "crates/core/granular_revocation",
+    "crates/core/secret_versioning"
 ]
 
 [workspace.package]
@@ -28,6 +31,9 @@ secreton-core = { path = "crates/core" }
 secreton-crypto = { path = "crates/crypto" }
 secreton-storage = { path = "crates/storage" }
 secreton-api = { path = "crates/api" }
+audit-log = { path = "crates/core/audit_log" }
+granular-revocation = { path = "crates/core/granular_revocation" }
+secret-versioning = { path = "crates/core/secret_versioning" }
 # Core dependencies
 tokio = { version = "1.40", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

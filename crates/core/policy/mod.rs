@@ -5,9 +5,13 @@
 
 mod model;
 mod engine;
+pub mod sentinel;
+pub mod control_groups;
 
 pub use model::*;
 pub use engine::*;
+pub use sentinel::*;
+pub use control_groups::*;
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};

@@ -5,13 +5,13 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// In-memory secrets engine: secrets only live in RAM, never written to disk
 #[allow(dead_code)]
 pub struct MemorySecretsEngine {
-    secrets: Arc<RwLock<HashMap<String, Secret>>>,
+    secrets: Arc<std::sync::RwLock<HashMap<String, Secret>>>,
     audit_logger: Option<AuditLogger>,
     policy_set: Option<PolicySet>,
 }
@@ -25,7 +25,7 @@ impl Default for MemorySecretsEngine {
 impl MemorySecretsEngine {
     pub fn new() -> Self {
         Self {
-            secrets: Arc::new(RwLock::new(HashMap::new())),
+            secrets: Arc::new(std::sync::RwLock::new(HashMap::new())),
             audit_logger: None,
             policy_set: None,
         }
@@ -33,7 +33,7 @@ impl MemorySecretsEngine {
 
     pub fn with_audit(audit_logger: AuditLogger) -> Self {
         Self {
-            secrets: Arc::new(RwLock::new(HashMap::new())),
+            secrets: Arc::new(std::sync::RwLock::new(HashMap::new())),
             audit_logger: Some(audit_logger),
             policy_set: None,
         }
@@ -41,7 +41,7 @@ impl MemorySecretsEngine {
 
     pub fn with_policy(policy_set: PolicySet) -> Self {
         Self {
-            secrets: Arc::new(RwLock::new(HashMap::new())),
+            secrets: Arc::new(std::sync::RwLock::new(HashMap::new())),
             audit_logger: None,
             policy_set: Some(policy_set),
         }
@@ -49,7 +49,7 @@ impl MemorySecretsEngine {
 
     pub fn with_audit_and_policy(audit_logger: AuditLogger, policy_set: PolicySet) -> Self {
         Self {
-            secrets: Arc::new(RwLock::new(HashMap::new())),
+            secrets: Arc::new(std::sync::RwLock::new(HashMap::new())),
             audit_logger: Some(audit_logger),
             policy_set: Some(policy_set),
         }
@@ -202,5 +202,22 @@ impl SecretsEngine for MemorySecretsEngine {
             .filter(|k| k.starts_with(prefix))
             .cloned()
             .collect())
+    }
+
+    async fn collect_metrics(&self) -> Result<super::EngineMetrics, super::SecretsError> {
+        let secrets = self.secrets.read().unwrap();
+        let active_secrets = secrets.len() as u64;
+
+        Ok(super::EngineMetrics {
+            engine_type: self.engine_type().to_string(),
+            secrets_created: 0,
+            secrets_read: 0,
+            secrets_updated: 0,
+            secrets_deleted: 0,
+            avg_response_time_ms: 0.0,
+            error_count: 0,
+            active_secrets,
+            storage_size_bytes: 0, // Memory engine doesn't track storage size
+        })
     }
 }
