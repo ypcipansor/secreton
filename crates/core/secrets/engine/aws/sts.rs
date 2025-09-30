@@ -34,7 +34,8 @@ impl StsHandler {
             .context("Role ARN is required for assumed role credentials")?;
 
         let session_name = role_config
-            .session_name.clone()
+            .session_name
+            .clone()
             .unwrap_or_else(|| format!("secreton-{}-{}", role_config.name, &lease_id[..8]));
 
         info!("Assuming role: {} with session: {}", role_arn, session_name);

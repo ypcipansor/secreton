@@ -3,11 +3,9 @@
 //! Tests for storage backend implementations, error handling, and integration
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use secreton_storage::{
-    EncryptionMetadata, HealthStatus, MockStorageBackend, QueryParams,
-    SecurityLevel, StorageBackend, StorageConfig, StorageError, StorageResult,
-    StorageStats, VaultEntry,
+    EncryptionMetadata, MockStorageBackend, QueryParams, SecurityLevel, StorageBackend,
+    StorageConfig, StorageError, VaultEntry,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -154,16 +152,16 @@ mod storage_backend_tests {
 
         // Create test entries with different paths
         let entries = vec![
-            ("app/users/user1", b"user data 1"),
-            ("app/users/user2", b"user data 2"),
-            ("app/config/db", b"db config"),
-            ("system/health", b"health status"),
+            ("app/users/user1".to_string(), b"user data 1".to_vec()),
+            ("app/users/user2".to_string(), b"user data 2".to_vec()),
+            ("app/config/db".to_string(), b"db config".to_vec()),
+            ("system/health".to_string(), b"health status".to_vec()),
         ];
 
         for (path, data) in entries {
             let entry = VaultEntry::new(
-                path.to_string(),
-                data.to_vec(),
+                path,
+                data,
                 EncryptionMetadata {
                     algorithm: "aes-256-gcm".to_string(),
                     key_id: "test-key".to_string(),
@@ -355,7 +353,10 @@ mod storage_backend_tests {
             .add_metadata("env".to_string(), "test".to_string())
             .add_tag("important".to_string());
 
-        assert_eq!(entry_with_metadata.metadata.get("env"), Some(&"test".to_string()));
+        assert_eq!(
+            entry_with_metadata.metadata.get("env"),
+            Some(&"test".to_string())
+        );
         assert!(entry_with_metadata.tags.contains(&"important".to_string()));
 
         Ok(())
@@ -403,7 +404,10 @@ mod storage_backend_tests {
             iv: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
             auth_tag: Some(vec![0; 16]),
             aad: Some(b"additional data".to_vec()),
-            kdf_params: Some(HashMap::from([("salt".to_string(), "randomsalt".to_string())])),
+            kdf_params: Some(HashMap::from([(
+                "salt".to_string(),
+                "randomsalt".to_string(),
+            )])),
         };
 
         assert_eq!(metadata.algorithm, "aes-256-gcm");
@@ -519,8 +523,14 @@ mod storage_integration_tests {
         assert!(write_duration.as_secs() < 5, "Write performance too slow");
         assert!(read_duration.as_secs() < 2, "Read performance too slow");
 
-        println!("Write performance: {} ops in {:?}", num_operations, write_duration);
-        println!("Read performance: {} ops in {:?}", num_operations, read_duration);
+        println!(
+            "Write performance: {} ops in {:?}",
+            num_operations, write_duration
+        );
+        println!(
+            "Read performance: {} ops in {:?}",
+            num_operations, read_duration
+        );
 
         Ok(())
     }

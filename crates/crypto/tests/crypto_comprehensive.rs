@@ -6,11 +6,11 @@
 use anyhow::Result;
 
 use secreton_crypto::{
-    encryption::{SymmetricCipher, Aes256GcmCipher, ChaCha20Poly1305Cipher},
-    hashing::{HashFunction, Sha256Hash, Sha3_256Hash, Blake3Hash},
-    key_derivation::{derive_key_pbkdf2, derive_key_argon2id},
-    AlgorithmId, CryptoError, SecurityParams,
+    encryption::{Aes256GcmCipher, ChaCha20Poly1305Cipher, SymmetricCipher},
     generate_random_bytes,
+    hashing::{Blake3Hash, HashFunction, Sha256Hash, Sha3_256Hash},
+    key_derivation::{derive_key_argon2id, derive_key_pbkdf2},
+    AlgorithmId, CryptoError, SecurityParams,
 };
 
 #[cfg(test)]
@@ -43,9 +43,7 @@ mod crypto_comprehensive_tests {
 
                 // Encrypt
                 let encrypted = match algorithm {
-                    EncryptionAlgorithm::Aes256Gcm => {
-                        aes_cipher.encrypt(data.as_bytes(), &key)?
-                    }
+                    EncryptionAlgorithm::Aes256Gcm => aes_cipher.encrypt(data.as_bytes(), &key)?,
                     EncryptionAlgorithm::ChaCha20Poly1305 => {
                         let chacha_cipher = ChaCha20Poly1305Cipher;
                         chacha_cipher.encrypt(data.as_bytes(), &key)?
@@ -57,9 +55,7 @@ mod crypto_comprehensive_tests {
 
                 // Decrypt
                 let decrypted = match algorithm {
-                    EncryptionAlgorithm::Aes256Gcm => {
-                        aes_cipher.decrypt(&encrypted, &key)?
-                    }
+                    EncryptionAlgorithm::Aes256Gcm => aes_cipher.decrypt(&encrypted, &key)?,
                     EncryptionAlgorithm::ChaCha20Poly1305 => {
                         let chacha_cipher = ChaCha20Poly1305Cipher;
                         chacha_cipher.decrypt(&encrypted, &key)?
@@ -206,9 +202,14 @@ mod crypto_comprehensive_tests {
         for algorithm in algorithms {
             let display = format!("{}", algorithm);
             assert!(!display.is_empty());
-            assert!(display.contains("AES") || display.contains("ChaCha") ||
-                   display.contains("SHA") || display.contains("BLAKE") ||
-                   display.contains("PBKDF2") || display.contains("Argon2"));
+            assert!(
+                display.contains("AES")
+                    || display.contains("ChaCha")
+                    || display.contains("SHA")
+                    || display.contains("BLAKE")
+                    || display.contains("PBKDF2")
+                    || display.contains("Argon2")
+            );
         }
 
         Ok(())

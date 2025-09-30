@@ -3,8 +3,7 @@
 //! Tests for web interface components, API endpoints, and user interface functionality
 
 use anyhow::Result;
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use serde_json::json;
 
 #[cfg(test)]
 mod ui_component_tests {
@@ -102,7 +101,10 @@ mod ui_component_tests {
 
         assert!(error_messages.get("validation").is_some());
         assert!(error_messages.get("server").is_some());
-        assert_eq!(error_messages["validation"]["required"], "This field is required");
+        assert_eq!(
+            error_messages["validation"]["required"],
+            "This field is required"
+        );
 
         Ok(())
     }
@@ -313,14 +315,6 @@ mod ui_functionality_tests {
     #[test]
     fn test_ui_data_transformation() -> Result<()> {
         // Test UI data transformation utilities
-        let raw_api_data = json!({
-            "data": {
-                "password": "secret123",
-                "created_time": "2025-01-01T00:00:00Z",
-                "version": 1
-            }
-        });
-
         // Transform for UI display
         let display_data = json!({
             "path": "app/database",
@@ -357,7 +351,10 @@ mod ui_functionality_tests {
         ]);
 
         // Search for production secrets
-        let production_secrets = secrets.as_array().unwrap().iter()
+        let production_secrets = secrets
+            .as_array()
+            .unwrap()
+            .iter()
             .filter(|s| s["tags"].as_array().unwrap().contains(&json!("production")))
             .collect::<Vec<_>>();
 
@@ -378,9 +375,7 @@ mod ui_functionality_tests {
         ];
 
         // Sort by path
-        secrets.sort_by(|a, b| {
-            a["path"].as_str().unwrap().cmp(b["path"].as_str().unwrap())
-        });
+        secrets.sort_by(|a, b| a["path"].as_str().unwrap().cmp(b["path"].as_str().unwrap()));
 
         assert_eq!(secrets[0]["path"], "app/alpha");
         assert_eq!(secrets[1]["path"], "app/beta");
@@ -400,7 +395,10 @@ mod ui_functionality_tests {
         ]);
 
         // Filter for production secrets
-        let prod_secrets = secrets.as_array().unwrap().iter()
+        let prod_secrets = secrets
+            .as_array()
+            .unwrap()
+            .iter()
             .filter(|s| s["env"] == "production")
             .collect::<Vec<_>>();
 

@@ -3,15 +3,16 @@
 //! Simple HTTP API for the Brankas transit engine
 
 use axum::{response::Json, routing::get, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub mod auth;
+pub mod config;
 pub mod kv;
 pub mod middleware;
 pub mod transit;
 
-pub use kv::{create_kv_router, KVApiState};
-pub use transit::{create_transit_router, TransitApiState};
+pub use kv::{create_kv_router, KVApiState, KVEngine};
+pub use transit::{create_transit_router, TransitApiState, TransitEngine};
 
 // Simple API state
 #[derive(Clone)]
@@ -35,14 +36,14 @@ impl Default for ApiConfig {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct HealthResponse {
     pub status: String,
     pub timestamp: String,
     pub version: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct VersionResponse {
     pub version: String,
     pub build_date: String,

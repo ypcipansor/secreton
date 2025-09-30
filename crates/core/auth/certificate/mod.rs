@@ -112,9 +112,10 @@ impl CertificateAuth {
 
         // Validate issuer if restrictions are configured
         if !self.config.allowed_issuers.is_empty()
-            && !self.config.allowed_issuers.contains(&creds.issuer) {
-                return Err(anyhow!("Certificate issuer not allowed"));
-            }
+            && !self.config.allowed_issuers.contains(&creds.issuer)
+        {
+            return Err(anyhow!("Certificate issuer not allowed"));
+        }
 
         // Check for required extensions
         for required_ext in &self.config.required_extensions {

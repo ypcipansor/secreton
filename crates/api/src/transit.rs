@@ -78,6 +78,14 @@ pub struct TransitApiState {
     pub engine: Arc<TransitEngine>,
 }
 
+impl Default for TransitApiState {
+    fn default() -> Self {
+        Self {
+            engine: Arc::new(TransitEngine::default()),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct ListKeysResponse {
     pub keys: Vec<String>,

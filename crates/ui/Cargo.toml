@@ -9,3 +9,5 @@ description = "Web UI for Secreton vault system"
 [dependencies]
 secreton-core.workspace = true
 serde.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true

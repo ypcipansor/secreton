@@ -228,7 +228,7 @@ impl AwsEngine {
     fn validate_ttl(ttl: Option<u64>) -> bool {
         match ttl {
             Some(t) => (900..=43200).contains(&t), // 15 minutes to 12 hours
-            None => true,                      // TTL is optional
+            None => true,                          // TTL is optional
         }
     }
 }

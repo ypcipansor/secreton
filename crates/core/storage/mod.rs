@@ -673,7 +673,8 @@ impl StorageBackend for PostgresStorage {
             )
             .await?;
 
-        Ok(rows.first()
+        Ok(rows
+            .first()
             .map(|r| r.get::<_, bool>("is_enabled"))
             .unwrap_or(false))
     }
@@ -1296,7 +1297,8 @@ impl StorageBackend for Storage {
             )
             .await?;
 
-        Ok(rows.first()
+        Ok(rows
+            .first()
             .map(|r| r.get::<_, bool>("is_enabled"))
             .unwrap_or(false))
     }

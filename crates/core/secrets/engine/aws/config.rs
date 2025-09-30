@@ -84,8 +84,7 @@ pub struct AwsRoleConfig {
 }
 
 /// Types of AWS credentials that can be generated
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum AwsCredentialType {
     /// Create IAM user with access keys
     #[default]
@@ -103,7 +102,6 @@ pub enum AwsCredentialType {
     /// Generate STS session token
     SessionToken,
 }
-
 
 /// AWS credential response
 #[derive(Debug, Clone, Serialize, Deserialize)]

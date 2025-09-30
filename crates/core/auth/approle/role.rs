@@ -59,8 +59,7 @@ pub struct AppRole {
     pub token_type: TokenType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum TokenType {
     #[serde(rename = "default")]
     #[default]
@@ -70,7 +69,6 @@ pub enum TokenType {
     #[serde(rename = "batch")]
     Batch,
 }
-
 
 impl Default for AppRole {
     fn default() -> Self {

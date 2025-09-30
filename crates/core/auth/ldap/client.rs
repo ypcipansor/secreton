@@ -203,13 +203,15 @@ impl LdapClient {
         let entry = SearchEntry::construct(rs.0[0].clone());
         let members = entry
             .attrs
-            .get(&self.config.group_attr).cloned()
+            .get(&self.config.group_attr)
+            .cloned()
             .unwrap_or_default();
 
         let policies = self
             .config
             .group_policy_mappings
-            .get(group_name).cloned()
+            .get(group_name)
+            .cloned()
             .unwrap_or_default();
 
         conn.unbind()?;

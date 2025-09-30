@@ -107,6 +107,14 @@ pub struct KVApiState {
     pub engine: std::sync::Arc<KVEngine>,
 }
 
+impl Default for KVApiState {
+    fn default() -> Self {
+        Self {
+            engine: std::sync::Arc::new(KVEngine::default()),
+        }
+    }
+}
+
 /// Request to create/update a secret
 #[derive(Debug, Deserialize)]
 pub struct CreateSecretRequest {

@@ -2,9 +2,11 @@
 //! Tests for the in-memory storage implementation
 
 use anyhow::Result;
+use secreton_storage::{
+    EncryptionMetadata, MockStorageBackend, QueryParams, SecurityLevel, StorageBackend, VaultEntry,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use secreton_storage::{MockStorageBackend, VaultEntry, QueryParams, EncryptionMetadata, SecurityLevel, StorageBackend};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -56,7 +58,9 @@ mod storage_backend_tests {
         assert_eq!(entry.encrypted_data, b"value1");
 
         // Test listing with prefix
-        let entries = storage.list(&QueryParams::new().with_path_prefix("key".to_string())).await?;
+        let entries = storage
+            .list(&QueryParams::new().with_path_prefix("key".to_string()))
+            .await?;
         let keys: Vec<String> = entries.into_iter().map(|e| e.path).collect();
         assert_eq!(keys.len(), 3);
         assert!(keys.contains(&"key1".to_string()));
@@ -65,8 +69,11 @@ mod storage_backend_tests {
 
         // Test deletion
         storage.delete_by_path("key1").await?;
-        let entries_after_delete = storage.list(&QueryParams::new().with_path_prefix("key".to_string())).await?;
-        let keys_after_delete: Vec<String> = entries_after_delete.into_iter().map(|e| e.path).collect();
+        let entries_after_delete = storage
+            .list(&QueryParams::new().with_path_prefix("key".to_string()))
+            .await?;
+        let keys_after_delete: Vec<String> =
+            entries_after_delete.into_iter().map(|e| e.path).collect();
         assert_eq!(keys_after_delete.len(), 2);
 
         Ok(())
@@ -114,7 +121,10 @@ mod storage_backend_tests {
             assert!(entry.is_some());
             let entry = entry.unwrap();
             assert_eq!(entry.path, key);
-            assert_eq!(entry.encrypted_data, format!("concurrent_value_{}", i).as_bytes());
+            assert_eq!(
+                entry.encrypted_data,
+                format!("concurrent_value_{}", i).as_bytes()
+            );
         }
 
         Ok(())
@@ -222,12 +232,24 @@ mod storage_backend_tests {
         }
         let read_duration = read_start.elapsed();
 
-        println!("Write performance: {} ops in {:?}", num_operations, write_duration);
-        println!("Read performance: {} ops in {:?}", num_operations, read_duration);
+        println!(
+            "Write performance: {} ops in {:?}",
+            num_operations, write_duration
+        );
+        println!(
+            "Read performance: {} ops in {:?}",
+            num_operations, read_duration
+        );
 
         // Performance assertions (should be fast for in-memory storage)
-        assert!(write_duration < Duration::from_secs(5), "Write performance too slow");
-        assert!(read_duration < Duration::from_secs(2), "Read performance too slow");
+        assert!(
+            write_duration < Duration::from_secs(5),
+            "Write performance too slow"
+        );
+        assert!(
+            read_duration < Duration::from_secs(2),
+            "Read performance too slow"
+        );
 
         Ok(())
     }
@@ -294,18 +316,24 @@ mod storage_backend_tests {
         }
 
         // Test prefix listing
-        let app_entries = storage.list(&QueryParams::new().with_path_prefix("app/".to_string())).await?;
+        let app_entries = storage
+            .list(&QueryParams::new().with_path_prefix("app/".to_string()))
+            .await?;
         let app_keys: Vec<String> = app_entries.into_iter().map(|e| e.path).collect();
         assert_eq!(app_keys.len(), 3);
         assert!(app_keys.contains(&"app/users/user1".to_string()));
         assert!(app_keys.contains(&"app/users/user2".to_string()));
         assert!(app_keys.contains(&"app/config/db".to_string()));
 
-        let system_entries = storage.list(&QueryParams::new().with_path_prefix("system/".to_string())).await?;
+        let system_entries = storage
+            .list(&QueryParams::new().with_path_prefix("system/".to_string()))
+            .await?;
         let system_keys: Vec<String> = system_entries.into_iter().map(|e| e.path).collect();
         assert_eq!(system_keys.len(), 2);
 
-        let user_entries = storage.list(&QueryParams::new().with_path_prefix("app/users/".to_string())).await?;
+        let user_entries = storage
+            .list(&QueryParams::new().with_path_prefix("app/users/".to_string()))
+            .await?;
         let user_keys: Vec<String> = user_entries.into_iter().map(|e| e.path).collect();
         assert_eq!(user_keys.len(), 2);
 
@@ -383,7 +411,7 @@ mod storage_backend_tests {
     async fn test_storage_transaction_simulation() -> Result<()> {
         // Since MockStorageBackend doesn't support transactions, we'll just test basic operations
         let storage = MockStorageBackend::new();
-        
+
         // Store a value
         let entry = VaultEntry::new(
             "tx_key".to_string(),
@@ -400,7 +428,7 @@ mod storage_backend_tests {
             Uuid::new_v4(),
         );
         storage.store(&entry).await?;
-        
+
         // Verify the value was stored
         let retrieved = storage.get_by_path("tx_key").await?;
         assert!(retrieved.is_some());

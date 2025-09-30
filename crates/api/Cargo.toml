@@ -25,6 +25,7 @@ axum.workspace = true
 hyper.workspace = true
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "compression-full", "fs"] }
+http-body-util = "0.1"
 
 # Authentication
 jsonwebtoken = "9.3"

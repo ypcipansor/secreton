@@ -265,8 +265,7 @@ pub struct SecretIdResponse {
     pub time_until_expiration: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SecretIdGenerateRequest {
     pub metadata: Option<HashMap<String, String>>,
     pub cidr_list: Option<Vec<String>>,
@@ -282,7 +281,6 @@ pub struct SecretIdGenerateResponse {
     pub secret_id_ttl: Option<u64>,
     pub secret_id_num_uses: Option<u32>,
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -1,5 +1,5 @@
 //! Configuration management for the Brankas API server.
-//! 
+//!
 //! Provides comprehensive configuration options for HTTP/gRPC servers,
 //! authentication, authorization, rate limiting, and security features.
 
@@ -14,25 +14,25 @@ use serde::{Deserialize, Serialize};
 pub struct ApiConfig {
     /// HTTP server configuration
     pub http: HttpConfig,
-    
+
     /// gRPC server configuration  
     pub grpc: GrpcConfig,
-    
+
     /// Authentication configuration
     pub auth: AuthConfig,
-    
+
     /// Rate limiting configuration
     pub rate_limit: RateLimitConfig,
-    
+
     /// TLS configuration
     pub tls: Option<TlsConfig>,
-    
+
     /// Monitoring configuration
     pub monitoring: MonitoringConfig,
-    
+
     /// CORS configuration
     pub cors: CorsConfig,
-    
+
     /// Logging configuration
     pub logging: LoggingConfig,
 }
@@ -42,19 +42,19 @@ pub struct ApiConfig {
 pub struct HttpConfig {
     /// Address to bind HTTP server
     pub bind_address: SocketAddr,
-    
+
     /// Request timeout
     pub timeout: Duration,
-    
+
     /// Maximum request body size (bytes)
     pub max_body_size: usize,
-    
+
     /// Keep-alive timeout
     pub keep_alive: Duration,
-    
+
     /// Enable compression
     pub compression: bool,
-    
+
     /// Enable static file serving
     pub static_files: Option<StaticFilesConfig>,
 }
@@ -64,19 +64,19 @@ pub struct HttpConfig {
 pub struct GrpcConfig {
     /// Enable gRPC server
     pub enabled: bool,
-    
+
     /// Address to bind gRPC server
     pub bind_address: SocketAddr,
-    
+
     /// Request timeout
     pub timeout: Duration,
-    
+
     /// Maximum message size (bytes)
     pub max_message_size: usize,
-    
+
     /// Enable reflection
     pub reflection: bool,
-    
+
     /// Enable health check service
     pub health_check: bool,
 }
@@ -86,16 +86,16 @@ pub struct GrpcConfig {
 pub struct AuthConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
-    
+
     /// OAuth2 configuration
     pub oauth2: Option<OAuth2Config>,
-    
+
     /// mTLS configuration
     pub mtls: Option<MtlsConfig>,
-    
+
     /// Session configuration
     pub session: SessionConfig,
-    
+
     /// Multi-factor authentication
     pub mfa: MfaConfig,
 }
@@ -105,19 +105,19 @@ pub struct AuthConfig {
 pub struct JwtConfig {
     /// JWT signing secret
     pub secret: String,
-    
+
     /// Token expiration time
     pub expiration: Duration,
-    
+
     /// Refresh token expiration
     pub refresh_expiration: Duration,
-    
+
     /// JWT algorithm
     pub algorithm: String,
-    
+
     /// Issuer
     pub issuer: String,
-    
+
     /// Audience
     pub audience: String,
 }
@@ -127,10 +127,10 @@ pub struct JwtConfig {
 pub struct OAuth2Config {
     /// OAuth2 provider URLs
     pub providers: Vec<OAuth2Provider>,
-    
+
     /// Redirect URL
     pub redirect_url: String,
-    
+
     /// Scopes to request
     pub scopes: Vec<String>,
 }
@@ -140,19 +140,19 @@ pub struct OAuth2Config {
 pub struct OAuth2Provider {
     /// Provider name
     pub name: String,
-    
+
     /// Client ID
     pub client_id: String,
-    
+
     /// Client secret
     pub client_secret: String,
-    
+
     /// Authorization URL
     pub auth_url: String,
-    
+
     /// Token URL
     pub token_url: String,
-    
+
     /// User info URL
     pub user_info_url: String,
 }
@@ -162,13 +162,13 @@ pub struct OAuth2Provider {
 pub struct MtlsConfig {
     /// Require client certificates
     pub required: bool,
-    
+
     /// CA certificate path
     pub ca_cert: PathBuf,
-    
+
     /// Allowed client certificate subjects
     pub allowed_subjects: Vec<String>,
-    
+
     /// Certificate revocation list
     pub crl: Option<PathBuf>,
 }
@@ -178,10 +178,10 @@ pub struct MtlsConfig {
 pub struct SessionConfig {
     /// Session timeout
     pub timeout: Duration,
-    
+
     /// Session store type
     pub store: SessionStore,
-    
+
     /// Cookie configuration
     pub cookie: CookieConfig,
 }
@@ -200,19 +200,19 @@ pub enum SessionStore {
 pub struct CookieConfig {
     /// Cookie name
     pub name: String,
-    
+
     /// Cookie domain
     pub domain: Option<String>,
-    
+
     /// Cookie path
     pub path: String,
-    
+
     /// Secure flag
     pub secure: bool,
-    
+
     /// HttpOnly flag
     pub http_only: bool,
-    
+
     /// SameSite policy
     pub same_site: String,
 }
@@ -222,16 +222,16 @@ pub struct CookieConfig {
 pub struct MfaConfig {
     /// Enable MFA
     pub enabled: bool,
-    
+
     /// TOTP configuration
     pub totp: TotpConfig,
-    
+
     /// SMS configuration
     pub sms: Option<SmsConfig>,
-    
+
     /// Email configuration
     pub email: Option<EmailConfig>,
-    
+
     /// WebAuthn configuration
     pub webauthn: Option<WebAuthnConfig>,
 }
@@ -241,16 +241,16 @@ pub struct MfaConfig {
 pub struct TotpConfig {
     /// Issuer name
     pub issuer: String,
-    
+
     /// Secret length
     pub secret_length: usize,
-    
+
     /// Time step (seconds)
     pub time_step: u64,
-    
+
     /// Code length
     pub code_length: usize,
-    
+
     /// Clock skew tolerance
     pub skew_tolerance: u64,
 }
@@ -260,10 +260,10 @@ pub struct TotpConfig {
 pub struct SmsConfig {
     /// SMS provider
     pub provider: String,
-    
+
     /// API key
     pub api_key: String,
-    
+
     /// From number
     pub from_number: String,
 }
@@ -273,19 +273,19 @@ pub struct SmsConfig {
 pub struct EmailConfig {
     /// SMTP server
     pub smtp_server: String,
-    
+
     /// SMTP port
     pub smtp_port: u16,
-    
+
     /// Username
     pub username: String,
-    
+
     /// Password
     pub password: String,
-    
+
     /// From address
     pub from_address: String,
-    
+
     /// Use TLS
     pub use_tls: bool,
 }
@@ -295,10 +295,10 @@ pub struct EmailConfig {
 pub struct WebAuthnConfig {
     /// Relying party name
     pub rp_name: String,
-    
+
     /// Relying party ID
     pub rp_id: String,
-    
+
     /// Origin
     pub origin: String,
 }
@@ -308,16 +308,16 @@ pub struct WebAuthnConfig {
 pub struct RateLimitConfig {
     /// Enable rate limiting
     pub enabled: bool,
-    
+
     /// Global rate limits
     pub global: RateLimitRule,
-    
+
     /// Per-endpoint rate limits
     pub endpoints: Vec<EndpointRateLimit>,
-    
+
     /// Per-user rate limits
     pub per_user: Option<RateLimitRule>,
-    
+
     /// Per-IP rate limits
     pub per_ip: Option<RateLimitRule>,
 }
@@ -327,10 +327,10 @@ pub struct RateLimitConfig {
 pub struct RateLimitRule {
     /// Requests per time window
     pub requests: u32,
-    
+
     /// Time window duration
     pub window: Duration,
-    
+
     /// Burst size
     pub burst: Option<u32>,
 }
@@ -340,7 +340,7 @@ pub struct RateLimitRule {
 pub struct EndpointRateLimit {
     /// Endpoint pattern
     pub pattern: String,
-    
+
     /// Rate limit rule
     pub rule: RateLimitRule,
 }
@@ -350,21 +350,34 @@ pub struct EndpointRateLimit {
 pub struct TlsConfig {
     /// Certificate file path
     pub cert_file: PathBuf,
-    
+
     /// Private key file path
     pub key_file: PathBuf,
-    
+
     /// CA certificate file path
     pub ca_file: Option<PathBuf>,
-    
+
     /// Minimum TLS version
     pub min_version: String,
-    
+
     /// Cipher suites
     pub cipher_suites: Vec<String>,
-    
+
     /// ALPN protocols
     pub alpn_protocols: Vec<String>,
+}
+
+/// Jaeger tracing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JaegerConfig {
+    /// Jaeger endpoint URL
+    pub endpoint: String,
+
+    /// Service name for tracing
+    pub service_name: String,
+
+    /// Sampling rate (0.0 to 1.0)
+    pub sample_rate: f64,
 }
 
 /// Monitoring configuration
@@ -375,10 +388,10 @@ pub struct MonitoringConfig {
 
     /// Metrics endpoint
     pub metrics_path: String,
-    
+
     /// Health check endpoint
     pub health_path: String,
-    
+
     /// Enable tracing
     pub tracing: bool,
 
@@ -386,28 +399,27 @@ pub struct MonitoringConfig {
     pub jaeger: Option<JaegerConfig>,
 }
 
-
 /// CORS configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorsConfig {
     /// Enable CORS
     pub enabled: bool,
-    
+
     /// Allowed origins
     pub allowed_origins: Vec<String>,
-    
+
     /// Allowed methods
     pub allowed_methods: Vec<String>,
-    
+
     /// Allowed headers
     pub allowed_headers: Vec<String>,
-    
+
     /// Exposed headers
     pub exposed_headers: Vec<String>,
-    
+
     /// Max age
     pub max_age: Option<Duration>,
-    
+
     /// Allow credentials
     pub allow_credentials: bool,
 }
@@ -417,13 +429,13 @@ pub struct CorsConfig {
 pub struct StaticFilesConfig {
     /// Static files directory
     pub directory: PathBuf,
-    
+
     /// URL path prefix
     pub path_prefix: String,
-    
+
     /// Enable directory listing
     pub directory_listing: bool,
-    
+
     /// Default index file
     pub index_file: Option<String>,
 }
@@ -433,16 +445,16 @@ pub struct StaticFilesConfig {
 pub struct LoggingConfig {
     /// Log level
     pub level: String,
-    
+
     /// Log format
     pub format: String,
-    
+
     /// Enable JSON logging
     pub json: bool,
-    
+
     /// Log file path
     pub file: Option<PathBuf>,
-    
+
     /// Log rotation
     pub rotation: Option<LogRotationConfig>,
 }
@@ -452,10 +464,10 @@ pub struct LoggingConfig {
 pub struct LogRotationConfig {
     /// Maximum file size
     pub max_size: u64,
-    
+
     /// Maximum number of files
     pub max_files: u32,
-    
+
     /// Rotation frequency
     pub frequency: String,
 }
@@ -616,7 +628,7 @@ impl Default for CorsConfig {
             allowed_origins: vec!["*".to_string()],
             allowed_methods: vec![
                 "GET".to_string(),
-                "POST".to_string(), 
+                "POST".to_string(),
                 "PUT".to_string(),
                 "DELETE".to_string(),
                 "PATCH".to_string(),
