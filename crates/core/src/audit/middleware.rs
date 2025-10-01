@@ -12,6 +12,12 @@ use uuid::Uuid;
 // TODO: Re-enable when auth module is implemented
 // use crate::auth::auth_impl::Claims;
 
+// Placeholder until auth module is implemented
+#[derive(Debug, Clone)]
+pub struct Claims {
+    pub sub: String,
+}
+
 use super::*;
 
 /// Extension trait for adding audit logging to requests

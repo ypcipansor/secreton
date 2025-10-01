@@ -992,7 +992,6 @@ roleRef:
                 self.config.server_url,
                 self.format_resources(),
                 self.config.namespace,
-                self.config.namespace,
                 self.config.namespace
             )
         }

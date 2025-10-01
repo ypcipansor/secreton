@@ -11,17 +11,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warp::{reject, Filter, Rejection, Reply};
 
-// TODO: Re-enable when error and security modules are implemented
-// use crate::{error::CoreError, security::*};
-
-// Temporary error type until error module is implemented
-#[derive(Debug)]
-pub struct CoreError(String);
-impl From<anyhow::Error> for CoreError {
-    fn from(e: anyhow::Error) -> Self {
-        CoreError(e.to_string())
-    }
-}
+use crate::error::CoreError;
+// TODO: Re-enable when security modules are implemented
+// use crate::security::*;
 
 /// API Response wrapper
 #[derive(Debug, Serialize)]
@@ -136,60 +128,30 @@ pub struct SecurityAPI {
 }
 
 /// Advanced security manager integrating all security modules
+/// TODO: Re-enable when security modules are implemented
 pub struct AdvancedSecurityManager {
-    pub entropy_engine: EntropyAugmentationEngine,
-    pub hsm_manager: HsmManager,
-    pub audit_system: AdvancedAuditSystem,
-    pub zero_trust_engine: ZeroTrustEngine,
-    pub mfa_engine: AdvancedMfaEngine,
-    pub compliance_engine: ComplianceGovernanceEngine,
-    pub quantum_crypto_engine: QuantumSafeCryptoEngine,
-    pub threat_intel_engine: ThreatIntelligenceEngine,
+    // Placeholder until security modules are implemented
+    _placeholder: (),
+    // pub entropy_engine: EntropyAugmentationEngine,
+    // pub hsm_manager: HsmManager,
+    // pub audit_system: AdvancedAuditSystem,
+    // pub zero_trust_engine: ZeroTrustEngine,
+    // pub mfa_engine: AdvancedMfaEngine,
+    // pub compliance_engine: ComplianceGovernanceEngine,
+    // pub quantum_crypto_engine: QuantumSafeCryptoEngine,
+    // pub threat_intel_engine: ThreatIntelligenceEngine,
 }
 
 impl AdvancedSecurityManager {
     pub async fn new() -> Result<Self, CoreError> {
-        info!("Initializing Advanced Security Manager");
+        info!("Initializing Advanced Security Manager (stub)");
 
         // TODO: Re-enable when security module is implemented
         // Initialize concrete implementations for abstract interfaces
         // use crate::security::concrete_implementations::*;
 
-        // Initialize all security components with proper dependencies
-        let entropy_engine = EntropyAugmentationEngine::new(Default::default());
-        let hsm_manager = HsmManager::new();
-
-        let audit_storage = MemoryAuditStorage::create();
-        let anomaly_detector = SimpleAnomalyDetector::create();
-        let audit_system = AdvancedAuditSystem::new(
-            audit_storage,
-            "node-1".to_string(),
-            Default::default(), // ComplianceConfig
-            anomaly_detector,
-        )
-        .map_err(|e| {
-            CoreError::from(anyhow::anyhow!("Failed to initialize audit system: {}", e))
-        })?;
-
-        let risk_engine = ConcreteRiskAssessmentEngine::create();
-        let zero_trust_engine = ZeroTrustEngine::new(risk_engine, Default::default());
-
-        let mfa_risk_assessor = ConcreteMfaRiskAssessor::create();
-        let mfa_engine = AdvancedMfaEngine::new(mfa_risk_assessor, Default::default());
-
-        let compliance_engine = ComplianceGovernanceEngine::new(Default::default());
-        let quantum_crypto_engine = QuantumSafeCryptoEngine::new(Default::default());
-        let threat_intel_engine = ThreatIntelligenceEngine::new(Default::default());
-
         Ok(Self {
-            entropy_engine,
-            hsm_manager,
-            audit_system,
-            zero_trust_engine,
-            mfa_engine,
-            compliance_engine,
-            quantum_crypto_engine,
-            threat_intel_engine,
+            _placeholder: (),
         })
     }
 

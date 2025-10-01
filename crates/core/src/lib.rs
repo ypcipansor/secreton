@@ -10,14 +10,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
+
 pub mod api;
 pub mod audit;
+pub mod error;
 pub mod sdk_libraries;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use api::{start_security_server, SecurityAPI};
 pub use audit::{AuditLog, AuditLogger, AuditStatus};
+pub use error::CoreError;
 // Commented out imports that don't exist yet
 // pub use auth::mfa::MfaMethod;
 // pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};

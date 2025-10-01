@@ -8,7 +8,8 @@ pub mod auth;
 pub mod config;
 pub mod kv;
 pub mod middleware;
-pub mod tls_optimization;
+// TODO: Update TLS optimization module for rustls 0.23 API changes
+// pub mod tls_optimization;
 pub mod transit;
 
 pub use kv::{create_kv_router, KVApiState, KVEngine};
@@ -84,14 +85,15 @@ pub async fn health_check() -> Json<HealthResponse> {
 }
 
 pub async fn get_tls_metrics() -> Json<TlsMetricsResponse> {
-    let metrics = tls_optimization::get_tls_metrics();
+    // TODO: Re-enable when tls_optimization module is updated
+    // let metrics = tls_optimization::get_tls_metrics();
     Json(TlsMetricsResponse {
-        total_handshakes: metrics.total_handshakes,
-        successful_handshakes: metrics.successful_handshakes,
-        session_resumptions: metrics.session_resumptions,
-        handshake_failures: metrics.handshake_failures,
-        average_handshake_time_ms: metrics.average_handshake_time_ms,
-        success_rate_percent: metrics.get_success_rate(),
-        resumption_rate_percent: metrics.get_resumption_rate(),
+        total_handshakes: 0,
+        successful_handshakes: 0,
+        session_resumptions: 0,
+        handshake_failures: 0,
+        average_handshake_time_ms: 0.0,
+        success_rate_percent: 0.0,
+        resumption_rate_percent: 0.0,
     })
 }
