@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use brankas_crypto::transit::{KeyType, TransitEngine, algorithms::HashAlgorithm, keys::{KeyOptions, KeyUsage}};
+use secreton_crypto::transit::{KeyType, TransitEngine, algorithms::HashAlgorithm, keys::{KeyOptions, KeyUsage}};
 
 #[derive(Clone)]
 pub struct TransitApiState {

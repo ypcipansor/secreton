@@ -2,6 +2,7 @@
 //!
 //! Simple HTTP API for the Brankas transit engine
 
+use axum::{routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 
 pub mod auth;
@@ -13,7 +14,7 @@ pub mod middleware;
 pub mod transit;
 
 pub use kv::{create_kv_router, KVApiState, KVEngine};
-pub use transit::{create_transit_router, TransitApiState, TransitEngine};
+pub use transit::{create_transit_router, TransitApiState};
 #[derive(Clone)]
 pub struct ApiState {
     pub transit: TransitApiState,
@@ -81,6 +82,14 @@ pub async fn health_check() -> Json<HealthResponse> {
         status: "healthy".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: "1.0.0".to_string(),
+    })
+}
+
+pub async fn get_version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        build_date: "2024".to_string(),
+        git_commit: "unknown".to_string(),
     })
 }
 

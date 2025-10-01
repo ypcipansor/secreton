@@ -327,6 +327,9 @@ pub enum AuthError {
     #[error("Invalid authorization header format")]
     InvalidAuthHeader,
 
+    #[error("Missing credentials")]
+    MissingCredentials,
+
     #[error("Permission denied")]
     PermissionDenied,
 

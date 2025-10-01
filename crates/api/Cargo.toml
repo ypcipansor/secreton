@@ -45,8 +45,9 @@ headers = "0.4"
 utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
 
-# Storage
+# Internal crates
 secreton-storage = { path = "../storage" }
+secreton-crypto = { path = "../crypto" }
 
 # Metrics
 prometheus.workspace = true
