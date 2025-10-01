@@ -9,7 +9,6 @@ use chrono::{DateTime, Utc};
 use tracing::{info, warn, error, debug};
 
 /// High-level transit operations wrapper
-#[derive(Debug)]
 pub struct TransitOperations {
     engine: TransitEngine,
     operation_stats: OperationStats,
@@ -494,21 +493,24 @@ impl OperationStats {
     pub fn record_encryption(&mut self, duration: std::time::Duration, bytes: usize) {
         self.encryptions += 1;
         self.total_bytes_encrypted += bytes as u64;
-        self.update_average_time(&mut self.average_encryption_time_ms, duration, self.encryptions);
+        let count = self.encryptions;
+        Self::update_average_time(&mut self.average_encryption_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
     
     pub fn record_decryption(&mut self, duration: std::time::Duration, bytes: usize) {
         self.decryptions += 1;
         self.total_bytes_decrypted += bytes as u64;
-        self.update_average_time(&mut self.average_decryption_time_ms, duration, self.decryptions);
+        let count = self.decryptions;
+        Self::update_average_time(&mut self.average_decryption_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
     
     pub fn record_signing(&mut self, duration: std::time::Duration, bytes: usize) {
         self.signings += 1;
         self.total_bytes_signed += bytes as u64;
-        self.update_average_time(&mut self.average_signing_time_ms, duration, self.signings);
+        let count = self.signings;
+        Self::update_average_time(&mut self.average_signing_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
     
@@ -520,7 +522,7 @@ impl OperationStats {
         self.last_operation = Some(Utc::now());
     }
     
-    fn update_average_time(&mut self, avg: &mut f64, duration: std::time::Duration, count: u64) {
+    fn update_average_time(avg: &mut f64, duration: std::time::Duration, count: u64) {
         let new_time = duration.as_millis() as f64;
         *avg = (*avg * (count - 1) as f64 + new_time) / count as f64;
     }

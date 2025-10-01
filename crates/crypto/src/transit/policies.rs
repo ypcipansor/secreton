@@ -368,7 +368,6 @@ impl Default for KeyUsagePolicy {
                 KeyType::Aes256Gcm,
                 KeyType::ChaCha20Poly1305,
                 KeyType::XChaCha20Poly1305,
-                KeyType::Rsa(2048),
                 KeyType::EcdsaP256,
                 KeyType::Ed25519,
             ],
@@ -394,15 +393,6 @@ impl KeyStrength {
             KeyType::Aes256Gcm => KeyStrength::High,
             KeyType::ChaCha20Poly1305 => KeyStrength::High,
             KeyType::XChaCha20Poly1305 => KeyStrength::High,
-            KeyType::Rsa(bits) => {
-                match bits {
-                    1024 => KeyStrength::Low,
-                    2048 => KeyStrength::Medium,
-                    3072 => KeyStrength::High,
-                    4096 => KeyStrength::VeryHigh,
-                    _ => KeyStrength::Medium,
-                }
-            }
             KeyType::EcdsaP256 => KeyStrength::High,
             KeyType::EcdsaSecp256k1 => KeyStrength::High,
             KeyType::Ed25519 => KeyStrength::High,

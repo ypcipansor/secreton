@@ -1,6 +1,6 @@
 //! Transit keys implementation with RustCrypto integration
 
-use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Key, Nonce}};
+use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Key}};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 // RSA imports removed - using Ed25519 instead
 use p256::{SecretKey as P256SecretKey, PublicKey as P256PublicKey, ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey}};
@@ -15,6 +15,7 @@ use signature::{Signer, Verifier};
 use digest::Digest;
 
 use crate::error::{CryptoResult, CryptoError};
+use crate::transit::algorithms::SignatureAlgorithm;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
@@ -81,17 +82,6 @@ pub enum KeyUsage {
     Derive,
 }
 
-/// Signature algorithms supported
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum SignatureAlgorithm {
-    /// Ed25519 signature
-    Ed25519,
-    /// ECDSA with SHA-256
-    EcdsaSha256,
-    /// ECDSA with SHA-384
-    EcdsaSha384,
-}
-
 /// Transit key with versioning and RustCrypto backends
 #[derive(Debug)]
 pub struct TransitKey {
@@ -112,7 +102,7 @@ pub struct TransitKey {
 }
 
 /// Individual key version with cryptographic material
-#[derive(Debug, ZeroizeOnDrop)]
+#[derive(Debug)]
 struct KeyVersion {
     /// Version number
     version: u32,
@@ -123,7 +113,7 @@ struct KeyVersion {
 }
 
 /// Cryptographic key material (zeroized on drop)
-#[derive(Debug, ZeroizeOnDrop)]
+#[derive(Debug)]
 enum KeyMaterial {
     /// AES-256-GCM key
     Aes256Gcm(Box<[u8; 32]>),
@@ -209,7 +199,7 @@ impl TransitKey {
                 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = Nonce::from_slice(&nonce_bytes);
+                let nonce = aes_gcm::aead::generic_array::GenericArray::from_slice(&nonce_bytes);
                 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -320,7 +310,7 @@ impl TransitKey {
                 
                 let nonce_bytes = BASE64.decode(parts[1])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string()))?;
-                let nonce = Nonce::from_slice(&nonce_bytes);
+                let nonce = aes_gcm::aead::generic_array::GenericArray::from_slice(&nonce_bytes);
                 
                 let encrypted_bytes = BASE64.decode(parts[2])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string()))?;
@@ -472,7 +462,8 @@ impl TransitKey {
             
             KeyMaterial::Ed25519(signing_key) => {
                 let verifying_key = signing_key.verifying_key();
-                if let Ok(signature) = Ed25519Signature::from_bytes(&signature_bytes.try_into().unwrap_or([0u8; 64])) {
+                if let Ok(sig_bytes) = TryInto::<[u8; 64]>::try_into(signature_bytes) {
+                    let signature = Ed25519Signature::from_bytes(&sig_bytes);
                     verifying_key.verify_strict(data, &signature).is_ok()
                 } else {
                     false
@@ -554,8 +545,7 @@ impl KeyVersion {
             }
             
             KeyType::Ed25519 => {
-                let mut rng = rand::thread_rng();
-                let signing_key = Ed25519SigningKey::generate(&mut rng);
+                let signing_key = Ed25519SigningKey::from_bytes(&rand::random::<[u8; 32]>());
                 KeyMaterial::Ed25519(Box::new(signing_key))
             }
             

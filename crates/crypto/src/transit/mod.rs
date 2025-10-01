@@ -19,14 +19,13 @@ pub mod batch;
 pub mod policies;
 
 pub use algorithms::*;
-pub use keys::*;
+pub use keys::{TransitKey, KeyType, KeyOptions, KeyUsage, KeyInfo};
 pub use operations::*;
 pub use batch::*;
 pub use policies::*;
 
 use async_trait::async_trait;
 use crate::error::{CryptoResult, CryptoError};
-use crate::transit::algorithms::SignatureAlgorithm;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,7 +34,6 @@ use tracing::{info, warn, error};
 use chrono::{DateTime, Utc};
 
 /// Transit engine for encryption as a service
-#[derive(Debug)]
 pub struct TransitEngine {
     /// Storage for transit keys
     keys: Arc<RwLock<HashMap<String, TransitKey>>>,
@@ -85,11 +83,13 @@ impl TransitEngine {
             return Err(CryptoError::KeyAlreadyExists(name));
         }
         
+        // Clone key_type before moving it
+        let key_type_clone = key_type.clone();
         let transit_key = TransitKey::new(name.clone(), key_type, options.unwrap_or_default())?;
         
         // Audit log
         if let Some(ref audit) = self.audit {
-            audit.log_key_creation(&name, &key_type).await;
+            audit.log_key_creation(&name, &key_type_clone).await;
         }
         
         keys.insert(name.clone(), transit_key);

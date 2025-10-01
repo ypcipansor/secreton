@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
@@ -355,9 +356,7 @@ impl KmipServer {
     /// Start the KMIP server
     pub async fn start(&self) -> CryptoResult<()> {
         let listener = TcpListener::bind(self.bind_address).await
-            .map_err(|e| CryptoError::ConnectionFailed {
-                message: format!("Failed to bind KMIP server: {}", e),
-            })?;
+            .map_err(|e| CryptoError::NetworkError(format!("Failed to bind KMIP server: {}", e)))?;
 
         info!("KMIP server started on {}", self.bind_address);
 
@@ -421,9 +420,7 @@ impl KmipConnectionHandler {
 
         loop {
             let n = socket.read(&mut buffer).await
-                .map_err(|e| CryptoError::ConnectionFailed {
-                    message: format!("Failed to read from KMIP socket: {}", e),
-                })?;
+                .map_err(|e| CryptoError::NetworkError(format!("Failed to read from KMIP socket: {}", e)))?;
 
             if n == 0 {
                 break; // Connection closed
@@ -438,9 +435,7 @@ impl KmipConnectionHandler {
             // Send response
             let response_bytes = self.serialize_kmip_message(&response)?;
             socket.write_all(&response_bytes).await
-                .map_err(|e| CryptoError::ConnectionFailed {
-                    message: format!("Failed to write to KMIP socket: {}", e),
-                })?;
+                .map_err(|e| CryptoError::NetworkError(format!("Failed to write to KMIP socket: {}", e)))?;
         }
 
         Ok(())

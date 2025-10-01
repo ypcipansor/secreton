@@ -213,7 +213,7 @@ pub fn derive_key(
 pub fn generate_random(length: usize) -> CryptoResult<Vec<u8>> {
     use rand::RngCore;
     let mut bytes = vec![0u8; length];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
     Ok(bytes)
 }
 
