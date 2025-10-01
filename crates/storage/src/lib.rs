@@ -21,201 +21,77 @@ pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend,
 
 // Re-export new backends
 pub use backends::{ConsulStorage, ConsulStorageConfig};
+pub use backends::{DynamoDBStorage, DynamoDBStorageConfig};
+pub use backends::{MySQLStorage, MySQLStorageConfig};
+pub use backends::{S3Storage, S3StorageConfig};
 pub use backends::{EtcdStorage, EtcdStorageConfig};
 
 // Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
-/// Storage operation errors
-#[derive(Error, Debug)]
-pub enum StorageError {
-    #[error("Connection failed: {message}")]
-    ConnectionFailed { message: String },
-
-    #[error("Query failed: {message}")]
-    QueryFailed { message: String },
-
-    #[error("Transaction failed: {message}")]
-    TransactionFailed { message: String },
-
-    #[error("Serialization error: {message}")]
-    SerializationError { message: String },
-
-    #[error("Not found: {resource_type} with ID {id}")]
-    NotFound { resource_type: String, id: String },
-
-    #[error("Duplicate entry: {resource_type} with ID {id}")]
-    Duplicate { resource_type: String, id: String },
-
-    #[error("Constraint violation: {constraint} - {message}")]
-    ConstraintViolation { constraint: String, message: String },
-
-    #[error("Permission denied for operation: {operation}")]
-    PermissionDenied { operation: String },
-
-    #[error("Storage backend error: {backend} - {message}")]
-    BackendError { backend: String, message: String },
-
-    #[error("Configuration error: {message}")]
-    ConfigurationError { message: String },
-
-    #[error("Migration error: {message}")]
-    MigrationError { message: String },
+/// Encryption metadata for vault entries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionMetadata {
+    /// Encryption algorithm used
+    pub algorithm: String,
+    /// Key ID used for encryption
+    pub key_id: String,
+    /// Initialization vector
+    pub iv: Vec<u8>,
+    /// Authentication tag for AEAD ciphers
+    pub auth_tag: Option<Vec<u8>>,
+    /// Additional authenticated data
+    pub aad: Option<Vec<u8>>,
+    /// Key derivation parameters
+    pub kdf_params: Option<HashMap<String, String>>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn test_vault_entry_initialization_defaults() {
-        let owner = Uuid::new_v4();
-        let entry = VaultEntry::new(
-            "secret/path".to_string(),
-            vec![1, 2, 3],
-            EncryptionMetadata {
-                algorithm: "aes-256-gcm".to_string(),
-                key_id: "key-123".to_string(),
-                iv: vec![0; 12],
-                auth_tag: Some(vec![0; 16]),
-                aad: None,
-                kdf_params: None,
-            },
-            SecurityLevel::Secret,
-            owner,
-        );
-
-        assert_eq!(entry.path, "secret/path");
-        assert_eq!(entry.version, 1);
-        assert_eq!(entry.security_level, SecurityLevel::Secret);
-        assert_eq!(entry.owner_id, owner);
-        assert!(entry.metadata.is_empty());
-        assert!(entry.tags.is_empty());
-        assert!(!entry.is_expired());
-    }
-
-    #[test]
-    fn test_vault_entry_tag_and_metadata_helpers() {
-        let owner = Uuid::new_v4();
-        let entry = VaultEntry::new(
-            "secret/path".to_string(),
-            vec![],
-            EncryptionMetadata {
-                algorithm: "aes-256-gcm".to_string(),
-                key_id: "key-123".to_string(),
-                iv: vec![0; 12],
-                auth_tag: None,
-                aad: None,
-                kdf_params: None,
-            },
-            SecurityLevel::Confidential,
-            owner,
-        )
-        .add_metadata("env".to_string(), "prod".to_string())
-        .add_metadata("region".to_string(), "apac".to_string())
-        .add_tag("finance".to_string())
-        .add_tag("finance".to_string())
-        .add_tag("internal".to_string());
-
-        assert_eq!(entry.metadata.get("env"), Some(&"prod".to_string()));
-        assert_eq!(entry.metadata.get("region"), Some(&"apac".to_string()));
-
-        let tag_set: HashSet<_> = entry.tags.iter().collect();
-        assert_eq!(tag_set.len(), 2);
-        assert!(tag_set.contains(&"finance".to_string()));
-        assert!(tag_set.contains(&"internal".to_string()));
-    }
-
-    #[test]
-    fn test_query_params_helpers() {
-        let owner = Uuid::new_v4();
-        let params = QueryParams::new()
-            .with_path_prefix("apps/".to_string())
-            .with_security_level(SecurityLevel::Internal)
-            .with_tag("pci".to_string())
-            .with_tag("finance".to_string())
-            .with_owner(owner)
-            .with_limit(50);
-
-        assert_eq!(params.path_prefix.as_deref(), Some("apps/"));
-        assert_eq!(params.security_level, Some(SecurityLevel::Internal));
-        assert_eq!(params.tags.len(), 2);
-        assert_eq!(params.owner_id, Some(owner));
-        assert_eq!(params.limit, Some(50));
-    }
-
-    #[test]
-    fn test_storage_error_debug_and_display() {
-        let error = StorageError::NotFound {
-            resource_type: "vault_entry".to_string(),
-            id: "123".to_string(),
-        };
-
-        let display = format!("{}", error);
-        assert!(display.contains("Not found"));
-        assert!(display.contains("vault_entry"));
-        assert!(display.contains("123"));
-
-        let debug = format!("{:?}", error);
-        assert!(debug.contains("NotFound"));
-    }
-}
-
-/// Type alias for Results with StorageError
-pub type StorageResult<T> = Result<T, StorageError>;
-
-/// Security classification levels for data
+/// Security classification levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SecurityLevel {
+    /// Public information - no security controls required
     Public = 0,
+    /// Internal use - basic access controls
     Internal = 1,
+    /// Confidential - restricted access
     Confidential = 2,
+    /// Secret - highly restricted access
     Secret = 3,
+    /// Top Secret - maximum security controls
     TopSecret = 4,
 }
 
-/// Generic vault entry for storing encrypted data
+/// Vault entry for storing secrets
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultEntry {
-    /// Unique identifier
+    /// Unique identifier for the entry
     pub id: Uuid,
-
-    /// Entry path/key
+    /// Path to the secret
     pub path: String,
-
-    /// Encrypted data
+    /// Encrypted secret data
     pub encrypted_data: Vec<u8>,
-
     /// Encryption metadata
     pub encryption_metadata: EncryptionMetadata,
-
-    /// Security classification
+    /// Security level of the data
     pub security_level: SecurityLevel,
-
-    /// Entry metadata
+    /// Additional metadata
     pub metadata: HashMap<String, String>,
-
-    /// Entry tags for organization
+    /// Tags for categorization
     pub tags: Vec<String>,
-
-    /// Entry version
+    /// Version number
     pub version: u32,
-
-    /// Owner user ID
+    /// Owner of the entry
     pub owner_id: Uuid,
-
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
-
-    /// Last modified timestamp
+    /// Last update timestamp
     pub updated_at: DateTime<Utc>,
-
-    /// Expiration timestamp (optional)
+    /// Optional expiration time
     pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl VaultEntry {
+    /// Create a new vault entry
     pub fn new(
         path: String,
         encrypted_data: Vec<u8>,
@@ -223,6 +99,7 @@ impl VaultEntry {
         security_level: SecurityLevel,
         owner_id: Uuid,
     ) -> Self {
+        let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             path,
@@ -233,13 +110,13 @@ impl VaultEntry {
             tags: Vec::new(),
             version: 1,
             owner_id,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             expires_at: None,
         }
     }
 
-    /// Check if entry has expired
+    /// Check if the entry is expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
             Utc::now() > expires_at
@@ -269,26 +146,17 @@ impl VaultEntry {
     }
 }
 
-/// Encryption metadata for stored data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionMetadata {
-    /// Encryption algorithm used
-    pub algorithm: String,
-
-    /// Key identifier
-    pub key_id: String,
-
-    /// Initialization vector/nonce
-    pub iv: Vec<u8>,
-
-    /// Authentication tag (for AEAD modes)
-    pub auth_tag: Option<Vec<u8>>,
-
-    /// Additional authenticated data
-    pub aad: Option<Vec<u8>>,
-
-    /// Key derivation parameters
-    pub kdf_params: Option<HashMap<String, String>>,
+impl Default for EncryptionMetadata {
+    fn default() -> Self {
+        Self {
+            algorithm: "aes-256-gcm".to_string(),
+            key_id: "default-key".to_string(),
+            iv: vec![0; 12],
+            auth_tag: None,
+            aad: None,
+            kdf_params: None,
+        }
+    }
 }
 
 /// Query parameters for filtering vault entries
@@ -355,6 +223,46 @@ impl QueryParams {
         self
     }
 }
+
+/// Storage operation errors
+#[derive(Error, Debug)]
+pub enum StorageError {
+    #[error("Connection failed: {message}")]
+    ConnectionFailed { message: String },
+
+    #[error("Query failed: {message}")]
+    QueryFailed { message: String },
+
+    #[error("Transaction failed: {message}")]
+    TransactionFailed { message: String },
+
+    #[error("Serialization error: {message}")]
+    SerializationError { message: String },
+
+    #[error("Not found: {resource_type} with ID {id}")]
+    NotFound { resource_type: String, id: String },
+
+    #[error("Duplicate entry: {resource_type} with ID {id}")]
+    Duplicate { resource_type: String, id: String },
+
+    #[error("Constraint violation: {constraint} - {message}")]
+    ConstraintViolation { constraint: String, message: String },
+
+    #[error("Permission denied for operation: {operation}")]
+    PermissionDenied { operation: String },
+
+    #[error("Storage backend error: {backend} - {message}")]
+    BackendError { backend: String, message: String },
+
+    #[error("Configuration error: {message}")]
+    ConfigurationError { message: String },
+
+    #[error("Migration error: {message}")]
+    MigrationError { message: String },
+}
+
+/// Type alias for Results with StorageError
+pub type StorageResult<T> = Result<T, StorageError>;
 
 /// Storage backend trait for different implementations
 #[async_trait]
@@ -681,5 +589,104 @@ impl StorageTransaction for MockTransaction {
 
     async fn rollback(self: Box<Self>) -> StorageResult<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_vault_entry_initialization_defaults() {
+        let owner = Uuid::new_v4();
+        let entry = VaultEntry::new(
+            "secret/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "aes-256-gcm".to_string(),
+                key_id: "key-123".to_string(),
+                iv: vec![0; 12],
+                auth_tag: Some(vec![0; 16]),
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Secret,
+            owner,
+        );
+
+        assert_eq!(entry.path, "secret/path");
+        assert_eq!(entry.version, 1);
+        assert_eq!(entry.security_level, SecurityLevel::Secret);
+        assert_eq!(entry.owner_id, owner);
+        assert!(entry.metadata.is_empty());
+        assert!(entry.tags.is_empty());
+        assert!(!entry.is_expired());
+    }
+
+    #[test]
+    fn test_vault_entry_tag_and_metadata_helpers() {
+        let owner = Uuid::new_v4();
+        let entry = VaultEntry::new(
+            "secret/path".to_string(),
+            vec![],
+            EncryptionMetadata {
+                algorithm: "aes-256-gcm".to_string(),
+                key_id: "key-123".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            owner,
+        )
+        .add_metadata("env".to_string(), "prod".to_string())
+        .add_metadata("region".to_string(), "apac".to_string())
+        .add_tag("finance".to_string())
+        .add_tag("finance".to_string())
+        .add_tag("internal".to_string());
+
+        assert_eq!(entry.metadata.get("env"), Some(&"prod".to_string()));
+        assert_eq!(entry.metadata.get("region"), Some(&"apac".to_string()));
+
+        let tag_set: HashSet<String> = entry.tags.iter().cloned().collect();
+        assert_eq!(tag_set.len(), 2);
+        assert!(tag_set.contains(&"finance".to_string()));
+        assert!(tag_set.contains(&"internal".to_string()));
+    }
+
+    #[test]
+    fn test_query_params_helpers() {
+        let owner = Uuid::new_v4();
+        let params = QueryParams::new()
+            .with_path_prefix("apps/".to_string())
+            .with_security_level(SecurityLevel::Internal)
+            .with_tag("pci".to_string())
+            .with_tag("finance".to_string())
+            .with_owner(owner)
+            .with_limit(50);
+
+        assert_eq!(params.path_prefix.as_deref(), Some("apps/"));
+        assert_eq!(params.security_level, Some(SecurityLevel::Internal));
+        assert_eq!(params.tags.len(), 2);
+        assert_eq!(params.owner_id, Some(owner));
+        assert_eq!(params.limit, Some(50));
+    }
+
+    #[test]
+    fn test_storage_error_debug_and_display() {
+        let error = StorageError::NotFound {
+            resource_type: "vault_entry".to_string(),
+            id: "123".to_string(),
+        };
+
+        let display = format!("{}", error);
+        assert!(display.contains("Not found"));
+        assert!(display.contains("vault_entry"));
+        assert!(display.contains("123"));
+
+        let debug = format!("{:?}", error);
+        assert!(debug.contains("NotFound"));
     }
 }

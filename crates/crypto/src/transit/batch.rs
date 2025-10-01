@@ -1,7 +1,7 @@
 //! Batch operations for high-throughput transit engine operations
 
 use crate::error::{CryptoResult, CryptoError};
-use crate::transit::SignatureAlgorithm;
+use crate::transit::algorithms::SignatureAlgorithm;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use uuid::Uuid;

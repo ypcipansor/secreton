@@ -12,66 +12,20 @@ use std::collections::HashMap;
 use std::str::FromStr;
 pub mod api;
 pub mod audit;
-pub mod auth;
-pub mod config;
-pub mod crypto;
-pub mod error;
-pub mod models;
-pub mod secrets;
-pub mod security;
-pub mod server;
-pub mod services;
-pub mod storage;
-pub mod types;
-pub mod utils;
-
-// Test utilities - available for tests, integration tests, and examples
+pub mod sdk_libraries;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use api::{start_security_server, SecurityAPI};
 pub use audit::{AuditLog, AuditLogger, AuditStatus};
 pub use auth::mfa::MfaMethod;
-pub use error::CoreError;
-pub use secrets::engine::{
-    CreateKeyRequest, DecryptRequest, EncryptRequest, SecretsEngine, TransitSecretsEngine,
-};
-pub use security::{
-    // Audit Systems
-    AdvancedAuditSystem,
-    // Advanced MFA
-    AdvancedMfaEngine,
-    // Core Security Components
-    AdvancedSecurityConfig,
-    AuditEvent,
-    ComplianceFramework,
-    // Compliance & Governance
-    ComplianceGovernanceEngine,
-    ComplianceReport,
-    ComplianceRequirement,
-    // Entropy & Randomness
-    EntropyAugmentationEngine,
-    EntropyQuality,
-    EntropySource,
-    // HSM Integration
-    HsmManager,
-    HsmProvider,
-    MfaAuthResult,
-    MfaChallengeType,
-    PostQuantumAlgorithm,
-    // Post-Quantum Cryptography
-    QuantumSafeCryptoEngine,
-    QuantumSecurityLevel,
-    ThreatDetection,
-    ThreatIndicator,
-    // Threat Intelligence
-    ThreatIntelligenceEngine,
-    // Zero Trust Architecture
-    ZeroTrustEngine,
-};
-pub use storage::{MemoryStorage, Storage};
-pub use types::{Environment, HealthStatus, Pagination, TimeRange, Version};
+pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
+pub use grpc_api::{GrpcConfig, SecretsGrpcService};
 pub use utils::error::AppError;
+
+// Include integration tests
+#[cfg(test)]
+mod integration_tests;
 
 /// Security classification levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]

@@ -10,22 +10,34 @@ pub mod user;
 
 // Authentication methods
 pub mod approle;
+pub mod aws;
+pub mod azure;
 pub mod certificate;
+pub mod cloudfoundry;
+pub mod gcp;
 pub mod ldap;
 pub mod oidc;
+pub mod okta;
 pub mod radius;
 pub mod saml;
 pub mod token;
+pub mod userpass;
 
 pub use approle::AppRoleAuth;
+pub use aws::{AwsAuth, AwsConfig, AwsAuthMethod, AwsAuthProvider};
+pub use azure::{AzureAuth, AzureConfig, AzureAuthMethod, AzureAuthProvider};
 pub use certificate::CertificateAuth;
+pub use cloudfoundry::{CloudFoundryAuth, CloudFoundryConfig, CloudFoundryAuthMethod, CloudFoundryAuthProvider};
+pub use gcp::{GcpAuth, GcpConfig, GcpAuthMethod, GcpAuthProvider};
 pub use ldap::LdapAuth;
 pub use oidc::OidcAuth;
+pub use okta::{OktaAuth, OktaConfig, OktaAuthMethod, OktaAuthProvider};
 pub use radius::RadiusAuth;
 pub use refresh_token::RefreshToken;
 pub use saml::SamlAuth;
 pub use service::{AuthService, TokenPair};
 pub use token::TokenAuth;
+pub use userpass::{UserpassAuth, UserpassConfig, UserpassAuthMethod, UserpassAuthProvider};
 pub use traits::{AuthMethod, AuthMethodRegistry, AuthResult, Credentials, TokenInfo};
 pub use user::User;
 

@@ -7,56 +7,23 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use thiserror::Error;
 
 pub mod encryption;
 pub mod error;
 pub mod hashing;
 pub mod key_derivation;
+pub mod kmip;
 pub mod kv_engine;
-pub mod quantum_safe_crypto;
-pub mod transit_simple;
+pub mod pqc;
+pub mod transit;
 
 pub use encryption::*;
 pub use error::*;
-pub use hashing::*;
 pub use key_derivation::*;
+pub use kmip::*;
 pub use kv_engine::*;
-pub use quantum_safe_crypto::*;
-pub use transit_simple::*;
-
-// Re-export transit_simple as transit for compatibility
-pub mod transit {
-    pub use super::transit_simple::*;
-}
-
-/// Cryptographic error types (legacy)
-#[derive(Error, Debug, Clone, PartialEq)]
-pub enum CryptoError {
-    #[error("Invalid key length: expected {expected}, got {actual}")]
-    InvalidKeyLength { expected: usize, actual: usize },
-
-    #[error("Encryption failed: {reason}")]
-    EncryptionFailed { reason: String },
-
-    #[error("Decryption failed: {reason}")]
-    DecryptionFailed { reason: String },
-
-    #[error("Key generation failed: {reason}")]
-    KeyGenerationFailed { reason: String },
-
-    #[error("Hash operation failed: {reason}")]
-    HashFailed { reason: String },
-
-    #[error("Invalid nonce/IV length")]
-    InvalidNonceLength,
-
-    #[error("Random generation failed")]
-    RandomGenerationFailed,
-}
-
-/// Type alias for Results with CryptoError (legacy)
-pub type CryptoResult<T> = Result<T, CryptoError>;
+pub use pqc::*;
+pub use transit::*;
 
 /// Supported cryptographic algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

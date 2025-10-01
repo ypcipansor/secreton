@@ -1,17 +1,18 @@
 //! Transit keys implementation with RustCrypto integration
 
-use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead}};
+use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Key, Nonce}};
 use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
 // RSA imports removed - using Ed25519 instead
 use p256::{SecretKey as P256SecretKey, PublicKey as P256PublicKey, ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey}};
 use k256::{SecretKey as K256SecretKey, PublicKey as K256PublicKey, ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey}};
 use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey, Signature as Ed25519Signature};
-use x25519_dalek::{EphemeralSecret as X25519Secret, PublicKey as X25519PublicKey};
+use x25519_dalek::{EphemeralSecret, PublicKey, PublicKey as X25519PublicKey};
 use hkdf::Hkdf;
 use sha2::{Sha256, Sha384, Sha512};
 use sha3::{Sha3_256, Sha3_512};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use signature::{Signer, Verifier};
+use digest::Digest;
 
 use crate::error::{CryptoResult, CryptoError};
 use serde::{Serialize, Deserialize};
@@ -19,12 +20,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use rand::{RngCore, CryptoRng};
-
-use x25519_dalek::{StaticSecret as X25519Secret, PublicKey as X25519PublicKey};
-use hkdf::Hkdf;
-use sha2::{Sha256, Sha384, Sha512};
-use sha3::{Sha3_256, Sha3_512};
-use digest::Digest;
+use rand::Rng;
 
 /// Supported key types for the transit engine
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,8 +137,8 @@ enum KeyMaterial {
     EcdsaSecp256k1(Box<K256SecretKey>),
     /// Ed25519 private key
     Ed25519(Box<Ed25519SigningKey>),
-    /// X25519 private key
-    X25519(Box<X25519Secret>),
+    /// X25519 private key (stored as bytes since EphemeralSecret can't be stored)
+    X25519(Box<[u8; 32]>),
 }
 
 impl TransitKey {
@@ -225,9 +221,9 @@ impl TransitKey {
                 
                 // Format: version:nonce:ciphertext
                 let mut result = format!("v{}:", version);
-                result.push_str(&base64::encode(&nonce_bytes));
+                result.push_str(&BASE64.encode(&nonce_bytes));
                 result.push(':');
-                result.push_str(&base64::encode(&encrypted));
+                result.push_str(&BASE64.encode(&encrypted));
                 result
             }
             
@@ -248,9 +244,9 @@ impl TransitKey {
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 
                 let mut result = format!("v{}:", version);
-                result.push_str(&base64::encode(&nonce_bytes));
+                result.push_str(&BASE64.encode(&nonce_bytes));
                 result.push(':');
-                result.push_str(&base64::encode(&encrypted));
+                result.push_str(&BASE64.encode(&encrypted));
                 result
             }
             
@@ -271,9 +267,9 @@ impl TransitKey {
                     .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
                 
                 let mut result = format!("v{}:", version);
-                result.push_str(&base64::encode(&nonce_bytes));
+                result.push_str(&BASE64.encode(&nonce_bytes));
                 result.push(':');
-                result.push_str(&base64::encode(&encrypted));
+                result.push_str(&BASE64.encode(&encrypted));
                 result
             }
             
@@ -322,11 +318,11 @@ impl TransitKey {
                 let key = Key::<Aes256Gcm>::from_slice(key_bytes.as_slice());
                 let cipher = Aes256Gcm::new(key);
                 
-                let nonce_bytes = base64::decode(parts[1])
+                let nonce_bytes = BASE64.decode(parts[1])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string()))?;
                 let nonce = Nonce::from_slice(&nonce_bytes);
                 
-                let encrypted_bytes = base64::decode(parts[2])
+                let encrypted_bytes = BASE64.decode(parts[2])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string()))?;
                 
                 let mut decrypted = cipher.decrypt(nonce, encrypted_bytes.as_slice())
@@ -350,11 +346,11 @@ impl TransitKey {
                 let key = chacha20poly1305::Key::from_slice(key_bytes.as_slice());
                 let cipher = ChaCha20Poly1305::new(key);
                 
-                let nonce_bytes = base64::decode(parts[1])
+                let nonce_bytes = BASE64.decode(parts[1])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string()))?;
                 let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
                 
-                let encrypted_bytes = base64::decode(parts[2])
+                let encrypted_bytes = BASE64.decode(parts[2])
                     .map_err(|_| CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string()))?;
                 
                 let mut decrypted = cipher.decrypt(nonce, encrypted_bytes.as_slice())
@@ -400,18 +396,18 @@ impl TransitKey {
             KeyMaterial::EcdsaP256(private_key) => {
                 let signing_key = P256SigningKey::from(private_key.as_ref());
                 let signature: p256::ecdsa::Signature = signing_key.sign(data);
-                base64::encode(signature.to_der())
+                BASE64.encode(signature.to_der())
             }
             
             KeyMaterial::EcdsaSecp256k1(private_key) => {
                 let signing_key = K256SigningKey::from(private_key.as_ref());
                 let signature: k256::ecdsa::Signature = signing_key.sign(data);
-                base64::encode(signature.to_der())
+                BASE64.encode(signature.to_der())
             }
             
             KeyMaterial::Ed25519(signing_key) => {
                 let signature = signing_key.sign(data);
-                base64::encode(signature.to_bytes())
+                BASE64.encode(signature.to_bytes())
             }
             
             _ => {
@@ -449,7 +445,7 @@ impl TransitKey {
             return Err(CryptoError::InvalidUsage("Verification not allowed for this key".to_string()));
         }
         
-        let signature_bytes = base64::decode(parts[1])
+        let signature_bytes = BASE64.decode(parts[1])
             .map_err(|_| CryptoError::InvalidSignature("Invalid signature encoding".to_string()))?;
         
         let is_valid = match &key_version.material {
@@ -564,8 +560,9 @@ impl KeyVersion {
             }
             
             KeyType::X25519 => {
-                let secret = X25519Secret::random_from_rng(&mut rand::thread_rng());
-                KeyMaterial::X25519(Box::new(secret))
+                let mut secret_bytes = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut secret_bytes);
+                KeyMaterial::X25519(Box::new(secret_bytes))
             }
         };
         

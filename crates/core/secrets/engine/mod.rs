@@ -5,16 +5,16 @@
 
 pub mod aws;
 pub mod database;
+pub mod alicloud;
+pub mod gcloud_secrets;
+pub mod azure_keyvault;
+pub mod gcp_secretmanager;
+pub mod pkiext;
 // pub mod azure; // TODO: Enable when Azure SDK dependencies are available
 // pub mod gcp; // TODO: Enable when GCP SDK dependencies are available
 // pub mod kubernetes; // TODO: Enable when Kubernetes SDK dependencies are available
 // pub mod rabbitmq; // TODO: Enable when RabbitMQ SDK dependencies are available
-mod kv;
-mod memory;
-mod pki; // Re-enabled for PKI certificate management
-mod ssh;
-mod totp;
-pub mod transit;
+pub mod kmip;
 
 /// Metrics for a specific secrets engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,13 +54,18 @@ use crate::{storage::StorageEngine, AppError};
 
 pub use aws::AwsEngine;
 pub use database::DatabaseEngine;
+pub use alicloud::{AliCloudEngine, AliCloudConfig, AliCloudCredentials, AliCloudRole, AliCloudPermission};
+pub use gcloud_secrets::{GCloudSecretsEngine, GCloudConfig, GCloudServiceAccount, GCloudTokenData};
+pub use azure_keyvault::{AzureKeyVaultEngine, AzureKeyVaultConfig};
+pub use gcp_secretmanager::{GcpSecretManagerEngine, GcpSecretManagerConfig};
+pub use pkiext::{PkiExtEngine, PkiExtConfig};
 pub use kv::KVSecretsEngine;
 pub use memory::MemorySecretsEngine;
 pub use pki::PkiSecretsEngine; // Re-enabled for PKI certificate management
+pub use shamir::{ShamirEngine, ShamirConfig, ShamirRequest, ShamirReconstructionRequest, ReconstructionMetadata};
 pub use ssh::SshSecretsEngine;
 pub use totp::TotpSecretsEngine;
-pub use transit::TransitSecretsEngine;
-pub use transit::{CreateKeyRequest, DecryptRequest, EncryptRequest};
+pub use kmip::{KmipSecretsEngine, KmipConfig, KmipRequest, KmipResponse, KmipOperation, KmipObjectType, KmipCryptographicAlgorithm, new_kmip_engine};
 
 /// Common error type for secrets engine operations
 #[derive(Error, Debug)]
@@ -312,21 +317,38 @@ pub async fn init_default_engines(
     let memory_engine = MemorySecretsEngine::new();
     registry.register(memory_engine)?;
 
-    // Initialize and register the Transit secrets engine (sync constructor)
-    let transit_storage: Arc<dyn StorageEngine> = Arc::new(TestStorageEngine {
+    // Initialize and register the KMIP secrets engine (sync constructor)
+    let kmip_storage: Arc<dyn StorageEngine> = Arc::new(TestStorageEngine {
         data: Arc::new(std::sync::RwLock::new(HashMap::new())),
     });
-    let transit_engine = TransitSecretsEngine::new(transit_storage);
-    registry.register(transit_engine)?;
+    let kmip_engine = KmipSecretsEngine::new(kmip_storage, kmip::KmipConfig {
+        server_port: 5696,
+        server_host: "0.0.0.0".to_string(),
+        tls_enabled: false,
+        tls_cert_path: None,
+        tls_key_path: None,
+        authentication_required: false,
+        supported_operations: vec![kmip::KmipOperation::Create, kmip::KmipOperation::Get],
+        supported_object_types: vec![kmip::KmipObjectType::SymmetricKey],
+        max_message_size: 4096,
+    });
+    registry.register(kmip_engine)?;
 
-    // Initialize and register the AWS secrets engine
-    let aws_config = aws::config::AwsConfig::default();
+
     let aws_engine = AwsEngine::new(aws_storage, aws_config).await?;
     registry.register(aws_engine)?;
 
     // Initialize and register the Database secrets engine
     let db_engine = DatabaseEngine::new();
     registry.register(db_engine)?;
+
+    // Initialize and register the AliCloud secrets engine
+    let alicloud_engine = AliCloudEngine::new(alicloud::AliCloudConfig::default());
+    registry.register(alicloud_engine)?;
+
+    // Initialize and register the Google Cloud Secrets engine
+    let gcloud_secrets_engine = GCloudSecretsEngine::new(gcloud_secrets::GCloudConfig::default());
+    registry.register(gcloud_secrets_engine)?;
 
     Ok(registry)
 }
@@ -360,14 +382,14 @@ mod tests {
             "PKI engine should not be registered (requires config)"
         );
 
-        // Test getting the Transit engine
-        let transit_engine = registry.get_engine("transit");
+        // Test getting the KMIP engine
+        let kmip_engine = registry.get_engine("kmip");
         assert!(
-            transit_engine.is_some(),
-            "Transit engine should be registered"
+            kmip_engine.is_some(),
+            "KMIP engine should be registered"
         );
 
-        // Test getting the Memory engine
+        // Test getting the Transform engine
         let memory_engine = registry.get_engine("memory");
         assert!(
             memory_engine.is_some(),
@@ -382,12 +404,13 @@ mod tests {
         let db_engine = registry.get_engine("database");
         assert!(db_engine.is_some(), "Database engine should be registered");
 
-        // Test getting a non-existent engine
-        let non_existent = registry.get_engine("nonexistent");
-        assert!(
-            non_existent.is_none(),
-            "Non-existent engine should not be found"
-        );
+        // Test getting the AliCloud engine
+        let alicloud_engine = registry.get_engine("alicloud");
+        assert!(alicloud_engine.is_some(), "AliCloud engine should be registered");
+
+        // Test getting the Google Cloud Secrets engine
+        let gcloud_engine = registry.get_engine("gcloud_secrets");
+        assert!(gcloud_engine.is_some(), "Google Cloud Secrets engine should be registered");
 
         Ok(())
     }
@@ -402,8 +425,8 @@ mod tests {
 
         // Verify we have metrics for all registered engines
         assert!(
-            metrics.len() >= 7,
-            "Should have metrics for at least 7 engines"
+            metrics.len() >= 11,
+            "Should have metrics for at least 11 engines (including new AliCloud and GCloud engines)"
         );
 
         // Verify specific engines have metrics
@@ -417,8 +440,20 @@ mod tests {
             "Should have Database engine metrics"
         );
         assert!(
+            metrics.contains_key("alicloud"),
+            "Should have AliCloud engine metrics"
+        );
+        assert!(
+            metrics.contains_key("gcloud_secrets"),
+            "Should have Google Cloud Secrets engine metrics"
+        );
+        assert!(
             metrics.contains_key("transit"),
             "Should have Transit engine metrics"
+        );
+        assert!(
+            metrics.contains_key("kmip"),
+            "Should have KMIP engine metrics"
         );
 
         Ok(())

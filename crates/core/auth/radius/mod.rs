@@ -570,3 +570,119 @@ impl Default for RadiusConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::CoreError;
+    
+    #[test]
+    fn test_radius_config_default() {
+        let config = RadiusConfig::default();
+        assert_eq!(config.server, "localhost");
+        assert_eq!(config.port, 1812);
+        assert_eq!(config.retries, 3);
+        assert_eq!(config.nas_identifier, "secreton-vault");
+    }
+    
+    #[test]
+    fn test_radius_config_validation() {
+        let mut config = RadiusConfig::default();
+        
+        // Valid configuration
+        assert!(config.validate().is_ok());
+        
+        // Empty server should fail
+        config.server = "".to_string();
+        assert!(config.validate().is_err());
+        
+        // Empty secret should fail
+        config.server = "localhost".to_string();
+        config.secret = "".to_string();
+        assert!(config.validate().is_err());
+    }
+    
+    #[test]
+    fn test_radius_auth_creation() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config);
+        assert!(auth.is_ok());
+    }
+    
+    #[test]
+    fn test_radius_method_type() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config).unwrap();
+        assert_eq!(auth.method_type(), "radius");
+    }
+    
+    #[test]
+    fn test_radius_description() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config).unwrap();
+        assert_eq!(auth.description(), "RADIUS authentication for network access control");
+    }
+    
+    #[test]
+    fn test_radius_mfa_support() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config).unwrap();
+        assert_eq!(auth.supports_mfa(), false);
+    }
+    
+    #[test]
+    fn test_radius_packet_type() {
+        assert_eq!(RadiusPacketType::AccessRequest as u8, 1);
+        assert_eq!(RadiusPacketType::AccessAccept as u8, 2);
+        assert_eq!(RadiusPacketType::AccessReject as u8, 3);
+        assert_eq!(RadiusPacketType::AccessChallenge as u8, 11);
+    }
+    
+    #[test]
+    fn test_radius_attribute_type() {
+        assert_eq!(RadiusAttributeType::UserName as u8, 1);
+        assert_eq!(RadiusAttributeType::UserPassword as u8, 2);
+        assert_eq!(RadiusAttributeType::NasIpAddress as u8, 4);
+        assert_eq!(RadiusAttributeType::NasIdentifier as u8, 32);
+    }
+    
+    #[test]
+    fn test_radius_config_with_custom_port() {
+        let mut config = RadiusConfig::default();
+        config.port = 1645; // Alternative RADIUS port
+        assert!(config.validate().is_ok());
+    }
+    
+    #[test]
+    fn test_radius_config_with_timeout() {
+        let mut config = RadiusConfig::default();
+        config.timeout = Duration::from_secs(10);
+        assert!(config.validate().is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_radius_auth_invalid_credentials() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config).unwrap();
+        
+        let mut credentials = HashMap::new();
+        // Missing username should fail
+        credentials.insert("password".to_string(), "test123".to_string());
+        
+        let result = auth.authenticate(credentials).await;
+        assert!(result.is_err());
+    }
+    
+    #[tokio::test]
+    async fn test_radius_auth_missing_password() {
+        let config = RadiusConfig::default();
+        let auth = RadiusAuth::new(config).unwrap();
+        
+        let mut credentials = HashMap::new();
+        credentials.insert("username".to_string(), "testuser".to_string());
+        // Missing password should fail
+        
+        let result = auth.authenticate(credentials).await;
+        assert!(result.is_err());
+    }
+}

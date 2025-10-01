@@ -9,69 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{info, warn};
 
-// TODO: Replace with actual transit engine implementation
-// use brankas_crypto::transit_simple::{KeyType, TransitEngine};
-
-// Placeholder types until brankas_crypto is available
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KeyType {
-    Aes256Gcm96,
-    ChaCha20Poly1305,
-    Ed25519,
-    Ecdsa256,
-    // RSA key types removed for security - replaced with Ed25519
-    // Rsa2048, // Deprecated - use Ed25519 instead
-    // Rsa4096, // Deprecated - use Ed25519 instead
-}
-
-#[derive(Debug, Clone)]
-pub struct TransitEngine {
-    // Placeholder implementation
-}
-
-impl Default for TransitEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TransitEngine {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub async fn list_keys(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(vec![])
-    }
-
-    pub async fn create_key(
-        &self,
-        _name: &str,
-        _key_type: KeyType,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(())
-    }
-
-    pub async fn encrypt(
-        &self,
-        _key_name: &str,
-        _plaintext: &[u8],
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(vec![])
-    }
-
-    pub async fn decrypt(
-        &self,
-        _key_name: &str,
-        _ciphertext: &[u8],
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(vec![])
-    }
-}
+// Import the actual transit engine from the main crypto crate
+use brankas_crypto::transit::{KeyType, TransitEngine, algorithms::HashAlgorithm, keys::{KeyOptions, KeyUsage}};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -145,13 +84,26 @@ pub async fn list_keys(
 pub async fn create_key(
     Path(key_name): Path<String>,
     State(state): State<TransitApiState>,
-    Json(_request): Json<CreateKeyRequest>,
+    Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<CreateKeyResponse>, StatusCode> {
-    match state
-        .engine
-        .create_key(&key_name, KeyType::Aes256Gcm96)
-        .await
-    {
+    // Parse key type from string to KeyType enum
+    let key_type = match request.key_type.as_deref().unwrap_or("aes256-gcm") {
+        "aes256-gcm" => KeyType::Aes256Gcm,
+        "chacha20-poly1305" => KeyType::ChaCha20Poly1305,
+        "xchacha20-poly1305" => KeyType::XChaCha20Poly1305,
+        "ed25519" => KeyType::Ed25519,
+        "ecdsa-p256" => KeyType::EcdsaP256,
+        "ecdsa-secp256k1" => KeyType::EcdsaSecp256k1,
+        "x25519" => KeyType::X25519,
+        _ => {
+            warn!("Invalid key type requested: {:?}", request.key_type);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    let options = KeyOptions::default();
+
+    match state.engine.create_key(key_name.clone(), key_type, Some(options)).await {
         Ok(_) => {
             info!("Created key: {}", key_name);
             Ok(Json(CreateKeyResponse {
@@ -181,7 +133,7 @@ pub async fn encrypt_data(
     };
 
     // Decode context if provided
-    let _context = if let Some(ctx) = request.context {
+    let context = if let Some(ctx) = request.context {
         match BASE64.decode(&ctx) {
             Ok(bytes) => Some(bytes),
             Err(_) => return Err(StatusCode::BAD_REQUEST),
@@ -190,12 +142,11 @@ pub async fn encrypt_data(
         None
     };
 
-    match state.engine.encrypt(&key_name, &plaintext_bytes).await {
+    match state.engine.encrypt(&key_name, &plaintext_bytes, context.as_deref(), None).await {
         Ok(ciphertext) => {
             info!("Encrypted data with key: {}", key_name);
-            let ciphertext_string = BASE64.encode(&ciphertext);
             Ok(Json(EncryptResponse {
-                ciphertext: ciphertext_string,
+                ciphertext,
             }))
         }
         Err(e) => {
@@ -214,7 +165,7 @@ pub async fn decrypt_data(
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
     // Decode context if provided
-    let _context = if let Some(ctx) = request.context {
+    let context = if let Some(ctx) = request.context {
         match BASE64.decode(&ctx) {
             Ok(bytes) => Some(bytes),
             Err(_) => return Err(StatusCode::BAD_REQUEST),
@@ -223,19 +174,11 @@ pub async fn decrypt_data(
         None
     };
 
-    match state
-        .engine
-        .decrypt(
-            &key_name,
-            &BASE64.decode(&request.ciphertext).unwrap_or_default(),
-        )
-        .await
-    {
+    match state.engine.decrypt(&key_name, &request.ciphertext, context.as_deref()).await {
         Ok(plaintext_bytes) => {
             info!("Decrypted data with key: {}", key_name);
-            let plaintext_b64 = BASE64.encode(&plaintext_bytes);
             Ok(Json(DecryptResponse {
-                plaintext: plaintext_b64,
+                plaintext: BASE64.encode(&plaintext_bytes),
             }))
         }
         Err(e) => {

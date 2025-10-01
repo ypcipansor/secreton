@@ -46,6 +46,13 @@ pub enum CryptoError {
     #[error("Invalid signature: {0}")]
     InvalidSignature(String),
 
+    // General input/usage errors
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("Invalid usage: {0}")]
+    InvalidUsage(String),
+
     // Parameter validation errors
     #[error("Validation error: {0}")]
     ValidationError(String),
@@ -59,12 +66,12 @@ pub enum CryptoError {
     #[error("Invalid nonce/IV length")]
     InvalidNonceLength,
 
-    #[error("Invalid algorithm: {0}")]
-    InvalidAlgorithm(String),
+    #[error("Invalid key: {0}")]
+    InvalidKey(String),
 
     // Usage and policy errors
-    #[error("Invalid usage: {0}")]
-    InvalidUsage(String),
+    #[error("Invalid algorithm: {0}")]
+    InvalidAlgorithm(String),
 
     #[error("Policy violation: {0}")]
     PolicyViolation(String),
@@ -165,6 +172,7 @@ impl CryptoError {
 
             CryptoError::InvalidParameter(_)
             | CryptoError::InvalidUsage(_)
+            | CryptoError::InvalidInput(_)
             | CryptoError::KeyNotFound(_) => ErrorSeverity::Low,
 
             _ => ErrorSeverity::Medium,
@@ -192,7 +200,9 @@ impl CryptoError {
             CryptoError::InvalidParameter(_)
             | CryptoError::InvalidKeyLength { .. }
             | CryptoError::InvalidNonceLength
-            | CryptoError::InvalidAlgorithm(_) => ErrorCategory::Validation,
+            | CryptoError::InvalidAlgorithm(_)
+            | CryptoError::InvalidInput(_)
+            | CryptoError::InvalidUsage(_) => ErrorCategory::Validation,
 
             CryptoError::PolicyViolation(_)
             | CryptoError::PermissionDenied(_)

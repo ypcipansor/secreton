@@ -31,7 +31,14 @@ postgres-types = { version = "0.2", features = ["derive"] }
 tokio-postgres.workspace = true
 deadpool-postgres.workspace = true
 redis.workspace = true
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+# SQLx temporarily disabled due to RSA vulnerability in MySQL backend
+# sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+mysql = { version = "26.0.1", features = ["chrono"] }
+aws-sdk-dynamodb = "1.0"
+aws-sdk-s3 = "1.0"
+aws-config = "1.0"
+aws-smithy-types = "1.0"
+aws-types = "1.0"
 
 # Cryptography
 secreton-crypto = { path = "../crypto" }

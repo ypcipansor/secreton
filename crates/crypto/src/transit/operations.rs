@@ -1,7 +1,8 @@
 //! High-level transit operations with comprehensive error handling
 
 use crate::error::{CryptoResult, CryptoError};
-use crate::transit::{TransitEngine, KeyType, KeyOptions, SignatureAlgorithm};
+use crate::transit::{TransitEngine, KeyType, KeyOptions};
+use crate::transit::algorithms::SignatureAlgorithm;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};

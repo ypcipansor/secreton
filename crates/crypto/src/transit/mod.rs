@@ -15,16 +15,18 @@
 pub mod algorithms;
 pub mod keys;
 pub mod operations;
-pub mod policies;
 pub mod batch;
+pub mod policies;
 
 pub use algorithms::*;
 pub use keys::*;
 pub use operations::*;
-pub use policies::*;
 pub use batch::*;
+pub use policies::*;
 
+use async_trait::async_trait;
 use crate::error::{CryptoResult, CryptoError};
+use crate::transit::algorithms::SignatureAlgorithm;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -311,7 +313,7 @@ impl TransitEngine {
 }
 
 /// Audit logger trait for transit operations
-#[async_trait::async_trait]
+#[async_trait]
 pub trait AuditLogger {
     async fn log_key_creation(&self, name: &str, key_type: &KeyType);
     async fn log_key_rotation(&self, name: &str, version: u32);
@@ -321,7 +323,6 @@ pub trait AuditLogger {
     async fn log_signing(&self, key_name: &str, data_len: usize);
     async fn log_verification(&self, key_name: &str, data_len: usize, result: bool);
 }
-
 /// Default audit logger implementation
 #[derive(Debug)]
 pub struct DefaultAuditLogger;
@@ -354,11 +355,5 @@ impl AuditLogger for DefaultAuditLogger {
     
     async fn log_verification(&self, key_name: &str, data_len: usize, result: bool) {
         info!("AUDIT: Verification - key: {}, data_len: {}, valid: {}", key_name, data_len, result);
-    }
-}
-
-impl Default for TransitEngine {
-    fn default() -> Self {
-        Self::new()
     }
 }

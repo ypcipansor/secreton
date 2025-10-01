@@ -33,9 +33,9 @@ pub async fn auth_middleware<B, S: StorageBackend>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
-    // Skip auth for public routes
+    // Skip auth for public routes - ONLY login/register endpoints
     let path = req.uri().path();
-    if path.starts_with("/api/v1/auth/") && path != "/api/v1/auth/me" {
+    if path.starts_with("/api/v1/auth/login") || path.starts_with("/api/v1/auth/register") {
         return Ok(next.run(req).await);
     }
 
