@@ -372,3 +372,258 @@ impl Default for ServiceProviderConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_saml_config_default() {
+        let config = SamlConfig::default();
+        assert_eq!(
+            config.idp_metadata_url,
+            "https://idp.example.com/metadata"
+        );
+        assert_eq!(config.sp_entity_id, "https://vault.example.com/saml");
+        assert_eq!(
+            config.acs_url,
+            "https://vault.example.com/v1/auth/saml/callback"
+        );
+        assert!(config.audience_restriction.is_some());
+        assert!(config.authn_context_class_ref.is_some());
+        assert!(config.name_id_format.is_some());
+    }
+
+    #[test]
+    fn test_service_provider_config_default() {
+        let sp_config = ServiceProviderConfig::default();
+        assert_eq!(
+            sp_config.entity_id,
+            "https://vault.example.com/saml"
+        );
+        assert_eq!(
+            sp_config.acs_url,
+            "https://vault.example.com/v1/auth/saml/callback"
+        );
+        assert!(sp_config.slo_url.is_some());
+    }
+
+    #[test]
+    fn test_saml_auth_creation() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+        assert_eq!(auth.name(), "saml");
+        assert_eq!(
+            auth.description(),
+            "SAML 2.0 authentication for enterprise SSO integration"
+        );
+    }
+
+    #[test]
+    fn test_saml_auth_supports_mfa() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+        assert_eq!(auth.supports_mfa(), true);
+    }
+
+    #[tokio::test]
+    async fn test_saml_auth_invalid_credentials() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        // Test with wrong credential type
+        let creds = Credentials::Token {
+            token: "invalid".to_string(),
+        };
+
+        let result = auth.authenticate(&creds).await;
+        assert!(result.is_ok());
+        let auth_result = result.unwrap();
+        assert_eq!(auth_result.success, false);
+        assert!(auth_result.error.is_some());
+    }
+
+    #[test]
+    fn test_saml_assertion_creation() {
+        let assertion = SamlAssertion {
+            subject: "user@example.com".to_string(),
+            issuer: "https://idp.example.com".to_string(),
+            audience: "https://vault.example.com".to_string(),
+            attributes: HashMap::new(),
+            authn_instant: chrono::Utc::now(),
+            session_index: Some("session-123".to_string()),
+            name_id: "user123".to_string(),
+            name_id_format: Some("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress".to_string()),
+        };
+
+        assert_eq!(assertion.subject, "user@example.com");
+        assert_eq!(assertion.issuer, "https://idp.example.com");
+        assert_eq!(assertion.audience, "https://vault.example.com");
+        assert_eq!(assertion.name_id, "user123");
+    }
+
+    #[test]
+    fn test_idp_metadata_creation() {
+        let metadata = IdpMetadata {
+            entity_id: "https://idp.example.com/entity".to_string(),
+            sso_url: "https://idp.example.com/sso".to_string(),
+            slo_url: Some("https://idp.example.com/slo".to_string()),
+            certificate: "mock-certificate".to_string(),
+            name_id_format: Some("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress".to_string()),
+        };
+
+        assert_eq!(metadata.entity_id, "https://idp.example.com/entity");
+        assert_eq!(metadata.sso_url, "https://idp.example.com/sso");
+        assert!(metadata.slo_url.is_some());
+        assert_eq!(metadata.certificate, "mock-certificate");
+    }
+
+    #[tokio::test]
+    async fn test_saml_load_idp_metadata() {
+        let config = SamlConfig {
+            idp_cert: Some("test-cert".to_string()),
+            ..Default::default()
+        };
+        let sp_config = ServiceProviderConfig::default();
+        let mut auth = SamlAuth::new(config, sp_config);
+
+        let result = auth.load_idp_metadata().await;
+        assert!(result.is_ok());
+        assert!(auth.idp_metadata.is_some());
+
+        let metadata = auth.idp_metadata.unwrap();
+        assert_eq!(metadata.entity_id, "https://idp.example.com/entity");
+    }
+
+    #[tokio::test]
+    async fn test_saml_validate_assertion_audience_mismatch() {
+        let config = SamlConfig {
+            audience_restriction: Some("https://different-audience.com".to_string()),
+            ..Default::default()
+        };
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        let assertion = SamlAssertion {
+            subject: "user@example.com".to_string(),
+            issuer: "https://idp.example.com".to_string(),
+            audience: "https://vault.example.com".to_string(),
+            attributes: HashMap::new(),
+            authn_instant: chrono::Utc::now(),
+            session_index: None,
+            name_id: "user123".to_string(),
+            name_id_format: None,
+        };
+
+        let result = auth.validate_assertion(&assertion).await;
+        assert!(result.is_err());
+        match result {
+            Err(SamlError::AudienceMismatch) => (),
+            _ => panic!("Expected AudienceMismatch error"),
+        }
+    }
+
+    #[test]
+    fn test_saml_extract_user_info() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        let mut attributes = HashMap::new();
+        attributes.insert("email".to_string(), vec!["user@example.com".to_string()]);
+        attributes.insert(
+            "groups".to_string(),
+            vec!["admin".to_string(), "users".to_string()],
+        );
+
+        let assertion = SamlAssertion {
+            subject: "user@example.com".to_string(),
+            issuer: "https://idp.example.com".to_string(),
+            audience: "https://vault.example.com".to_string(),
+            attributes,
+            authn_instant: chrono::Utc::now(),
+            session_index: Some("session-456".to_string()),
+            name_id: "user789".to_string(),
+            name_id_format: None,
+        };
+
+        let user_info = auth.extract_user_info(&assertion);
+
+        assert_eq!(user_info.get("subject"), Some(&"user@example.com".to_string()));
+        assert_eq!(user_info.get("issuer"), Some(&"https://idp.example.com".to_string()));
+        assert_eq!(user_info.get("name_id"), Some(&"user789".to_string()));
+        assert_eq!(
+            user_info.get("saml_email"),
+            Some(&"user@example.com".to_string())
+        );
+        assert_eq!(user_info.get("saml_groups"), Some(&"admin".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_saml_list_users_not_supported() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        let result = auth.list_users().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_saml_create_user_not_supported() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        let result = auth
+            .create_user("testuser", &serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not supported for SAML"));
+    }
+
+    #[tokio::test]
+    async fn test_saml_delete_user_not_supported() {
+        let config = SamlConfig::default();
+        let sp_config = ServiceProviderConfig::default();
+        let auth = SamlAuth::new(config, sp_config);
+
+        let result = auth.delete_user("testuser").await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not supported for SAML"));
+    }
+
+    #[test]
+    fn test_saml_config_with_custom_urls() {
+        let config = SamlConfig {
+            idp_metadata_url: "https://custom-idp.com/metadata".to_string(),
+            sp_entity_id: "https://custom-sp.com/saml".to_string(),
+            acs_url: "https://custom-sp.com/callback".to_string(),
+            slo_url: None,
+            signing_cert: Some("signing-cert".to_string()),
+            encryption_cert: Some("encryption-cert".to_string()),
+            idp_cert: Some("idp-cert".to_string()),
+            audience_restriction: Some("https://custom-audience.com".to_string()),
+            authn_context_class_ref: Some("urn:custom:authn:class".to_string()),
+            name_id_format: Some("urn:custom:nameid:format".to_string()),
+        };
+
+        assert_eq!(config.idp_metadata_url, "https://custom-idp.com/metadata");
+        assert_eq!(config.sp_entity_id, "https://custom-sp.com/saml");
+        assert_eq!(config.acs_url, "https://custom-sp.com/callback");
+        assert!(config.slo_url.is_none());
+        assert!(config.signing_cert.is_some());
+        assert!(config.encryption_cert.is_some());
+        assert!(config.idp_cert.is_some());
+    }
+}
