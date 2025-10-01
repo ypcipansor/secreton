@@ -87,7 +87,7 @@ impl CockroachDBStorage {
         Ok(())
     }
 
-    fn vault_entry_to_params(entry: &VaultEntry) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> {
+    fn vault_entry_to_params<'a>(entry: &'a VaultEntry) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync + 'a>> {
         vec![
             Box::new(entry.id),
             Box::new(&entry.path),
@@ -104,7 +104,7 @@ impl CockroachDBStorage {
         ]
     }
 
-    fn row_to_vault_entry(row: tokio_postgres::Row) -> StorageResult<VaultEntry> {
+    fn row_to_vault_entry(row: &tokio_postgres::Row) -> StorageResult<VaultEntry> {
         let id: Uuid = row.get(0);
         let path: String = row.get(1);
         let encrypted_data: Vec<u8> = row.get(2);
@@ -156,6 +156,7 @@ impl CockroachDBStorage {
 impl StorageBackend for CockroachDBStorage {
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
         let params = Self::vault_entry_to_params(entry);
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
 
         let query = r#"
             INSERT INTO vault_entries
@@ -173,7 +174,7 @@ impl StorageBackend for CockroachDBStorage {
         "#;
 
         self.client
-            .execute(query, &params)
+            .execute(query, &params_refs)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to store entry: {}", e),
@@ -284,9 +285,10 @@ impl StorageBackend for CockroachDBStorage {
         };
 
         let query = format!("SELECT * FROM vault_entries {} {}", where_clause, limit_clause);
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
 
         let rows = self.client
-            .query(&query, &param_values)
+            .query(&query, &params_refs)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to list entries: {}", e),
@@ -336,9 +338,10 @@ impl StorageBackend for CockroachDBStorage {
         };
 
         let query = format!("SELECT COUNT(*) FROM vault_entries {}", where_clause);
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
 
         let rows = self.client
-            .query(&query, &param_values)
+            .query(&query, &params_refs)
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to count entries: {}", e),

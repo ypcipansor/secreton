@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::{Storage, StorageError, StorageEntry, StorageConfig};
+use crate::{StorageBackend, StorageError, VaultEntry, StorageResult};
 
 /// Manta configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

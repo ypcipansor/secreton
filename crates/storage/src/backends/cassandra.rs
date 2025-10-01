@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 use base64::{Engine as _, engine::general_purpose};
@@ -8,7 +9,8 @@ use crate::{
     StorageBackend, StorageResult, StorageError, VaultEntry, QueryParams, HealthStatus, StorageStats,
     SecurityLevel,
 };
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CassandraConfig {
     /// Cassandra contact points (comma-separated list of host:port)
     pub contact_points: String,

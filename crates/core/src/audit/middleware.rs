@@ -9,7 +9,8 @@ use axum::{
 use std::{collections::HashMap, time::Instant};
 use uuid::Uuid;
 
-use crate::auth::auth_impl::Claims;
+// TODO: Re-enable when auth module is implemented
+// use crate::auth::auth_impl::Claims;
 
 use super::*;
 

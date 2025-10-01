@@ -38,26 +38,27 @@ pub enum StorageBackendType {
     Cassandra,
     /// MongoDB storage
     MongoDB,
-    /// Aerospike storage
-    Aerospike,
-    /// AliCloud OSS storage
-    AliCloudOSS,
-    /// CouchDB storage
-    CouchDB,
-    /// FoundationDB storage
-    FoundationDB,
-    /// Manta storage
-    Manta,
-    /// Microsoft SQL Server storage
-    MSSQL,
-    /// OCI storage
-    OCI,
-    /// Spanner storage
-    Spanner,
-    /// Swift storage
-    Swift,
-    /// ZooKeeper storage
-    ZooKeeper,
+    // Commented out backends that need implementation fixes
+    // /// Aerospike storage
+    // Aerospike,
+    // /// AliCloud OSS storage
+    // AliCloudOSS,
+    // /// CouchDB storage
+    // CouchDB,
+    // /// FoundationDB storage
+    // FoundationDB,
+    // /// Manta storage
+    // Manta,
+    // /// Microsoft SQL Server storage
+    // MSSQL,
+    // /// OCI storage
+    // OCI,
+    // /// Spanner storage
+    // Spanner,
+    // /// Swift storage
+    // Swift,
+    // /// ZooKeeper storage
+    // ZooKeeper,
 }
 
 /// Unified storage configuration
@@ -108,36 +109,37 @@ pub struct StorageFactoryConfig {
     /// MongoDB backend configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mongodb_config: Option<MongoDBConfig>,
-    /// Aerospike backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub aerospike_config: Option<AerospikeConfig>,
-    /// AliCloud OSS backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alicloud_oss_config: Option<AliCloudOSSConfig>,
-    /// CouchDB backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub couchdb_config: Option<CouchDBConfig>,
-    /// FoundationDB backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub foundationdb_config: Option<FoundationDBConfig>,
-    /// Manta backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manta_config: Option<MantaConfig>,
-    /// MSSQL backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mssql_config: Option<MSSQLConfig>,
-    /// OCI backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oci_config: Option<OCIConfig>,
-    /// Spanner backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spanner_config: Option<SpannerConfig>,
-    /// Swift backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub swift_config: Option<SwiftConfig>,
-    /// ZooKeeper backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub zookeeper_config: Option<ZooKeeperConfig>,
+    // Commented out backend configs that need implementation fixes
+    // /// Aerospike backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub aerospike_config: Option<AerospikeConfig>,
+    // /// AliCloud OSS backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub alicloud_oss_config: Option<AliCloudOSSConfig>,
+    // /// CouchDB backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub couchdb_config: Option<CouchDBConfig>,
+    // /// FoundationDB backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub foundationdb_config: Option<FoundationDBConfig>,
+    // /// Manta backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub manta_config: Option<MantaConfig>,
+    // /// MSSQL backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub mssql_config: Option<MSSQLConfig>,
+    // /// OCI backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub oci_config: Option<OCIConfig>,
+    // /// Spanner backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub spanner_config: Option<SpannerConfig>,
+    // /// Swift backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub swift_config: Option<SwiftConfig>,
+    // /// ZooKeeper backend configuration
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub zookeeper_config: Option<ZooKeeperConfig>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileBackendConfig {
@@ -170,16 +172,17 @@ impl Default for StorageFactoryConfig {
             cockroachdb_config: None,
             cassandra_config: None,
             mongodb_config: None,
-            aerospike_config: None,
-            alicloud_oss_config: None,
-            couchdb_config: None,
-            foundationdb_config: None,
-            manta_config: None,
-            mssql_config: None,
-            oci_config: None,
-            spanner_config: None,
-            swift_config: None,
-            zookeeper_config: None,
+            // Commented out backend configs
+            // aerospike_config: None,
+            // alicloud_oss_config: None,
+            // couchdb_config: None,
+            // foundationdb_config: None,
+            // manta_config: None,
+            // mssql_config: None,
+            // oci_config: None,
+            // spanner_config: None,
+            // swift_config: None,
+            // zookeeper_config: None,
         }
     }
 }
@@ -312,106 +315,25 @@ impl StorageFactory {
                 let backend = MongoDBStorage::new(mongodb_config).await?;
                 Ok(Arc::new(backend))
             }
-            StorageBackendType::Aerospike => {
-                let aerospike_config = config.aerospike_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "Aerospike configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = AerospikeStorage::new(aerospike_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::AliCloudOSS => {
-                let alicloud_oss_config = config.alicloud_oss_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "AliCloud OSS configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = AliCloudOSSStorage::new(alicloud_oss_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::CouchDB => {
-                let couchdb_config = config.couchdb_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "CouchDB configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = CouchDBStorage::new(couchdb_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::FoundationDB => {
-                let foundationdb_config = config.foundationdb_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "FoundationDB configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = FoundationDBStorage::new(foundationdb_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::Manta => {
-                let manta_config = config.manta_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "Manta configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = MantaStorage::new(manta_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::MSSQL => {
-                let mssql_config = config.mssql_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "MSSQL configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = MSSQLStorage::new(mssql_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::OCI => {
-                let oci_config = config.oci_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "OCI configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = OCIStorage::new(oci_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::Spanner => {
-                let spanner_config = config.spanner_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "Spanner configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = SpannerStorage::new(spanner_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::Swift => {
-                let swift_config = config.swift_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "Swift configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = SwiftStorage::new(swift_config);
-                Ok(Arc::new(backend))
-            }
-            StorageBackendType::ZooKeeper => {
-                let zookeeper_config = config.zookeeper_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "ZooKeeper configuration is required".to_string(),
-                    }
-                })?;
-
-                let backend = ZooKeeperStorage::new(zookeeper_config);
-                Ok(Arc::new(backend))
-            }
+            // Commented out backend implementations that need fixes
+            // StorageBackendType::Aerospike => {
+            //     let aerospike_config = config.aerospike_config.ok_or_else(|| {
+            //         StorageError::ConfigurationError {
+            //             message: "Aerospike configuration is required".to_string(),
+            //         }
+            //     })?;
+            //     let backend = AerospikeStorage::new(aerospike_config);
+            //     Ok(Arc::new(backend))
+            // }
+            // StorageBackendType::AliCloudOSS => { ... }
+            // StorageBackendType::CouchDB => { ... }
+            // StorageBackendType::FoundationDB => { ... }
+            // StorageBackendType::Manta => { ... }
+            // StorageBackendType::MSSQL => { ... }
+            // StorageBackendType::OCI => { ... }
+            // StorageBackendType::Spanner => { ... }
+            // StorageBackendType::Swift => { ... }
+            // StorageBackendType::ZooKeeper => { ... }
             _ => Err(StorageError::ConfigurationError { message: format!("Backend type {:?} not yet implemented in factory", config.backend_type) }),
         }
     }

@@ -18,10 +18,11 @@ pub mod test_utils;
 
 pub use api::{start_security_server, SecurityAPI};
 pub use audit::{AuditLog, AuditLogger, AuditStatus};
-pub use auth::mfa::MfaMethod;
-pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
-pub use grpc_api::{GrpcConfig, SecretsGrpcService};
-pub use utils::error::AppError;
+// Commented out imports that don't exist yet
+// pub use auth::mfa::MfaMethod;
+// pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
+// pub use grpc_api::{GrpcConfig, SecretsGrpcService};
+// pub use utils::error::AppError;
 
 // Include integration tests
 #[cfg(test)]

@@ -11,7 +11,17 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warp::{reject, Filter, Rejection, Reply};
 
-use crate::{error::CoreError, security::*};
+// TODO: Re-enable when error and security modules are implemented
+// use crate::{error::CoreError, security::*};
+
+// Temporary error type until error module is implemented
+#[derive(Debug)]
+pub struct CoreError(String);
+impl From<anyhow::Error> for CoreError {
+    fn from(e: anyhow::Error) -> Self {
+        CoreError(e.to_string())
+    }
+}
 
 /// API Response wrapper
 #[derive(Debug, Serialize)]
@@ -141,8 +151,9 @@ impl AdvancedSecurityManager {
     pub async fn new() -> Result<Self, CoreError> {
         info!("Initializing Advanced Security Manager");
 
+        // TODO: Re-enable when security module is implemented
         // Initialize concrete implementations for abstract interfaces
-        use crate::security::concrete_implementations::*;
+        // use crate::security::concrete_implementations::*;
 
         // Initialize all security components with proper dependencies
         let entropy_engine = EntropyAugmentationEngine::new(Default::default());

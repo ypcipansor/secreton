@@ -3,6 +3,7 @@
 //! This module provides a CouchDB-based storage backend implementation.
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
-use super::{Storage, StorageError, StorageEntry, StorageConfig};
+use crate::{StorageBackend, StorageError, VaultEntry, StorageResult};
 
 /// CouchDB storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,15 +84,15 @@ impl CouchDBStorage {
     /// Generate document ID for a key
     fn document_id(&self, key: &str) -> String {
         // Use URL-safe base64 encoding of the key as document ID
-        base64::encode_config(key.as_bytes(), base64::URL_SAFE_NO_PAD)
+        URL_SAFE_NO_PAD.encode(key.as_bytes())
     }
 
     /// Parse document ID back to key
     fn parse_document_id(&self, doc_id: &str) -> Result<String, StorageError> {
-        let decoded = base64::decode_config(doc_id, base64::URL_SAFE_NO_PAD)
-            .map_err(|e| StorageError::InvalidKey(format!("Invalid document ID: {}", e)))?;
+        let decoded = URL_SAFE_NO_PAD.decode(doc_id)
+            .map_err(|e| StorageError::SerializationError { message: format!("Invalid document ID: {}", e) })?;
         String::from_utf8(decoded)
-            .map_err(|e| StorageError::InvalidKey(format!("Invalid UTF-8 in document ID: {}", e)))
+            .map_err(|e| StorageError::SerializationError { message: format!("Invalid UTF-8 in document ID: {}", e) })
     }
 }
 
