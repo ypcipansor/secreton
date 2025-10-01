@@ -59,43 +59,42 @@ impl KdfParams {
         match self.algorithm {
             AlgorithmId::Pbkdf2 => {
                 if self.iterations < 100_000 {
-                    return Err(CryptoError::KeyGenerationFailed {
-                        reason: format!(
-                            "PBKDF2 iterations too low: {} (minimum 100,000)",
-                            self.iterations
-                        ),
-                    });
+                    return Err(CryptoError::KeyGenerationFailed(format!(
+                        "PBKDF2 iterations too low: {} (minimum 100,000)",
+                        self.iterations
+                    )));
                 }
             }
             AlgorithmId::Argon2id => {
                 if self.memory_cost.unwrap_or(0) < 65536 {
-                    return Err(CryptoError::KeyGenerationFailed {
-                        reason: "Argon2id memory cost too low (minimum 64MB)".to_string(),
-                    });
+                    return Err(CryptoError::KeyGenerationFailed(
+                        "Argon2id memory cost too low (minimum 64MB)".to_string()
+                    ));
                 }
                 if self.iterations < 3 {
-                    return Err(CryptoError::KeyGenerationFailed {
-                        reason: "Argon2id iterations too low (minimum 3)".to_string(),
-                    });
+                    return Err(CryptoError::KeyGenerationFailed(
+                        "Argon2id iterations too low (minimum 3)".to_string()
+                    ));
                 }
             }
             _ => {
-                return Err(CryptoError::KeyGenerationFailed {
-                    reason: format!("Unsupported KDF algorithm: {}", self.algorithm),
-                });
+                return Err(CryptoError::KeyGenerationFailed(format!(
+                    "Unsupported KDF algorithm: {}",
+                    self.algorithm
+                )));
             }
         }
 
         if self.salt.len() < 16 {
-            return Err(CryptoError::KeyGenerationFailed {
-                reason: "Salt too short (minimum 16 bytes)".to_string(),
-            });
+            return Err(CryptoError::KeyGenerationFailed(
+                "Salt too short (minimum 16 bytes)".to_string()
+            ));
         }
 
         if self.key_length < 16 {
-            return Err(CryptoError::KeyGenerationFailed {
-                reason: "Key length too short (minimum 16 bytes)".to_string(),
-            });
+            return Err(CryptoError::KeyGenerationFailed(
+                "Key length too short (minimum 16 bytes)".to_string()
+            ));
         }
 
         Ok(())
@@ -149,9 +148,7 @@ pub fn derive_key_argon2id(
 ) -> CryptoResult<Vec<u8>> {
     let params =
         Params::new(memory_cost, iterations, parallelism, Some(key_length)).map_err(|e| {
-            CryptoError::KeyGenerationFailed {
-                reason: format!("Invalid Argon2 parameters: {}", e),
-            }
+            CryptoError::KeyGenerationFailed(format!("Invalid Argon2 parameters: {}", e))
         })?;
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -159,9 +156,7 @@ pub fn derive_key_argon2id(
     let mut key = vec![0u8; key_length];
     argon2
         .hash_password_into(password, salt, &mut key)
-        .map_err(|e| CryptoError::KeyGenerationFailed {
-            reason: format!("Argon2id key derivation failed: {}", e),
-        })?;
+        .map_err(|e| CryptoError::KeyGenerationFailed(format!("Argon2id key derivation failed: {}", e)))?;
 
     Ok(key)
 }
@@ -183,9 +178,10 @@ pub fn derive_key(password: &[u8], params: &KdfParams) -> CryptoResult<DerivedKe
             params.key_length,
         )?,
         _ => {
-            return Err(CryptoError::KeyGenerationFailed {
-                reason: format!("Unsupported KDF algorithm: {}", params.algorithm),
-            });
+            return Err(CryptoError::KeyGenerationFailed(format!(
+                "Unsupported KDF algorithm: {}",
+                params.algorithm
+            )));
         }
     };
 
@@ -228,9 +224,9 @@ pub mod stretch {
     /// Simple key stretching for existing keys (not password-based)
     pub fn stretch_key_sha256(key: &[u8], iterations: u32) -> CryptoResult<Vec<u8>> {
         if iterations == 0 {
-            return Err(CryptoError::KeyGenerationFailed {
-                reason: "Iterations must be greater than 0".to_string(),
-            });
+            return Err(CryptoError::KeyGenerationFailed(
+                "Iterations must be greater than 0".to_string()
+            ));
         }
 
         let mut result = key.to_vec();
