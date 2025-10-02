@@ -101,7 +101,7 @@ pub async fn get_tls_metrics() -> Json<TlsMetricsResponse> {
         successful_handshakes: 0,
         session_resumptions: 0,
         handshake_failures: 0,
-        average_handshake_time_ms: 0.0,
+        average_handshake_time_ms: 0,
         success_rate_percent: 0.0,
         resumption_rate_percent: 0.0,
     })

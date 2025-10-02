@@ -20,7 +20,7 @@ pub struct TransitApiState {
 impl Default for TransitApiState {
     fn default() -> Self {
         Self {
-            engine: Arc::new(TransitEngine::default()),
+            engine: Arc::new(TransitEngine::new()),
         }
     }
 }
@@ -73,12 +73,9 @@ pub fn create_transit_router() -> Router<TransitApiState> {
 
 pub async fn list_keys(
     State(state): State<TransitApiState>,
-) -> Result<Json<ListKeysResponse>, StatusCode> {
-    let keys = match state.engine.list_keys().await {
-        Ok(keys) => keys,
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-    Ok(Json(ListKeysResponse { keys }))
+) -> Json<ListKeysResponse> {
+    let keys = state.engine.list_keys().await;
+    Json(ListKeysResponse { keys })
 }
 
 pub async fn create_key(
