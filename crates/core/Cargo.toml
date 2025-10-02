@@ -44,6 +44,7 @@ aws-sdk-sts = { workspace = true }
 
 # Threading and concurrency
 parking_lot = { workspace = true }
+once_cell = "1.19"  # Thread-safe lazy initialization (security fix)
 
 # Security dependencies for advanced features
 rand.workspace = true

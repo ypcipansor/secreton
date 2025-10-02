@@ -46,8 +46,52 @@ pub struct MySQLStorage {
 }
 
 impl MySQLStorage {
+    /// Validate SQL identifier (table name) to prevent SQL injection
+    /// SECURITY FIX: Prevents SQL injection via table name
+    fn validate_sql_identifier(name: &str) -> Result<(), StorageError> {
+        // Check length (max 64 chars for MySQL)
+        if name.is_empty() || name.len() > 64 {
+            return Err(StorageError::ConfigurationError {
+                message: format!("Table name length must be 1-64 characters, got {}", name.len()),
+            });
+        }
+
+        // Only allow alphanumeric and underscore (no spaces, special chars)
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(StorageError::ConfigurationError {
+                message: format!("Table name '{}' contains invalid characters. Only alphanumeric and underscore allowed.", name),
+            });
+        }
+
+        // Prevent SQL keywords as table names
+        let uppercase = name.to_uppercase();
+        let sql_keywords = [
+            "SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", 
+            "TABLE", "DATABASE", "INDEX", "VIEW", "PROCEDURE", "FUNCTION",
+            "TRIGGER", "USER", "GRANT", "REVOKE", "FROM", "WHERE", "JOIN",
+        ];
+        
+        if sql_keywords.contains(&uppercase.as_str()) {
+            return Err(StorageError::ConfigurationError {
+                message: format!("Table name '{}' is a reserved SQL keyword", name),
+            });
+        }
+
+        // Must not start with number (MySQL rule)
+        if name.chars().next().unwrap().is_ascii_digit() {
+            return Err(StorageError::ConfigurationError {
+                message: format!("Table name '{}' cannot start with a digit", name),
+            });
+        }
+
+        Ok(())
+    }
+
     /// Create new MySQL storage backend
     pub async fn new(config: MySQLStorageConfig) -> Result<Self, StorageError> {
+        // SECURITY FIX: Validate table name before use
+        Self::validate_sql_identifier(&config.table_name)?;
+
         let opts = mysql::Opts::from_url(&config.connection_string).map_err(|e| StorageError::ConnectionFailed { message: format!("Invalid MySQL URL: {}", e) })?;
         let pool = mysql::Pool::new(opts)
             .map_err(|e| StorageError::ConnectionFailed {

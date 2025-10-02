@@ -1,6 +1,8 @@
 use axum::{extract::{Json, State, Path, ConnectInfo, Query}, response::IntoResponse, http::HeaderMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use once_cell::sync::Lazy;
 
 // MFA module
 pub mod mfa {
@@ -156,7 +158,10 @@ pub struct RevokeTokenResponse {
 
 // Duplicate LockoutUserRequest/Response removed; defined later below
 
-static mut APPROLE: Option<Mutex<AppRole>> = None;
+// SECURITY FIX: Replace unsafe static mut with thread-safe Lazy<Mutex<>>
+// Previous: static mut APPROLE: Option<Mutex<AppRole>> = None;
+// This is safe, thread-safe, and doesn't require unsafe blocks
+static APPROLE: Lazy<StdMutex<Option<AppRole>>> = Lazy::new(|| StdMutex::new(None));
 
 #[derive(serde::Deserialize, ToSchema)]
 pub struct LoginRequest {
@@ -395,31 +400,28 @@ pub async fn oidc_callback(State(state): State<Arc<AppState>>, axum::extract::Qu
 
 pub async fn generate_approle(Json(payload): Json<AppRolePolicyRequest>) -> impl IntoResponse {
     let role = generate_role(payload.policies);
-    unsafe {
-        APPROLE = Some(Mutex::new(role.clone()));
-    }
+    // SECURITY FIX: No unsafe block needed with Lazy<Mutex<>>
+    *APPROLE.lock().unwrap() = Some(role.clone());
     Json(role)
 }
 
 pub async fn approle_login(Json(payload): Json<AppRoleLoginRequest>) -> impl IntoResponse {
-    unsafe {
-        if let Some(ref role) = APPROLE {
-            let role = role.lock().unwrap();
-            if login_approle(&role, &payload.role_id, &payload.secret_id) {
-                return Json("AppRole login success").into_response();
-            }
+    // SECURITY FIX: No unsafe block needed
+    let approle_guard = APPROLE.lock().unwrap();
+    if let Some(ref role) = *approle_guard {
+        if login_approle(role, &payload.role_id, &payload.secret_id) {
+            return Json("AppRole login success").into_response();
         }
     }
     (axum::http::StatusCode::UNAUTHORIZED, "AppRole login failed").into_response()
 }
 
 pub async fn rotate_approle_secret_id() -> impl IntoResponse {
-    unsafe {
-        if let Some(ref role) = APPROLE {
-            let mut role = role.lock().unwrap();
-            rotate_secret_id(&mut role);
-            return Json(role.clone()).into_response();
-        }
+    // SECURITY FIX: No unsafe block needed
+    let mut approle_guard = APPROLE.lock().unwrap();
+    if let Some(ref mut role) = *approle_guard {
+        rotate_secret_id(role);
+        return Json(role.clone()).into_response();
     }
     (axum::http::StatusCode::NOT_FOUND, "AppRole not found").into_response()
 } 
