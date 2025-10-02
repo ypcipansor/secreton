@@ -413,8 +413,9 @@ pub fn test_key_exchange_correctness(variant: MLKemVariant) -> CryptoResult<bool
     // Bob decapsulates
     let bob_secret = keypair.decapsulate(&ciphertext)?;
 
-    // Secrets should match
-    Ok(alice_secret == bob_secret)
+    // Secrets should match - use constant-time comparison
+    use crate::pqc::constant_time::ct_eq;
+    Ok(ct_eq(&alice_secret, &bob_secret))
 }
 
 #[cfg(test)]

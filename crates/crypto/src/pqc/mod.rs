@@ -3,9 +3,11 @@
 //! Unified interface for all post-quantum cryptographic algorithms
 //! including ML-DSA, ML-KEM, and Falcon implementations.
 
+pub mod constant_time;
 pub mod falcon;
 pub mod mldsa;
 pub mod mlkem;
+pub mod zeroize;
 
 use crate::error::{CryptoResult, CryptoError};
 use serde::{Deserialize, Serialize};
