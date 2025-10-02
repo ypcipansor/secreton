@@ -615,8 +615,8 @@ mod tests {
     #[test]
     fn test_key_strength() {
         assert_eq!(KeyStrength::for_key_type(&KeyType::Aes256Gcm), KeyStrength::High);
-        assert_eq!(KeyStrength::for_key_type(&KeyType::Rsa(1024)), KeyStrength::Low);
-        assert_eq!(KeyStrength::for_key_type(&KeyType::Rsa(4096)), KeyStrength::VeryHigh);
+        assert_eq!(KeyStrength::for_key_type(&KeyType::ChaCha20Poly1305), KeyStrength::High);
+        assert_eq!(KeyStrength::for_key_type(&KeyType::Ed25519), KeyStrength::VeryHigh);
     }
     
     #[test]

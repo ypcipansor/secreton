@@ -113,23 +113,42 @@ impl MLKemKeypair {
     }
 
     /// Encapsulate a shared secret using the public key
+    /// 
+    /// # Returns
+    /// Tuple of (shared_secret, ciphertext):
+    /// - shared_secret: 32-byte symmetric key (all variants)
+    /// - ciphertext: Variant-specific size to send to recipient
+    /// 
+    /// # Security
+    /// - Uses cryptographically secure randomness internally
+    /// - FIPS 203 compliant ML-KEM implementation
+    /// - Constant-time operations resistant to timing attacks
     pub fn encapsulate(&self) -> CryptoResult<(Vec<u8>, Vec<u8>)> {
+        // Validate public key size
+        if self.public_key.len() != self.variant.public_key_size() {
+            return Err(CryptoError::InvalidKey(format!(
+                "Invalid public key size: expected {} bytes, got {} bytes",
+                self.variant.public_key_size(),
+                self.public_key.len()
+            )));
+        }
+
         match self.variant {
             MLKemVariant::MLKem512 => {
                 let pk = mlkem512::PublicKey::from_bytes(&self.public_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-512 public key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let (shared_secret, ciphertext) = mlkem512::encapsulate(&pk);
                 Ok((shared_secret.as_bytes().to_vec(), ciphertext.as_bytes().to_vec()))
             }
             MLKemVariant::MLKem768 => {
                 let pk = mlkem768::PublicKey::from_bytes(&self.public_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-768 public key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let (shared_secret, ciphertext) = mlkem768::encapsulate(&pk);
                 Ok((shared_secret.as_bytes().to_vec(), ciphertext.as_bytes().to_vec()))
             }
             MLKemVariant::MLKem1024 => {
                 let pk = mlkem1024::PublicKey::from_bytes(&self.public_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-1024 public key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let (shared_secret, ciphertext) = mlkem1024::encapsulate(&pk);
                 Ok((shared_secret.as_bytes().to_vec(), ciphertext.as_bytes().to_vec()))
             }
@@ -137,29 +156,58 @@ impl MLKemKeypair {
     }
 
     /// Decapsulate a shared secret using the private key and ciphertext
+    /// 
+    /// # Arguments
+    /// * `ciphertext` - The ciphertext from encapsulation
+    /// 
+    /// # Returns
+    /// The 32-byte shared secret (same as produced by encapsulate)
+    /// 
+    /// # Security
+    /// - FIPS 203 compliant ML-KEM implementation
+    /// - Constant-time decapsulation
+    /// - Validates ciphertext size before processing
     pub fn decapsulate(&self, ciphertext: &[u8]) -> CryptoResult<Vec<u8>> {
+        // Validate ciphertext size
+        if ciphertext.len() != self.variant.ciphertext_size() {
+            return Err(CryptoError::InvalidCiphertext(format!(
+                "Invalid ciphertext size: expected {} bytes, got {} bytes",
+                self.variant.ciphertext_size(),
+                ciphertext.len()
+            )));
+        }
+
+        // Validate private key size
+        if self.private_key.len() != self.variant.private_key_size() {
+            return Err(CryptoError::InvalidKey(format!(
+                "Invalid private key size: expected {} bytes, got {} bytes",
+                self.variant.private_key_size(),
+                self.private_key.len()
+            )));
+        }
+
         match self.variant {
             MLKemVariant::MLKem512 => {
                 let sk = mlkem512::SecretKey::from_bytes(&self.private_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-512 private key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let ct = mlkem512::Ciphertext::from_bytes(ciphertext)
-                    .map_err(|_| CryptoError::InvalidCiphertext("Invalid ML-KEM-512 ciphertext".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidCiphertext("Ciphertext format invalid".to_string()))?;
                 let shared_secret = mlkem512::decapsulate(&ct, &sk);
                 Ok(shared_secret.as_bytes().to_vec())
             }
             MLKemVariant::MLKem768 => {
                 let sk = mlkem768::SecretKey::from_bytes(&self.private_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-768 private key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let ct = mlkem768::Ciphertext::from_bytes(ciphertext)
-                    .map_err(|_| CryptoError::InvalidCiphertext("Invalid ML-KEM-768 ciphertext".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidCiphertext("Ciphertext format invalid".to_string()))?;
                 let shared_secret = mlkem768::decapsulate(&ct, &sk);
                 Ok(shared_secret.as_bytes().to_vec())
             }
             MLKemVariant::MLKem1024 => {
                 let sk = mlkem1024::SecretKey::from_bytes(&self.private_key)
-                    .map_err(|_| CryptoError::InvalidKey("Invalid ML-KEM-1024 private key".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
                 let ct = mlkem1024::Ciphertext::from_bytes(ciphertext)
-                    .map_err(|_| CryptoError::InvalidCiphertext("Invalid ML-KEM-1024 ciphertext".to_string()))?;
+                    .map_err(|_| CryptoError::InvalidCiphertext("Ciphertext format invalid".to_string()))?;
                 let shared_secret = mlkem1024::decapsulate(&ct, &sk);
                 Ok(shared_secret.as_bytes().to_vec())
             }
@@ -469,6 +517,54 @@ mod tests {
         for variant in [MLKemVariant::MLKem512, MLKemVariant::MLKem768, MLKemVariant::MLKem1024] {
             let is_correct = super::test_key_exchange_correctness(variant).unwrap();
             assert!(is_correct, "Key exchange failed for {:?}", variant);
+        }
+    }
+    
+    #[test]
+    fn test_input_validation() {
+        let keypair = MLKemKeypair::generate(MLKemVariant::MLKem512).unwrap();
+        
+        // Test invalid ciphertext size
+        let invalid_ct = vec![0u8; 100]; // Wrong size
+        let result = keypair.decapsulate(&invalid_ct);
+        assert!(result.is_err(), "Should reject invalid ciphertext size");
+        
+        // Test invalid public key size for encapsulation
+        let mut bad_keypair = keypair.clone();
+        bad_keypair.public_key = vec![0u8; 100]; // Wrong size
+        let result = bad_keypair.encapsulate();
+        assert!(result.is_err(), "Should reject invalid public key size");
+        
+        // Test invalid private key size for decapsulation
+        let (_, ciphertext) = keypair.encapsulate().unwrap();
+        let mut bad_keypair2 = keypair.clone();
+        bad_keypair2.private_key = vec![0u8; 100]; // Wrong size
+        let result = bad_keypair2.decapsulate(&ciphertext);
+        assert!(result.is_err(), "Should reject invalid private key size");
+    }
+    
+    #[test]
+    fn test_cross_variant_rejection() {
+        // Generate keypairs for different variants
+        let keypair_512 = MLKemKeypair::generate(MLKemVariant::MLKem512).unwrap();
+        let keypair_768 = MLKemKeypair::generate(MLKemVariant::MLKem768).unwrap();
+        
+        // Encapsulate with 512
+        let (_, ciphertext_512) = keypair_512.encapsulate().unwrap();
+        
+        // Try to decapsulate with 768 key (should fail due to size mismatch)
+        let result = keypair_768.decapsulate(&ciphertext_512);
+        assert!(result.is_err(), "Cross-variant decapsulation should fail");
+    }
+    
+    #[test]
+    fn test_shared_secret_size() {
+        for variant in [MLKemVariant::MLKem512, MLKemVariant::MLKem768, MLKemVariant::MLKem1024] {
+            let keypair = MLKemKeypair::generate(variant).unwrap();
+            let (shared_secret, _) = keypair.encapsulate().unwrap();
+            
+            assert_eq!(shared_secret.len(), 32, 
+                       "All variants should produce 32-byte shared secrets");
         }
     }
 }
