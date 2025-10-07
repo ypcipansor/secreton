@@ -1,19 +1,19 @@
 //! Cryptographic algorithms implementation using RustCrypto
-//! 
+//!
 //! This module provides implementations of various cryptographic algorithms
 //! using the RustCrypto ecosystem, with a focus on modern, secure algorithms
 //! like Ed25519 for signatures and ChaCha20-Poly1305 for encryption.
 
-use crate::error::{CryptoResult, CryptoError};
-use serde::{Serialize, Deserialize};
+use crate::error::{CryptoError, CryptoResult};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // Re-export commonly used algorithms
-pub use aes_gcm::{Aes256Gcm, Aes128Gcm};
+pub use aes_gcm::{Aes128Gcm, Aes256Gcm};
+pub use blake3::Hasher as Blake3Hasher;
 pub use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
-pub use sha2::{Sha256, Sha384, Sha512, Digest};
+pub use sha2::{Digest, Sha256, Sha384, Sha512};
 pub use sha3::{Sha3_256, Sha3_384, Sha3_512};
-pub use blake3::{Hasher as Blake3Hasher};
 
 /// Supported hash algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,11 +132,9 @@ pub fn hash_data(algorithm: HashAlgorithm, data: &[u8]) -> CryptoResult<Vec<u8>>
             hasher.update(data);
             hasher.finalize().to_vec()
         }
-        HashAlgorithm::Blake3 => {
-            blake3::hash(data).as_bytes().to_vec()
-        }
+        HashAlgorithm::Blake3 => blake3::hash(data).as_bytes().to_vec(),
     };
-    
+
     Ok(digest)
 }
 
@@ -162,17 +160,19 @@ pub fn derive_key(
             Ok(key)
         }
         KdfAlgorithm::Argon2id => {
-            use argon2::{Argon2, Algorithm, Version, Params};
+            use argon2::{Algorithm, Argon2, Params, Version};
             let params = Params::new(
                 65536, // memory cost (64 MB)
                 iterations,
                 1, // parallelism
-                Some(length)
-            ).map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
-            
+                Some(length),
+            )
+            .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
+
             let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
             let mut key = vec![0u8; length];
-            argon2.hash_password_into(password, salt, &mut key)
+            argon2
+                .hash_password_into(password, salt, &mut key)
                 .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
             Ok(key)
         }
@@ -182,9 +182,10 @@ pub fn derive_key(
                 14, // log_n (2^14 = 16384)
                 8,  // r
                 1,  // p
-                length
-            ).map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
-            
+                length,
+            )
+            .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
+
             let mut key = vec![0u8; length];
             scrypt(password, salt, &params, &mut key)
                 .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
@@ -211,7 +212,6 @@ pub fn derive_key(
 
 /// Generate cryptographically secure random bytes
 pub fn generate_random(length: usize) -> CryptoResult<Vec<u8>> {
-    use rand::RngCore;
     let mut bytes = vec![0u8; length];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
     Ok(bytes)
@@ -239,11 +239,11 @@ impl SecureRandom for rand::rngs::ThreadRng {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         rand::RngCore::fill_bytes(self, dest)
     }
-    
+
     fn next_u32(&mut self) -> u32 {
         rand::RngCore::next_u32(self)
     }
-    
+
     fn next_u64(&mut self) -> u64 {
         rand::RngCore::next_u64(self)
     }
@@ -291,22 +291,22 @@ impl AlgorithmRegistry {
             ],
         }
     }
-    
+
     /// Check if cipher is supported
     pub fn supports_cipher(&self, cipher: &str) -> bool {
         self.supported_ciphers.contains(&cipher.to_lowercase())
     }
-    
+
     /// Check if hash algorithm is supported
     pub fn supports_hash(&self, hash: HashAlgorithm) -> bool {
         self.supported_hashes.contains(&hash)
     }
-    
+
     /// Check if KDF algorithm is supported
     pub fn supports_kdf(&self, kdf: KdfAlgorithm) -> bool {
         self.supported_kdfs.contains(&kdf)
     }
-    
+
     /// Get all supported algorithms
     pub fn supported_algorithms(&self) -> AlgorithmSupport {
         AlgorithmSupport {
@@ -345,7 +345,7 @@ impl Default for CryptoParams {
         Self {
             salt: None,
             iterations: Some(100_000), // Default PBKDF2 iterations
-            key_length: Some(32), // Default to 256-bit keys
+            key_length: Some(32),      // Default to 256-bit keys
             aad: None,
             nonce: None,
         }
@@ -355,11 +355,11 @@ impl Default for CryptoParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_hash_algorithms() {
         let data = b"test data";
-        
+
         // Test all hash algorithms
         for &algorithm in &[
             HashAlgorithm::Sha256,
@@ -372,18 +372,18 @@ mod tests {
         ] {
             let digest = hash_data(algorithm, data).unwrap();
             assert!(!digest.is_empty());
-            
+
             // Hash should be deterministic
             let digest2 = hash_data(algorithm, data).unwrap();
             assert_eq!(digest, digest2);
         }
     }
-    
+
     #[test]
     fn test_kdf_algorithms() {
         let password = b"password";
         let salt = b"salt1234567890ab";
-        
+
         for &algorithm in &[
             KdfAlgorithm::Pbkdf2Sha256,
             KdfAlgorithm::Pbkdf2Sha512,
@@ -392,31 +392,31 @@ mod tests {
         ] {
             let key = derive_key(algorithm, password, salt, 1000, 32).unwrap();
             assert_eq!(key.len(), 32);
-            
+
             // KDF should be deterministic
             let key2 = derive_key(algorithm, password, salt, 1000, 32).unwrap();
             assert_eq!(key, key2);
         }
     }
-    
+
     #[test]
     fn test_random_generation() {
         let random1 = generate_random(32).unwrap();
         let random2 = generate_random(32).unwrap();
-        
+
         assert_eq!(random1.len(), 32);
         assert_eq!(random2.len(), 32);
         assert_ne!(random1, random2); // Should be different
     }
-    
+
     #[test]
     fn test_algorithm_registry() {
         let registry = AlgorithmRegistry::new();
-        
+
         assert!(registry.supports_cipher("aes-256-gcm"));
         assert!(registry.supports_hash(HashAlgorithm::Sha256));
         assert!(registry.supports_kdf(KdfAlgorithm::Pbkdf2Sha256));
-        
+
         assert!(!registry.supports_cipher("unknown-cipher"));
     }
 }

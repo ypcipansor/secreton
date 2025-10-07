@@ -1,13 +1,13 @@
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio_postgres::{Client, NoTls};
 use uuid::Uuid;
-use async_trait::async_trait;
 
 use crate::{
-    StorageBackend, StorageResult, StorageError, VaultEntry, QueryParams, HealthStatus, StorageStats,
-    SecurityLevel, StorageTransaction,
+    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction, VaultEntry,
 };
 
 /// Configuration for CockroachDB storage backend
@@ -87,7 +87,9 @@ impl CockroachDBStorage {
         Ok(())
     }
 
-    fn vault_entry_to_params<'a>(entry: &'a VaultEntry) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync + 'a>> {
+    fn vault_entry_to_params<'a>(
+        entry: &'a VaultEntry,
+    ) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync + 'a>> {
         vec![
             Box::new(entry.id),
             Box::new(&entry.path),
@@ -118,13 +120,15 @@ impl CockroachDBStorage {
         let updated_at: DateTime<Utc> = row.get(10);
         let expires_at: Option<DateTime<Utc>> = row.get(11);
 
-        let encryption_metadata: crate::EncryptionMetadata = serde_json::from_value(encryption_metadata_json)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to deserialize encryption metadata: {}", e),
+        let encryption_metadata: crate::EncryptionMetadata =
+            serde_json::from_value(encryption_metadata_json).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to deserialize encryption metadata: {}", e),
+                }
             })?;
 
-        let metadata: HashMap<String, String> = serde_json::from_value(metadata_json)
-            .unwrap_or_default();
+        let metadata: HashMap<String, String> =
+            serde_json::from_value(metadata_json).unwrap_or_default();
 
         let security_level = match security_level_int {
             0 => SecurityLevel::Public,
@@ -156,7 +160,10 @@ impl CockroachDBStorage {
 impl StorageBackend for CockroachDBStorage {
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
         let params = Self::vault_entry_to_params(entry);
-        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
+            .iter()
+            .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
 
         let query = r#"
             INSERT INTO vault_entries
@@ -185,12 +192,13 @@ impl StorageBackend for CockroachDBStorage {
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
         let query = "SELECT * FROM vault_entries WHERE id = $1";
-        let rows = self.client
-            .query(query, &[&id])
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to query by ID: {}", e),
-            })?;
+        let rows =
+            self.client
+                .query(query, &[&id])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to query by ID: {}", e),
+                })?;
 
         if let Some(row) = rows.get(0) {
             Ok(Some(Self::row_to_vault_entry(row)?))
@@ -201,12 +209,13 @@ impl StorageBackend for CockroachDBStorage {
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
         let query = "SELECT * FROM vault_entries WHERE path = $1";
-        let rows = self.client
-            .query(query, &[&path])
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to query by path: {}", e),
-            })?;
+        let rows =
+            self.client
+                .query(query, &[&path])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to query by path: {}", e),
+                })?;
 
         if let Some(row) = rows.get(0) {
             Ok(Some(Self::row_to_vault_entry(row)?))
@@ -221,24 +230,26 @@ impl StorageBackend for CockroachDBStorage {
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
         let query = "DELETE FROM vault_entries WHERE id = $1";
-        let result = self.client
-            .execute(query, &[&id])
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to delete by ID: {}", e),
-            })?;
+        let result =
+            self.client
+                .execute(query, &[&id])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete by ID: {}", e),
+                })?;
 
         Ok(result > 0)
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
         let query = "DELETE FROM vault_entries WHERE path = $1";
-        let result = self.client
-            .execute(query, &[&path])
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to delete by path: {}", e),
-            })?;
+        let result =
+            self.client
+                .execute(query, &[&path])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete by path: {}", e),
+                })?;
 
         Ok(result > 0)
     }
@@ -267,7 +278,10 @@ impl StorageBackend for CockroachDBStorage {
         }
 
         if !params.include_expired {
-            conditions.push(format!("(expires_at IS NULL OR expires_at > ${})", param_index));
+            conditions.push(format!(
+                "(expires_at IS NULL OR expires_at > ${})",
+                param_index
+            ));
             param_values.push(Box::new(Utc::now()));
             param_index += 1;
         }
@@ -284,15 +298,20 @@ impl StorageBackend for CockroachDBStorage {
             String::new()
         };
 
-        let query = format!("SELECT * FROM vault_entries {} {}", where_clause, limit_clause);
-        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let query = format!(
+            "SELECT * FROM vault_entries {} {}",
+            where_clause, limit_clause
+        );
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
+            .iter()
+            .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
 
-        let rows = self.client
-            .query(&query, &params_refs)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
+        let rows = self.client.query(&query, &params_refs).await.map_err(|e| {
+            StorageError::QueryFailed {
                 message: format!("Failed to list entries: {}", e),
-            })?;
+            }
+        })?;
 
         let mut entries = Vec::new();
         for row in rows {
@@ -326,7 +345,10 @@ impl StorageBackend for CockroachDBStorage {
         }
 
         if !params.include_expired {
-            conditions.push(format!("(expires_at IS NULL OR expires_at > ${})", param_index));
+            conditions.push(format!(
+                "(expires_at IS NULL OR expires_at > ${})",
+                param_index
+            ));
             param_values.push(Box::new(Utc::now()));
             param_index += 1;
         }
@@ -338,14 +360,16 @@ impl StorageBackend for CockroachDBStorage {
         };
 
         let query = format!("SELECT COUNT(*) FROM vault_entries {}", where_clause);
-        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values.iter().map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
+            .iter()
+            .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
 
-        let rows = self.client
-            .query(&query, &params_refs)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
+        let rows = self.client.query(&query, &params_refs).await.map_err(|e| {
+            StorageError::QueryFailed {
                 message: format!("Failed to count entries: {}", e),
-            })?;
+            }
+        })?;
 
         let count: i64 = rows[0].get(0);
         Ok(count as u64)
@@ -353,12 +377,13 @@ impl StorageBackend for CockroachDBStorage {
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
         let query = "SELECT 1 FROM vault_entries WHERE path = $1 LIMIT 1";
-        let rows = self.client
-            .query(query, &[&path])
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to check existence: {}", e),
-            })?;
+        let rows =
+            self.client
+                .query(query, &[&path])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to check existence: {}", e),
+                })?;
 
         Ok(!rows.is_empty())
     }
@@ -401,7 +426,8 @@ impl StorageBackend for CockroachDBStorage {
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
         let query = "SELECT COUNT(*), SUM(octet_length(encrypted_data)) FROM vault_entries";
-        let rows = self.client
+        let rows = self
+            .client
             .query(query, &[])
             .await
             .map_err(|e| StorageError::QueryFailed {
@@ -435,7 +461,8 @@ impl StorageBackend for CockroachDBStorage {
 impl Default for CockroachDBConfig {
     fn default() -> Self {
         Self {
-            connection_string: "postgresql://root@localhost:26257/defaultdb?sslmode=disable".to_string(),
+            connection_string: "postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+                .to_string(),
             database_name: "defaultdb".to_string(),
             max_connections: 10,
         }

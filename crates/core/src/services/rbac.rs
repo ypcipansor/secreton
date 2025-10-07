@@ -1,7 +1,8 @@
 use crate::models::policy::Policy;
-use crate::services::policy::PolicySet;
+// use crate::services::policy::PolicySet; // COMMENTED: policy module disabled
 use serde_json::Value;
 
+/* COMMENTED: PolicySet dependency from disabled policy module
 pub fn check_policy_with_policyset(
     user: &str,
     path: &str,
@@ -15,6 +16,7 @@ pub fn check_policy_with_policyset(
         false
     }
 }
+*/
 
 // Update check_policy agar bisa fallback ke policy as code jika ada
 pub fn check_policy(
@@ -41,9 +43,10 @@ pub fn check_policy(
         }
     }
     // Fallback ke policy as code jika ada
-    if let Some(json) = policyset_json {
-        return check_policy_with_policyset("", path, action, json, None);
-    }
+    // COMMENTED: check_policy_with_policyset function disabled due to missing PolicySet dependency
+    // if let Some(json) = policyset_json {
+    //     return check_policy_with_policyset("", path, action, json, None);
+    // }
     false
 }
 

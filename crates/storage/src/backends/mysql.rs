@@ -3,9 +3,9 @@ use crate::{
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use mysql::prelude::Queryable;
 use chrono::{NaiveDateTime, Utc};
+use mysql::prelude::Queryable;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -52,7 +52,10 @@ impl MySQLStorage {
         // Check length (max 64 chars for MySQL)
         if name.is_empty() || name.len() > 64 {
             return Err(StorageError::ConfigurationError {
-                message: format!("Table name length must be 1-64 characters, got {}", name.len()),
+                message: format!(
+                    "Table name length must be 1-64 characters, got {}",
+                    name.len()
+                ),
             });
         }
 
@@ -66,11 +69,28 @@ impl MySQLStorage {
         // Prevent SQL keywords as table names
         let uppercase = name.to_uppercase();
         let sql_keywords = [
-            "SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", 
-            "TABLE", "DATABASE", "INDEX", "VIEW", "PROCEDURE", "FUNCTION",
-            "TRIGGER", "USER", "GRANT", "REVOKE", "FROM", "WHERE", "JOIN",
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "DROP",
+            "CREATE",
+            "ALTER",
+            "TABLE",
+            "DATABASE",
+            "INDEX",
+            "VIEW",
+            "PROCEDURE",
+            "FUNCTION",
+            "TRIGGER",
+            "USER",
+            "GRANT",
+            "REVOKE",
+            "FROM",
+            "WHERE",
+            "JOIN",
         ];
-        
+
         if sql_keywords.contains(&uppercase.as_str()) {
             return Err(StorageError::ConfigurationError {
                 message: format!("Table name '{}' is a reserved SQL keyword", name),
@@ -92,11 +112,14 @@ impl MySQLStorage {
         // SECURITY FIX: Validate table name before use
         Self::validate_sql_identifier(&config.table_name)?;
 
-        let opts = mysql::Opts::from_url(&config.connection_string).map_err(|e| StorageError::ConnectionFailed { message: format!("Invalid MySQL URL: {}", e) })?;
-        let pool = mysql::Pool::new(opts)
-            .map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to create MySQL pool: {}", e),
-            })?;
+        let opts = mysql::Opts::from_url(&config.connection_string).map_err(|e| {
+            StorageError::ConnectionFailed {
+                message: format!("Invalid MySQL URL: {}", e),
+            }
+        })?;
+        let pool = mysql::Pool::new(opts).map_err(|e| StorageError::ConnectionFailed {
+            message: format!("Failed to create MySQL pool: {}", e),
+        })?;
 
         // Create table if not exists
         Self::create_table_if_not_exists(&pool, &config.table_name).await?;
@@ -212,18 +235,23 @@ impl StorageBackend for MySQLStorage {
 
         let query = self.build_upsert_query(entry);
 
-        let encryption_metadata_json = serde_json::to_string(&entry.encryption_metadata)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize encryption metadata: {}", e),
+        let encryption_metadata_json =
+            serde_json::to_string(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
             })?;
 
-        let metadata_json = serde_json::to_string(&entry.metadata).map_err(|e| StorageError::SerializationError {
-            message: format!("Failed to serialize metadata: {}", e),
+        let metadata_json = serde_json::to_string(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
+                message: format!("Failed to serialize metadata: {}", e),
+            }
         })?;
 
-        let tags_json = serde_json::to_string(&entry.tags).map_err(|e| StorageError::SerializationError {
-            message: format!("Failed to serialize tags: {}", e),
-        })?;
+        let tags_json =
+            serde_json::to_string(&entry.tags).map_err(|e| StorageError::SerializationError {
+                message: format!("Failed to serialize tags: {}", e),
+            })?;
         let expires_at: Option<NaiveDateTime> = entry.expires_at.map(|dt| dt.naive_utc());
 
         conn.exec_drop(
@@ -242,7 +270,8 @@ impl StorageBackend for MySQLStorage {
                 entry.updated_at.naive_utc(),
                 &expires_at,
             ),
-        ).map_err(|e| StorageError::BackendError {
+        )
+        .map_err(|e| StorageError::BackendError {
             backend: "mysql".to_string(),
             message: format!("Failed to store entry: {}", e),
         })?;
@@ -278,12 +307,12 @@ impl StorageBackend for MySQLStorage {
 
         let query = self.build_select_query(path);
 
-        let rows: Vec<mysql::Row> = conn
-            .exec(&query, (path,))
-            .map_err(|e| StorageError::BackendError {
-                backend: "mysql".to_string(),
-                message: format!("Failed to query entry: {}", e),
-            })?;
+        let rows: Vec<mysql::Row> =
+            conn.exec(&query, (path,))
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to query entry: {}", e),
+                })?;
 
         if let Some(row) = rows.first() {
             let entry = self.row_to_vault_entry(row)?;
@@ -315,8 +344,7 @@ impl StorageBackend for MySQLStorage {
 
         let query = self.build_delete_query(path);
 
-        conn
-            .exec_drop(&query, (path,))
+        conn.exec_drop(&query, (path,))
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to delete entry: {}", e),
@@ -348,10 +376,7 @@ impl StorageBackend for MySQLStorage {
         } else {
             conn.exec(
                 &query,
-                (format!(
-                    "{}%",
-                    params.path_prefix.as_deref().unwrap_or("")
-                ),),
+                (format!("{}%", params.path_prefix.as_deref().unwrap_or("")),),
             )
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
@@ -435,7 +460,9 @@ impl StorageBackend for MySQLStorage {
 
         let mut entries_by_security_level = HashMap::new();
         for entry in &entries {
-            *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+            *entries_by_security_level
+                .entry(entry.security_level)
+                .or_insert(0) += 1;
         }
 
         Ok(StorageStats {
@@ -462,65 +489,51 @@ impl StorageBackend for MySQLStorage {
 impl MySQLStorage {
     /// Convert MySQL row to VaultEntry
     fn row_to_vault_entry(&self, row: &mysql::Row) -> Result<VaultEntry, StorageError> {
-        let id: String = row
-            .get(0)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing id field".to_string(),
-            })?;
-        let path: String = row
-            .get(1)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing path field".to_string(),
-            })?;
-        let encrypted_data: Vec<u8> = row
-            .get(2)
-            .ok_or_else(|| StorageError::SerializationError {
+        let id: String = row.get(0).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing id field".to_string(),
+        })?;
+        let path: String = row.get(1).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing path field".to_string(),
+        })?;
+        let encrypted_data: Vec<u8> =
+            row.get(2).ok_or_else(|| StorageError::SerializationError {
                 message: "Missing encrypted_data field".to_string(),
             })?;
-        let encryption_metadata_json: String = row
-            .get(3)
-            .ok_or_else(|| StorageError::SerializationError {
+        let encryption_metadata_json: String =
+            row.get(3).ok_or_else(|| StorageError::SerializationError {
                 message: "Missing encryption_metadata field".to_string(),
             })?;
-        let security_level: u8 = row
-            .get(4)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing security_level field".to_string(),
-            })?;
+        let security_level: u8 = row.get(4).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing security_level field".to_string(),
+        })?;
         let metadata_json: Option<String> = row.get(5);
-        let tags_json: String = row
-            .get(6)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing tags field".to_string(),
-            })?;
-        let version: i32 = row
-            .get(7)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing version field".to_string(),
-            })?;
-        let owner_id: String = row
-            .get(8)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing owner_id field".to_string(),
-            })?;
-        let created_at: NaiveDateTime = row
-            .get(9)
-            .ok_or_else(|| StorageError::SerializationError {
+        let tags_json: String = row.get(6).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing tags field".to_string(),
+        })?;
+        let version: i32 = row.get(7).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing version field".to_string(),
+        })?;
+        let owner_id: String = row.get(8).ok_or_else(|| StorageError::SerializationError {
+            message: "Missing owner_id field".to_string(),
+        })?;
+        let created_at: NaiveDateTime =
+            row.get(9).ok_or_else(|| StorageError::SerializationError {
                 message: "Missing created_at field".to_string(),
             })?;
-        let updated_at: NaiveDateTime = row
-            .get(10)
-            .ok_or_else(|| StorageError::SerializationError {
-                message: "Missing updated_at field".to_string(),
-            })?;
+        let updated_at: NaiveDateTime =
+            row.get(10)
+                .ok_or_else(|| StorageError::SerializationError {
+                    message: "Missing updated_at field".to_string(),
+                })?;
         let expires_at: Option<NaiveDateTime> = row.get(11);
 
         let id = Uuid::parse_str(&id).map_err(|e| StorageError::SerializationError {
             message: format!("Invalid UUID: {}", e),
         })?;
-        let owner_id = Uuid::parse_str(&owner_id).map_err(|e| StorageError::SerializationError {
-            message: format!("Invalid owner UUID: {}", e),
-        })?;
+        let owner_id =
+            Uuid::parse_str(&owner_id).map_err(|e| StorageError::SerializationError {
+                message: format!("Invalid owner UUID: {}", e),
+            })?;
 
         let encryption_metadata: crate::EncryptionMetadata =
             serde_json::from_str(&encryption_metadata_json).map_err(|e| {
@@ -538,22 +551,22 @@ impl MySQLStorage {
         };
 
         let metadata = if let Some(json) = metadata_json {
-            Some(serde_json::from_str(&json).map_err(|e| {
-                StorageError::SerializationError {
+            Some(
+                serde_json::from_str(&json).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to deserialize metadata: {}", e),
-                }
-            })?)
+                })?,
+            )
         } else {
             None
         };
 
-        let tags: Vec<String> = serde_json::from_str(&tags_json).map_err(|e| {
-            StorageError::SerializationError {
+        let tags: Vec<String> =
+            serde_json::from_str(&tags_json).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to deserialize tags: {}", e),
-            }
-        })?;
+            })?;
 
-        let expires_at_dt = expires_at.map(|dt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+        let expires_at_dt =
+            expires_at.map(|dt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
         Ok(VaultEntry {
             id,

@@ -285,7 +285,18 @@ impl TransitIntegration {
     
     /// Get current metrics
     pub async fn get_metrics(&self) -> IntegrationMetrics {
-        self.metrics.read().await.clone()
+        let guard = self.metrics.read().await;
+        IntegrationMetrics {
+            api_requests: guard.api_requests,
+            api_errors: guard.api_errors,
+            storage_operations: guard.storage_operations,
+            storage_errors: guard.storage_errors,
+            cache_hits: guard.cache_hits,
+            cache_misses: guard.cache_misses,
+            total_keys_managed: guard.total_keys_managed,
+            total_operations_performed: guard.total_operations_performed,
+            last_updated: guard.last_updated,
+        }
     }
     
     /// Update metrics with a closure
@@ -418,15 +429,16 @@ impl TransitIntegration {
         // Update metrics
         let successful = results.iter().filter(|r| r.success).count();
         let failed = results.len() - successful;
+        let total_ops = results.len();
         
         self.update_metrics(|m| {
-            m.total_operations_performed += results.len() as u64;
+            m.total_operations_performed += total_ops as u64;
             m.api_errors += failed as u64;
         }).await;
         
         Ok(BatchOperationResponse {
             results,
-            total_operations: results.len(),
+            total_operations: total_ops,
             successful_operations: successful,
             failed_operations: failed,
             processing_time_ms: start_time.elapsed().as_millis() as u64,

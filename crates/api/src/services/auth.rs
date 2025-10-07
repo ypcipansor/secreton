@@ -11,6 +11,9 @@ use crate::config::AuthConfig;
 use brankas_crypto::CryptoService;
 use brankas_storage::StorageBackend;
 
+// Use canonical User from core
+pub use secreton_core::models::User;
+
 /// Authentication service errors
 #[derive(Error, Debug)]
 pub enum AuthError {
@@ -48,23 +51,7 @@ pub enum AuthError {
     Internal(#[from] anyhow::Error),
 }
 
-/// User information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct User {
-    pub id: String,
-    pub username: String,
-    pub email: String,
-    pub password_hash: String,
-    pub full_name: Option<String>,
-    pub enabled: bool,
-    pub roles: Vec<String>,
-    pub mfa_enabled: bool,
-    pub mfa_secret: Option<String>,
-    pub last_login: Option<chrono::DateTime<chrono::Utc>>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub metadata: HashMap<String, String>,
-}
+// User is now imported from secreton_core::models
 
 /// Role definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,16 +362,22 @@ impl AuthService {
         Ok(())
     }
 
-    /// Hash password
+    /// Hash password using crypto service
     fn hash_password(&self, password: &str) -> Result<String, AuthError> {
-        // TODO: Implement secure password hashing (bcrypt, argon2, etc.)
-        Ok(format!("hashed_{}", password))
+        use secreton_crypto::hashing::HashingService;
+        
+        let result = HashingService::hash_password_argon2(password)
+            .map_err(|e| AuthError::InternalError(format!("Password hashing failed: {}", e)))?;
+        
+        Ok(result.hash)
     }
 
-    /// Verify password
+    /// Verify password using crypto service
     fn verify_password(&self, password: &str, hash: &str) -> Result<bool, AuthError> {
-        // TODO: Implement password verification
-        Ok(hash == &format!("hashed_{}", password))
+        use secreton_crypto::hashing::HashingService;
+        
+        HashingService::verify_password_argon2(password, hash)
+            .map_err(|e| AuthError::InternalError(format!("Password verification failed: {}", e)))
     }
 
     /// Verify MFA code

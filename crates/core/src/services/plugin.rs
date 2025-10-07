@@ -1,6 +1,156 @@
+//! Enhanced Plugin System for Secreton
+//!
+//! Provides comprehensive plugin infrastructure for secrets engines, auth methods,
+//! audit devices, and storage backends with lifecycle management.
+
+use async_trait::async_trait;
 use libloading::{Library, Symbol};
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Error types for plugin system
+#[derive(Debug, thiserror::Error)]
+pub enum PluginError {
+    #[error("Plugin not found: {0}")]
+    PluginNotFound(String),
+    
+    #[error("Plugin already loaded: {0}")]
+    AlreadyLoaded(String),
+    
+    #[error("Plugin load failed: {0}")]
+    LoadFailed(String),
+    
+    #[error("Plugin initialization failed: {0}")]
+    InitFailed(String),
+    
+    #[error("Plugin operation failed: {0}")]
+    OperationFailed(String),
+    
+    #[error("Invalid plugin configuration: {0}")]
+    InvalidConfig(String),
+    
+    #[error("Incompatible plugin version: {0}")]
+    IncompatibleVersion(String),
+}
+
+/// Plugin type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PluginType {
+    SecretsEngine,
+    AuthMethod,
+    AuditDevice,
+    StorageBackend,
+}
+
+/// Plugin metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginMetadata {
+    pub name: String,
+    pub version: String,
+    pub plugin_type: PluginType,
+    pub description: String,
+    pub author: String,
+    pub required_version: String,
+    pub capabilities: Vec<String>,
+}
+
+/// Plugin configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginConfig {
+    pub name: String,
+    pub mount_path: String,
+    pub config: HashMap<String, serde_json::Value>,
+    pub enabled: bool,
+}
+
+/// Plugin state
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PluginState {
+    Unloaded,
+    Loading,
+    Loaded,
+    Initializing,
+    Running,
+    Stopping,
+    Stopped,
+    Failed,
+}
+
+/// Enhanced plugin trait
+#[async_trait]
+pub trait EnhancedPlugin: Send + Sync {
+    fn metadata(&self) -> PluginMetadata;
+    async fn initialize(&mut self, config: &PluginConfig) -> Result<(), PluginError>;
+    async fn start(&mut self) -> Result<(), PluginError>;
+    async fn stop(&mut self) -> Result<(), PluginError>;
+    async fn health(&self) -> Result<bool, PluginError> { Ok(true) }
+    async fn reload(&mut self, config: &PluginConfig) -> Result<(), PluginError> {
+        self.stop().await?;
+        self.initialize(config).await?;
+        self.start().await
+    }
+}
+
+/// Enhanced secrets engine plugin
+#[async_trait]
+pub trait EnhancedSecretsEngine: EnhancedPlugin {
+    async fn read(&self, path: &str) -> Result<HashMap<String, serde_json::Value>, PluginError>;
+    async fn write(&self, path: &str, data: HashMap<String, serde_json::Value>) -> Result<(), PluginError>;
+    async fn delete(&self, path: &str) -> Result<(), PluginError>;
+    async fn list(&self, path: &str) -> Result<Vec<String>, PluginError>;
+}
+
+/// Enhanced plugin registry
+pub struct EnhancedPluginRegistry {
+    plugins: Arc<RwLock<HashMap<String, PluginState>>>,
+    secrets_engines: Arc<RwLock<HashMap<String, Arc<dyn EnhancedSecretsEngine>>>>,
+}
+
+impl EnhancedPluginRegistry {
+    pub fn new() -> Self {
+        Self {
+            plugins: Arc::new(RwLock::new(HashMap::new())),
+            secrets_engines: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+    
+    pub async fn register_secrets_engine(&self, name: String, engine: Arc<dyn EnhancedSecretsEngine>) -> Result<(), PluginError> {
+        let mut engines = self.secrets_engines.write().await;
+        engines.insert(name.clone(), engine);
+        
+        let mut plugins = self.plugins.write().await;
+        plugins.insert(name, PluginState::Loaded);
+        Ok(())
+    }
+    
+    pub async fn get_secrets_engine(&self, name: &str) -> Result<Arc<dyn EnhancedSecretsEngine>, PluginError> {
+        let engines = self.secrets_engines.read().await;
+        engines.get(name).cloned()
+            .ok_or_else(|| PluginError::PluginNotFound(name.to_string()))
+    }
+    
+    pub async fn list_plugins(&self) -> Vec<String> {
+        let plugins = self.plugins.read().await;
+        plugins.keys().cloned().collect()
+    }
+    
+    pub async fn update_state(&self, name: &str, state: PluginState) -> Result<(), PluginError> {
+        let mut plugins = self.plugins.write().await;
+        plugins.insert(name.to_string(), state);
+        Ok(())
+    }
+}
+
+impl Default for EnhancedPluginRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ========== Legacy Plugin System (kept for compatibility) ==========
 
 pub trait VaultPlugin: Send + Sync {
     fn name(&self) -> &'static str;

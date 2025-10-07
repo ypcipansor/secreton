@@ -1,10 +1,11 @@
 //! Transit engine policies and security controls
 
-use crate::error::{CryptoResult, CryptoError};
+// CLEANUP: Removed unused imports
+// use crate::error::{CryptoError, CryptoResult};
 use crate::transit::KeyType;
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use chrono::{DateTime, Utc, Duration};
 
 /// Global policies for the transit engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,52 +108,61 @@ pub struct RoleBasedAccessControl {
 impl Default for RoleBasedAccessControl {
     fn default() -> Self {
         let mut roles = HashMap::new();
-        
+
         // Define default roles
-        roles.insert("admin".to_string(), Role {
-            name: "admin".to_string(),
-            permissions: vec![
-                Permission::CreateKey,
-                Permission::DeleteKey,
-                Permission::RotateKey,
-                Permission::Encrypt,
-                Permission::Decrypt,
-                Permission::Sign,
-                Permission::Verify,
-                Permission::DeriveKey,
-                Permission::GenerateRandom,
-                Permission::ManagePolicies,
-            ],
-            key_restrictions: KeyRestrictions::default(),
-        });
-        
-        roles.insert("operator".to_string(), Role {
-            name: "operator".to_string(),
-            permissions: vec![
-                Permission::CreateKey,
-                Permission::RotateKey,
-                Permission::Encrypt,
-                Permission::Decrypt,
-                Permission::Sign,
-                Permission::Verify,
-                Permission::DeriveKey,
-                Permission::GenerateRandom,
-            ],
-            key_restrictions: KeyRestrictions::default(),
-        });
-        
-        roles.insert("user".to_string(), Role {
-            name: "user".to_string(),
-            permissions: vec![
-                Permission::Encrypt,
-                Permission::Decrypt,
-                Permission::Sign,
-                Permission::Verify,
-                Permission::GenerateRandom,
-            ],
-            key_restrictions: KeyRestrictions::default(),
-        });
-        
+        roles.insert(
+            "admin".to_string(),
+            Role {
+                name: "admin".to_string(),
+                permissions: vec![
+                    Permission::CreateKey,
+                    Permission::DeleteKey,
+                    Permission::RotateKey,
+                    Permission::Encrypt,
+                    Permission::Decrypt,
+                    Permission::Sign,
+                    Permission::Verify,
+                    Permission::DeriveKey,
+                    Permission::GenerateRandom,
+                    Permission::ManagePolicies,
+                ],
+                key_restrictions: KeyRestrictions::default(),
+            },
+        );
+
+        roles.insert(
+            "operator".to_string(),
+            Role {
+                name: "operator".to_string(),
+                permissions: vec![
+                    Permission::CreateKey,
+                    Permission::RotateKey,
+                    Permission::Encrypt,
+                    Permission::Decrypt,
+                    Permission::Sign,
+                    Permission::Verify,
+                    Permission::DeriveKey,
+                    Permission::GenerateRandom,
+                ],
+                key_restrictions: KeyRestrictions::default(),
+            },
+        );
+
+        roles.insert(
+            "user".to_string(),
+            Role {
+                name: "user".to_string(),
+                permissions: vec![
+                    Permission::Encrypt,
+                    Permission::Decrypt,
+                    Permission::Sign,
+                    Permission::Verify,
+                    Permission::GenerateRandom,
+                ],
+                key_restrictions: KeyRestrictions::default(),
+            },
+        );
+
         Self {
             roles,
             user_roles: HashMap::new(),
@@ -201,7 +211,7 @@ pub struct KeyRestrictions {
 impl Default for KeyRestrictions {
     fn default() -> Self {
         Self {
-            allowed_key_types: None, // All types allowed by default
+            allowed_key_types: None,                      // All types allowed by default
             allowed_key_patterns: vec![".*".to_string()], // All names allowed by default
             denied_key_patterns: Vec::new(),
             max_data_size: None, // No limit by default
@@ -271,7 +281,7 @@ impl TimeWindow {
             end_hour: 23,
         }
     }
-    
+
     /// Create business hours time window (Mon-Fri, 9AM-5PM)
     pub fn business_hours() -> Self {
         Self {
@@ -341,10 +351,19 @@ impl Default for AuditPolicy {
 /// Audit log destinations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuditDestination {
-    File { path: String },
-    Syslog { facility: String },
-    Database { connection_string: String },
-    Webhook { url: String, headers: HashMap<String, String> },
+    File {
+        path: String,
+    },
+    Syslog {
+        facility: String,
+    },
+    Database {
+        connection_string: String,
+    },
+    Webhook {
+        url: String,
+        headers: HashMap<String, String>,
+    },
 }
 
 /// Key usage policies
@@ -395,7 +414,8 @@ impl KeyStrength {
             KeyType::XChaCha20Poly1305 => KeyStrength::High,
             KeyType::EcdsaP256 => KeyStrength::High,
             KeyType::EcdsaSecp256k1 => KeyStrength::High,
-            KeyType::Ed25519 => KeyStrength::High,
+            // Ed25519 is considered very high security due to its resistance to side-channel attacks
+            KeyType::Ed25519 => KeyStrength::VeryHigh,
             KeyType::X25519 => KeyStrength::High,
         }
     }
@@ -465,7 +485,7 @@ impl PolicyEngine {
             rate_limiters: HashMap::new(),
         }
     }
-    
+
     /// Check if user has permission for operation
     pub fn check_permission(&self, user: &str, permission: Permission) -> bool {
         if let Some(roles) = self.policies.access_control.rbac.user_roles.get(user) {
@@ -479,14 +499,19 @@ impl PolicyEngine {
         }
         false
     }
-    
+
     /// Check if key type is allowed for user
     pub fn check_key_type_allowed(&self, user: &str, key_type: &KeyType) -> bool {
         // Check global policy
-        if !self.policies.key_usage_policy.allowed_algorithms.contains(key_type) {
+        if !self
+            .policies
+            .key_usage_policy
+            .allowed_algorithms
+            .contains(key_type)
+        {
             return false;
         }
-        
+
         // Check user role restrictions
         if let Some(roles) = self.policies.access_control.rbac.user_roles.get(user) {
             for role_name in roles {
@@ -497,36 +522,37 @@ impl PolicyEngine {
                 }
             }
         }
-        
+
         true // Default allow if no restrictions
     }
-    
+
     /// Check if key strength meets minimum requirements
     pub fn check_key_strength(&self, key_type: &KeyType) -> bool {
         let key_strength = KeyStrength::for_key_type(key_type);
         key_strength >= self.policies.key_usage_policy.minimum_key_strength
     }
-    
+
     /// Check rate limits for user
     pub fn check_rate_limit(&mut self, user: &str) -> bool {
         if !self.policies.access_control.rate_limiting.enabled {
             return true;
         }
-        
-        let rate_limiter = self.rate_limiters
+
+        let rate_limiter = self
+            .rate_limiters
             .entry(user.to_string())
             .or_insert_with(|| RateLimiter::new(&self.policies.access_control.rate_limiting));
-        
+
         rate_limiter.check_limit()
     }
-    
+
     /// Update policies
     pub fn update_policies(&mut self, policies: TransitPolicies) {
         self.policies = policies;
         // Clear rate limiters to apply new limits
         self.rate_limiters.clear();
     }
-    
+
     /// Get current policies
     pub fn get_policies(&self) -> &TransitPolicies {
         &self.policies
@@ -558,44 +584,44 @@ impl RateLimiter {
             last_day: now,
         }
     }
-    
+
     fn check_limit(&mut self) -> bool {
         let now = Utc::now();
-        
+
         // Reset counters if time periods have passed
         if now.signed_duration_since(self.last_minute).num_minutes() >= 1 {
             self.minute_counter = 0;
             self.last_minute = now;
         }
-        
+
         if now.signed_duration_since(self.last_hour).num_hours() >= 1 {
             self.hour_counter = 0;
             self.last_hour = now;
         }
-        
+
         if now.signed_duration_since(self.last_day).num_days() >= 1 {
             self.day_counter = 0;
             self.last_day = now;
         }
-        
+
         // Check limits
         if self.minute_counter >= self.policy.max_operations_per_minute {
             return false;
         }
-        
+
         if self.hour_counter >= self.policy.max_operations_per_hour {
             return false;
         }
-        
+
         if self.day_counter >= self.policy.max_operations_per_day {
             return false;
         }
-        
+
         // Increment counters
         self.minute_counter += 1;
         self.hour_counter += 1;
         self.day_counter += 1;
-        
+
         true
     }
 }
@@ -603,7 +629,7 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_policies() {
         let policies = TransitPolicies::default();
@@ -611,29 +637,38 @@ mod tests {
         assert_eq!(policies.max_random_bytes, 1024 * 1024);
         assert!(policies.rotation_policy.auto_rotation_interval.is_some());
     }
-    
+
     #[test]
     fn test_key_strength() {
-        assert_eq!(KeyStrength::for_key_type(&KeyType::Aes256Gcm), KeyStrength::High);
-        assert_eq!(KeyStrength::for_key_type(&KeyType::ChaCha20Poly1305), KeyStrength::High);
-        assert_eq!(KeyStrength::for_key_type(&KeyType::Ed25519), KeyStrength::VeryHigh);
+        assert_eq!(
+            KeyStrength::for_key_type(&KeyType::Aes256Gcm),
+            KeyStrength::High
+        );
+        assert_eq!(
+            KeyStrength::for_key_type(&KeyType::ChaCha20Poly1305),
+            KeyStrength::High
+        );
+        assert_eq!(
+            KeyStrength::for_key_type(&KeyType::Ed25519),
+            KeyStrength::VeryHigh
+        );
     }
-    
+
     #[test]
     fn test_policy_engine() {
         let policies = TransitPolicies::default();
         let engine = PolicyEngine::new(policies);
-        
+
         // Test key strength check
         assert!(engine.check_key_strength(&KeyType::Aes256Gcm));
         assert!(engine.check_key_strength(&KeyType::Ed25519));
     }
-    
+
     #[test]
     fn test_time_window() {
         let always = TimeWindow::always();
         assert_eq!(always.days.len(), 7);
-        
+
         let business = TimeWindow::business_hours();
         assert_eq!(business.days.len(), 5);
         assert_eq!(business.start_hour, 9);

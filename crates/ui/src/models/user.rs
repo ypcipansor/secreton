@@ -1,7 +1,2 @@
-use serde::{Deserialize, Serialize};
- 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct User {
-    pub username: String,
-    pub roles: Vec<String>,
-} 
+// Re-export canonical User from secreton-core
+pub use secreton_core::models::User;

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use secreton_crypto::transit::{KeyType, TransitEngine, algorithms::HashAlgorithm, keys::{KeyOptions, KeyUsage}};
+use secreton_crypto::transit::{keys::KeyOptions, KeyType, TransitEngine};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -71,9 +71,7 @@ pub fn create_transit_router() -> Router<TransitApiState> {
         .route("/decrypt/:key_name", post(decrypt_data))
 }
 
-pub async fn list_keys(
-    State(state): State<TransitApiState>,
-) -> Json<ListKeysResponse> {
+pub async fn list_keys(State(state): State<TransitApiState>) -> Json<ListKeysResponse> {
     let keys = state.engine.list_keys().await;
     Json(ListKeysResponse { keys })
 }
@@ -100,7 +98,11 @@ pub async fn create_key(
 
     let options = KeyOptions::default();
 
-    match state.engine.create_key(key_name.clone(), key_type, Some(options)).await {
+    match state
+        .engine
+        .create_key(key_name.clone(), key_type, Some(options))
+        .await
+    {
         Ok(_) => {
             info!("Created key: {}", key_name);
             Ok(Json(CreateKeyResponse {
@@ -139,12 +141,14 @@ pub async fn encrypt_data(
         None
     };
 
-    match state.engine.encrypt(&key_name, &plaintext_bytes, context.as_deref(), None).await {
+    match state
+        .engine
+        .encrypt(&key_name, &plaintext_bytes, context.as_deref(), None)
+        .await
+    {
         Ok(ciphertext) => {
             info!("Encrypted data with key: {}", key_name);
-            Ok(Json(EncryptResponse {
-                ciphertext,
-            }))
+            Ok(Json(EncryptResponse { ciphertext }))
         }
         Err(e) => {
             warn!("Failed to encrypt with key {}: {:?}", key_name, e);
@@ -171,7 +175,11 @@ pub async fn decrypt_data(
         None
     };
 
-    match state.engine.decrypt(&key_name, &request.ciphertext, context.as_deref()).await {
+    match state
+        .engine
+        .decrypt(&key_name, &request.ciphertext, context.as_deref())
+        .await
+    {
         Ok(plaintext_bytes) => {
             info!("Decrypted data with key: {}", key_name);
             Ok(Json(DecryptResponse {

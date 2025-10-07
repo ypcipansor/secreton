@@ -385,8 +385,12 @@ pub struct CreatePolicyRequest {
     pub metadata: Option<PolicyMetadata>,
 }
 
+// Use canonical PolicyRule from core
+pub use secreton_core::models::PolicyRule;
+
+// API-specific extension if capabilities needed
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PolicyRule {
+pub struct ApiPolicyRule {
     pub path: String,
     pub capabilities: Vec<String>,
     pub conditions: Option<HashMap<String, String>>,

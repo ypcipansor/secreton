@@ -3,8 +3,8 @@ use crate::{
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
-use aws_types::region::Region;
 use aws_sdk_s3::primitives::ByteStream;
+use aws_types::region::Region;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -95,19 +95,19 @@ impl S3Storage {
             }
             Err(_) => {
                 // Bucket doesn't exist, create it
-                let mut create_request = client
-                    .create_bucket()
-                    .bucket(&config.bucket_name);
+                let mut create_request = client.create_bucket().bucket(&config.bucket_name);
 
                 // Add region for non-us-east-1 buckets
                 if config.region != "us-east-1" {
-                    let location_constraint = aws_sdk_s3::types::CreateBucketConfiguration::builder()
-                        .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::from(
-                            config.region.as_str(),
-                        ))
-                        .build();
+                    let location_constraint =
+                        aws_sdk_s3::types::CreateBucketConfiguration::builder()
+                            .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::from(
+                                config.region.as_str(),
+                            ))
+                            .build();
 
-                    create_request = create_request.create_bucket_configuration(location_constraint);
+                    create_request =
+                        create_request.create_bucket_configuration(location_constraint);
                 }
 
                 create_request
@@ -159,16 +159,22 @@ impl S3Storage {
             let lifecycle_rule = aws_sdk_s3::types::LifecycleRule::builder()
                 .id("vault-secrets-lifecycle")
                 .status(aws_sdk_s3::types::ExpirationStatus::Enabled)
-                .filter(aws_sdk_s3::types::LifecycleRuleFilter::builder().prefix(&config.prefix).build())
+                .filter(
+                    aws_sdk_s3::types::LifecycleRuleFilter::builder()
+                        .prefix(&config.prefix)
+                        .build(),
+                )
                 .set_transitions(Some(transitions))
                 .build()
-                .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build lifecycle rule: {}", e) })?;
+                .map_err(|e| StorageError::ConfigurationError {
+                    message: format!("Failed to build lifecycle rule: {}", e),
+                })?;
 
             let lifecycle_config = aws_sdk_s3::types::BucketLifecycleConfiguration::builder()
                 .set_rules(Some(vec![lifecycle_rule]))
                 .build()
                 .map_err(|e| StorageError::ConfigurationError {
-                    message: format!("Failed to build lifecycle configuration: {}", e)
+                    message: format!("Failed to build lifecycle configuration: {}", e),
                 })?;
 
             client
@@ -193,7 +199,12 @@ impl S3Storage {
 
     /// Build S3 key for versioned objects
     fn build_versioned_key(&self, path: &str, version: u32) -> String {
-        format!("{}/v{}/{}", self.config.prefix.trim_end_matches('/'), version, path)
+        format!(
+            "{}/v{}/{}",
+            self.config.prefix.trim_end_matches('/'),
+            version,
+            path
+        )
     }
 
     /// Convert VaultEntry to S3 object data
@@ -289,8 +300,10 @@ impl StorageBackend for S3Storage {
             for object in objects {
                 if let Some(key) = &object.key {
                     // Extract version from key (format: vault/v{version}/path)
-                    if let Some(version_str) = key.strip_prefix(&format!("{}/v", self.config.prefix.trim_end_matches('/')))
-                        .and_then(|s| s.split('/').next()) {
+                    if let Some(version_str) = key
+                        .strip_prefix(&format!("{}/v", self.config.prefix.trim_end_matches('/')))
+                        .and_then(|s| s.split('/').next())
+                    {
                         if let Ok(version) = version_str.parse::<u32>() {
                             if version > latest_version {
                                 latest_version = version;
@@ -314,10 +327,14 @@ impl StorageBackend for S3Storage {
                     backend: "s3".to_string(),
                     message: format!("Failed to get object: {}", e),
                 })?;
-            let data = result.body.collect().await.map_err(|e| StorageError::BackendError {
-                backend: "s3".to_string(),
-                message: format!("Failed to collect body: {}", e),
-            })?;
+            let data = result
+                .body
+                .collect()
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "s3".to_string(),
+                    message: format!("Failed to collect body: {}", e),
+                })?;
 
             let entry = self.bytes_to_vault_entry(&data.into_bytes())?;
             let mut cache = self.cache.write().await;
@@ -419,9 +436,11 @@ impl StorageBackend for S3Storage {
                                 message: format!("Failed to get object: {}", e),
                             })?;
 
-                        let data = result.body.collect().await.map_err(|e| StorageError::BackendError {
-                            backend: "s3".to_string(),
-                            message: format!("Failed to collect body: {}", e),
+                        let data = result.body.collect().await.map_err(|e| {
+                            StorageError::BackendError {
+                                backend: "s3".to_string(),
+                                message: format!("Failed to collect body: {}", e),
+                            }
                         })?;
 
                         let entry = self.bytes_to_vault_entry(&data.into_bytes())?;
@@ -506,7 +525,9 @@ impl StorageBackend for S3Storage {
 
         let mut entries_by_security_level = HashMap::new();
         for entry in &entries {
-            *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+            *entries_by_security_level
+                .entry(entry.security_level)
+                .or_insert(0) += 1;
         }
 
         Ok(StorageStats {
@@ -552,7 +573,10 @@ mod tests {
         // In a real implementation, we'd use a mock client
 
         // Test the key building logic directly
-        assert_eq!(format!("{}{}", config.prefix.trim_end_matches('/'), "/test/path"), "vault/test/path");
+        assert_eq!(
+            format!("{}{}", config.prefix.trim_end_matches('/'), "/test/path"),
+            "vault/test/path"
+        );
     }
 
     #[test]
@@ -560,7 +584,15 @@ mod tests {
         let config = S3StorageConfig::default();
 
         // Test the versioned key building logic directly
-        assert_eq!(format!("{}/v{}/{}", config.prefix.trim_end_matches('/'), 2, "test/path"), "vault/v2/test/path");
+        assert_eq!(
+            format!(
+                "{}/v{}/{}",
+                config.prefix.trim_end_matches('/'),
+                2,
+                "test/path"
+            ),
+            "vault/v2/test/path"
+        );
     }
 
     #[test]

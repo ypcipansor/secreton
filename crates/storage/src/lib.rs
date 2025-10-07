@@ -22,9 +22,9 @@ pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend,
 // Re-export new backends
 pub use backends::{ConsulStorage, ConsulStorageConfig};
 pub use backends::{DynamoDBStorage, DynamoDBStorageConfig};
+pub use backends::{EtcdStorage, EtcdStorageConfig};
 pub use backends::{MySQLStorage, MySQLStorageConfig};
 pub use backends::{S3Storage, S3StorageConfig};
-pub use backends::{EtcdStorage, EtcdStorageConfig};
 
 // Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};

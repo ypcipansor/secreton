@@ -34,7 +34,7 @@ impl SecureMLDsaPrivateKey {
     }
 
     /// Convert to raw bytes (consumes self, no zeroization)
-    /// 
+    ///
     /// # Safety
     /// This bypasses automatic zeroization. Use only when transferring ownership.
     pub fn into_bytes(mut self) -> Vec<u8> {
@@ -74,7 +74,7 @@ impl SecureMLKemPrivateKey {
     }
 
     /// Convert to raw bytes (consumes self, no zeroization)
-    /// 
+    ///
     /// # Safety
     /// This bypasses automatic zeroization. Use only when transferring ownership.
     pub fn into_bytes(mut self) -> Vec<u8> {
@@ -114,7 +114,7 @@ impl SecureFalconPrivateKey {
     }
 
     /// Convert to raw bytes (consumes self, no zeroization)
-    /// 
+    ///
     /// # Safety
     /// This bypasses automatic zeroization. Use only when transferring ownership.
     pub fn into_bytes(mut self) -> Vec<u8> {
@@ -154,7 +154,7 @@ impl SecureSharedSecret {
     }
 
     /// Convert to raw bytes (consumes self, no zeroization)
-    /// 
+    ///
     /// # Safety
     /// This bypasses automatic zeroization. Use only when transferring ownership.
     pub fn into_bytes(mut self) -> Vec<u8> {

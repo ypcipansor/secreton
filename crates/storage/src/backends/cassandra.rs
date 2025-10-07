@@ -1,13 +1,13 @@
 use async_trait::async_trait;
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose};
 
 use crate::{
-    StorageBackend, StorageResult, StorageError, VaultEntry, QueryParams, HealthStatus, StorageStats,
-    SecurityLevel,
+    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
+    StorageStats, VaultEntry,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +56,10 @@ impl CassandraStorage {
             entry.owner_id.to_string(),
             entry.created_at.to_rfc3339(),
             entry.updated_at.to_rfc3339(),
-            entry.expires_at.map(|dt| dt.to_rfc3339()).unwrap_or_default(),
+            entry
+                .expires_at
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default(),
         ]
     }
 
@@ -67,42 +70,42 @@ impl CassandraStorage {
             });
         }
 
-        let id = Uuid::parse_str(&row[0])
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Invalid UUID: {}", e),
-            })?;
+        let id = Uuid::parse_str(&row[0]).map_err(|e| StorageError::SerializationError {
+            message: format!("Invalid UUID: {}", e),
+        })?;
 
         let path = row[1].clone();
-        let encrypted_data = general_purpose::STANDARD.decode(&row[2])
-            .map_err(|e| StorageError::SerializationError {
+        let encrypted_data = general_purpose::STANDARD.decode(&row[2]).map_err(|e| {
+            StorageError::SerializationError {
                 message: format!("Invalid base64 data: {}", e),
-            })?;
+            }
+        })?;
 
         let encryption_metadata: crate::EncryptionMetadata = serde_json::from_str(&row[3])
             .map_err(|e| StorageError::SerializationError {
                 message: format!("Invalid encryption metadata: {}", e),
             })?;
 
-        let security_level_int: i16 = row[4].parse()
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Invalid security level: {}", e),
-            })?;
+        let security_level_int: i16 =
+            row[4]
+                .parse()
+                .map_err(|e| StorageError::SerializationError {
+                    message: format!("Invalid security level: {}", e),
+                })?;
 
-        let metadata: HashMap<String, String> = serde_json::from_str(&row[5])
-            .unwrap_or_default();
+        let metadata: HashMap<String, String> = serde_json::from_str(&row[5]).unwrap_or_default();
 
-        let tags: Vec<String> = serde_json::from_str(&row[6])
-            .unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&row[6]).unwrap_or_default();
 
-        let version: u32 = row[7].parse()
+        let version: u32 = row[7]
+            .parse()
             .map_err(|e| StorageError::SerializationError {
                 message: format!("Invalid version: {}", e),
             })?;
 
-        let owner_id = Uuid::parse_str(&row[8])
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Invalid owner ID: {}", e),
-            })?;
+        let owner_id = Uuid::parse_str(&row[8]).map_err(|e| StorageError::SerializationError {
+            message: format!("Invalid owner ID: {}", e),
+        })?;
 
         let created_at = DateTime::parse_from_rfc3339(&row[9])
             .map_err(|e| StorageError::SerializationError {
@@ -119,11 +122,13 @@ impl CassandraStorage {
         let expires_at = if row[11].is_empty() {
             None
         } else {
-            Some(DateTime::parse_from_rfc3339(&row[11])
-                .map_err(|e| StorageError::SerializationError {
-                    message: format!("Invalid expires_at: {}", e),
-                })?
-                .with_timezone(&Utc))
+            Some(
+                DateTime::parse_from_rfc3339(&row[11])
+                    .map_err(|e| StorageError::SerializationError {
+                        message: format!("Invalid expires_at: {}", e),
+                    })?
+                    .with_timezone(&Utc),
+            )
         };
 
         let security_level = match security_level_int {

@@ -1,12 +1,14 @@
 //! High-level transit operations with comprehensive error handling
 
-use crate::error::{CryptoResult, CryptoError};
-use crate::transit::{TransitEngine, KeyType, KeyOptions};
+use crate::error::{CryptoError, CryptoResult};
 use crate::transit::algorithms::SignatureAlgorithm;
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use crate::transit::{KeyOptions, KeyType, TransitEngine};
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+// CLEANUP: Only import what's used
+use tracing::{debug, info};
+// use tracing::{error, warn}; // Not used
 
 /// High-level transit operations wrapper
 pub struct TransitOperations {
@@ -22,7 +24,7 @@ impl TransitOperations {
             operation_stats: OperationStats::new(),
         }
     }
-    
+
     /// Create a new encryption key with comprehensive options
     pub async fn create_encryption_key(
         &mut self,
@@ -31,12 +33,14 @@ impl TransitOperations {
         options: CreateKeyRequest,
     ) -> CryptoResult<CreateKeyResponse> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate key name
         if name.is_empty() || name.len() > 64 {
-            return Err(CryptoError::InvalidParameter("Key name must be 1-64 characters".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name must be 1-64 characters".to_string(),
+            ));
         }
-        
+
         // Create key options
         let key_options = KeyOptions {
             exportable: options.exportable,
@@ -46,15 +50,17 @@ impl TransitOperations {
             context: options.derivation_context.clone(),
             metadata: options.metadata.clone(),
         };
-        
+
         // Create the key
-        self.engine.create_key(name.clone(), key_type.clone(), Some(key_options)).await?;
-        
+        self.engine
+            .create_key(name.clone(), key_type.clone(), Some(key_options))
+            .await?;
+
         let processing_time = start_time.elapsed();
         self.operation_stats.record_key_creation(processing_time);
-        
+
         info!("Created encryption key: {} (type: {:?})", name, key_type);
-        
+
         Ok(CreateKeyResponse {
             name: name.clone(),
             key_type,
@@ -63,33 +69,45 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Encrypt data with additional options
     pub async fn encrypt_data(&mut self, request: EncryptRequest) -> CryptoResult<EncryptResponse> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate input
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.plaintext.is_empty() {
-            return Err(CryptoError::InvalidParameter("Plaintext cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Plaintext cannot be empty".to_string(),
+            ));
         }
-        
+
         // Perform encryption
-        let ciphertext = self.engine.encrypt(
-            &request.key_name,
-            &request.plaintext,
-            request.context.as_deref(),
-            request.key_version,
-        ).await?;
-        
+        let ciphertext = self
+            .engine
+            .encrypt(
+                &request.key_name,
+                &request.plaintext,
+                request.context.as_deref(),
+                request.key_version,
+            )
+            .await?;
+
         let processing_time = start_time.elapsed();
-        self.operation_stats.record_encryption(processing_time, request.plaintext.len());
-        
-        debug!("Encrypted {} bytes with key: {}", request.plaintext.len(), request.key_name);
-        
+        self.operation_stats
+            .record_encryption(processing_time, request.plaintext.len());
+
+        debug!(
+            "Encrypted {} bytes with key: {}",
+            request.plaintext.len(),
+            request.key_name
+        );
+
         Ok(EncryptResponse {
             key_name: request.key_name,
             ciphertext,
@@ -97,65 +115,89 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Decrypt data with validation
     pub async fn decrypt_data(&mut self, request: DecryptRequest) -> CryptoResult<DecryptResponse> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate input
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.ciphertext.is_empty() {
-            return Err(CryptoError::InvalidParameter("Ciphertext cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Ciphertext cannot be empty".to_string(),
+            ));
         }
-        
+
         // Perform decryption
-        let plaintext = self.engine.decrypt(
-            &request.key_name,
-            &request.ciphertext,
-            request.context.as_deref(),
-        ).await?;
-        
+        let plaintext = self
+            .engine
+            .decrypt(
+                &request.key_name,
+                &request.ciphertext,
+                request.context.as_deref(),
+            )
+            .await?;
+
         let processing_time = start_time.elapsed();
-        self.operation_stats.record_decryption(processing_time, plaintext.len());
-        
-        debug!("Decrypted {} bytes with key: {}", plaintext.len(), request.key_name);
-        
+        self.operation_stats
+            .record_decryption(processing_time, plaintext.len());
+
+        debug!(
+            "Decrypted {} bytes with key: {}",
+            plaintext.len(),
+            request.key_name
+        );
+
         Ok(DecryptResponse {
             key_name: request.key_name,
             plaintext,
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Sign data with comprehensive options
     pub async fn sign_data(&mut self, request: SignRequest) -> CryptoResult<SignResponse> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate input
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.data.is_empty() {
-            return Err(CryptoError::InvalidParameter("Data to sign cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Data to sign cannot be empty".to_string(),
+            ));
         }
-        
+
         // Perform signing
-        let signature = self.engine.sign(
-            &request.key_name,
-            &request.data,
-            request.algorithm,
-            request.key_version,
-        ).await?;
-        
+        let signature = self
+            .engine
+            .sign(
+                &request.key_name,
+                &request.data,
+                request.algorithm,
+                request.key_version,
+            )
+            .await?;
+
         let processing_time = start_time.elapsed();
-        self.operation_stats.record_signing(processing_time, request.data.len());
-        
-        debug!("Signed {} bytes with key: {}", request.data.len(), request.key_name);
-        
+        self.operation_stats
+            .record_signing(processing_time, request.data.len());
+
+        debug!(
+            "Signed {} bytes with key: {}",
+            request.data.len(),
+            request.key_name
+        );
+
         Ok(SignResponse {
             key_name: request.key_name,
             signature,
@@ -164,38 +206,55 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Verify signature with validation
-    pub async fn verify_signature(&mut self, request: VerifyRequest) -> CryptoResult<VerifyResponse> {
+    pub async fn verify_signature(
+        &mut self,
+        request: VerifyRequest,
+    ) -> CryptoResult<VerifyResponse> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate input
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.data.is_empty() {
-            return Err(CryptoError::InvalidParameter("Data cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Data cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.signature.is_empty() {
-            return Err(CryptoError::InvalidParameter("Signature cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Signature cannot be empty".to_string(),
+            ));
         }
-        
+
         // Perform verification
-        let is_valid = self.engine.verify(
-            &request.key_name,
-            &request.data,
-            &request.signature,
-            request.algorithm,
-        ).await?;
-        
+        let is_valid = self
+            .engine
+            .verify(
+                &request.key_name,
+                &request.data,
+                &request.signature,
+                request.algorithm,
+            )
+            .await?;
+
         let processing_time = start_time.elapsed();
-        self.operation_stats.record_verification(processing_time, request.data.len(), is_valid);
-        
-        debug!("Verified signature for {} bytes with key: {} (valid: {})", 
-               request.data.len(), request.key_name, is_valid);
-        
+        self.operation_stats
+            .record_verification(processing_time, request.data.len(), is_valid);
+
+        debug!(
+            "Verified signature for {} bytes with key: {} (valid: {})",
+            request.data.len(),
+            request.key_name,
+            is_valid
+        );
+
         Ok(VerifyResponse {
             key_name: request.key_name,
             is_valid,
@@ -203,22 +262,30 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Rotate key with validation
-    pub async fn rotate_key(&mut self, request: RotateKeyRequest) -> CryptoResult<RotateKeyResponse> {
+    pub async fn rotate_key(
+        &mut self,
+        request: RotateKeyRequest,
+    ) -> CryptoResult<RotateKeyResponse> {
         let start_time = std::time::Instant::now();
-        
+
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         let new_version = self.engine.rotate_key(&request.key_name).await?;
-        
+
         let processing_time = start_time.elapsed();
         self.operation_stats.record_key_rotation(processing_time);
-        
-        info!("Rotated key: {} to version {}", request.key_name, new_version);
-        
+
+        info!(
+            "Rotated key: {} to version {}",
+            request.key_name, new_version
+        );
+
         Ok(RotateKeyResponse {
             key_name: request.key_name,
             new_version,
@@ -226,21 +293,27 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Generate random data
-    pub async fn generate_random(&mut self, request: RandomRequest) -> CryptoResult<RandomResponse> {
+    pub async fn generate_random(
+        &mut self,
+        request: RandomRequest,
+    ) -> CryptoResult<RandomResponse> {
         let start_time = std::time::Instant::now();
-        
-        if request.bytes == 0 || request.bytes > 1024 * 1024 { // Max 1MB
-            return Err(CryptoError::InvalidParameter("Bytes must be between 1 and 1048576".to_string()));
+
+        if request.bytes == 0 || request.bytes > 1024 * 1024 {
+            // Max 1MB
+            return Err(CryptoError::InvalidParameter(
+                "Bytes must be between 1 and 1048576".to_string(),
+            ));
         }
-        
+
         let random_data = self.engine.random(request.bytes).await?;
-        
+
         let processing_time = start_time.elapsed();
-        
+
         debug!("Generated {} random bytes", request.bytes);
-        
+
         Ok(RandomResponse {
             random_data,
             bytes: request.bytes,
@@ -248,29 +321,45 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Derive key from existing key
-    pub async fn derive_key(&mut self, request: DeriveKeyRequest) -> CryptoResult<DeriveKeyResponse> {
+    pub async fn derive_key(
+        &mut self,
+        request: DeriveKeyRequest,
+    ) -> CryptoResult<DeriveKeyResponse> {
         let start_time = std::time::Instant::now();
-        
+
         if request.key_name.is_empty() {
-            return Err(CryptoError::InvalidParameter("Key name cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Key name cannot be empty".to_string(),
+            ));
         }
-        
+
         if request.context.is_empty() {
-            return Err(CryptoError::InvalidParameter("Derivation context cannot be empty".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Derivation context cannot be empty".to_string(),
+            ));
         }
-        
-        if request.length == 0 || request.length > 1024 { // Max 1KB derived key
-            return Err(CryptoError::InvalidParameter("Length must be between 1 and 1024".to_string()));
+
+        if request.length == 0 || request.length > 1024 {
+            // Max 1KB derived key
+            return Err(CryptoError::InvalidParameter(
+                "Length must be between 1 and 1024".to_string(),
+            ));
         }
-        
-        let derived_key = self.engine.derive_key(&request.key_name, &request.context, request.length).await?;
-        
+
+        let derived_key = self
+            .engine
+            .derive_key(&request.key_name, &request.context, request.length)
+            .await?;
+
         let processing_time = start_time.elapsed();
-        
-        debug!("Derived {} byte key from: {}", request.length, request.key_name);
-        
+
+        debug!(
+            "Derived {} byte key from: {}",
+            request.length, request.key_name
+        );
+
         Ok(DeriveKeyResponse {
             key_name: request.key_name,
             derived_key,
@@ -278,12 +367,12 @@ impl TransitOperations {
             processing_time_ms: processing_time.as_millis() as u64,
         })
     }
-    
+
     /// Get operation statistics
     pub fn get_stats(&self) -> &OperationStats {
         &self.operation_stats
     }
-    
+
     /// Reset operation statistics
     pub fn reset_stats(&mut self) {
         self.operation_stats = OperationStats::new();
@@ -479,17 +568,19 @@ impl OperationStats {
             last_operation: None,
         }
     }
-    
-    pub fn record_key_creation(&mut self, duration: std::time::Duration) {
+
+    pub fn record_key_creation(&mut self, _duration: std::time::Duration) {
+        // TODO: Use duration for timing statistics
         self.key_creations += 1;
         self.last_operation = Some(Utc::now());
     }
-    
-    pub fn record_key_rotation(&mut self, duration: std::time::Duration) {
+
+    pub fn record_key_rotation(&mut self, _duration: std::time::Duration) {
+        // TODO: Use duration for timing statistics
         self.key_rotations += 1;
         self.last_operation = Some(Utc::now());
     }
-    
+
     pub fn record_encryption(&mut self, duration: std::time::Duration, bytes: usize) {
         self.encryptions += 1;
         self.total_bytes_encrypted += bytes as u64;
@@ -497,7 +588,7 @@ impl OperationStats {
         Self::update_average_time(&mut self.average_encryption_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
-    
+
     pub fn record_decryption(&mut self, duration: std::time::Duration, bytes: usize) {
         self.decryptions += 1;
         self.total_bytes_decrypted += bytes as u64;
@@ -505,7 +596,7 @@ impl OperationStats {
         Self::update_average_time(&mut self.average_decryption_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
-    
+
     pub fn record_signing(&mut self, duration: std::time::Duration, bytes: usize) {
         self.signings += 1;
         self.total_bytes_signed += bytes as u64;
@@ -513,20 +604,26 @@ impl OperationStats {
         Self::update_average_time(&mut self.average_signing_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
-    
-    pub fn record_verification(&mut self, duration: std::time::Duration, bytes: usize, valid: bool) {
+
+    pub fn record_verification(
+        &mut self,
+        _duration: std::time::Duration,
+        _bytes: usize,
+        valid: bool,
+    ) {
+        // TODO: Use duration and bytes for detailed statistics
         self.verifications += 1;
         if valid {
             self.successful_verifications += 1;
         }
         self.last_operation = Some(Utc::now());
     }
-    
+
     fn update_average_time(avg: &mut f64, duration: std::time::Duration, count: u64) {
         let new_time = duration.as_millis() as f64;
         *avg = (*avg * (count - 1) as f64 + new_time) / count as f64;
     }
-    
+
     pub fn verification_success_rate(&self) -> f64 {
         if self.verifications == 0 {
             return 0.0;

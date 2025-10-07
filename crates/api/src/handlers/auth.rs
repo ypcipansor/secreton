@@ -14,6 +14,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Use canonical types from core
+use secreton_core::models::{LoginRequest, LoginResponse, RefreshTokenRequest, UserInfo};
+
 use crate::{
     handlers::AppState,
     ApiResponse, ApiResult, ApiError,
@@ -108,42 +111,7 @@ mod tests {
     }
 }
 
-/// Login request
-#[derive(Debug, Deserialize)]
-pub struct LoginRequest {
-    pub username: String,
-    pub password: String,
-    pub mfa_code: Option<String>,
-    pub remember_me: Option<bool>,
-}
-
-/// Login response
-#[derive(Debug, Serialize)]
-pub struct LoginResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub token_type: String,
-    pub expires_in: u64,
-    pub user: UserInfo,
-    pub mfa_required: bool,
-}
-
-/// User information
-#[derive(Debug, Serialize)]
-pub struct UserInfo {
-    pub id: String,
-    pub username: String,
-    pub email: String,
-    pub roles: Vec<String>,
-    pub permissions: Vec<String>,
-    pub last_login: chrono::DateTime<chrono::Utc>,
-}
-
-/// Token refresh request
-#[derive(Debug, Deserialize)]
-pub struct RefreshTokenRequest {
-    pub refresh_token: String,
-}
+// LoginRequest, LoginResponse, RefreshTokenRequest, UserInfo now imported from secreton_core::models
 
 /// Token verification request
 #[derive(Debug, Deserialize)]

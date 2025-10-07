@@ -9,7 +9,7 @@ pub mod mldsa;
 pub mod mlkem;
 pub mod zeroize;
 
-use crate::error::{CryptoResult, CryptoError};
+use crate::error::CryptoError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -116,37 +116,58 @@ pub struct PQCRegistry;
 
 impl PQCRegistry {
     /// Create ML-DSA provider
-    pub fn create_mldsa_provider(variant: crate::pqc::mldsa::MLDsaVariant) -> Box<dyn PostQuantumSignatures> {
+    pub fn create_mldsa_provider(
+        variant: crate::pqc::mldsa::MLDsaVariant,
+    ) -> Box<dyn PostQuantumSignatures> {
         Box::new(crate::pqc::mldsa::MLDsaProvider::new(variant))
     }
 
     /// Create ML-KEM provider
-    pub fn create_mlkem_provider(variant: crate::pqc::mlkem::MLKemVariant) -> Box<dyn PostQuantumKeyExchange> {
+    pub fn create_mlkem_provider(
+        variant: crate::pqc::mlkem::MLKemVariant,
+    ) -> Box<dyn PostQuantumKeyExchange> {
         Box::new(crate::pqc::mlkem::MLKemProvider::new(variant))
     }
 
     /// Create Falcon provider
-    pub fn create_falcon_provider(variant: crate::pqc::falcon::FalconVariant) -> Box<dyn PostQuantumSignatures> {
+    pub fn create_falcon_provider(
+        variant: crate::pqc::falcon::FalconVariant,
+    ) -> Box<dyn PostQuantumSignatures> {
         Box::new(crate::pqc::falcon::FalconProvider::new(variant))
     }
 
     /// Get available algorithms
     pub fn get_available_algorithms() -> Vec<&'static str> {
         vec![
-            "ML-DSA-44", "ML-DSA-65", "ML-DSA-87",
-            "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024",
-            "Falcon-512", "Falcon-1024",
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "ML-DSA-87",
+            "ML-KEM-512",
+            "ML-KEM-768",
+            "ML-KEM-1024",
+            "Falcon-512",
+            "Falcon-1024",
         ]
     }
 
     /// Create provider by algorithm name
     pub fn create_provider_by_name(name: &str) -> PQCResult<Box<dyn PostQuantumSignatures>> {
         match name {
-            "ML-DSA-44" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(crate::pqc::mldsa::MLDsaVariant::MLDsa44))),
-            "ML-DSA-65" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(crate::pqc::mldsa::MLDsaVariant::MLDsa65))),
-            "ML-DSA-87" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(crate::pqc::mldsa::MLDsaVariant::MLDsa87))),
-            "Falcon-512" => Ok(Box::new(crate::pqc::falcon::FalconProvider::new(crate::pqc::falcon::FalconVariant::Falcon512))),
-            "Falcon-1024" => Ok(Box::new(crate::pqc::falcon::FalconProvider::new(crate::pqc::falcon::FalconVariant::Falcon1024))),
+            "ML-DSA-44" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(
+                crate::pqc::mldsa::MLDsaVariant::MLDsa44,
+            ))),
+            "ML-DSA-65" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(
+                crate::pqc::mldsa::MLDsaVariant::MLDsa65,
+            ))),
+            "ML-DSA-87" => Ok(Box::new(crate::pqc::mldsa::MLDsaProvider::new(
+                crate::pqc::mldsa::MLDsaVariant::MLDsa87,
+            ))),
+            "Falcon-512" => Ok(Box::new(crate::pqc::falcon::FalconProvider::new(
+                crate::pqc::falcon::FalconVariant::Falcon512,
+            ))),
+            "Falcon-1024" => Ok(Box::new(crate::pqc::falcon::FalconProvider::new(
+                crate::pqc::falcon::FalconVariant::Falcon1024,
+            ))),
             _ => Err(PQCError::UnsupportedAlgorithm(name.to_string())),
         }
     }
@@ -338,7 +359,10 @@ mod tests {
         assert!(characteristics.iter().any(|c| c.name == "Falcon-512"));
 
         // Check security levels
-        let mldsa_65 = characteristics.iter().find(|c| c.name == "ML-DSA-65").unwrap();
+        let mldsa_65 = characteristics
+            .iter()
+            .find(|c| c.name == "ML-DSA-65")
+            .unwrap();
         assert_eq!(mldsa_65.security_level, "192-bit");
         assert_eq!(mldsa_65.operation, "Signature");
     }
@@ -350,7 +374,8 @@ mod tests {
         assert_eq!(provider.algorithm_id(), "ML-DSA-44");
 
         // Test Falcon provider creation
-        let provider = PQCRegistry::create_falcon_provider(crate::pqc::falcon::FalconVariant::Falcon512);
+        let provider =
+            PQCRegistry::create_falcon_provider(crate::pqc::falcon::FalconVariant::Falcon512);
         assert_eq!(provider.algorithm_id(), "Falcon-512");
     }
 

@@ -1796,21 +1796,22 @@ impl Storage {
         Ok(())
     }
 
+    /// Hash password using crypto service
     pub fn hash_password(password: &str) -> Result<String> {
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        let hash = argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| anyhow::anyhow!(e))?
-            .to_string();
-        Ok(hash)
+        use secreton_crypto::hashing::HashingService;
+        
+        let result = HashingService::hash_password_argon2(password)
+            .map_err(|e| anyhow::anyhow!("Password hashing failed: {}", e))?;
+        
+        Ok(result.hash)
     }
 
+    /// Verify password using crypto service
     pub fn verify_password(hash: &str, password: &str) -> Result<bool> {
-        let parsed_hash = PasswordHash::new(hash).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok())
+        use secreton_crypto::hashing::HashingService;
+        
+        HashingService::verify_password_argon2(password, hash)
+            .map_err(|e| anyhow::anyhow!("Password verification failed: {}", e))
     }
 
     pub async fn create_user(&self, username: &str, password: &str, namespace: &str) -> Result<()> {

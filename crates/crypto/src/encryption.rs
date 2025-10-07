@@ -40,12 +40,9 @@ impl SymmetricCipher for Aes256GcmCipher {
         let nonce_bytes = generate_random_bytes(12)?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext =
-            cipher
-                .encrypt(nonce, plaintext)
-                .map_err(|e| CryptoError::EncryptionFailed(
-                    format!("AES-GCM encryption failed: {}", e)
-                ))?;
+        let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
+            CryptoError::EncryptionFailed(format!("AES-GCM encryption failed: {}", e))
+        })?;
 
         Ok(EncryptedData {
             algorithm: AlgorithmId::Aes256Gcm,
@@ -73,9 +70,7 @@ impl SymmetricCipher for Aes256GcmCipher {
 
         cipher
             .decrypt(nonce, encrypted.ciphertext.as_ref())
-            .map_err(|e| CryptoError::DecryptionFailed(
-                format!("AES-GCM decryption failed: {}", e)
-            ))
+            .map_err(|e| CryptoError::DecryptionFailed(format!("AES-GCM decryption failed: {}", e)))
     }
 }
 
@@ -98,12 +93,9 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
         let nonce_bytes = generate_random_bytes(12)?;
         let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext =
-            cipher
-                .encrypt(nonce, plaintext)
-                .map_err(|e| CryptoError::EncryptionFailed(
-                    format!("ChaCha20-Poly1305 encryption failed: {}", e)
-                ))?;
+        let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
+            CryptoError::EncryptionFailed(format!("ChaCha20-Poly1305 encryption failed: {}", e))
+        })?;
 
         Ok(EncryptedData {
             algorithm: AlgorithmId::ChaCha20Poly1305,
@@ -131,9 +123,9 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
 
         cipher
             .decrypt(nonce, encrypted.ciphertext.as_ref())
-            .map_err(|e| CryptoError::DecryptionFailed(
-                format!("ChaCha20-Poly1305 decryption failed: {}", e)
-            ))
+            .map_err(|e| {
+                CryptoError::DecryptionFailed(format!("ChaCha20-Poly1305 decryption failed: {}", e))
+            })
     }
 }
 
@@ -166,9 +158,10 @@ impl CryptoEngine {
                 let cipher = ChaCha20Poly1305Cipher;
                 cipher.encrypt(plaintext, key)
             }
-            _ => Err(CryptoError::EncryptionFailed(
-                format!("Unsupported encryption algorithm: {}", algorithm)
-            )),
+            _ => Err(CryptoError::EncryptionFailed(format!(
+                "Unsupported encryption algorithm: {}",
+                algorithm
+            ))),
         }
     }
 
@@ -182,9 +175,10 @@ impl CryptoEngine {
                 let cipher = ChaCha20Poly1305Cipher;
                 cipher.decrypt(encrypted, key)
             }
-            _ => Err(CryptoError::DecryptionFailed(
-                format!("Unsupported decryption algorithm: {}", encrypted.algorithm)
-            )),
+            _ => Err(CryptoError::DecryptionFailed(format!(
+                "Unsupported decryption algorithm: {}",
+                encrypted.algorithm
+            ))),
         }
     }
 }

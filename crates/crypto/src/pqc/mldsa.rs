@@ -39,22 +39,22 @@ impl MLDsaVariant {
     }
 
     /// Get the maximum detached signature size in bytes for this variant
-    /// 
+    ///
     /// Note: Actual signature sizes from pqcrypto-mldsa may vary slightly.
     /// These values represent typical/maximum sizes from the library implementation.
-    /// 
+    ///
     /// Reference: FIPS 204 ML-DSA specification
     pub fn signature_size(&self) -> usize {
         match self {
             // ML-DSA-44: NIST spec says 2420, but pqcrypto-mldsa produces ~2420 bytes
             MLDsaVariant::MLDsa44 => 2420,
-            // ML-DSA-65: NIST spec says 3309, but pqcrypto-mldsa produces ~3309 bytes  
+            // ML-DSA-65: NIST spec says 3309, but pqcrypto-mldsa produces ~3309 bytes
             MLDsaVariant::MLDsa65 => 3309,
             // ML-DSA-87: NIST spec says 4627, pqcrypto-mldsa matches
             MLDsaVariant::MLDsa87 => 4627,
         }
     }
-    
+
     /// Get the maximum signature size (upper bound for allocation)
     pub fn max_signature_size(&self) -> usize {
         self.signature_size() + 50 // Add 50 bytes buffer for encoding overhead
@@ -117,10 +117,10 @@ impl MLDsaKeypair {
     }
 
     /// Sign a message and return detached signature
-    /// 
+    ///
     /// # Arguments
     /// * `message` - The message to sign (max 100 MB recommended)
-    /// 
+    ///
     /// # Security
     /// - Uses cryptographically secure randomness internally
     /// - Returns DETACHED signature (signature only, not message)
@@ -168,16 +168,16 @@ impl MLDsaKeypair {
     }
 
     /// Verify a detached signature
-    /// 
+    ///
     /// # Arguments
     /// * `message` - The original message
     /// * `signature` - The detached signature to verify
-    /// 
+    ///
     /// # Returns
     /// * `Ok(true)` if signature is valid
     /// * `Ok(false)` if signature is invalid
     /// * `Err(...)` if inputs are malformed
-    /// 
+    ///
     /// # Security
     /// - Constant-time verification
     /// - Returns false for invalid signatures (doesn't leak why)
@@ -190,7 +190,9 @@ impl MLDsaKeypair {
 
         // Validate public key size
         if self.public_key.len() != self.variant.public_key_size() {
-            return Err(CryptoError::InvalidKey("Invalid public key size".to_string()));
+            return Err(CryptoError::InvalidKey(
+                "Invalid public key size".to_string(),
+            ));
         }
 
         // Validate signature size (approximate check - some variance allowed)
@@ -207,24 +209,30 @@ impl MLDsaKeypair {
             MLDsaVariant::MLDsa44 => {
                 let pk = mldsa44::PublicKey::from_bytes(&self.public_key)
                     .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
-                let detached_sig = mldsa44::DetachedSignature::from_bytes(signature)
-                    .map_err(|_| CryptoError::InvalidSignature("Signature format invalid".to_string()))?;
+                let detached_sig =
+                    mldsa44::DetachedSignature::from_bytes(signature).map_err(|_| {
+                        CryptoError::InvalidSignature("Signature format invalid".to_string())
+                    })?;
                 let result = mldsa44::verify_detached_signature(&detached_sig, message, &pk);
                 Ok(result.is_ok())
             }
             MLDsaVariant::MLDsa65 => {
                 let pk = mldsa65::PublicKey::from_bytes(&self.public_key)
                     .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
-                let detached_sig = mldsa65::DetachedSignature::from_bytes(signature)
-                    .map_err(|_| CryptoError::InvalidSignature("Signature format invalid".to_string()))?;
+                let detached_sig =
+                    mldsa65::DetachedSignature::from_bytes(signature).map_err(|_| {
+                        CryptoError::InvalidSignature("Signature format invalid".to_string())
+                    })?;
                 let result = mldsa65::verify_detached_signature(&detached_sig, message, &pk);
                 Ok(result.is_ok())
             }
             MLDsaVariant::MLDsa87 => {
                 let pk = mldsa87::PublicKey::from_bytes(&self.public_key)
                     .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
-                let detached_sig = mldsa87::DetachedSignature::from_bytes(signature)
-                    .map_err(|_| CryptoError::InvalidSignature("Signature format invalid".to_string()))?;
+                let detached_sig =
+                    mldsa87::DetachedSignature::from_bytes(signature).map_err(|_| {
+                        CryptoError::InvalidSignature("Signature format invalid".to_string())
+                    })?;
                 let result = mldsa87::verify_detached_signature(&detached_sig, message, &pk);
                 Ok(result.is_ok())
             }
@@ -299,16 +307,25 @@ impl crate::pqc::PostQuantumSignatures for MLDsaProvider {
             private_key: private_key.to_vec(),
             variant: self.variant,
         };
-        keypair.sign(message).map_err(|e| crate::pqc::PQCError::SignatureError(e.to_string()))
+        keypair
+            .sign(message)
+            .map_err(|e| crate::pqc::PQCError::SignatureError(e.to_string()))
     }
 
-    fn verify(&self, message: &[u8], signature: &[u8], public_key: &[u8]) -> crate::pqc::PQCResult<bool> {
+    fn verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> crate::pqc::PQCResult<bool> {
         let keypair = MLDsaKeypair {
             public_key: public_key.to_vec(),
             private_key: Vec::new(), // Not needed for verification
             variant: self.variant,
         };
-        keypair.verify(message, signature).map_err(|e| crate::pqc::PQCError::VerificationError(e.to_string()))
+        keypair
+            .verify(message, signature)
+            .map_err(|e| crate::pqc::PQCError::VerificationError(e.to_string()))
     }
 
     fn signature_size(&self) -> usize {
@@ -324,7 +341,7 @@ pub struct MLDsaBatchSigner {
 
 impl MLDsaBatchSigner {
     /// Create a new batch signer
-    /// 
+    ///
     /// # Security Warning
     /// Batch operations reuse the same private key. Ensure the underlying
     /// pqcrypto-mldsa library uses fresh randomness for each signature.
@@ -337,7 +354,7 @@ impl MLDsaBatchSigner {
                 private_key.len()
             )));
         }
-        
+
         Ok(Self {
             private_key,
             variant,
@@ -345,14 +362,14 @@ impl MLDsaBatchSigner {
     }
 
     /// Sign multiple messages efficiently (returns detached signatures)
-    /// 
+    ///
     /// # Arguments
     /// * `messages` - Slice of messages to sign
-    /// 
+    ///
     /// # Performance
     /// Pre-allocates result vector for better performance.
     /// Consider using parallel processing for large batches (requires rayon).
-    /// 
+    ///
     /// # Security
     /// - Each signature uses fresh randomness (handled by pqcrypto-mldsa)
     /// - Recommended batch size: ≤ 1000 messages
@@ -360,13 +377,13 @@ impl MLDsaBatchSigner {
     pub fn batch_sign(&self, messages: &[&[u8]]) -> CryptoResult<Vec<Vec<u8>>> {
         // Pre-allocate for performance
         let mut signatures = Vec::with_capacity(messages.len());
-        
+
         // Recommended batch size limit
         const MAX_BATCH_SIZE: usize = 1000;
         if messages.len() > MAX_BATCH_SIZE {
             return Err(CryptoError::InvalidInput(format!(
-                "Batch size too large: {} (max: {})", 
-                messages.len(), 
+                "Batch size too large: {} (max: {})",
+                messages.len(),
                 MAX_BATCH_SIZE
             )));
         }
@@ -375,25 +392,30 @@ impl MLDsaBatchSigner {
             // Validate message size
             const MAX_MESSAGE_SIZE: usize = 100 * 1024 * 1024;
             if message.len() > MAX_MESSAGE_SIZE {
-                return Err(CryptoError::InvalidInput("Message too large in batch".to_string()));
+                return Err(CryptoError::InvalidInput(
+                    "Message too large in batch".to_string(),
+                ));
             }
 
             let signature = match self.variant {
                 MLDsaVariant::MLDsa44 => {
-                    let sk = mldsa44::SecretKey::from_bytes(&self.private_key)
-                        .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
+                    let sk = mldsa44::SecretKey::from_bytes(&self.private_key).map_err(|_| {
+                        CryptoError::InvalidKey("Key validation failed".to_string())
+                    })?;
                     let detached_sig = mldsa44::detached_sign(message, &sk);
                     detached_sig.as_bytes().to_vec()
                 }
                 MLDsaVariant::MLDsa65 => {
-                    let sk = mldsa65::SecretKey::from_bytes(&self.private_key)
-                        .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
+                    let sk = mldsa65::SecretKey::from_bytes(&self.private_key).map_err(|_| {
+                        CryptoError::InvalidKey("Key validation failed".to_string())
+                    })?;
                     let detached_sig = mldsa65::detached_sign(message, &sk);
                     detached_sig.as_bytes().to_vec()
                 }
                 MLDsaVariant::MLDsa87 => {
-                    let sk = mldsa87::SecretKey::from_bytes(&self.private_key)
-                        .map_err(|_| CryptoError::InvalidKey("Key validation failed".to_string()))?;
+                    let sk = mldsa87::SecretKey::from_bytes(&self.private_key).map_err(|_| {
+                        CryptoError::InvalidKey("Key validation failed".to_string())
+                    })?;
                     let detached_sig = mldsa87::detached_sign(message, &sk);
                     detached_sig.as_bytes().to_vec()
                 }
@@ -422,9 +444,15 @@ impl MLDsaBatchVerifier {
     }
 
     /// Verify multiple signatures efficiently
-    pub fn batch_verify(&self, messages: &[&[u8]], signatures: &[&[u8]]) -> CryptoResult<Vec<bool>> {
+    pub fn batch_verify(
+        &self,
+        messages: &[&[u8]],
+        signatures: &[&[u8]],
+    ) -> CryptoResult<Vec<bool>> {
         if messages.len() != signatures.len() {
-            return Err(CryptoError::InvalidInput("Messages and signatures count mismatch".to_string()));
+            return Err(CryptoError::InvalidInput(
+                "Messages and signatures count mismatch".to_string(),
+            ));
         }
 
         let mut results = Vec::new();
@@ -432,24 +460,33 @@ impl MLDsaBatchVerifier {
         for (message, signature) in messages.iter().zip(signatures.iter()) {
             let is_valid = match self.variant {
                 MLDsaVariant::MLDsa44 => {
-                    let pk = mldsa44::PublicKey::from_bytes(&self.public_key)
-                        .map_err(|_| CryptoError::InvalidKey("Invalid ML-DSA-44 public key".to_string()))?;
-                    let detached_sig = mldsa44::DetachedSignature::from_bytes(signature)
-                        .map_err(|_| CryptoError::InvalidSignature("Invalid ML-DSA-44 signature".to_string()))?;
+                    let pk = mldsa44::PublicKey::from_bytes(&self.public_key).map_err(|_| {
+                        CryptoError::InvalidKey("Invalid ML-DSA-44 public key".to_string())
+                    })?;
+                    let detached_sig =
+                        mldsa44::DetachedSignature::from_bytes(signature).map_err(|_| {
+                            CryptoError::InvalidSignature("Invalid ML-DSA-44 signature".to_string())
+                        })?;
                     mldsa44::verify_detached_signature(&detached_sig, message, &pk).is_ok()
                 }
                 MLDsaVariant::MLDsa65 => {
-                    let pk = mldsa65::PublicKey::from_bytes(&self.public_key)
-                        .map_err(|_| CryptoError::InvalidKey("Invalid ML-DSA-65 public key".to_string()))?;
-                    let detached_sig = mldsa65::DetachedSignature::from_bytes(signature)
-                        .map_err(|_| CryptoError::InvalidSignature("Invalid ML-DSA-65 signature".to_string()))?;
+                    let pk = mldsa65::PublicKey::from_bytes(&self.public_key).map_err(|_| {
+                        CryptoError::InvalidKey("Invalid ML-DSA-65 public key".to_string())
+                    })?;
+                    let detached_sig =
+                        mldsa65::DetachedSignature::from_bytes(signature).map_err(|_| {
+                            CryptoError::InvalidSignature("Invalid ML-DSA-65 signature".to_string())
+                        })?;
                     mldsa65::verify_detached_signature(&detached_sig, message, &pk).is_ok()
                 }
                 MLDsaVariant::MLDsa87 => {
-                    let pk = mldsa87::PublicKey::from_bytes(&self.public_key)
-                        .map_err(|_| CryptoError::InvalidKey("Invalid ML-DSA-87 public key".to_string()))?;
-                    let detached_sig = mldsa87::DetachedSignature::from_bytes(signature)
-                        .map_err(|_| CryptoError::InvalidSignature("Invalid ML-DSA-87 signature".to_string()))?;
+                    let pk = mldsa87::PublicKey::from_bytes(&self.public_key).map_err(|_| {
+                        CryptoError::InvalidKey("Invalid ML-DSA-87 public key".to_string())
+                    })?;
+                    let detached_sig =
+                        mldsa87::DetachedSignature::from_bytes(signature).map_err(|_| {
+                            CryptoError::InvalidSignature("Invalid ML-DSA-87 signature".to_string())
+                        })?;
                     mldsa87::verify_detached_signature(&detached_sig, message, &pk).is_ok()
                 }
             };
@@ -485,9 +522,11 @@ mod tests {
         assert_eq!(MLDsaVariant::MLDsa87.private_key_size(), 4896);
         assert_eq!(MLDsaVariant::MLDsa87.signature_size(), 4627);
         assert_eq!(MLDsaVariant::MLDsa87.security_level(), "256-bit");
-        
+
         // Test max_signature_size
-        assert!(MLDsaVariant::MLDsa44.max_signature_size() > MLDsaVariant::MLDsa44.signature_size());
+        assert!(
+            MLDsaVariant::MLDsa44.max_signature_size() > MLDsaVariant::MLDsa44.signature_size()
+        );
     }
 
     #[test]
@@ -505,7 +544,7 @@ mod tests {
         let message = b"Hello, Post-Quantum World!";
 
         let signature = keypair.sign(message).unwrap();
-        
+
         // Detached signature should be approximately the expected size
         // Allow some variance due to encoding
         let expected_size = MLDsaVariant::MLDsa44.signature_size();
@@ -524,7 +563,10 @@ mod tests {
         // Test with wrong message
         let wrong_message = b"Hello, Wrong World!";
         let is_invalid = keypair.verify(wrong_message, &signature).unwrap();
-        assert!(!is_invalid, "Signature should not verify with different message");
+        assert!(
+            !is_invalid,
+            "Signature should not verify with different message"
+        );
     }
 
     #[test]
@@ -543,17 +585,19 @@ mod tests {
         let messages_raw = vec![b"Message 1", b"Message 2", b"Message 3"];
         let messages: Vec<&[u8]> = messages_raw.iter().map(|m| m.as_ref()).collect();
 
-        let batch_signer = MLDsaBatchSigner::new(keypair.private_key.clone(), MLDsaVariant::MLDsa44).unwrap();
+        let batch_signer =
+            MLDsaBatchSigner::new(keypair.private_key.clone(), MLDsaVariant::MLDsa44).unwrap();
         let signatures = batch_signer.batch_sign(&messages).unwrap();
 
         assert_eq!(signatures.len(), 3, "Should produce 3 signatures");
-        
+
         // All signatures should be approximately the expected size
         let expected_size = MLDsaVariant::MLDsa44.signature_size();
         for sig in &signatures {
             assert!(
                 sig.len() >= expected_size - 50 && sig.len() <= expected_size + 50,
-                "Signature size {} not in valid range", sig.len()
+                "Signature size {} not in valid range",
+                sig.len()
             );
         }
 
@@ -562,64 +606,81 @@ mod tests {
         let results = batch_verifier.batch_verify(&messages, &sig_slices).unwrap();
 
         assert_eq!(results.len(), 3);
-        assert!(results.iter().all(|&valid| valid), "All signatures should be valid");
+        assert!(
+            results.iter().all(|&valid| valid),
+            "All signatures should be valid"
+        );
     }
 
     #[test]
     fn test_different_variants() {
-        for variant in [MLDsaVariant::MLDsa44, MLDsaVariant::MLDsa65, MLDsaVariant::MLDsa87] {
+        for variant in [
+            MLDsaVariant::MLDsa44,
+            MLDsaVariant::MLDsa65,
+            MLDsaVariant::MLDsa87,
+        ] {
             let keypair = MLDsaKeypair::generate(variant).unwrap();
             let message = b"Test message";
 
             let signature = keypair.sign(message).unwrap();
-            
+
             // Check signature size is in acceptable range
             let expected = variant.signature_size();
             assert!(
                 signature.len() >= expected - 50 && signature.len() <= expected + 50,
                 "Variant {:?}: signature size {} not in range [{}, {}]",
-                variant, signature.len(), expected - 50, expected + 50
+                variant,
+                signature.len(),
+                expected - 50,
+                expected + 50
             );
 
             let is_valid = keypair.verify(message, &signature).unwrap();
-            assert!(is_valid, "Signature for variant {:?} should be valid", variant);
+            assert!(
+                is_valid,
+                "Signature for variant {:?} should be valid",
+                variant
+            );
         }
     }
-    
+
     #[test]
     fn test_input_validation() {
         let keypair = MLDsaKeypair::generate(MLDsaVariant::MLDsa44).unwrap();
-        
+
         // Test invalid key size
         let invalid_sk = vec![0u8; 100]; // Wrong size
         let batch_signer = MLDsaBatchSigner::new(invalid_sk, MLDsaVariant::MLDsa44);
         assert!(batch_signer.is_err(), "Should reject invalid key size");
-        
+
         // Test message too large
         let huge_message = vec![0u8; 101 * 1024 * 1024]; // 101 MB
         let result = keypair.sign(&huge_message);
         assert!(result.is_err(), "Should reject oversized message");
-        
+
         // Test batch size limit
-        let batch_signer = MLDsaBatchSigner::new(keypair.private_key.clone(), MLDsaVariant::MLDsa44).unwrap();
+        let batch_signer =
+            MLDsaBatchSigner::new(keypair.private_key.clone(), MLDsaVariant::MLDsa44).unwrap();
         let too_many: Vec<&[u8]> = vec![b"msg"; 1001];
         let result = batch_signer.batch_sign(&too_many);
         assert!(result.is_err(), "Should reject oversized batch");
     }
-    
+
     #[test]
     fn test_cross_variant_rejection() {
         // Generate keypairs for different variants
         let keypair_44 = MLDsaKeypair::generate(MLDsaVariant::MLDsa44).unwrap();
         let keypair_65 = MLDsaKeypair::generate(MLDsaVariant::MLDsa65).unwrap();
-        
+
         let message = b"Test message";
         let signature_44 = keypair_44.sign(message).unwrap();
-        
+
         // Try to verify ML-DSA-44 signature with ML-DSA-65 key (should fail)
         let result = keypair_65.verify(message, &signature_44);
         // This should either error or return false
-        assert!(result.is_err() || result.unwrap() == false, 
-                "Cross-variant verification should fail");
+        assert!(
+            result.is_err() || result.unwrap() == false,
+            "Cross-variant verification should fail"
+        );
     }
 }

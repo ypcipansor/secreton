@@ -1,8 +1,8 @@
 //! Transit Engine - Encryption as a Service
 //!
-//! This module provides a comprehensive transit encryption service similar to HashiCorp Vault's 
+//! This module provides a comprehensive transit encryption service similar to HashiCorp Vault's
 //! transit secrets engine, with enhanced RustCrypto integration for cryptographic operations.
-//! 
+//!
 //! Key features:
 //! - Multiple encryption algorithms (AES-GCM, ChaCha20Poly1305, RSA, ECC)
 //! - Key rotation and versioning
@@ -13,34 +13,33 @@
 //! - Audit logging for compliance
 
 pub mod algorithms;
+pub mod batch;
 pub mod keys;
 pub mod operations;
-pub mod batch;
 pub mod policies;
 
 pub use algorithms::*;
-pub use keys::{TransitKey, KeyType, KeyOptions, KeyUsage, KeyInfo};
-pub use operations::*;
 pub use batch::*;
+pub use keys::{KeyInfo, KeyOptions, KeyType, KeyUsage, TransitKey};
+pub use operations::*;
 pub use policies::*;
 
+use crate::error::{CryptoError, CryptoResult};
 use async_trait::async_trait;
-use crate::error::{CryptoResult, CryptoError};
-use serde::{Serialize, Deserialize};
+// CLEANUP: Removed unused imports
+// use chrono::{DateTime, Utc}; // Not used in this file
+// use serde::{Deserialize, Serialize}; // Not used in this file
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
-use chrono::{DateTime, Utc};
-
-/// Transit engine for encryption as a service
+use tracing::{info, warn}; // Import both info and warn/// Transit engine for encryption as a service
 pub struct TransitEngine {
     /// Storage for transit keys
     keys: Arc<RwLock<HashMap<String, TransitKey>>>,
-    
+
     /// Global policies for the transit engine
     policies: TransitPolicies,
-    
+
     /// Audit logger
     audit: Option<Box<dyn AuditLogger + Send + Sync>>,
 }
@@ -54,7 +53,7 @@ impl TransitEngine {
             audit: None,
         }
     }
-    
+
     /// Create transit engine with custom policies
     pub fn with_policies(policies: TransitPolicies) -> Self {
         Self {
@@ -63,13 +62,13 @@ impl TransitEngine {
             audit: None,
         }
     }
-    
+
     /// Set audit logger
     pub fn with_audit_logger(mut self, logger: Box<dyn AuditLogger + Send + Sync>) -> Self {
         self.audit = Some(logger);
         self
     }
-    
+
     /// Create a new transit key
     pub async fn create_key(
         &self,
@@ -78,74 +77,78 @@ impl TransitEngine {
         options: Option<KeyOptions>,
     ) -> CryptoResult<()> {
         let mut keys = self.keys.write().await;
-        
+
         if keys.contains_key(&name) {
             return Err(CryptoError::KeyAlreadyExists(name));
         }
-        
+
         // Clone key_type before moving it
         let key_type_clone = key_type.clone();
         let transit_key = TransitKey::new(name.clone(), key_type, options.unwrap_or_default())?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_key_creation(&name, &key_type_clone).await;
         }
-        
+
         keys.insert(name.clone(), transit_key);
         info!("Created transit key: {}", name);
-        
+
         Ok(())
     }
-    
+
     /// List all transit keys
     pub async fn list_keys(&self) -> Vec<String> {
         let keys = self.keys.read().await;
         keys.keys().cloned().collect()
     }
-    
+
     /// Get key information
     pub async fn get_key_info(&self, name: &str) -> CryptoResult<KeyInfo> {
         let keys = self.keys.read().await;
-        let key = keys.get(name).ok_or_else(|| CryptoError::KeyNotFound(name.to_string()))?;
+        let key = keys
+            .get(name)
+            .ok_or_else(|| CryptoError::KeyNotFound(name.to_string()))?;
         Ok(key.info())
     }
-    
+
     /// Rotate a transit key (create new version)
     pub async fn rotate_key(&self, name: &str) -> CryptoResult<u32> {
         let mut keys = self.keys.write().await;
-        let key = keys.get_mut(name).ok_or_else(|| CryptoError::KeyNotFound(name.to_string()))?;
-        
+        let key = keys
+            .get_mut(name)
+            .ok_or_else(|| CryptoError::KeyNotFound(name.to_string()))?;
+
         let new_version = key.rotate()?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_key_rotation(name, new_version).await;
         }
-        
+
         info!("Rotated transit key: {} to version {}", name, new_version);
         Ok(new_version)
     }
-    
+
     /// Delete a transit key
     pub async fn delete_key(&self, name: &str) -> CryptoResult<()> {
         let mut keys = self.keys.write().await;
-        
+
         if !keys.contains_key(name) {
             return Err(CryptoError::KeyNotFound(name.to_string()));
         }
-        
+
         keys.remove(name);
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_key_deletion(name).await;
         }
-        
+
         warn!("Deleted transit key: {}", name);
         Ok(())
     }
-    
+
     /// Encrypt data using a transit key
     pub async fn encrypt(
         &self,
@@ -155,18 +158,20 @@ impl TransitEngine {
         key_version: Option<u32>,
     ) -> CryptoResult<String> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name).ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
-        
+        let key = keys
+            .get(key_name)
+            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+
         let result = key.encrypt(plaintext, context, key_version)?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_encryption(key_name, plaintext.len()).await;
         }
-        
+
         Ok(result)
     }
-    
+
     /// Decrypt data using a transit key
     pub async fn decrypt(
         &self,
@@ -175,18 +180,20 @@ impl TransitEngine {
         context: Option<&[u8]>,
     ) -> CryptoResult<Vec<u8>> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name).ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
-        
+        let key = keys
+            .get(key_name)
+            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+
         let result = key.decrypt(ciphertext, context)?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_decryption(key_name, result.len()).await;
         }
-        
+
         Ok(result)
     }
-    
+
     /// Sign data using a transit key
     pub async fn sign(
         &self,
@@ -196,18 +203,20 @@ impl TransitEngine {
         key_version: Option<u32>,
     ) -> CryptoResult<String> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name).ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
-        
+        let key = keys
+            .get(key_name)
+            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+
         let result = key.sign(data, algorithm, key_version)?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_signing(key_name, data.len()).await;
         }
-        
+
         Ok(result)
     }
-    
+
     /// Verify signature using a transit key
     pub async fn verify(
         &self,
@@ -217,32 +226,35 @@ impl TransitEngine {
         algorithm: Option<SignatureAlgorithm>,
     ) -> CryptoResult<bool> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name).ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
-        
+        let key = keys
+            .get(key_name)
+            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+
         let result = key.verify(data, signature, algorithm)?;
-        
+
         // Audit log
         if let Some(ref audit) = self.audit {
             audit.log_verification(key_name, data.len(), result).await;
         }
-        
+
         Ok(result)
     }
-    
+
     /// Generate random data
     pub async fn random(&self, bytes: usize) -> CryptoResult<Vec<u8>> {
         if bytes > self.policies.max_random_bytes {
-            return Err(CryptoError::InvalidParameter(
-                format!("Requested {} bytes exceeds maximum {}", bytes, self.policies.max_random_bytes)
-            ));
+            return Err(CryptoError::InvalidParameter(format!(
+                "Requested {} bytes exceeds maximum {}",
+                bytes, self.policies.max_random_bytes
+            )));
         }
-        
+
         let mut random_data = vec![0u8; bytes];
         rand::Rng::fill(&mut rand::thread_rng(), &mut random_data[..]);
-        
+
         Ok(random_data)
     }
-    
+
     /// Derive key using HKDF
     pub async fn derive_key(
         &self,
@@ -251,59 +263,68 @@ impl TransitEngine {
         length: usize,
     ) -> CryptoResult<Vec<u8>> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name).ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
-        
+        let key = keys
+            .get(key_name)
+            .ok_or_else(|| CryptoError::KeyNotFound(key_name.to_string()))?;
+
         key.derive_key(context, length)
     }
-    
+
     /// Process batch operations
     pub async fn batch_operation(&self, operations: Vec<BatchOperation>) -> Vec<BatchResult> {
         let mut results = Vec::with_capacity(operations.len());
-        
+
         for operation in operations {
             let result = self.process_batch_operation(operation).await;
             results.push(result);
         }
-        
+
         results
     }
-    
+
     /// Process a single batch operation
     async fn process_batch_operation(&self, operation: BatchOperation) -> BatchResult {
         match operation.operation_type {
             BatchOperationType::Encrypt => {
-                match self.encrypt(
-                    &operation.key_name,
-                    &operation.data,
-                    operation.context.as_deref(),
-                    operation.key_version,
-                ).await {
+                match self
+                    .encrypt(
+                        &operation.key_name,
+                        &operation.data,
+                        operation.context.as_deref(),
+                        operation.key_version,
+                    )
+                    .await
+                {
                     Ok(ciphertext) => BatchResult::success(operation.id, ciphertext.into_bytes()),
                     Err(e) => BatchResult::error(operation.id, e.to_string()),
                 }
             }
-            BatchOperationType::Decrypt => {
-                match String::from_utf8(operation.data.clone()) {
-                    Ok(ciphertext) => {
-                        match self.decrypt(
+            BatchOperationType::Decrypt => match String::from_utf8(operation.data.clone()) {
+                Ok(ciphertext) => {
+                    match self
+                        .decrypt(
                             &operation.key_name,
                             &ciphertext,
                             operation.context.as_deref(),
-                        ).await {
-                            Ok(plaintext) => BatchResult::success(operation.id, plaintext),
-                            Err(e) => BatchResult::error(operation.id, e.to_string()),
-                        }
+                        )
+                        .await
+                    {
+                        Ok(plaintext) => BatchResult::success(operation.id, plaintext),
+                        Err(e) => BatchResult::error(operation.id, e.to_string()),
                     }
-                    Err(e) => BatchResult::error(operation.id, format!("Invalid UTF-8: {}", e)),
                 }
-            }
+                Err(e) => BatchResult::error(operation.id, format!("Invalid UTF-8: {}", e)),
+            },
             BatchOperationType::Sign => {
-                match self.sign(
-                    &operation.key_name,
-                    &operation.data,
-                    operation.signature_algorithm,
-                    operation.key_version,
-                ).await {
+                match self
+                    .sign(
+                        &operation.key_name,
+                        &operation.data,
+                        operation.signature_algorithm,
+                        operation.key_version,
+                    )
+                    .await
+                {
                     Ok(signature) => BatchResult::success(operation.id, signature.into_bytes()),
                     Err(e) => BatchResult::error(operation.id, e.to_string()),
                 }
@@ -332,28 +353,40 @@ impl AuditLogger for DefaultAuditLogger {
     async fn log_key_creation(&self, name: &str, key_type: &KeyType) {
         info!("AUDIT: Key created - name: {}, type: {:?}", name, key_type);
     }
-    
+
     async fn log_key_rotation(&self, name: &str, version: u32) {
-        info!("AUDIT: Key rotated - name: {}, new_version: {}", name, version);
+        info!(
+            "AUDIT: Key rotated - name: {}, new_version: {}",
+            name, version
+        );
     }
-    
+
     async fn log_key_deletion(&self, name: &str) {
         warn!("AUDIT: Key deleted - name: {}", name);
     }
-    
+
     async fn log_encryption(&self, key_name: &str, data_len: usize) {
-        info!("AUDIT: Encryption - key: {}, data_len: {}", key_name, data_len);
+        info!(
+            "AUDIT: Encryption - key: {}, data_len: {}",
+            key_name, data_len
+        );
     }
-    
+
     async fn log_decryption(&self, key_name: &str, data_len: usize) {
-        info!("AUDIT: Decryption - key: {}, data_len: {}", key_name, data_len);
+        info!(
+            "AUDIT: Decryption - key: {}, data_len: {}",
+            key_name, data_len
+        );
     }
-    
+
     async fn log_signing(&self, key_name: &str, data_len: usize) {
         info!("AUDIT: Signing - key: {}, data_len: {}", key_name, data_len);
     }
-    
+
     async fn log_verification(&self, key_name: &str, data_len: usize, result: bool) {
-        info!("AUDIT: Verification - key: {}, data_len: {}, valid: {}", key_name, data_len, result);
+        info!(
+            "AUDIT: Verification - key: {}, data_len: {}, valid: {}",
+            key_name, data_len, result
+        );
     }
 }

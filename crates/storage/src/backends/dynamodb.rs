@@ -4,8 +4,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use aws_sdk_dynamodb::types::AttributeValue;
-use aws_types::region::Region;
 use aws_smithy_types::Blob;
+use aws_types::region::Region;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -102,13 +102,17 @@ impl DynamoDBStorage {
                     .attribute_name(&config.partition_key)
                     .attribute_type(aws_sdk_dynamodb::types::ScalarAttributeType::S)
                     .build()
-                    .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build attribute definition: {}", e) })?;
+                    .map_err(|e| StorageError::ConfigurationError {
+                        message: format!("Failed to build attribute definition: {}", e),
+                    })?;
                 attribute_definitions.push(ad_pk);
                 let ad_sk = aws_sdk_dynamodb::types::AttributeDefinition::builder()
                     .attribute_name(&config.sort_key)
                     .attribute_type(aws_sdk_dynamodb::types::ScalarAttributeType::N)
                     .build()
-                    .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build attribute definition: {}", e) })?;
+                    .map_err(|e| StorageError::ConfigurationError {
+                        message: format!("Failed to build attribute definition: {}", e),
+                    })?;
                 attribute_definitions.push(ad_sk);
 
                 let mut key_schema = Vec::new();
@@ -116,13 +120,17 @@ impl DynamoDBStorage {
                     .attribute_name(&config.partition_key)
                     .key_type(aws_sdk_dynamodb::types::KeyType::Hash)
                     .build()
-                    .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build key schema: {}", e) })?;
+                    .map_err(|e| StorageError::ConfigurationError {
+                        message: format!("Failed to build key schema: {}", e),
+                    })?;
                 key_schema.push(ks_hash);
                 let ks_range = aws_sdk_dynamodb::types::KeySchemaElement::builder()
                     .attribute_name(&config.sort_key)
                     .key_type(aws_sdk_dynamodb::types::KeyType::Range)
                     .build()
-                    .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build key schema: {}", e) })?;
+                    .map_err(|e| StorageError::ConfigurationError {
+                        message: format!("Failed to build key schema: {}", e),
+                    })?;
                 key_schema.push(ks_range);
 
                 let mut request = client
@@ -130,16 +138,18 @@ impl DynamoDBStorage {
                     .table_name(&config.table_name)
                     .set_attribute_definitions(Some(attribute_definitions))
                     .set_key_schema(Some(key_schema))
-                    .billing_mode(
-                        aws_sdk_dynamodb::types::BillingMode::from(config.billing_mode.as_str()),
-                    );
+                    .billing_mode(aws_sdk_dynamodb::types::BillingMode::from(
+                        config.billing_mode.as_str(),
+                    ));
 
                 if config.billing_mode == "PROVISIONED" {
                     let throughput = aws_sdk_dynamodb::types::ProvisionedThroughput::builder()
                         .read_capacity_units(config.read_capacity_units)
                         .write_capacity_units(config.write_capacity_units)
                         .build()
-                        .map_err(|e| StorageError::ConfigurationError { message: format!("Failed to build throughput: {}", e) })?;
+                        .map_err(|e| StorageError::ConfigurationError {
+                            message: format!("Failed to build throughput: {}", e),
+                        })?;
                     request = request.provisioned_throughput(throughput);
                 }
 
@@ -201,17 +211,14 @@ impl DynamoDBStorage {
             self.config.sort_key.clone(),
             AttributeValue::N(entry.version.to_string()),
         );
-        item.insert(
-            "id".to_string(),
-            AttributeValue::S(entry.id.to_string()),
-        );
+        item.insert("id".to_string(), AttributeValue::S(entry.id.to_string()));
         item.insert(
             "encrypted_data".to_string(),
             AttributeValue::B(Blob::new(entry.encrypted_data.clone())),
         );
 
-        let encryption_metadata_json = serde_json::to_string(&entry.encryption_metadata)
-            .unwrap_or_default();
+        let encryption_metadata_json =
+            serde_json::to_string(&entry.encryption_metadata).unwrap_or_default();
         item.insert(
             "encryption_metadata".to_string(),
             AttributeValue::S(encryption_metadata_json),
@@ -252,7 +259,10 @@ impl DynamoDBStorage {
     }
 
     /// Convert DynamoDB item to VaultEntry
-    fn item_to_vault_entry(&self, item: &HashMap<String, AttributeValue>) -> Result<VaultEntry, StorageError> {
+    fn item_to_vault_entry(
+        &self,
+        item: &HashMap<String, AttributeValue>,
+    ) -> Result<VaultEntry, StorageError> {
         let path = item
             .get(&self.config.partition_key)
             .and_then(|v| v.as_s().ok())
@@ -594,7 +604,9 @@ impl StorageBackend for DynamoDBStorage {
 
         let mut entries_by_security_level = HashMap::new();
         for entry in &entries {
-            *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+            *entries_by_security_level
+                .entry(entry.security_level)
+                .or_insert(0) += 1;
         }
 
         Ok(StorageStats {
@@ -637,7 +649,9 @@ mod tests {
         let config = DynamoDBStorageConfig::default();
         let storage = DynamoDBStorage {
             config,
-            client: aws_sdk_dynamodb::Client::from_conf(aws_sdk_dynamodb::Config::builder().build()),
+            client: aws_sdk_dynamodb::Client::from_conf(
+                aws_sdk_dynamodb::Config::builder().build(),
+            ),
             cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
@@ -647,7 +661,7 @@ mod tests {
             crate::EncryptionMetadata {
                 algorithm: "aes-256-gcm".to_string(),
                 key_id: "key-1".to_string(),
-                iv: vec![0;12],
+                iv: vec![0; 12],
                 auth_tag: None,
                 aad: None,
                 kdf_params: None,

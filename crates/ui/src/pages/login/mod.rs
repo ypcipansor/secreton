@@ -1,18 +1,10 @@
 use leptos::*;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use secreton_core::models::{LoginRequest, LoginResponse};
 
-#[derive(Serialize)]
-struct LoginRequest {
-    username: String,
-    password: String,
-}
-
-#[derive(Deserialize)]
-struct LoginResponse {
-    token: String,
-    expires_in: i64,
-}
+// Using canonical LoginRequest and LoginResponse from secreton_core
+// No need to redefine these structs
 
 #[component]
 pub fn Login(cx: Scope) -> impl IntoView {
@@ -30,7 +22,12 @@ pub fn Login(cx: Scope) -> impl IntoView {
             let client = Client::new();
             let res = client
                 .post("http://localhost:8080/v1/auth/login")
-                .json(&LoginRequest { username, password })
+                .json(&LoginRequest { 
+                    username, 
+                    password,
+                    mfa_code: None,
+                    remember_me: None,
+                })
                 .send()
                 .await;
             match res {
@@ -42,7 +39,7 @@ pub fn Login(cx: Scope) -> impl IntoView {
                             .local_storage()
                             .unwrap()
                             .unwrap()
-                            .set_item("token", &login.token)
+                            .set_item("token", &login.access_token)
                             .unwrap();
                         error.set(String::new());
                         nav("/", Default::default());

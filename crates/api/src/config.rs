@@ -10,8 +10,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Main API configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiConfig {
     /// HTTP server configuration
     pub http: HttpConfig,
@@ -83,8 +82,7 @@ pub struct GrpcConfig {
 }
 
 /// Authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
@@ -220,8 +218,7 @@ pub struct CookieConfig {
 }
 
 /// Multi-factor authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MfaConfig {
     /// Enable MFA
     pub enabled: bool,
@@ -475,7 +472,6 @@ pub struct LogRotationConfig {
     pub frequency: String,
 }
 
-
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
@@ -501,7 +497,6 @@ impl Default for GrpcConfig {
         }
     }
 }
-
 
 impl Default for JwtConfig {
     fn default() -> Self {
@@ -538,7 +533,6 @@ impl Default for CookieConfig {
         }
     }
 }
-
 
 impl Default for TotpConfig {
     fn default() -> Self {

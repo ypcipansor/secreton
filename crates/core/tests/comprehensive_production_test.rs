@@ -17,19 +17,25 @@ mod comprehensive_tests {
         // Test KV Engine
         let kv_engine = kv::KvEngine::new();
         let kv_data = serde_json::json!({"key": "value", "number": 42});
-        let kv_secret = kv_engine.create_secret("test/kv", kv_data.clone(), None).await;
+        let kv_secret = kv_engine
+            .create_secret("test/kv", kv_data.clone(), None)
+            .await;
         assert!(kv_secret.is_ok());
 
         // Test Memory Engine
         let memory_engine = memory::MemorySecretsEngine::new();
         let memory_data = serde_json::json!({"memory": "data"});
-        let memory_secret = memory_engine.create_secret("test/memory", memory_data.clone(), None).await;
+        let memory_secret = memory_engine
+            .create_secret("test/memory", memory_data.clone(), None)
+            .await;
         assert!(memory_secret.is_ok());
 
         // Test Transit Engine
         let transit_engine = transit::TransitEngine::new();
         let transit_data = serde_json::json!({"plaintext": "sensitive_data"});
-        let transit_secret = transit_engine.create_secret("test/transit", transit_data.clone(), None).await;
+        let transit_secret = transit_engine
+            .create_secret("test/transit", transit_data.clone(), None)
+            .await;
         assert!(transit_secret.is_ok());
 
         println!("✅ All secrets engines functional");
@@ -42,9 +48,22 @@ mod comprehensive_tests {
 
         // Test that all auth methods can be instantiated
         let auth_methods = vec![
-            "approle", "aws", "azure", "certificate", "cloudfoundry",
-            "gcp", "github", "jwt", "kubernetes", "ldap", "oidc",
-            "okta", "radius", "saml", "token", "userpass"
+            "approle",
+            "aws",
+            "azure",
+            "certificate",
+            "cloudfoundry",
+            "gcp",
+            "github",
+            "jwt",
+            "kubernetes",
+            "ldap",
+            "oidc",
+            "okta",
+            "radius",
+            "saml",
+            "token",
+            "userpass",
         ];
 
         for method in auth_methods {
@@ -63,11 +82,32 @@ mod comprehensive_tests {
 
         // Test that all storage backends exist
         let backends = vec![
-            "consul", "postgresql", "etcd", "raft", "mysql", "dynamodb",
-            "s3", "redis", "cassandra", "azure_blob", "gcs", "mongodb",
-            "aerospike", "alicloud_oss", "couchdb", "foundationdb",
-            "manta", "mssql", "oci", "spanner", "swift", "zookeeper",
-            "file", "memory", "namespace", "secure"
+            "consul",
+            "postgresql",
+            "etcd",
+            "raft",
+            "mysql",
+            "dynamodb",
+            "s3",
+            "redis",
+            "cassandra",
+            "azure_blob",
+            "gcs",
+            "mongodb",
+            "aerospike",
+            "alicloud_oss",
+            "couchdb",
+            "foundationdb",
+            "manta",
+            "mssql",
+            "oci",
+            "spanner",
+            "swift",
+            "zookeeper",
+            "file",
+            "memory",
+            "namespace",
+            "secure",
         ];
 
         for backend in backends {
@@ -82,8 +122,8 @@ mod comprehensive_tests {
     /// Test Shamir Secret Sharing functionality
     #[tokio::test]
     async fn test_shamir_secret_sharing() {
-        use secreton_core::secrets::engine::shamir::shamir_math::ShamirMath;
         use num_bigint::BigUint;
+        use secreton_core::secrets::engine::shamir::shamir_math::ShamirMath;
 
         // Test safe prime generation
         let prime = ShamirMath::generate_safe_prime(256).await;
@@ -195,7 +235,10 @@ mod comprehensive_tests {
         // Should complete within reasonable time (less than 1 second for 100 operations)
         assert!(duration.as_secs() < 1);
 
-        println!("✅ Performance characteristics verified (took {:?})", duration);
+        println!(
+            "✅ Performance characteristics verified (took {:?})",
+            duration
+        );
     }
 
     /// Test error handling and edge cases
@@ -248,7 +291,7 @@ mod comprehensive_tests {
             "authentication",
             "secret_creation",
             "secret_retrieval",
-            "secret_deletion"
+            "secret_deletion",
         ];
 
         for (i, step) in steps.iter().enumerate() {

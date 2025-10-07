@@ -13,8 +13,34 @@ use std::str::FromStr;
 
 pub mod api;
 pub mod audit;
+pub mod config;
 pub mod error;
+pub mod models;
 pub mod sdk_libraries;
+pub mod services;
+pub mod types;
+
+// TODO: Fix missing dependencies (prometheus, etc)
+// pub mod metrics;
+// pub mod telemetry;
+
+// TODO: Review and fix these modules
+// pub mod server;
+// pub mod control_groups;
+// pub mod disaster_recovery;
+// pub mod secrets;
+// pub mod secrets_sync;
+
+// Feature-gated modules (need dependencies)
+// #[cfg(feature = "graphql")]
+// pub mod graphql_api;
+
+// #[cfg(feature = "grpc")]
+// pub mod grpc_api;
+
+// #[cfg(feature = "postgres-audit")]
+// pub mod audit_postgres;
+
 // Disabled: missing storage dependencies
 // #[cfg(any(test, feature = "test-utils"))]
 // pub mod test_utils;
@@ -27,6 +53,14 @@ pub use error::CoreError;
 // pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
 // pub use grpc_api::{GrpcConfig, SecretsGrpcService};
 // pub use utils::error::AppError;
+
+// Re-export commonly used models
+pub use models::auth::{
+    AuthMethod, AuthMethodType, AuthRequest, AuthResponse, LoginRequest, LoginResponse,
+    RefreshTokenRequest, UserInfo,
+};
+pub use models::policy::{Policy, PolicyRule};
+pub use models::user::{Token, User};
 
 // Include integration tests - Disabled: missing dependencies
 // #[cfg(test)]

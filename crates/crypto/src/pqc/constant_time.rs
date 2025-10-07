@@ -124,11 +124,7 @@ pub fn validate_key_size(key: &[u8], expected_size: usize) -> Result<(), String>
 /// assert_eq!(result, secret_a);
 /// ```
 pub fn ct_select(condition: bool, a: &[u8], b: &[u8]) -> Vec<u8> {
-    assert_eq!(
-        a.len(),
-        b.len(),
-        "ct_select requires equal-length inputs"
-    );
+    assert_eq!(a.len(), b.len(), "ct_select requires equal-length inputs");
 
     let mut result = vec![0u8; a.len()];
     let mask = if condition { 0xFF } else { 0x00 };
@@ -220,22 +216,22 @@ mod tests {
     fn test_ct_eq_timing_properties() {
         // This is a basic functional test. Actual timing analysis
         // requires specialized tools (e.g., dudect, ctgrind).
-        
+
         let secret1 = vec![0x42; 1024];
         let mut secret2 = secret1.clone();
-        
+
         // Equal secrets
         assert!(ct_eq(&secret1, &secret2));
-        
+
         // Differ in first byte
         secret2[0] = 0x43;
         assert!(!ct_eq(&secret1, &secret2));
-        
+
         // Differ in last byte
         secret2[0] = 0x42;
         secret2[1023] = 0x43;
         assert!(!ct_eq(&secret1, &secret2));
-        
+
         // Both operations should take the same time regardless of
         // where the difference occurs (verified via external tools)
     }

@@ -1,6 +1,32 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Canonical LoginRequest - use this throughout the project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+    pub mfa_code: Option<String>,
+    pub remember_me: Option<bool>,
+}
+
+/// Canonical LoginResponse - use this throughout the project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub user: UserInfo,
+    pub mfa_required: bool,
+}
+
+/// Canonical RefreshTokenRequest
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthRequest {
     Token { token: String },

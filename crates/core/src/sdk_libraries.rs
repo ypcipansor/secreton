@@ -79,7 +79,11 @@ pub trait SecretonSdk {
     fn read_secret(&self, path: &str) -> Result<SdkResponse<SdkSecret>, String>;
 
     /// Update a secret
-    fn update_secret(&self, path: &str, data: HashMap<String, String>) -> Result<SdkOperationResult, String>;
+    fn update_secret(
+        &self,
+        path: &str,
+        data: HashMap<String, String>,
+    ) -> Result<SdkOperationResult, String>;
 
     /// Delete a secret
     fn delete_secret(&self, path: &str) -> Result<SdkOperationResult, String>;
@@ -136,7 +140,11 @@ pub mod go_sdk {
             })
         }
 
-        fn update_secret(&self, path: &str, data: HashMap<String, String>) -> Result<SdkOperationResult, String> {
+        fn update_secret(
+            &self,
+            path: &str,
+            data: HashMap<String, String>,
+        ) -> Result<SdkOperationResult, String> {
             Ok(SdkOperationResult {
                 success: true,
                 message: "Secret updated successfully".to_string(),
@@ -341,7 +349,11 @@ pub mod python_sdk {
             })
         }
 
-        fn update_secret(&self, path: &str, data: HashMap<String, String>) -> Result<SdkOperationResult, String> {
+        fn update_secret(
+            &self,
+            path: &str,
+            data: HashMap<String, String>,
+        ) -> Result<SdkOperationResult, String> {
             Ok(SdkOperationResult {
                 success: true,
                 message: "Secret updated successfully".to_string(),
@@ -589,7 +601,11 @@ pub mod js_sdk {
             })
         }
 
-        fn update_secret(&self, path: &str, data: HashMap<String, String>) -> Result<SdkOperationResult, String> {
+        fn update_secret(
+            &self,
+            path: &str,
+            data: HashMap<String, String>,
+        ) -> Result<SdkOperationResult, String> {
             Ok(SdkOperationResult {
                 success: true,
                 message: "Secret updated successfully".to_string(),

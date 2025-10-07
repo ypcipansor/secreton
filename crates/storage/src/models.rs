@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// User information for access control
+/// User information for access control in storage layer
+/// Note: This is a simplified version for storage. The full User model is in secreton-core.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
     pub username: String,
     pub email: String,
     pub roles: Vec<String>,
-    pub security_clearance: crate::SecurityLevel,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login: Option<DateTime<Utc>>,
@@ -50,6 +50,7 @@ pub struct Session {
 }
 
 /// Access control policy
+/// Note: Simplified version for storage. Full Policy model is in secreton-core.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub id: Uuid,

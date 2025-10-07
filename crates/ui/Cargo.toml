@@ -11,3 +11,31 @@ secreton-core.workspace = true
 serde.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+
+# Authentication dependencies
+argon2 = { version = "0.5", features = ["std"] }
+zeroize = "1.7"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1.35", features = ["full"] }
+
+# Web framework
+axum = "0.7"
+
+# Templates and static files
+askama = "0.12"
+rust-embed = "8.0"
+mime_guess = "2.0"
+
+# CLI tools
+clap = { version = "4.4", features = ["derive"], optional = true }
+rpassword = { version = "7.3", optional = true }
+
+[features]
+default = []
+cli = ["clap", "rpassword"]
+
+[[bin]]
+name = "secreton-user"
+path = "src/bin/user_manager.rs"
+required-features = ["cli"]

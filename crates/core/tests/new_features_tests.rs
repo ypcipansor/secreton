@@ -3,8 +3,8 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use chrono::Utc;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_enterprise_mfa_creation() {
@@ -31,7 +31,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_plugin_system() {
-        use crate::plugins::{PluginManager, PluginManagerConfig, PluginType, PluginCapability, SimplePlugin};
+        use crate::plugins::{
+            PluginCapability, PluginManager, PluginManagerConfig, PluginType, SimplePlugin,
+        };
         use std::path::PathBuf;
 
         let config = PluginManagerConfig {
@@ -56,7 +58,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_secrets_sync_config() {
-        use crate::secrets_sync::{SyncConfig, ExternalSystem, SyncDirection, ConflictResolution, ConnectionConfig, SyncPolicies, RetryConfig};
+        use crate::secrets_sync::{
+            ConflictResolution, ConnectionConfig, ExternalSystem, RetryConfig, SyncConfig,
+            SyncDirection, SyncPolicies,
+        };
 
         let connection = ConnectionConfig {
             endpoint: "https://example.com".to_string(),
@@ -95,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_risk_engine() {
-        use crate::auth::mfa::{RiskEngine, MfaContext};
+        use crate::auth::mfa::{MfaContext, RiskEngine};
 
         let risk_engine = RiskEngine::new();
 
@@ -107,11 +112,17 @@ mod tests {
         assert!(public_ip_risk >= 0.0 && public_ip_risk <= 1.0);
 
         // Test location risk assessment
-        let location_risk = risk_engine.assess_location_risk(37.7749, -122.4194).await.unwrap(); // San Francisco
+        let location_risk = risk_engine
+            .assess_location_risk(37.7749, -122.4194)
+            .await
+            .unwrap(); // San Francisco
         assert!(location_risk >= 0.0 && location_risk <= 1.0);
 
         // Test device fingerprint risk
-        let device_risk = risk_engine.assess_device_risk("long_device_fingerprint_string").await.unwrap();
+        let device_risk = risk_engine
+            .assess_device_risk("long_device_fingerprint_string")
+            .await
+            .unwrap();
         assert!(device_risk >= 0.0 && device_risk <= 1.0);
     }
 

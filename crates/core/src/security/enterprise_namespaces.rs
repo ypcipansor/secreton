@@ -221,7 +221,7 @@ pub struct AccessPolicy {
     /// Policy name
     pub name: String,
     /// Policy rules
-    pub rules: Vec<PolicyRule>,
+    pub rules: Vec<EnterprisePolicyRule>,
     /// Effect (allow/deny)
     pub effect: PolicyEffect,
     /// Conditions for policy application
@@ -232,9 +232,12 @@ pub struct AccessPolicy {
     pub inheritable: bool,
 }
 
-/// Policy Rules
+/// Use canonical PolicyRule from models
+pub use crate::models::PolicyRule as CorePolicyRule;
+
+/// Enterprise-specific Policy Rules with advanced features
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRule {
+pub struct EnterprisePolicyRule {
     /// Resource type this rule applies to
     pub resource: ResourceType,
     /// Actions allowed/denied

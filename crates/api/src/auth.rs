@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use jsonwebtoken::{
     decode, encode, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation,
 };
@@ -362,30 +362,8 @@ impl IntoResponse for AuthError {
     }
 }
 
-/// Login request structure
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
-}
-
-/// Login response structure
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LoginResponse {
-    pub token: String,
-    pub expires_at: DateTime<Utc>,
-    pub user: UserInfo,
-}
-
-/// User information structure
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UserInfo {
-    pub id: String,
-    pub name: String,
-    pub email: String,
-    pub roles: Vec<String>,
-    pub permissions: Vec<String>,
-}
+// Use canonical types from secreton_core::models
+// LoginRequest, LoginResponse, UserInfo are now imported at the top
 
 #[cfg(test)]
 mod tests {

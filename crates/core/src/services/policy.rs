@@ -1,26 +1,13 @@
-use crate::models::sentinel::SentinelPolicy;
 use crate::services::audit::log_audit_external;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// Use canonical types from models
+pub use crate::models::{PolicyRule, ControlGroup, Policy};
+pub use crate::types::sentinel::SentinelPolicy;
+
 #[cfg(feature = "wasm")]
 use wasmtime::{Engine, Instance, Module, Store};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRule {
-    pub effect: String,                      // "allow" atau "deny"
-    pub action: String,                      // misal "read", "write"
-    pub path: String,                        // glob/wildcard path
-    pub condition: Option<Value>,            // ekspresi/logic opsional
-    pub control_group: Option<ControlGroup>, // multi-approval
-    pub mfa: Option<bool>,                   // butuh MFA?
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlGroup {
-    pub required_approvals: u32,
-    pub approved_by: Vec<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicySet {

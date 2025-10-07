@@ -221,33 +221,36 @@ impl StorageFactory {
             }
 
             StorageBackendType::MySQL => {
-                let mysql_config = config.mysql_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "MySQL configuration is required".to_string(),
-                    }
-                })?;
+                let mysql_config =
+                    config
+                        .mysql_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "MySQL configuration is required".to_string(),
+                        })?;
 
                 let backend = MySQLStorage::new(mysql_config).await?;
                 Ok(Arc::new(backend))
             }
 
             StorageBackendType::DynamoDB => {
-                let dynamodb_config = config.dynamodb_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "DynamoDB configuration is required".to_string(),
-                    }
-                })?;
+                let dynamodb_config =
+                    config
+                        .dynamodb_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "DynamoDB configuration is required".to_string(),
+                        })?;
 
                 let backend = DynamoDBStorage::new(dynamodb_config).await?;
                 Ok(Arc::new(backend))
             }
 
             StorageBackendType::S3 => {
-                let s3_config = config.s3_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "S3 configuration is required".to_string(),
-                    }
-                })?;
+                let s3_config =
+                    config
+                        .s3_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "S3 configuration is required".to_string(),
+                        })?;
 
                 let backend = S3Storage::new(s3_config).await?;
                 Ok(Arc::new(backend))
@@ -266,51 +269,74 @@ impl StorageFactory {
             }
 
             StorageBackendType::File => {
-                let file_config = config.file_config.ok_or_else(|| StorageError::ConfigurationError { message: "File configuration is required".to_string() })?;
+                let file_config =
+                    config
+                        .file_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "File configuration is required".to_string(),
+                        })?;
                 let backend = FileBackend::new(&file_config.base_path)?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::Postgres => {
-                let pg_config = config.postgres_config.ok_or_else(|| StorageError::ConfigurationError { message: "Postgres configuration is required".to_string() })?;
+                let pg_config =
+                    config
+                        .postgres_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Postgres configuration is required".to_string(),
+                        })?;
                 let backend = PostgresBackend::new(&pg_config.connection_string).await?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::Redis => {
-                let redis_config = config.redis_config.ok_or_else(|| StorageError::ConfigurationError { message: "Redis configuration is required".to_string() })?;
+                let redis_config =
+                    config
+                        .redis_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Redis configuration is required".to_string(),
+                        })?;
                 let backend = RedisBackend::new(&redis_config.url).await?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::Raft => {
-                let raft_config = config.raft_config.ok_or_else(|| StorageError::ConfigurationError { message: "Raft configuration is required".to_string() })?;
+                let raft_config =
+                    config
+                        .raft_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Raft configuration is required".to_string(),
+                        })?;
                 let backend = RaftStorageBackend::new(raft_config).await?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::CockroachDB => {
-                let cockroachdb_config = config.cockroachdb_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "CockroachDB configuration is required".to_string(),
-                    }
-                })?;
+                let cockroachdb_config =
+                    config
+                        .cockroachdb_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "CockroachDB configuration is required".to_string(),
+                        })?;
 
                 let backend = CockroachDBStorage::new(cockroachdb_config).await?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::Cassandra => {
-                let cassandra_config = config.cassandra_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "Cassandra configuration is required".to_string(),
-                    }
-                })?;
+                let cassandra_config =
+                    config
+                        .cassandra_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Cassandra configuration is required".to_string(),
+                        })?;
 
                 let backend = CassandraStorage::new(cassandra_config).await?;
                 Ok(Arc::new(backend))
             }
             StorageBackendType::MongoDB => {
-                let mongodb_config = config.mongodb_config.ok_or_else(|| {
-                    StorageError::ConfigurationError {
-                        message: "MongoDB configuration is required".to_string(),
-                    }
-                })?;
+                let mongodb_config =
+                    config
+                        .mongodb_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "MongoDB configuration is required".to_string(),
+                        })?;
 
                 let backend = MongoDBStorage::new(mongodb_config).await?;
                 Ok(Arc::new(backend))
@@ -334,7 +360,12 @@ impl StorageFactory {
             // StorageBackendType::Spanner => { ... }
             // StorageBackendType::Swift => { ... }
             // StorageBackendType::ZooKeeper => { ... }
-            _ => Err(StorageError::ConfigurationError { message: format!("Backend type {:?} not yet implemented in factory", config.backend_type) }),
+            _ => Err(StorageError::ConfigurationError {
+                message: format!(
+                    "Backend type {:?} not yet implemented in factory",
+                    config.backend_type
+                ),
+            }),
         }
     }
 
@@ -360,7 +391,7 @@ impl StorageFactory {
             table_name,
             ..Default::default()
         };
-        
+
         let backend = DynamoDBStorage::new(config).await?;
         Ok(Arc::new(backend))
     }
@@ -371,11 +402,10 @@ impl StorageFactory {
             bucket_name,
             ..Default::default()
         };
-        
+
         let backend = S3Storage::new(config).await?;
         Ok(Arc::new(backend))
     }
-
 }
 
 #[cfg(test)]

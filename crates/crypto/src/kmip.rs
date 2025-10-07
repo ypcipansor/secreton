@@ -10,7 +10,7 @@
 //! - Certificate management
 //! - Policy enforcement
 
-use crate::error::{CryptoResult, CryptoError};
+use crate::error::{CryptoError, CryptoResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -355,7 +355,8 @@ impl KmipServer {
 
     /// Start the KMIP server
     pub async fn start(&self) -> CryptoResult<()> {
-        let listener = TcpListener::bind(self.bind_address).await
+        let listener = TcpListener::bind(self.bind_address)
+            .await
             .map_err(|e| CryptoError::NetworkError(format!("Failed to bind KMIP server: {}", e)))?;
 
         info!("KMIP server started on {}", self.bind_address);
@@ -419,8 +420,9 @@ impl KmipConnectionHandler {
         let mut buffer = vec![0u8; self.config.max_message_size];
 
         loop {
-            let n = socket.read(&mut buffer).await
-                .map_err(|e| CryptoError::NetworkError(format!("Failed to read from KMIP socket: {}", e)))?;
+            let n = socket.read(&mut buffer).await.map_err(|e| {
+                CryptoError::NetworkError(format!("Failed to read from KMIP socket: {}", e))
+            })?;
 
             if n == 0 {
                 break; // Connection closed
@@ -434,29 +436,36 @@ impl KmipConnectionHandler {
 
             // Send response
             let response_bytes = self.serialize_kmip_message(&response)?;
-            socket.write_all(&response_bytes).await
-                .map_err(|e| CryptoError::NetworkError(format!("Failed to write to KMIP socket: {}", e)))?;
+            socket.write_all(&response_bytes).await.map_err(|e| {
+                CryptoError::NetworkError(format!("Failed to write to KMIP socket: {}", e))
+            })?;
         }
 
         Ok(())
     }
 
     /// Parse KMIP message from bytes
-    fn parse_kmip_message(&self, data: &[u8]) -> CryptoResult<KmipRequest> {
+    fn parse_kmip_message(&self, _data: &[u8]) -> CryptoResult<KmipRequest> {
+        // TODO: Implement full KMIP TTLV parsing with data
         // Basic KMIP message parsing (simplified for this implementation)
         // In a real implementation, this would parse the full KMIP protocol format
 
         // For now, return a placeholder - real implementation would parse TTLV format
-        Err(CryptoError::InvalidParameter("KMIP message parsing not fully implemented".to_string()))
+        Err(CryptoError::InvalidParameter(
+            "KMIP message parsing not fully implemented".to_string(),
+        ))
     }
 
     /// Serialize KMIP message to bytes
-    fn serialize_kmip_message(&self, response: &KmipResponse) -> CryptoResult<Vec<u8>> {
+    fn serialize_kmip_message(&self, _response: &KmipResponse) -> CryptoResult<Vec<u8>> {
+        // TODO: Implement full KMIP TTLV serialization with response
         // Basic KMIP message serialization (simplified for this implementation)
         // In a real implementation, this would serialize to TTLV format
 
         // For now, return a placeholder - real implementation would serialize properly
-        Err(CryptoError::InvalidParameter("KMIP message serialization not fully implemented".to_string()))
+        Err(CryptoError::InvalidParameter(
+            "KMIP message serialization not fully implemented".to_string(),
+        ))
     }
 
     /// Process KMIP request
@@ -478,21 +487,14 @@ impl KmipConnectionHandler {
     /// Process individual KMIP operation
     async fn process_operation(&self, operation: KmipOperationBatch) -> KmipOperationResponse {
         match operation.operation {
-            KmipOperation::Query => {
-                self.handle_query_operation(&operation.parameters).await
-            }
-            KmipOperation::Create => {
-                self.handle_create_operation(&operation.parameters).await
-            }
+            KmipOperation::Query => self.handle_query_operation(&operation.parameters).await,
+            KmipOperation::Create => self.handle_create_operation(&operation.parameters).await,
             KmipOperation::CreateKeyPair => {
-                self.handle_create_keypair_operation(&operation.parameters).await
+                self.handle_create_keypair_operation(&operation.parameters)
+                    .await
             }
-            KmipOperation::Get => {
-                self.handle_get_operation(&operation.parameters).await
-            }
-            KmipOperation::Destroy => {
-                self.handle_destroy_operation(&operation.parameters).await
-            }
+            KmipOperation::Get => self.handle_get_operation(&operation.parameters).await,
+            KmipOperation::Destroy => self.handle_destroy_operation(&operation.parameters).await,
             _ => KmipOperationResponse {
                 result_status: KmipResultStatus::Failure,
                 result_reason: Some(KmipResultReason::UnsupportedOperation),
@@ -503,7 +505,10 @@ impl KmipConnectionHandler {
     }
 
     /// Handle Query operation
-    async fn handle_query_operation(&self, _parameters: &HashMap<String, KmipAttributeValue>) -> KmipOperationResponse {
+    async fn handle_query_operation(
+        &self,
+        _parameters: &HashMap<String, KmipAttributeValue>,
+    ) -> KmipOperationResponse {
         let mut result_data = HashMap::new();
 
         // Return server capabilities
@@ -529,7 +534,10 @@ impl KmipConnectionHandler {
     }
 
     /// Handle Create operation
-    async fn handle_create_operation(&self, parameters: &HashMap<String, KmipAttributeValue>) -> KmipOperationResponse {
+    async fn handle_create_operation(
+        &self,
+        parameters: &HashMap<String, KmipAttributeValue>,
+    ) -> KmipOperationResponse {
         // Extract parameters
         let object_type = match parameters.get("object_type") {
             Some(KmipAttributeValue::String(s)) => match s.as_str() {
@@ -593,7 +601,10 @@ impl KmipConnectionHandler {
     }
 
     /// Handle CreateKeyPair operation
-    async fn handle_create_keypair_operation(&self, _parameters: &HashMap<String, KmipAttributeValue>) -> KmipOperationResponse {
+    async fn handle_create_keypair_operation(
+        &self,
+        _parameters: &HashMap<String, KmipAttributeValue>,
+    ) -> KmipOperationResponse {
         KmipOperationResponse {
             result_status: KmipResultStatus::Failure,
             result_reason: Some(KmipResultReason::UnsupportedOperation),
@@ -603,7 +614,10 @@ impl KmipConnectionHandler {
     }
 
     /// Handle Get operation
-    async fn handle_get_operation(&self, parameters: &HashMap<String, KmipAttributeValue>) -> KmipOperationResponse {
+    async fn handle_get_operation(
+        &self,
+        parameters: &HashMap<String, KmipAttributeValue>,
+    ) -> KmipOperationResponse {
         let unique_identifier = match parameters.get("unique_identifier") {
             Some(KmipAttributeValue::String(s)) => s.clone(),
             _ => {
@@ -652,7 +666,10 @@ impl KmipConnectionHandler {
     }
 
     /// Handle Destroy operation
-    async fn handle_destroy_operation(&self, parameters: &HashMap<String, KmipAttributeValue>) -> KmipOperationResponse {
+    async fn handle_destroy_operation(
+        &self,
+        parameters: &HashMap<String, KmipAttributeValue>,
+    ) -> KmipOperationResponse {
         let unique_identifier = match parameters.get("unique_identifier") {
             Some(KmipAttributeValue::String(s)) => s.clone(),
             _ => {
@@ -733,19 +750,27 @@ impl KmipClient {
     /// Query server capabilities
     pub async fn query(&self) -> CryptoResult<HashMap<String, String>> {
         // Simplified implementation - real KMIP client would implement full protocol
-        Err(CryptoError::InvalidParameter("KMIP client not fully implemented".to_string()))
+        Err(CryptoError::InvalidParameter(
+            "KMIP client not fully implemented".to_string(),
+        ))
     }
 
     /// Create a key on the KMIP server
-    pub async fn create_key(&self, object_type: KmipObjectType) -> CryptoResult<String> {
+    pub async fn create_key(&self, _object_type: KmipObjectType) -> CryptoResult<String> {
+        // TODO: Implement full KMIP protocol with object_type
         // Simplified implementation - real KMIP client would implement full protocol
-        Err(CryptoError::InvalidParameter("KMIP client not fully implemented".to_string()))
+        Err(CryptoError::InvalidParameter(
+            "KMIP client not fully implemented".to_string(),
+        ))
     }
 
     /// Get a key from the KMIP server
-    pub async fn get_key(&self, unique_identifier: &str) -> CryptoResult<KmipManagedObject> {
+    pub async fn get_key(&self, _unique_identifier: &str) -> CryptoResult<KmipManagedObject> {
+        // TODO: Implement full KMIP protocol with unique_identifier lookup
         // Simplified implementation - real KMIP client would implement full protocol
-        Err(CryptoError::InvalidParameter("KMIP client not fully implemented".to_string()))
+        Err(CryptoError::InvalidParameter(
+            "KMIP client not fully implemented".to_string(),
+        ))
     }
 }
 

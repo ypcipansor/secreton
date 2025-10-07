@@ -8,7 +8,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_alicloud_engine_creation() {
-        use crate::secrets::engine::alicloud::{AliCloudEngine, AliCloudConfig, AliCloudRole, AliCloudCredentials, AliCloudPermission};
+        use crate::secrets::engine::alicloud::{
+            AliCloudConfig, AliCloudCredentials, AliCloudEngine, AliCloudPermission, AliCloudRole,
+        };
 
         let config = AliCloudConfig::default();
         let engine = AliCloudEngine::new(config);
@@ -42,7 +44,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_gcloud_secrets_engine_creation() {
-        use crate::secrets::engine::gcloud_secrets::{GCloudSecretsEngine, GCloudConfig, GCloudServiceAccount};
+        use crate::secrets::engine::gcloud_secrets::{
+            GCloudConfig, GCloudSecretsEngine, GCloudServiceAccount,
+        };
 
         let config = GCloudConfig::default();
         let engine = GCloudSecretsEngine::new(config);
@@ -61,10 +65,16 @@ mod tests {
             enable_impersonation: true,
         };
 
-        engine.create_service_account(service_account).await.unwrap();
+        engine
+            .create_service_account(service_account)
+            .await
+            .unwrap();
 
         // Test service account retrieval
-        let retrieved_account = engine.get_service_account("test@example.com").await.unwrap();
+        let retrieved_account = engine
+            .get_service_account("test@example.com")
+            .await
+            .unwrap();
         assert_eq!(retrieved_account.email, "test@example.com");
         assert_eq!(retrieved_account.project_id, "test-project");
     }
@@ -106,7 +116,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_plugin_system_functionality() {
-        use crate::plugins::{PluginManager, PluginManagerConfig, PluginType, PluginCapability, SimplePlugin};
+        use crate::plugins::{
+            PluginCapability, PluginManager, PluginManagerConfig, PluginType, SimplePlugin,
+        };
 
         let config = PluginManagerConfig {
             plugin_dir: std::path::PathBuf::from("/tmp/plugins"),
@@ -135,7 +147,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_secrets_sync_configuration() {
-        use crate::secrets_sync::{SyncConfig, ExternalSystem, SyncDirection, ConflictResolution, ConnectionConfig, SyncPolicies, RetryConfig};
+        use crate::secrets_sync::{
+            ConflictResolution, ConnectionConfig, ExternalSystem, RetryConfig, SyncConfig,
+            SyncDirection, SyncPolicies,
+        };
 
         let connection = ConnectionConfig {
             endpoint: "https://example.com".to_string(),
@@ -175,7 +190,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_disaster_recovery_configuration() {
-        use crate::disaster_recovery::{DisasterRecoveryConfig, ReplicationStrategy, SnapshotConfig, SnapshotType};
+        use crate::disaster_recovery::{
+            DisasterRecoveryConfig, ReplicationStrategy, SnapshotConfig, SnapshotType,
+        };
 
         let dr_config = DisasterRecoveryConfig {
             enabled: true,
@@ -220,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_graphql_api_schema_creation() {
-        use crate::graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager};
+        use crate::graphql_api::{create_graphql_schema, DefaultSecretsManager, GraphQLConfig};
 
         let config = GraphQLConfig::default();
         let secrets_manager = Arc::new(DefaultSecretsManager::new());
@@ -234,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_grpc_api_service_creation() {
-        use crate::grpc_api::{GrpcConfig, SecretsGrpcService, DefaultSecretsManager};
+        use crate::grpc_api::{DefaultSecretsManager, GrpcConfig, SecretsGrpcService};
 
         let config = GrpcConfig::default();
         let secrets_manager = Arc::new(DefaultSecretsManager::new());
@@ -248,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sdk_libraries_generation() {
-        use crate::sdk_libraries::{SdkGenerator, SdkConfig};
+        use crate::sdk_libraries::{SdkConfig, SdkGenerator};
 
         let sdks = SdkGenerator::generate_all_sdks();
 
@@ -277,7 +294,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_terraform_provider_generation() {
-        use crate::sdk_libraries::terraform_provider::{TerraformProvider, TerraformProviderConfig};
+        use crate::sdk_libraries::terraform_provider::{
+            TerraformProvider, TerraformProviderConfig,
+        };
 
         let config = TerraformProviderConfig {
             server_url: "https://secreton.example.com".to_string(),
@@ -297,7 +316,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_kubernetes_operator_generation() {
-        use crate::sdk_libraries::kubernetes_operator::{KubernetesOperator, KubernetesOperatorConfig};
+        use crate::sdk_libraries::kubernetes_operator::{
+            KubernetesOperator, KubernetesOperatorConfig,
+        };
 
         let config = KubernetesOperatorConfig {
             namespace: "secreton-system".to_string(),
@@ -325,7 +346,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_risk_engine_assessment() {
-        use crate::auth::mfa::{RiskEngine, MfaContext};
+        use crate::auth::mfa::{MfaContext, RiskEngine};
 
         let risk_engine = RiskEngine::new();
 
@@ -337,11 +358,17 @@ mod tests {
         assert!(public_ip_risk >= 0.0 && public_ip_risk <= 1.0);
 
         // Test location risk assessment
-        let location_risk = risk_engine.assess_location_risk(37.7749, -122.4194).await.unwrap(); // San Francisco
+        let location_risk = risk_engine
+            .assess_location_risk(37.7749, -122.4194)
+            .await
+            .unwrap(); // San Francisco
         assert!(location_risk >= 0.0 && location_risk <= 1.0);
 
         // Test device fingerprint risk
-        let device_risk = risk_engine.assess_device_risk("long_device_fingerprint_string").await.unwrap();
+        let device_risk = risk_engine
+            .assess_device_risk("long_device_fingerprint_string")
+            .await
+            .unwrap();
         assert!(device_risk >= 0.0 && device_risk <= 1.0);
 
         let short_device_risk = risk_engine.assess_device_risk("short").await.unwrap();
@@ -389,19 +416,25 @@ mod tests {
         let test_data = b"secret data for wrapping";
 
         // Test wrapping
-        let wrapped = secrets_manager.wrap_response(test_data, Some(3600)).await.unwrap();
+        let wrapped = secrets_manager
+            .wrap_response(test_data, Some(3600))
+            .await
+            .unwrap();
         assert!(!wrapped.token.is_empty());
         assert_eq!(wrapped.data, test_data);
         assert!(wrapped.expires_at > wrapped.created_at);
 
         // Test unwrapping
-        let unwrapped = secrets_manager.unwrap_response(&wrapped.token).await.unwrap();
+        let unwrapped = secrets_manager
+            .unwrap_response(&wrapped.token)
+            .await
+            .unwrap();
         assert!(!unwrapped.is_empty());
     }
 
     #[tokio::test]
     async fn test_session_management() {
-        use crate::auth::mfa::{SessionManager, EnterpriseMfaSession, MfaContext};
+        use crate::auth::mfa::{EnterpriseMfaSession, MfaContext, SessionManager};
 
         let mut manager = SessionManager::new();
 
@@ -458,7 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_management() {
-        use crate::disaster_recovery::{SnapshotManager, SnapshotConfig};
+        use crate::disaster_recovery::{SnapshotConfig, SnapshotManager};
 
         let config = SnapshotConfig {
             enabled: true,
@@ -476,14 +509,20 @@ mod tests {
         let manager = SnapshotManager::new(config);
 
         // Test snapshot creation
-        let snapshot_id = manager.create_snapshot(Some("test-snapshot".to_string())).await.unwrap();
+        let snapshot_id = manager
+            .create_snapshot(Some("test-snapshot".to_string()))
+            .await
+            .unwrap();
         assert!(!snapshot_id.is_empty());
 
         // Test snapshot listing
         let snapshots = manager.list_snapshots().await;
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].name, "test-snapshot");
-        assert_eq!(snapshots[0].status, crate::disaster_recovery::SnapshotStatus::Available);
+        assert_eq!(
+            snapshots[0].status,
+            crate::disaster_recovery::SnapshotStatus::Available
+        );
 
         // Test snapshot deletion
         manager.delete_snapshot(&snapshot_id).await.unwrap();
@@ -493,7 +532,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_replication_functionality() {
-        use crate::disaster_recovery::{DisasterRecoveryManager, DisasterRecoveryConfig, ReplicationStrategy};
+        use crate::disaster_recovery::{
+            DisasterRecoveryConfig, DisasterRecoveryManager, ReplicationStrategy,
+        };
 
         let config = DisasterRecoveryConfig {
             enabled: true,
@@ -575,9 +616,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             operation_id: "integration-test".to_string(),
             user_id: Some("test-user".to_string()),
-            metadata: HashMap::from([
-                ("test".to_string(), "integration".to_string()),
-            ]),
+            metadata: HashMap::from([("test".to_string(), "integration".to_string())]),
             config: serde_json::json!({
                 "timeout": 30,
                 "retries": 3
@@ -604,7 +643,10 @@ mod tests {
         let risk_engine = RiskEngine::new();
         for _ in 0..100 {
             let _ = risk_engine.assess_ip_risk("192.168.1.1").await.unwrap();
-            let _ = risk_engine.assess_location_risk(37.7749, -122.4194).await.unwrap();
+            let _ = risk_engine
+                .assess_location_risk(37.7749, -122.4194)
+                .await
+                .unwrap();
         }
 
         let risk_assessment_time = start.elapsed();
@@ -615,17 +657,20 @@ mod tests {
         let plugin_start = Instant::now();
 
         for _ in 0..100 {
-            let _ = plugin.execute(
-                PluginContext {
-                    plugin_id: "perf-test".to_string(),
-                    operation_id: "test".to_string(),
-                    user_id: None,
-                    metadata: HashMap::new(),
-                    config: serde_json::Value::Null,
-                },
-                "test_operation".to_string(),
-                serde_json::json!({"test": "data"}),
-            ).await.unwrap();
+            let _ = plugin
+                .execute(
+                    PluginContext {
+                        plugin_id: "perf-test".to_string(),
+                        operation_id: "test".to_string(),
+                        user_id: None,
+                        metadata: HashMap::new(),
+                        config: serde_json::Value::Null,
+                    },
+                    "test_operation".to_string(),
+                    serde_json::json!({"test": "data"}),
+                )
+                .await
+                .unwrap();
         }
 
         let plugin_execution_time = plugin_start.elapsed();
@@ -651,17 +696,19 @@ mod tests {
         let plugin = SimplePlugin::new("error-test".to_string());
 
         // Test with malformed context
-        let result = plugin.execute(
-            PluginContext {
-                plugin_id: "error-test".to_string(),
-                operation_id: "test".to_string(),
-                user_id: None,
-                metadata: HashMap::new(),
-                config: serde_json::Value::Null,
-            },
-            "test".to_string(),
-            serde_json::json!(null), // Invalid JSON
-        ).await;
+        let result = plugin
+            .execute(
+                PluginContext {
+                    plugin_id: "error-test".to_string(),
+                    operation_id: "test".to_string(),
+                    user_id: None,
+                    metadata: HashMap::new(),
+                    config: serde_json::Value::Null,
+                },
+                "test".to_string(),
+                serde_json::json!(null), // Invalid JSON
+            )
+            .await;
 
         // Should handle gracefully
         assert!(result.is_ok());

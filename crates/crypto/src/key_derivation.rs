@@ -68,12 +68,12 @@ impl KdfParams {
             AlgorithmId::Argon2id => {
                 if self.memory_cost.unwrap_or(0) < 65536 {
                     return Err(CryptoError::KeyGenerationFailed(
-                        "Argon2id memory cost too low (minimum 64MB)".to_string()
+                        "Argon2id memory cost too low (minimum 64MB)".to_string(),
                     ));
                 }
                 if self.iterations < 3 {
                     return Err(CryptoError::KeyGenerationFailed(
-                        "Argon2id iterations too low (minimum 3)".to_string()
+                        "Argon2id iterations too low (minimum 3)".to_string(),
                     ));
                 }
             }
@@ -87,13 +87,13 @@ impl KdfParams {
 
         if self.salt.len() < 16 {
             return Err(CryptoError::KeyGenerationFailed(
-                "Salt too short (minimum 16 bytes)".to_string()
+                "Salt too short (minimum 16 bytes)".to_string(),
             ));
         }
 
         if self.key_length < 16 {
             return Err(CryptoError::KeyGenerationFailed(
-                "Key length too short (minimum 16 bytes)".to_string()
+                "Key length too short (minimum 16 bytes)".to_string(),
             ));
         }
 
@@ -156,7 +156,9 @@ pub fn derive_key_argon2id(
     let mut key = vec![0u8; key_length];
     argon2
         .hash_password_into(password, salt, &mut key)
-        .map_err(|e| CryptoError::KeyGenerationFailed(format!("Argon2id key derivation failed: {}", e)))?;
+        .map_err(|e| {
+            CryptoError::KeyGenerationFailed(format!("Argon2id key derivation failed: {}", e))
+        })?;
 
     Ok(key)
 }
@@ -225,7 +227,7 @@ pub mod stretch {
     pub fn stretch_key_sha256(key: &[u8], iterations: u32) -> CryptoResult<Vec<u8>> {
         if iterations == 0 {
             return Err(CryptoError::KeyGenerationFailed(
-                "Iterations must be greater than 0".to_string()
+                "Iterations must be greater than 0".to_string(),
             ));
         }
 

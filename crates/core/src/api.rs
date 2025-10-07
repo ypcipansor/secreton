@@ -150,9 +150,7 @@ impl AdvancedSecurityManager {
         // Initialize concrete implementations for abstract interfaces
         // use crate::security::concrete_implementations::*;
 
-        Ok(Self {
-            _placeholder: (),
-        })
+        Ok(Self { _placeholder: () })
     }
 
     pub async fn authenticate(

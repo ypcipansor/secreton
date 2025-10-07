@@ -767,9 +767,10 @@ impl SecurityEnforcer {
     async fn calculate_file_hash(&self, path: &PathBuf) -> CoreResult<String> {
         // Open file for reading
         let file = File::open(path).await.map_err(|e| {
-            CoreError::Io(std::io::Error::other(
-                format!("Failed to open file for hashing: {}", e),
-            ))
+            CoreError::Io(std::io::Error::other(format!(
+                "Failed to open file for hashing: {}",
+                e
+            )))
         })?;
 
         let mut reader = BufReader::new(file);
@@ -779,9 +780,10 @@ impl SecurityEnforcer {
         // Read file in chunks and update hash
         loop {
             let bytes_read = reader.read(&mut buffer).await.map_err(|e| {
-                CoreError::Io(std::io::Error::other(
-                    format!("Failed to read file for hashing: {}", e),
-                ))
+                CoreError::Io(std::io::Error::other(format!(
+                    "Failed to read file for hashing: {}",
+                    e
+                )))
             })?;
 
             if bytes_read == 0 {

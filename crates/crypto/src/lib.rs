@@ -15,7 +15,12 @@ pub mod key_derivation;
 pub mod kmip;
 pub mod kv_engine;
 pub mod pqc;
+pub mod shamir;
 pub mod transit;
+
+// TODO: Fix compilation errors in these modules
+// pub mod integration;
+// pub mod quantum_safe_crypto;
 
 pub use encryption::*;
 pub use error::*;
@@ -23,6 +28,7 @@ pub use key_derivation::*;
 pub use kmip::*;
 pub use kv_engine::*;
 pub use pqc::*;
+pub use shamir::*;
 pub use transit::*;
 
 /// Supported cryptographic algorithms

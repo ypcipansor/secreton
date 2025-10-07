@@ -111,9 +111,10 @@ pub fn compute_hash(algorithm: AlgorithmId, data: &[u8]) -> CryptoResult<HashRes
             hasher.hash(data)?
         }
         _ => {
-            return Err(CryptoError::HashFailed(
-                format!("Unsupported hash algorithm: {}", algorithm)
-            ));
+            return Err(CryptoError::HashFailed(format!(
+                "Unsupported hash algorithm: {}",
+                algorithm
+            )));
         }
     };
 
@@ -139,9 +140,10 @@ pub fn compute_hash_multiple(
             hasher.hash_multiple(data_chunks)?
         }
         _ => {
-            return Err(CryptoError::HashFailed(
-                format!("Unsupported hash algorithm: {}", algorithm)
-            ));
+            return Err(CryptoError::HashFailed(format!(
+                "Unsupported hash algorithm: {}",
+                algorithm
+            )));
         }
     };
 
@@ -153,9 +155,8 @@ pub type HmacSha256 = Hmac<Sha256>;
 
 /// Compute HMAC-SHA256
 pub fn compute_hmac_sha256(key: &[u8], data: &[u8]) -> CryptoResult<Vec<u8>> {
-    let mut mac = HmacSha256::new_from_slice(key).map_err(|e| {
-        CryptoError::HashFailed(format!("HMAC key initialization failed: {}", e))
-    })?;
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|e| CryptoError::HashFailed(format!("HMAC key initialization failed: {}", e)))?;
 
     mac.update(data);
     Ok(mac.finalize().into_bytes().to_vec())
@@ -207,9 +208,8 @@ pub mod password {
 
     /// Verify password with Argon2id
     pub fn verify_password_argon2(password: &str, hash: &str) -> CryptoResult<bool> {
-        let parsed_hash = PasswordHash::new(hash).map_err(|e| {
-            CryptoError::HashFailed(format!("Invalid password hash format: {}", e))
-        })?;
+        let parsed_hash = PasswordHash::new(hash)
+            .map_err(|e| CryptoError::HashFailed(format!("Invalid password hash format: {}", e)))?;
 
         let argon2 = Argon2::default();
         match argon2.verify_password(password.as_bytes(), &parsed_hash) {

@@ -11,12 +11,12 @@ use axum::{
     Json,
 };
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 use x509_parser::prelude::*;
-use std::path::PathBuf;
 
 use crate::auth::{extract_bearer_token, AuthError, AuthService};
 use crate::ApiState;
@@ -144,7 +144,8 @@ fn validate_cached_certificate(
 
     // Check if subject is in allowed list
     let subject_str = cert.subject().to_string();
-    let is_allowed = allowed_subjects.is_empty() || allowed_subjects.iter().any(|s| subject_str.contains(s));
+    let is_allowed =
+        allowed_subjects.is_empty() || allowed_subjects.iter().any(|s| subject_str.contains(s));
 
     if !is_allowed {
         warn!("Certificate subject not in allowed list: {}", subject_str);

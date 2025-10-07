@@ -6,14 +6,14 @@ pub mod raft;
 pub mod redis;
 
 // New storage backends
+pub mod cassandra;
+pub mod cockroachdb;
 pub mod consul;
 pub mod dynamodb;
 pub mod etcd;
+pub mod mongodb;
 pub mod mysql;
 pub mod s3;
-pub mod cockroachdb;
-pub mod cassandra;
-pub mod mongodb;
 
 // Azure and GCS backends
 pub mod azure_blob;
@@ -38,18 +38,18 @@ pub use raft::{RaftConfig, RaftStorageBackend};
 pub use redis::RedisBackend;
 
 // Export new backends
+pub use cassandra::{CassandraConfig, CassandraStorage};
+pub use cockroachdb::{CockroachDBConfig, CockroachDBStorage};
 pub use consul::{ConsulStorage, ConsulStorageConfig};
 pub use dynamodb::{DynamoDBStorage, DynamoDBStorageConfig};
 pub use etcd::{EtcdStorage, EtcdStorageConfig};
+pub use mongodb::{MongoDBConfig, MongoDBStorage};
 pub use mysql::{MySQLStorage, MySQLStorageConfig};
 pub use s3::{S3Storage, S3StorageConfig};
-pub use cockroachdb::{CockroachDBStorage, CockroachDBConfig};
-pub use cassandra::{CassandraStorage, CassandraConfig};
-pub use mongodb::{MongoDBStorage, MongoDBConfig};
 
 // Export Azure and GCS backends
-pub use azure_blob::{AzureBlobStorage, AzureBlobConfig};
-pub use gcs::{GoogleCloudStorage, GcsConfig};
+pub use azure_blob::{AzureBlobConfig, AzureBlobStorage};
+pub use gcs::{GcsConfig, GoogleCloudStorage};
 
 // Export additional backends
 // pub use aerospike::{AerospikeStorage, AerospikeConfig};

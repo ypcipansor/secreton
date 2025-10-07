@@ -40,6 +40,11 @@ aws-config = "1.0"
 aws-smithy-types = "1.0"
 aws-types = "1.0"
 
+# Azure Storage
+azure_storage = "0.20"
+azure_storage_blobs = "0.20"
+azure_core = "0.20"
+
 # Cryptography
 secreton-crypto = { path = "../crypto" }
 zeroize.workspace = true
