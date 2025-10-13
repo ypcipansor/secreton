@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use x509_parser::prelude::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 use crate::models::auth::{AuthRequest, AuthResponse, UserInfo};
 
@@ -153,7 +154,7 @@ impl CertAuth {
             .collect();
         let pem_body = pem_lines.join("");
         
-        let der_data = base64::decode(&pem_body)
+        let der_data = base64.decode(&pem_body)
             .map_err(|e| CertError::ParseError(format!("Base64 decode error: {}", e)))?;
         
         let (_, cert) = X509Certificate::from_der(&der_data)

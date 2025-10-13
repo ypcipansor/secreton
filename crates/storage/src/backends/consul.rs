@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 /// Consul storage backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +152,7 @@ impl StorageBackend for ConsulStorage {
                 message: format!("Failed to serialize entry: {}", e),
             })?;
 
-        let encoded = base64::encode(&serialized);
+        let encoded = STANDARD.encode(&serialized);
 
         let request = self.client.put(&url).body(encoded);
         let request = self.add_auth(request);
@@ -232,7 +233,7 @@ impl StorageBackend for ConsulStorage {
 
         if let Some(kv) = kv_response.first() {
             let decoded =
-                base64::decode(&kv.value).map_err(|e| StorageError::SerializationError {
+                STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to decode base64: {}", e),
                 })?;
 

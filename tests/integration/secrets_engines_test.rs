@@ -7,7 +7,7 @@
 
 #[cfg(test)]
 mod secrets_engine_integration_tests {
-    use secreton_core::secrets::engine::*;
+    use secreton_core::services::secrets::*;
     
     /// Test AWS secrets engine initialization
     #[tokio::test]

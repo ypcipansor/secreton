@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Audit event type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum AuditEventType {
     /// Authentication events
     AuthLogin,
@@ -49,6 +49,15 @@ pub enum AuditEventType {
     
     /// Other
     Custom(String),
+}
+
+impl serde::Serialize for AuditEventType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
 }
 
 impl AuditEventType {

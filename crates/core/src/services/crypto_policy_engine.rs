@@ -137,67 +137,14 @@ pub struct CryptoPolicyEngine {
 
 impl CryptoPolicyEngine {
     pub fn new() -> Self {
-        let engine = Self {
+        let metadata = Self::create_default_metadata();
+        
+        Self {
             policies: Arc::new(RwLock::new(HashMap::new())),
-            algorithm_metadata: Arc::new(RwLock::new(HashMap::new())),
+            algorithm_metadata: Arc::new(RwLock::new(metadata)),
             audits: Arc::new(RwLock::new(Vec::new())),
             inventory: Arc::new(RwLock::new(HashMap::new())),
-        };
-
-        // Initialize with default algorithm metadata
-        tokio::spawn({
-            let engine = engine.clone();
-            async move {
-                engine.initialize_defaults().await;
-            }
-        });
-
-        engine
-    }
-
-    async fn initialize_defaults(&self) {
-        let mut metadata = self.algorithm_metadata.write().await;
-
-        // Approved algorithms
-        metadata.insert(
-            CryptoAlgorithm::AES256_GCM,
-            AlgorithmMetadata {
-                algorithm: CryptoAlgorithm::AES256_GCM,
-                status: AlgorithmStatus::Approved,
-                security_level: 256,
-                compliance: vec![
-                    ComplianceStandard::FIPS_140_2,
-                    ComplianceStandard::NIST_SP_800_131A,
-                ],
-                deprecation_date: None,
-                recommended_replacement: None,
-            },
-        );
-
-        metadata.insert(
-            CryptoAlgorithm::ED25519,
-            AlgorithmMetadata {
-                algorithm: CryptoAlgorithm::ED25519,
-                status: AlgorithmStatus::Approved,
-                security_level: 128,
-                compliance: vec![ComplianceStandard::NIST_SP_800_131A],
-                deprecation_date: None,
-                recommended_replacement: None,
-            },
-        );
-
-        // Deprecated algorithm
-        metadata.insert(
-            CryptoAlgorithm::RSA2048,
-            AlgorithmMetadata {
-                algorithm: CryptoAlgorithm::RSA2048,
-                status: AlgorithmStatus::Deprecated,
-                security_level: 112,
-                compliance: vec![],
-                deprecation_date: Some(Utc::now()),
-                recommended_replacement: Some(CryptoAlgorithm::RSA4096),
-            },
-        );
+        }
     }
 
     /// Create policy
@@ -391,13 +338,65 @@ impl CryptoPolicyEngine {
         }
     }
 
+    fn create_default_metadata() -> HashMap<CryptoAlgorithm, AlgorithmMetadata> {
+        let mut metadata = HashMap::new();
+
+        // Approved algorithms
+        metadata.insert(
+            CryptoAlgorithm::AES256_GCM,
+            AlgorithmMetadata {
+                algorithm: CryptoAlgorithm::AES256_GCM,
+                status: AlgorithmStatus::Approved,
+                security_level: 256,
+                compliance: vec![
+                    ComplianceStandard::FIPS_140_2,
+                    ComplianceStandard::NIST_SP_800_131A,
+                ],
+                deprecation_date: None,
+                recommended_replacement: None,
+            },
+        );
+
+        metadata.insert(
+            CryptoAlgorithm::ED25519,
+            AlgorithmMetadata {
+                algorithm: CryptoAlgorithm::ED25519,
+                status: AlgorithmStatus::Approved,
+                security_level: 128,
+                compliance: vec![ComplianceStandard::NIST_SP_800_131A],
+                deprecation_date: None,
+                recommended_replacement: None,
+            },
+        );
+
+        // Deprecated algorithm
+        metadata.insert(
+            CryptoAlgorithm::RSA2048,
+            AlgorithmMetadata {
+                algorithm: CryptoAlgorithm::RSA2048,
+                status: AlgorithmStatus::Deprecated,
+                security_level: 112,
+                compliance: vec![],
+                deprecation_date: Some(Utc::now()),
+                recommended_replacement: Some(CryptoAlgorithm::RSA4096),
+            },
+        );
+        
+        metadata
+    }
+
+    /// Check if initialized (metadata is always populated in new())
+    pub async fn is_initialized(&self) -> bool {
+        let metadata = self.algorithm_metadata.read().await;
+        !metadata.is_empty()
+    }
+
     /// Get inventory
     pub async fn get_inventory(&self) -> Vec<CryptoInventoryItem> {
         let inventory = self.inventory.read().await;
         inventory.values().cloned().collect()
     }
 
-    /// Get non-compliant items
     pub async fn get_non_compliant_items(&self) -> Vec<CryptoInventoryItem> {
         let inventory = self.inventory.read().await;
         inventory

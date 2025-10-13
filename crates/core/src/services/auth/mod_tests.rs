@@ -1,0 +1,194 @@
+//! Integration tests for authentication services
+//!
+//! Tests cross-auth-method scenarios, error handling, and edge cases
+
+use super::*;
+use crate::services::auth::{
+    approle::AppRoleAuthService,
+    token::TokenAuthService,
+    userpass::UserPassAuthService,
+};
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_multiple_auth_methods_sequential() {
+        // Test that multiple auth methods can be used sequentially
+        let token_service = TokenAuthService::new();
+        let userpass_service = UserPassAuthService::new();
+        
+        // Create token
+        let token_result = token_service
+            .create_token("test-user", vec!["admin".to_string()], 3600)
+            .await;
+        assert!(token_result.is_ok());
+        
+        // Authenticate with userpass
+        userpass_service
+            .create_user("testuser".to_string(), "testpass123".to_string())
+            .await
+            .unwrap();
+        
+        let auth_result = userpass_service
+            .authenticate("testuser", "testpass123")
+            .await;
+        assert!(auth_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_approle_secret_id_rotation() {
+        let service = AppRoleAuthService::new();
+        
+        // Create role
+        service
+            .create_role("test-role".to_string(), vec!["default".to_string()])
+            .await
+            .unwrap();
+        
+        // Generate multiple secret IDs
+        let secret_id_1 = service.generate_secret_id("test-role").await.unwrap();
+        let secret_id_2 = service.generate_secret_id("test-role").await.unwrap();
+        
+        // Both should be valid
+        assert_ne!(secret_id_1, secret_id_2);
+        assert!(!secret_id_1.is_empty());
+        assert!(!secret_id_2.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_token_renewal_lifecycle() {
+        let service = TokenAuthService::new();
+        
+        // Create renewable token
+        let token_result = service
+            .create_token("test-user", vec!["default".to_string()], 3600)
+            .await
+            .unwrap();
+        
+        // Verify token
+        let verify_result = service.verify_token(&token_result.token).await;
+        assert!(verify_result.is_ok());
+        
+        // Revoke token
+        let revoke_result = service.revoke_token(&token_result.token).await;
+        assert!(revoke_result.is_ok());
+        
+        // Verify revoked token should fail
+        let verify_after_revoke = service.verify_token(&token_result.token).await;
+        assert!(verify_after_revoke.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_userpass_password_policy() {
+        let service = UserPassAuthService::new();
+        
+        // Test weak password rejection
+        let weak_result = service
+            .create_user("testuser".to_string(), "123".to_string())
+            .await;
+        // Should succeed (no password policy enforced in basic impl)
+        assert!(weak_result.is_ok());
+        
+        // Test strong password
+        let strong_result = service
+            .create_user("testuser2".to_string(), "StrongP@ssw0rd!123".to_string())
+            .await;
+        assert!(strong_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_authentication() {
+        use tokio::task::JoinSet;
+        
+        let service = std::sync::Arc::new(UserPassAuthService::new());
+        
+        // Create user
+        service
+            .create_user("concurrent_user".to_string(), "password123".to_string())
+            .await
+            .unwrap();
+        
+        // Spawn multiple concurrent auth requests
+        let mut set = JoinSet::new();
+        for _ in 0..10 {
+            let service_clone = service.clone();
+            set.spawn(async move {
+                service_clone
+                    .authenticate("concurrent_user", "password123")
+                    .await
+            });
+        }
+        
+        // All should succeed
+        let mut success_count = 0;
+        while let Some(result) = set.join_next().await {
+            if result.unwrap().is_ok() {
+                success_count += 1;
+            }
+        }
+        
+        assert_eq!(success_count, 10);
+    }
+
+    #[tokio::test]
+    async fn test_auth_error_handling() {
+        let token_service = TokenAuthService::new();
+        let userpass_service = UserPassAuthService::new();
+        
+        // Test invalid token
+        let invalid_token_result = token_service.verify_token("invalid-token").await;
+        assert!(invalid_token_result.is_err());
+        
+        // Test non-existent user
+        let invalid_user_result = userpass_service
+            .authenticate("nonexistent", "password")
+            .await;
+        assert!(invalid_user_result.is_err());
+        
+        // Test wrong password
+        userpass_service
+            .create_user("testuser".to_string(), "correctpass".to_string())
+            .await
+            .unwrap();
+        
+        let wrong_pass_result = userpass_service
+            .authenticate("testuser", "wrongpass")
+            .await;
+        assert!(wrong_pass_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_approle_role_id_stability() {
+        let service = AppRoleAuthService::new();
+        
+        // Create role
+        service
+            .create_role("stable-role".to_string(), vec!["default".to_string()])
+            .await
+            .unwrap();
+        
+        // Get role ID multiple times
+        let role_id_1 = service.get_role_id("stable-role").await.unwrap();
+        let role_id_2 = service.get_role_id("stable-role").await.unwrap();
+        
+        // Should be the same
+        assert_eq!(role_id_1, role_id_2);
+    }
+
+    #[tokio::test]
+    async fn test_token_metadata_preservation() {
+        let service = TokenAuthService::new();
+        
+        let policies = vec!["admin".to_string(), "read-only".to_string()];
+        let token_result = service
+            .create_token("metadata-user", policies.clone(), 3600)
+            .await
+            .unwrap();
+        
+        // Verify metadata is preserved
+        assert!(token_result.token.starts_with("hvs."));
+        assert_eq!(token_result.lease_duration, 3600);
+    }
+}

@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// Common SDK configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1002,7 +1003,7 @@ roleRef:
 "#,
                 self.config.namespace,
                 self.config.namespace,
-                base64::encode(&self.config.token),
+                base64.encode(&self.config.token),
                 self.config.namespace,
                 self.config.image,
                 self.config.server_url,

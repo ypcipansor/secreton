@@ -7,12 +7,13 @@ use secreton_api::{create_api_router, ApiState};
 async fn create_test_app() -> axum::Router {
     // Create a simple test state for basic API testing
     use secreton_api::{KVApiState, TransitApiState};
+    use secreton_core::services::secrets::{Kvv2SecretsEngine, TransitEngine};
     let api_state = ApiState {
         transit: TransitApiState {
-            engine: std::sync::Arc::new(secreton_api::TransitEngine::default()),
+            engine: std::sync::Arc::new(TransitEngine::new()),
         },
         kv: KVApiState {
-            engine: std::sync::Arc::new(secreton_api::KVEngine::default()),
+            engine: std::sync::Arc::new(Kvv2SecretsEngine::new()),
         },
     };
 
@@ -63,12 +64,13 @@ mod api_tests {
     async fn test_router_creation() {
         // Test that API server can be initialized without errors
         use secreton_api::{KVApiState, TransitApiState};
+        use secreton_core::services::secrets::{Kvv2SecretsEngine, TransitEngine};
         let api_state = ApiState {
             transit: TransitApiState {
-                engine: std::sync::Arc::new(secreton_api::TransitEngine::default()),
+                engine: std::sync::Arc::new(TransitEngine::new()),
             },
             kv: KVApiState {
-                engine: std::sync::Arc::new(secreton_api::KVEngine::default()),
+                engine: std::sync::Arc::new(Kvv2SecretsEngine::new()),
             },
         };
 

@@ -399,6 +399,7 @@ impl KmipServer {
     }
 
     /// Handle KMIP connection
+    #[allow(dead_code)]
     async fn handle_connection(&self, socket: tokio::net::TcpStream) -> CryptoResult<()> {
         let handler = self.clone_for_connection();
         handler.handle_connection(socket).await

@@ -175,7 +175,7 @@ impl MySQLStorage {
     }
 
     /// Build MySQL query for inserting/updating entries
-    fn build_upsert_query(&self, entry: &VaultEntry) -> String {
+    fn build_upsert_query(&self, _entry: &VaultEntry) -> String {
         format!(
             r#"
             INSERT INTO {} (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
@@ -195,7 +195,7 @@ impl MySQLStorage {
     }
 
     /// Build MySQL query for selecting entries
-    fn build_select_query(&self, path: &str) -> String {
+    fn build_select_query(&self, _path: &str) -> String {
         format!(
             "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM {} WHERE path = ?",
             self.config.table_name
@@ -203,7 +203,7 @@ impl MySQLStorage {
     }
 
     /// Build MySQL query for deleting entries
-    fn build_delete_query(&self, path: &str) -> String {
+    fn build_delete_query(&self, _path: &str) -> String {
         format!("DELETE FROM {} WHERE path = ?", self.config.table_name)
     }
 
@@ -283,7 +283,7 @@ impl StorageBackend for MySQLStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<VaultEntry>> {
         // For MySQL, we need to query by path first to find the entry
         // This is a limitation of the current design
         Ok(None)

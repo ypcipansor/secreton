@@ -496,9 +496,16 @@ mod tests {
             .await
             .unwrap();
 
-        // Add extra connections
+        // Add extra connections and release them to make them idle
+        let mut connection_ids = Vec::new();
         for _ in 0..3 {
-            service.acquire_connection("temp-db").await.unwrap();
+            let conn = service.acquire_connection("temp-db").await.unwrap();
+            connection_ids.push(conn.id);
+        }
+
+        // Release connections to make them idle
+        for id in connection_ids {
+            service.release_connection("temp-db", &id).await.unwrap();
         }
 
         let metrics_before = service.get_metrics("temp-db").await.unwrap();

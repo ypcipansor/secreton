@@ -329,13 +329,19 @@ impl LogStreaming {
         drop(config);
 
         let mut buffer = self.buffer.write().await;
-        let events = buffer.drain(batch_size);
+        let drain_count = batch_size.min(buffer.events.len());
+        let events: Vec<_> = buffer.events.drain(0..drain_count).collect();
         let count = events.len();
         drop(buffer);
 
-        // Stream buffered events
+        // Send buffered events directly to destinations (don't re-buffer)
+        let destinations = self.destinations.read().await;
         for event in events {
-            let _ = self.stream_log(event).await;
+            for destination in destinations.values() {
+                if destination.enabled {
+                    let _ = self.deliver_to_destination(&event, destination).await;
+                }
+            }
         }
 
         Ok(count)
@@ -374,7 +380,7 @@ impl LogStreaming {
 
     fn should_sample(&self, rate: f64) -> bool {
         use rand::Rng;
-        rand::thread_rng().gen::<f64>() < rate
+        rand::thread_rng().r#gen::<f64>() < rate
     }
 
     // Mock delivery methods
@@ -527,12 +533,12 @@ mod tests {
         let metrics_before = streaming.get_metrics().await;
         assert_eq!(metrics_before["buffered_events"], 10);
 
-        // Flush batch
+        // Flush batch (flushes batch_size=5 events)
         let flushed = streaming.flush_buffer().await.unwrap();
-        assert_eq!(flushed, 5);
+        assert_eq!(flushed, 5); // batch_size events flushed
 
         let metrics_after = streaming.get_metrics().await;
-        assert_eq!(metrics_after["buffered_events"], 5);
+        assert_eq!(metrics_after["buffered_events"], 5); // 5 remaining in buffer
     }
 
     #[tokio::test]

@@ -456,7 +456,7 @@ impl StorageBackend for DynamoDBStorage {
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        let result = self
+        let _result = self
             .client
             .delete_item()
             .table_name(&self.config.table_name)

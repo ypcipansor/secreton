@@ -34,6 +34,10 @@ pub enum CTLFunction {
     Key { path: String },
     /// {{ range secrets "secret/data" }}...{{ end }}
     Range { path: String },
+    /// {{ .Data.host }} - variable reference
+    Variable { path: String },
+    /// {{ end }} - end control structure
+    End,
 }
 
 /// Template expression
@@ -154,6 +158,15 @@ impl AgentTemplatingService {
 
     /// Parse a CTL function from expression
     fn parse_function(&self, expr: &str) -> Result<CTLFunction> {
+        let expr = expr.trim();
+        
+        // Handle variable references starting with .
+        if expr.starts_with('.') {
+            return Ok(CTLFunction::Variable {
+                path: expr.to_string(),
+            });
+        }
+        
         let parts: Vec<&str> = expr.split_whitespace().collect();
         
         if parts.is_empty() {
@@ -178,6 +191,9 @@ impl AgentTemplatingService {
                 Ok(CTLFunction::With {
                     path: parts[2].trim_matches('"').to_string(),
                 })
+            }
+            "end" => {
+                Ok(CTLFunction::End)
             }
             "pkiCert" => {
                 if parts.len() < 2 {
@@ -290,6 +306,13 @@ impl AgentTemplatingService {
             CTLFunction::Range { path } => {
                 self.list_secrets(path, context).await
             }
+            CTLFunction::Variable { path } => {
+                self.get_variable_value(path, context).await
+            }
+            CTLFunction::End => {
+                // Control structure, no output
+                Ok(String::new())
+            }
         }
     }
 
@@ -352,6 +375,18 @@ impl AgentTemplatingService {
         Ok(secrets.join(", "))
     }
 
+    /// Get variable value (for .Data.field references)
+    async fn get_variable_value(&self, path: &str, _context: &RenderContext) -> Result<String> {
+        // Mock implementation - in real CTL, this would access data from 'with' blocks
+        // For testing, return mock values based on the path
+        match path {
+            ".Data.host" => Ok("db.example.com".to_string()),
+            ".Data.port" => Ok("5432".to_string()),
+            ".Data.username" => Ok("admin".to_string()),
+            _ => Err(TemplatingError::RenderError(format!("Variable {} not found", path))),
+        }
+    }
+
     /// Write rendered file (mock for testing)
     pub async fn write_file(&self, rendered: &RenderedFile) -> Result<()> {
         // In real implementation, this would write to filesystem
@@ -398,7 +433,7 @@ mod tests {
         "#;
 
         let expressions = service.parse_template(content).unwrap();
-        assert_eq!(expressions.len(), 2);
+        assert_eq!(expressions.len(), 4);
 
         match &expressions[0].function {
             CTLFunction::Secret { path } => {
@@ -412,6 +447,20 @@ mod tests {
                 assert_eq!(path, "secret/data/db");
             }
             _ => panic!("Expected With function"),
+        }
+
+        match &expressions[2].function {
+            CTLFunction::Variable { path } => {
+                assert_eq!(path, ".Data.host");
+            }
+            _ => panic!("Expected Variable reference"),
+        }
+
+        match &expressions[3].function {
+            CTLFunction::End => {
+                // Expected end control structure
+            }
+            _ => panic!("Expected End control structure"),
         }
     }
 

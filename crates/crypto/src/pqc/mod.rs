@@ -253,7 +253,6 @@ pub struct AlgorithmCharacteristics {
     pub operation: String,
     pub performance_rating: String,
 }
-
 /// Hybrid classical + PQC implementation
 // TODO: Re-enable when TransitProvider trait is defined
 // pub struct HybridCryptoProvider {

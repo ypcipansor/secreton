@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 /// etcd storage backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,8 +141,8 @@ impl StorageBackend for EtcdStorage {
             })?;
 
         let request_body = serde_json::json!({
-            "key": base64::encode(&full_key),
-            "value": base64::encode(&serialized),
+            "key": BASE64_STANDARD.encode(&full_key),
+            "value": BASE64_STANDARD.encode(&serialized),
         });
 
         let request = self.client.post(&url).json(&request_body);
@@ -188,7 +189,7 @@ impl StorageBackend for EtcdStorage {
         let url = self.build_url("kv/range");
 
         let request_body = serde_json::json!({
-            "key": base64::encode(&full_key),
+            "key": BASE64_STANDARD.encode(&full_key),
         });
 
         let request = self.client.post(&url).json(&request_body);
@@ -229,7 +230,7 @@ impl StorageBackend for EtcdStorage {
         if let Some(kvs) = etcd_response.kvs {
             if let Some(kv) = kvs.first() {
                 let decoded =
-                    base64::decode(&kv.value).map_err(|e| StorageError::SerializationError {
+                    BASE64_STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
                         message: format!("Failed to decode base64: {}", e),
                     })?;
 
@@ -267,7 +268,7 @@ impl StorageBackend for EtcdStorage {
         let url = self.build_url("kv/deleterange");
 
         let request_body = serde_json::json!({
-            "key": base64::encode(&full_key),
+            "key": BASE64_STANDARD.encode(&full_key),
         });
 
         let request = self.client.post(&url).json(&request_body);
@@ -303,8 +304,8 @@ impl StorageBackend for EtcdStorage {
         let range_end = format!("{}\0", full_prefix);
 
         let request_body = serde_json::json!({
-            "key": base64::encode(&full_prefix),
-            "range_end": base64::encode(&range_end),
+            "key": BASE64_STANDARD.encode(&full_prefix),
+            "range_end": BASE64_STANDARD.encode(&range_end),
         });
 
         let request = self.client.post(&url).json(&request_body);
@@ -346,7 +347,7 @@ impl StorageBackend for EtcdStorage {
         if let Some(kvs) = etcd_response.kvs {
             for kv in kvs {
                 let decoded =
-                    base64::decode(&kv.value).map_err(|e| StorageError::SerializationError {
+                    BASE64_STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
                         message: format!("Failed to decode value: {}", e),
                     })?;
 

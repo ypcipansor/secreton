@@ -4,9 +4,8 @@
 
 use anyhow::Result;
 use secreton_agent::{
-    config::AgentConfig,
+    config::{AgentConfig, SecurityConfig},
     metrics::{MetricPoint, MetricsCollector},
-    security::SecurityConfig,
 };
 use std::time::Duration;
 

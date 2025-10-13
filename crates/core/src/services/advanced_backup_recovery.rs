@@ -109,6 +109,7 @@ pub struct AdvancedBackupRecovery {
     recovery_points: Arc<RwLock<HashMap<String, RecoveryPoint>>>,
     restore_operations: Arc<RwLock<Vec<RestoreOperation>>>,
     last_backup_snapshot: Arc<RwLock<Option<BackupMetadata>>>,
+    mock_call_count: Arc<RwLock<u32>>, // For testing
 }
 
 impl AdvancedBackupRecovery {
@@ -119,6 +120,7 @@ impl AdvancedBackupRecovery {
             recovery_points: Arc::new(RwLock::new(HashMap::new())),
             restore_operations: Arc::new(RwLock::new(Vec::new())),
             last_backup_snapshot: Arc::new(RwLock::new(None)),
+            mock_call_count: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -393,13 +395,17 @@ impl AdvancedBackupRecovery {
     // Helper methods
 
     async fn mock_fetch_secrets(&self) -> Result<HashMap<String, SecretData>> {
+        let mut call_count = self.mock_call_count.write().await;
+        *call_count += 1;
+        let version_offset = *call_count;
+
         let mut secrets = HashMap::new();
         secrets.insert(
             "secret/db/password".to_string(),
             SecretData {
                 path: "secret/db/password".to_string(),
                 value: "secret123".to_string(),
-                version: 1,
+                version: 1 + version_offset,
                 metadata: HashMap::new(),
             },
         );
@@ -408,7 +414,7 @@ impl AdvancedBackupRecovery {
             SecretData {
                 path: "secret/api/key".to_string(),
                 value: "key456".to_string(),
-                version: 2,
+                version: 2 + version_offset,
                 metadata: HashMap::new(),
             },
         );

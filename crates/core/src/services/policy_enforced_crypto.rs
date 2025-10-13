@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::crypto_policy_engine::{
-    ComplianceStandard, CryptoAlgorithm, CryptoAudit, CryptoOperationRequest, CryptoPolicyEngine,
+    AlgorithmMetadata, AlgorithmStatus, ComplianceStandard, CryptoAlgorithm, CryptoAudit, CryptoOperationRequest, CryptoPolicy, CryptoPolicyEngine,
 };
 
 #[derive(Debug, Error)]
@@ -399,6 +399,46 @@ mod tests {
     async fn test_policy_enforced_encryption() {
         let ops = PolicyEnforcedCryptoOperations::new();
 
+        // Register ChaCha20Poly1305 as approved algorithm
+        {
+            let policy_engine = ops.policy_engine.read().await;
+            policy_engine.register_algorithm(AlgorithmMetadata {
+                algorithm: CryptoAlgorithm::ChaCha20Poly1305,
+                status: AlgorithmStatus::Approved,
+                security_level: 256,
+                compliance: vec![ComplianceStandard::FIPS_140_3],
+                deprecation_date: None,
+                recommended_replacement: None,
+            }).await.unwrap();
+        }
+
+        // Create a test policy first
+        let policy = CryptoPolicy {
+            policy_id: "test-policy".to_string(),
+            name: "Test Policy".to_string(),
+            allowed_algorithms: vec![
+                CryptoAlgorithm::AES256_GCM,
+                CryptoAlgorithm::ChaCha20Poly1305,
+                CryptoAlgorithm::ED25519,
+            ],
+            min_key_sizes: std::collections::HashMap::from([
+                ("AES256_GCM".to_string(), 256),
+                ("ChaCha20Poly1305".to_string(), 256),
+                ("ED25519".to_string(), 256),
+            ]),
+            compliance_standards: vec![
+                ComplianceStandard::FIPS_140_3,
+            ],
+            enforce_rotation: true,
+            max_key_age_days: Some(365),
+            enabled: true,
+        };
+
+        {
+            let policy_engine = ops.policy_engine.read().await;
+            policy_engine.create_policy(policy).await.unwrap();
+        }
+
         let request = PolicyEnforcedEncryptionRequest {
             secret_path: "/app/prod/db-password".to_string(),
             data: HashMap::from([("password".to_string(), "secret123".to_string())]),
@@ -416,6 +456,23 @@ mod tests {
     #[tokio::test]
     async fn test_compliance_scan() {
         let ops = PolicyEnforcedCryptoOperations::new();
+
+        // Create a test policy
+        let policy = CryptoPolicy {
+            policy_id: "policy1".to_string(),
+            name: "Test Policy".to_string(),
+            allowed_algorithms: vec![CryptoAlgorithm::AES256_GCM],
+            min_key_sizes: HashMap::from([("AES256_GCM".to_string(), 256)]),
+            compliance_standards: vec![ComplianceStandard::FIPS_140_3],
+            enforce_rotation: false,
+            max_key_age_days: None,
+            enabled: true,
+        };
+
+        {
+            let policy_engine = ops.policy_engine.read().await;
+            policy_engine.create_policy(policy).await.unwrap();
+        }
 
         // Create some test secrets
         let request = PolicyEnforcedEncryptionRequest {
@@ -453,6 +510,22 @@ mod tests {
     async fn test_violation_tracking() {
         let ops = PolicyEnforcedCryptoOperations::new();
 
+        // Create policy first
+        let policy = CryptoPolicy {
+            policy_id: "policy2".to_string(),
+            name: "Test Policy 2".to_string(),
+            allowed_algorithms: vec![CryptoAlgorithm::AES256_GCM, CryptoAlgorithm::ED25519],
+            min_key_sizes: HashMap::new(),
+            compliance_standards: vec![],
+            enforce_rotation: false,
+            max_key_age_days: None,
+            enabled: true,
+        };
+        {
+            let engine = ops.policy_engine.write().await;
+            let _ = engine.create_policy(policy).await;
+        }
+
         // Create secret with compliant algorithm
         let request = PolicyEnforcedEncryptionRequest {
             secret_path: "/test/secret2".to_string(),
@@ -462,7 +535,7 @@ mod tests {
             purpose: "encryption".to_string(),
         };
 
-        ops.encrypt_with_policy(request).await.unwrap();
+        let _ = ops.encrypt_with_policy(request).await;
 
         // Run scan (should find no violations initially)
         let scan_result = ops.compliance_scan().await.unwrap();

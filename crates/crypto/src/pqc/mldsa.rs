@@ -4,7 +4,7 @@
 
 use crate::error::{CryptoError, CryptoResult};
 use pqcrypto_mldsa::*;
-use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey, SignedMessage};
+use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn test_batch_operations() {
         let keypair = MLDsaKeypair::generate(MLDsaVariant::MLDsa44).unwrap();
-        let messages_raw = vec![b"Message 1", b"Message 2", b"Message 3"];
+        let messages_raw = [b"Message 1", b"Message 2", b"Message 3"];
         let messages: Vec<&[u8]> = messages_raw.iter().map(|m| m.as_ref()).collect();
 
         let batch_signer =
@@ -679,7 +679,7 @@ mod tests {
         let result = keypair_65.verify(message, &signature_44);
         // This should either error or return false
         assert!(
-            result.is_err() || result.unwrap() == false,
+            result.is_err() || !result.unwrap(),
             "Cross-variant verification should fail"
         );
     }

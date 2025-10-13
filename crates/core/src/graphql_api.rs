@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// GraphQL secret representation
 #[derive(SimpleObject, Clone)]
@@ -358,7 +359,7 @@ impl SecretsManager for DefaultSecretsManager {
 
         Ok(WrappedResponse {
             token,
-            data: base64::encode(data),
+            data: base64.encode(data),
             created_at: Utc::now(),
             expires_at,
         })

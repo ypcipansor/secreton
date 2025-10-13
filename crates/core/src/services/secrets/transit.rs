@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// Error types for transit engine
 #[derive(Debug, thiserror::Error)]
@@ -302,7 +303,7 @@ impl TransitEngine {
         let formatted = format!(
             "vault:v{}:{}",
             version,
-            base64::encode(&ciphertext)
+            base64.encode(&ciphertext)
         );
         
         Ok(EncryptedData {
@@ -330,7 +331,7 @@ impl TransitEngine {
         let version: u32 = version_str.parse()
             .map_err(|_| TransitError::InvalidCiphertext("Invalid version".to_string()))?;
         
-        let ciphertext_bytes = base64::decode(parts[2])
+        let ciphertext_bytes = base64.decode(parts[2])
             .map_err(|_| TransitError::InvalidCiphertext("Invalid base64".to_string()))?;
         
         let keys = self.keys.read().await;
@@ -357,7 +358,7 @@ impl TransitEngine {
         )?;
         
         Ok(DecryptedData {
-            plaintext: base64::encode(&plaintext),
+            plaintext: base64.encode(&plaintext),
             key_version: version,
         })
     }
@@ -381,7 +382,7 @@ impl TransitEngine {
     ) -> Result<EncryptedData, TransitError> {
         // Decrypt with old version
         let decrypted = self.decrypt(key_name, ciphertext, context).await?;
-        let plaintext = base64::decode(&decrypted.plaintext)
+        let plaintext = base64.decode(&decrypted.plaintext)
             .map_err(|_| TransitError::DecryptionFailed("Invalid plaintext".to_string()))?;
         
         // Re-encrypt with latest version
@@ -405,7 +406,7 @@ impl TransitEngine {
         let encrypted = self.encrypt(key_name, &data_key, None).await?;
         
         Ok(DataKey {
-            plaintext: base64::encode(&data_key),
+            plaintext: base64.encode(&data_key),
             ciphertext: encrypted.ciphertext,
             key_version: encrypted.key_version,
         })
@@ -563,7 +564,7 @@ mod tests {
         assert_eq!(encrypted.key_version, 1);
         
         let decrypted = engine.decrypt("test-key", &encrypted.ciphertext, None).await.unwrap();
-        let decrypted_bytes = base64::decode(&decrypted.plaintext).unwrap();
+        let decrypted_bytes = base64.decode(&decrypted.plaintext).unwrap();
         
         assert_eq!(decrypted_bytes, plaintext);
         assert_eq!(decrypted.key_version, 1);
@@ -611,7 +612,7 @@ mod tests {
         
         // Verify decryption still works
         let decrypted = engine.decrypt("test-key", &rewrapped.ciphertext, None).await.unwrap();
-        let decrypted_bytes = base64::decode(&decrypted.plaintext).unwrap();
+        let decrypted_bytes = base64.decode(&decrypted.plaintext).unwrap();
         assert_eq!(decrypted_bytes, plaintext);
     }
     
@@ -628,7 +629,7 @@ mod tests {
         
         let data_key = engine.generate_data_key("test-key", 256).await.unwrap();
         
-        assert_eq!(base64::decode(&data_key.plaintext).unwrap().len(), 32);
+        assert_eq!(base64.decode(&data_key.plaintext).unwrap().len(), 32);
         assert!(data_key.ciphertext.starts_with("vault:v1:"));
     }
     

@@ -147,7 +147,7 @@ pub fn split<R: RngCore + CryptoRng>(
     if threshold == 0 || threshold > total_shares {
         return Err(ShamirError::InvalidThreshold);
     }
-    if total_shares < 2 || total_shares > 255 {
+    if !(2..=255).contains(&total_shares) {
         return Err(ShamirError::InvalidShareCount);
     }
 
@@ -160,13 +160,13 @@ pub fn split<R: RngCore + CryptoRng>(
         let mut coefficients = vec![0u8; threshold];
         coefficients[0] = secret_byte; // Constant term is the secret
 
-        for i in 1..threshold {
-            let mut coeff = 0u8;
-            while coeff == 0 {
+        for coeff in coefficients.iter_mut().skip(1) {
+            let mut coeff_val = 0u8;
+            while coeff_val == 0 {
                 // Ensure non-zero coefficients
-                rng.fill_bytes(std::slice::from_mut(&mut coeff));
+                rng.fill_bytes(std::slice::from_mut(&mut coeff_val));
             }
-            coefficients[i] = coeff;
+            *coeff = coeff_val;
         }
 
         // Evaluate polynomial at x=1,2,3,...,total_shares
@@ -226,7 +226,7 @@ pub fn combine(shares: &[Share]) -> Result<Vec<u8>, ShamirError> {
     let mut secret = vec![0u8; secret_len];
 
     // Reconstruct each byte using Lagrange interpolation
-    for byte_idx in 0..secret_len {
+    for (byte_idx, secret_byte) in secret.iter_mut().enumerate() {
         let mut value = 0u8;
 
         // Lagrange interpolation to find p(0)
@@ -251,7 +251,7 @@ pub fn combine(shares: &[Share]) -> Result<Vec<u8>, ShamirError> {
             value ^= GF256::mul(y_i, basis);
         }
 
-        secret[byte_idx] = value;
+        *secret_byte = value;
     }
 
     Ok(secret)

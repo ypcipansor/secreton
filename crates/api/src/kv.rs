@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
+use crate::ApiState;
+
 // TODO: Replace with actual KV engine implementation
 // use brankas_crypto::{KVEngine, SecretMetadata};
 
@@ -155,7 +157,7 @@ pub struct DeleteResponse {
 }
 
 /// Create the KV router with all endpoints
-pub fn create_kv_router(state: KVApiState) -> Router {
+pub fn create_kv_router() -> Router<ApiState> {
     Router::new()
         .route("/secrets", get(list_secrets))
         .route("/secret/data/:path", post(put_secret))
@@ -163,15 +165,14 @@ pub fn create_kv_router(state: KVApiState) -> Router {
         .route("/secret/data/:path", delete(delete_secret))
         .route("/secret/metadata/:path", get(get_metadata))
         .route("/secret/destroy/:path/:version", delete(destroy_secret))
-        .with_state(state)
 }
 
 /// List all secret paths
 #[axum::debug_handler]
 pub async fn list_secrets(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    let keys = match state.engine.list_secrets().await {
+    let keys = match state.kv.engine.list_secrets().await {
         Ok(keys) => keys,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -184,11 +185,11 @@ pub async fn list_secrets(
 /// Create or update a secret
 #[axum::debug_handler]
 pub async fn put_secret(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> Result<Json<CreateSecretResponse>, StatusCode> {
-    match state.engine.put_secret(&path, request.data).await {
+    match state.kv.engine.put_secret(&path, request.data).await {
         Ok(version) => {
             info!(
                 "Created secret at path '{}' version {}",
@@ -209,10 +210,10 @@ pub async fn put_secret(
 /// Get a secret
 #[axum::debug_handler]
 pub async fn get_secret(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<GetSecretResponse>, StatusCode> {
-    match state.engine.get_secret(&path, None).await {
+    match state.kv.engine.get_secret(&path, None).await {
         Ok(Some((data, metadata))) => {
             info!("Retrieved secret at path '{}'", path);
             let data_map = match data {
@@ -240,10 +241,10 @@ pub async fn get_secret(
 /// Delete a secret (soft delete)
 #[axum::debug_handler]
 pub async fn delete_secret(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.engine.delete_secret(&path, None).await {
+    match state.kv.engine.delete_secret(&path, None).await {
         Ok(_) => {
             info!("Deleted secret at path '{}'", path);
             Ok(Json(DeleteResponse {
@@ -261,10 +262,10 @@ pub async fn delete_secret(
 /// Get secret metadata
 #[axum::debug_handler]
 pub async fn get_metadata(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<MetadataResponse>, StatusCode> {
-    match state.engine.get_metadata(&path).await {
+    match state.kv.engine.get_metadata(&path).await {
         Ok(Some(metadata)) => {
             info!("Retrieved metadata for path '{}'", path);
             let mut versions = HashMap::new();
@@ -285,10 +286,10 @@ pub async fn get_metadata(
 /// Permanently destroy a secret version
 #[axum::debug_handler]
 pub async fn destroy_secret(
-    State(state): State<KVApiState>,
+    State(state): State<ApiState>,
     Path((path, version)): Path<(String, u32)>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.engine.destroy_secret(&path, version as u64).await {
+    match state.kv.engine.destroy_secret(&path, version as u64).await {
         Ok(_) => {
             info!(
                 "Permanently destroyed secret '{}' version {}",

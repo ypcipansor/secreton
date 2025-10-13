@@ -218,12 +218,12 @@ impl PluginRegistry {
     /// - The library exports a `plugin_entry` function with the correct signature
     /// - The loaded plugin is memory-safe and ABI-compatible
     pub unsafe fn load_dynamic_library(&mut self, path: &str) -> Result<(), String> {
-        let lib = Library::new(path).map_err(|e| format!("load error: {}", e))?;
+        let lib = unsafe { Library::new(path) }.map_err(|e| format!("load error: {}", e))?;
         // Konvensi: plugin expose fn plugin_entry() -> Box<dyn VaultPlugin>
-        let func: Symbol<unsafe extern "C" fn() -> Box<dyn VaultPlugin>> = lib
-            .get(b"plugin_entry")
+        let func: Symbol<unsafe extern "C" fn() -> Box<dyn VaultPlugin>> = unsafe { lib
+            .get(b"plugin_entry") }
             .map_err(|e| format!("symbol error: {}", e))?;
-        let mut plugin = func();
+        let mut plugin = unsafe { func() };
         let name = plugin.name().to_string();
         plugin.init();
         self.plugins.insert(name, plugin);

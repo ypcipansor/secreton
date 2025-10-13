@@ -20,12 +20,12 @@ chrono.workspace = true
 async-trait.workspace = true
 
 # HTTP client for Consul/etcd
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
-base64 = "0.21"
+reqwest.workspace = true
+base64.workspace = true
 
 # Database - Using postgres crate for better dependency isolation
-postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-postgres-types = { version = "0.2", features = ["derive"] }
+postgres.workspace = true
+postgres-types.workspace = true
 
 # Database
 tokio-postgres.workspace = true
@@ -33,33 +33,32 @@ deadpool-postgres.workspace = true
 redis.workspace = true
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
-mysql = { version = "26.0.1", features = ["chrono"] }
-aws-sdk-dynamodb = "1.0"
-aws-sdk-s3 = "1.0"
-aws-config = "1.0"
-aws-smithy-types = "1.0"
-aws-types = "1.0"
+mysql.workspace = true
+aws-sdk-dynamodb.workspace = true
+aws-sdk-s3.workspace = true
+aws-config.workspace = true
+aws-smithy-types.workspace = true
+aws-types.workspace = true
 
 # Azure Storage
-azure_storage = "0.20"
-azure_storage_blobs = "0.20"
-azure_core = "0.20"
+azure_storage.workspace = true
+azure_storage_blobs.workspace = true
+azure_core.workspace = true
 
 # Cryptography
 secreton-crypto = { path = "../crypto" }
 zeroize.workspace = true
-secrecy.workspace = true
 
 # Configuration
 toml.workspace = true
 
 # Utilities
 bincode.workspace = true
-ciborium = "0.2"
+ciborium.workspace = true
 
 # Google Cloud Storage Dependencies
-google-cloud-storage = "0.16"
-futures = "0.3"
+google-cloud-storage.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

@@ -472,10 +472,10 @@ mod tests {
         let backups_before = dr.list_backups().await;
         assert_eq!(backups_before.len(), 2);
 
-        // Mock old backup by modifying started_at
+        // Mock old backup by modifying the incremental backup (not the full one)
         {
             let mut backups = dr.backups.write().await;
-            if let Some(backup) = backups.values_mut().next() {
+            if let Some(backup) = backups.values_mut().find(|b| b.backup_type == BackupType::Incremental) {
                 backup.started_at = Utc::now() - Duration::days(2);
             }
         }

@@ -193,6 +193,7 @@ pub struct StorageFactory;
 impl StorageFactory {
     /// Create a new storage backend based on configuration
     pub async fn create(config: StorageFactoryConfig) -> StorageResult<Arc<dyn StorageBackend>> {
+        #[allow(unreachable_patterns)]
         match config.backend_type {
             StorageBackendType::Memory => Ok(Arc::new(crate::MockStorageBackend::new())),
 

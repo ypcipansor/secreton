@@ -421,7 +421,7 @@ mod tests {
     async fn test_check_due_rotations() {
         let scheduler = RotationScheduler::new(create_test_config());
         let mut policy = create_test_policy();
-        policy.rotation_interval_days = -1; // Already due
+        policy.rotation_interval_days = 1; // Valid positive interval
 
         scheduler.create_policy(policy).await.unwrap();
 

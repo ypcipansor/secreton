@@ -5,7 +5,7 @@ use secreton_storage::{
     backends::{
         AzureBlobStorage, CassandraStorage, CockroachDBStorage, GoogleCloudStorage, MongoDBStorage,
     },
-    EncryptionMetadata, SecurityLevel, VaultEntry,
+    EncryptionMetadata, SecurityLevel, StorageBackend, VaultEntry,
 };
 
 #[tokio::test]
@@ -229,9 +229,11 @@ async fn test_azure_blob_storage_basic_operations() {
     // Test configuration
     let config = secreton_storage::backends::AzureBlobConfig {
         account_name: "testaccount".to_string(),
+        account_key: Some("testkey".to_string()),
         container_name: "testcontainer".to_string(),
         endpoint: None,
         use_emulator: true,
+        sas_token: None,
     };
 
     // Create storage instance
@@ -308,6 +310,7 @@ async fn test_gcs_storage_basic_operations() {
         project_id: "test-project".to_string(),
         bucket_name: "test-bucket".to_string(),
         credentials_path: None,
+        service_account_key: None,
     };
 
     // Create storage instance

@@ -267,8 +267,13 @@ impl AgentAuth {
     
     /// Renew token
     pub async fn renew_token(&self) -> Result<AuthResult, AgentAuthError> {
-        let current = self.current_token.read().await;
-        let current = current.as_ref()
+        // Clone the current token to avoid holding read lock while acquiring write lock
+        let current_clone = {
+            let current = self.current_token.read().await;
+            current.clone()
+        };
+        
+        let current = current_clone.as_ref()
             .ok_or_else(|| AgentAuthError::RenewalFailed("No token to renew".to_string()))?;
         
         if !current.renewable {

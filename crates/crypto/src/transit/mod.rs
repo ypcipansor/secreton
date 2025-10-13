@@ -333,6 +333,12 @@ impl TransitEngine {
     }
 }
 
+impl Default for TransitEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Audit logger trait for transit operations
 #[async_trait]
 pub trait AuditLogger {

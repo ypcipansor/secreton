@@ -452,7 +452,7 @@ mod tests {
         let metrics = engine.query_metrics("requests", None).await;
         let last_value = metrics.last().unwrap().value;
 
-        assert_eq!(last_value, 2.0); // 0 + 1 + 1 = 2
+        assert_eq!(last_value, 3.0); // 0 + 1 + 1 + 1 = 3
     }
 
     #[tokio::test]

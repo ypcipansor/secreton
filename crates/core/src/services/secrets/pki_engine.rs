@@ -10,9 +10,74 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 // Mock types since crypto::pki module not available
-type Certificate = Vec<u8>;
-type CertificateBuilder = ();
-type PrivateKey = Vec<u8>;
+#[derive(Debug, Clone)]
+pub struct PrivateKey {
+    pub pem_data: String,
+    pub key_type: String,
+}
+
+impl PrivateKey {
+    pub fn generate_rsa(_bits: u32) -> Result<Self, String> {
+        Ok(Self {
+            pem_data: "-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END RSA PRIVATE KEY-----".to_string(),
+            key_type: "RSA".to_string(),
+        })
+    }
+    
+    pub fn generate_ec(_bits: u32) -> Result<Self, String> {
+        Ok(Self {
+            pem_data: "-----BEGIN EC PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END EC PRIVATE KEY-----".to_string(),
+            key_type: "EC".to_string(),
+        })
+    }
+    
+    pub fn generate_ed25519() -> Result<Self, String> {
+        Ok(Self {
+            pem_data: "-----BEGIN PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END PRIVATE KEY-----".to_string(),
+            key_type: "Ed25519".to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Certificate {
+    pub pem_data: String,
+}
+
+#[derive(Debug, Default)]
+pub struct CertificateBuilder {
+    common_name: String,
+    serial_number: String,
+    alt_names: Vec<String>,
+}
+
+impl CertificateBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn common_name(&mut self, cn: &str) -> &mut Self {
+        self.common_name = cn.to_string();
+        self
+    }
+    
+    pub fn serial_number(&mut self, sn: &str) -> &mut Self {
+        self.serial_number = sn.to_string();
+        self
+    }
+    
+    pub fn add_alt_name(&mut self, alt: &str) -> &mut Self {
+        self.alt_names.push(alt.to_string());
+        self
+    }
+    
+    pub fn build(&self, _key: &PrivateKey) -> Result<Certificate, String> {
+        Ok(Certificate {
+            pem_data: format!("-----BEGIN CERTIFICATE-----\nMOCK_CERT_{}\n-----END CERTIFICATE-----", self.common_name),
+        })
+    }
+}
+
 type SignatureAlgorithm = String;
 
 /// Error types for PKI engine

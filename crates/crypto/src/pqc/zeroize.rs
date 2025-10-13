@@ -184,7 +184,7 @@ mod tests {
         assert_eq!(secure_key.as_bytes(), &key_data);
 
         // Manually trigger drop and verify zeroization
-        let key_ptr = secure_key.as_bytes_mut().as_mut_ptr();
+        let _key_ptr = secure_key.as_bytes_mut().as_mut_ptr();
         drop(secure_key);
 
         // Note: This is a simplified test. In production, you'd use memory
