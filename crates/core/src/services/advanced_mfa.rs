@@ -110,7 +110,7 @@ pub enum RiskLevel {
 /// Risk assessment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskAssessment {
-    pub risk_score: u8,    // 0-100
+    pub risk_score: u8, // 0-100
     pub risk_level: RiskLevel,
     pub factors_required: u8,
     pub ip_reputation: String,
@@ -198,7 +198,11 @@ impl AdvancedMFA {
     }
 
     /// Send push notification
-    pub async fn send_push_notification(&self, user_id: String, device_token: String) -> Result<String> {
+    pub async fn send_push_notification(
+        &self,
+        user_id: String,
+        device_token: String,
+    ) -> Result<String> {
         let notification_id = uuid::Uuid::new_v4().to_string();
 
         let notification = PushNotification {
@@ -259,7 +263,11 @@ impl AdvancedMFA {
     }
 
     /// Verify biometric
-    pub async fn verify_biometric(&self, credential_id: &str, _template_data: &[u8]) -> Result<bool> {
+    pub async fn verify_biometric(
+        &self,
+        credential_id: &str,
+        _template_data: &[u8],
+    ) -> Result<bool> {
         let credentials = self.biometric_credentials.read().await;
         let _credential = credentials
             .get(credential_id)
@@ -447,7 +455,9 @@ mod tests {
         drop(notifications);
 
         // Approve notification
-        mfa.approve_push_notification(&notification_id).await.unwrap();
+        mfa.approve_push_notification(&notification_id)
+            .await
+            .unwrap();
 
         let notifications = mfa.push_notifications.read().await;
         let notification = notifications.get(&notification_id).unwrap();

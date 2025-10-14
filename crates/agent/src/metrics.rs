@@ -1,7 +1,7 @@
 //! Metrics collection module for the Brankas agent
 
 use crate::config::MetricsConfig;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use secreton_core::{CoreError, CoreResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};

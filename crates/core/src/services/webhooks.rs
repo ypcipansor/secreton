@@ -50,7 +50,7 @@ pub enum DeliveryStatus {
 pub struct WebhookConfig {
     pub id: String,
     pub url: String,
-    pub secret: String,              // For HMAC signature
+    pub secret: String, // For HMAC signature
     pub headers: HashMap<String, String>,
     pub retry_attempts: u32,
     pub timeout_ms: u64,
@@ -169,12 +169,16 @@ impl WebhookSystem {
     }
 
     /// Deliver event to specific webhook
-    async fn deliver_to_webhook(&self, event: &WebhookEvent, webhook: &WebhookConfig) -> Result<()> {
+    async fn deliver_to_webhook(
+        &self,
+        event: &WebhookEvent,
+        webhook: &WebhookConfig,
+    ) -> Result<()> {
         let delivery_id = uuid::Uuid::new_v4().to_string();
 
         // Create payload
-        let payload = serde_json::to_string(event)
-            .map_err(|e| WebhookError::WebhookError(e.to_string()))?;
+        let payload =
+            serde_json::to_string(event).map_err(|e| WebhookError::WebhookError(e.to_string()))?;
 
         // Generate HMAC signature
         let signature = self.generate_hmac_signature(&payload, &webhook.secret);
@@ -264,7 +268,7 @@ impl WebhookSystem {
     /// List events with optional filtering
     pub async fn list_events(&self, event_type: Option<WebhookEventType>) -> Vec<WebhookEvent> {
         let events = self.events.read().await;
-        
+
         if let Some(filter_type) = event_type {
             events
                 .iter()
@@ -323,7 +327,7 @@ impl WebhookSystem {
     /// Clear old events
     pub async fn clear_old_events(&self, older_than_hours: i64) -> usize {
         let cutoff = Utc::now() - Duration::hours(older_than_hours);
-        
+
         let mut events = self.events.write().await;
         let original_len = events.len();
         events.retain(|e| e.timestamp > cutoff);
@@ -418,7 +422,7 @@ mod tests {
         let secret = "my_secret_key";
 
         let signature = system.generate_hmac_signature(payload, secret);
-        
+
         assert!(system.validate_webhook(payload, &signature, secret));
         assert!(!system.validate_webhook(payload, "wrong_signature", secret));
     }
@@ -491,7 +495,9 @@ mod tests {
         let read_events = system.list_events(Some(WebhookEventType::SecretRead)).await;
         assert_eq!(read_events.len(), 1);
 
-        let write_events = system.list_events(Some(WebhookEventType::SecretWrite)).await;
+        let write_events = system
+            .list_events(Some(WebhookEventType::SecretWrite))
+            .await;
         assert_eq!(write_events.len(), 1);
     }
 

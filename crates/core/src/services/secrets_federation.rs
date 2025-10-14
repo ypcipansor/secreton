@@ -23,8 +23,8 @@ pub type Result<T> = std::result::Result<T, FederationError>;
 /// Replication mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ReplicationMode {
-    Sync,   // Synchronous replication
-    Async,  // Asynchronous replication
+    Sync,  // Synchronous replication
+    Async, // Asynchronous replication
 }
 
 /// Conflict resolution strategy
@@ -49,7 +49,7 @@ pub struct FederationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterEndpoint {
     pub cluster_id: String,
-    pub endpoint: String,    // URL
+    pub endpoint: String, // URL
     pub region: String,
     pub is_primary: bool,
     pub health: ClusterHealth,
@@ -187,8 +187,13 @@ impl SecretsFederation {
         secrets.insert(secret_path.to_string(), federated_secret);
 
         // Log replication
-        self.log_replication(secret_path, source_cluster, target_clusters, SyncStatus::Synced)
-            .await;
+        self.log_replication(
+            secret_path,
+            source_cluster,
+            target_clusters,
+            SyncStatus::Synced,
+        )
+        .await;
 
         Ok(())
     }
@@ -288,7 +293,10 @@ impl SecretsFederation {
         let conflicts = self.conflicts.read().await;
 
         let mut status = HashMap::new();
-        status.insert("total_clusters".to_string(), serde_json::json!(clusters.len()));
+        status.insert(
+            "total_clusters".to_string(),
+            serde_json::json!(clusters.len()),
+        );
         status.insert(
             "healthy_clusters".to_string(),
             serde_json::json!(

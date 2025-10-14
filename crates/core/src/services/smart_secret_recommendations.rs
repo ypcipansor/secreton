@@ -1,7 +1,7 @@
 // Smart Secret Recommendations - ML-based analysis and recommendations
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -151,12 +151,8 @@ impl SmartSecretRecommendations {
         let has_numbers = secret_value.chars().any(|c| c.is_numeric());
         let has_uppercase = secret_value.chars().any(|c| c.is_uppercase());
 
-        let complexity_score = self.calculate_complexity_score(
-            has_special_chars,
-            has_numbers,
-            has_uppercase,
-            length,
-        );
+        let complexity_score =
+            self.calculate_complexity_score(has_special_chars, has_numbers, has_uppercase, length);
 
         let passed_common_password_check = !self.is_common_password(secret_value);
 
@@ -353,7 +349,8 @@ impl SmartSecretRecommendations {
             }
             RecommendedAction::Archive => {
                 // Mock: Archive secret
-                self.mock_archive_secret(&recommendation.secret_path).await?;
+                self.mock_archive_secret(&recommendation.secret_path)
+                    .await?;
             }
             RecommendedAction::Review => {
                 // Mock: Flag for manual review
@@ -373,7 +370,10 @@ impl SmartSecretRecommendations {
     }
 
     /// Get recommendations
-    pub async fn get_recommendations(&self, priority: Option<Priority>) -> Vec<RotationRecommendation> {
+    pub async fn get_recommendations(
+        &self,
+        priority: Option<Priority>,
+    ) -> Vec<RotationRecommendation> {
         let recommendations = self.recommendations.read().await;
 
         if let Some(p) = priority {
@@ -543,10 +543,7 @@ mod tests {
         let recommender = SmartSecretRecommendations::new(create_test_config());
 
         let analysis = recommender
-            .analyze_secret_strength(
-                "secret/db/password".to_string(),
-                "MyStr0ng!P@ssw0rd123",
-            )
+            .analyze_secret_strength("secret/db/password".to_string(), "MyStr0ng!P@ssw0rd123")
             .await
             .unwrap();
 
@@ -575,9 +572,7 @@ mod tests {
         let recommendations = recommender.generate_recommendations().await.unwrap();
 
         assert!(recommendations.len() > 0);
-        assert!(recommendations
-            .iter()
-            .any(|r| r.priority == Priority::High));
+        assert!(recommendations.iter().any(|r| r.priority == Priority::High));
     }
 
     #[tokio::test]

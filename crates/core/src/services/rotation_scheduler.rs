@@ -172,7 +172,7 @@ impl RotationScheduler {
                     "Current time is outside rotation window".to_string(),
                 ));
             }
-            
+
             policy.rotation_interval_days
         };
 
@@ -180,7 +180,7 @@ impl RotationScheduler {
         let (old_version, new_version) = {
             let mut jobs = self.jobs.write().await;
             let job = jobs.get_mut(job_id).unwrap();
-            
+
             job.status = JobStatus::Running;
 
             // Mock secret rotation
@@ -196,7 +196,7 @@ impl RotationScheduler {
 
             // Schedule next rotation
             job.next_rotation_at = Utc::now() + Duration::days(rotation_interval_days);
-            
+
             (old_version, new_version)
         };
 
@@ -225,9 +225,7 @@ impl RotationScheduler {
         let now = Utc::now();
 
         jobs.iter()
-            .filter(|(_, job)| {
-                job.status == JobStatus::Scheduled && job.next_rotation_at <= now
-            })
+            .filter(|(_, job)| job.status == JobStatus::Scheduled && job.next_rotation_at <= now)
             .map(|(job_id, _)| job_id.clone())
             .collect()
     }
@@ -257,7 +255,7 @@ impl RotationScheduler {
     /// Update policy
     pub async fn update_policy(&self, policy: RotationPolicy) -> Result<()> {
         let mut policies = self.policies.write().await;
-        
+
         if !policies.contains_key(&policy.policy_id) {
             return Err(RotationError::PolicyError("Policy not found".to_string()));
         }
@@ -309,7 +307,10 @@ impl RotationScheduler {
         let total_jobs = jobs.len();
         let completed_rotations = history.iter().filter(|r| r.success).count();
         let failed_rotations = history.iter().filter(|r| !r.success).count();
-        let pending_jobs = jobs.values().filter(|j| j.status == JobStatus::Scheduled).count();
+        let pending_jobs = jobs
+            .values()
+            .filter(|j| j.status == JobStatus::Scheduled)
+            .count();
 
         RotationStats {
             total_jobs,
@@ -391,7 +392,7 @@ mod tests {
     async fn test_execute_rotation() {
         let scheduler = RotationScheduler::new(create_test_config());
         let mut policy = create_test_policy();
-        
+
         // Set rotation window to current hour
         let current_hour = Utc::now().hour() as u8;
         policy.rotation_window = RotationWindow {
@@ -446,7 +447,7 @@ mod tests {
     async fn test_rotation_history() {
         let scheduler = RotationScheduler::new(create_test_config());
         let mut policy = create_test_policy();
-        
+
         let current_hour = Utc::now().hour() as u8;
         policy.rotation_window = RotationWindow {
             start_hour: current_hour.saturating_sub(1),

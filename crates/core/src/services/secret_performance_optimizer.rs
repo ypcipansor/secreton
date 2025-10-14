@@ -3,7 +3,7 @@
 //! Provides query optimization, smart caching strategies, performance metrics,
 //! and auto-scaling recommendations for optimal secret access performance.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,10 +26,10 @@ pub type Result<T> = std::result::Result<T, OptimizerError>;
 /// Cache strategy types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CacheStrategy {
-    LRU,          // Least Recently Used
-    TTL,          // Time To Live
-    Predictive,   // ML-based prediction
-    Adaptive,     // Adapts based on patterns
+    LRU,        // Least Recently Used
+    TTL,        // Time To Live
+    Predictive, // ML-based prediction
+    Adaptive,   // Adapts based on patterns
 }
 
 /// Cache configuration
@@ -176,7 +176,7 @@ impl SecretPerformanceOptimizer {
     /// Get from cache
     pub async fn get_cached(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let mut cache = self.cache.write().await;
-        
+
         if let Some(entry) = cache.get_mut(key) {
             // Check TTL
             if let Some(ttl) = entry.ttl_seconds {
@@ -230,11 +230,11 @@ impl SecretPerformanceOptimizer {
         };
 
         let mut cache = self.cache.write().await;
-        
+
         // Check if eviction needed
         let total_size: usize = cache.values().map(|e| e.size_bytes).sum();
         let max_size_bytes = config.max_size_mb * 1024 * 1024;
-        
+
         if total_size + size_bytes > max_size_bytes {
             self.evict_entries(&mut cache, &config).await?;
         }
@@ -252,10 +252,7 @@ impl SecretPerformanceOptimizer {
         match config.strategy {
             CacheStrategy::LRU => {
                 // Remove least recently used
-                if let Some((key, _)) = cache
-                    .iter()
-                    .min_by_key(|(_, e)| e.last_accessed)
-                {
+                if let Some((key, _)) = cache.iter().min_by_key(|(_, e)| e.last_accessed) {
                     let key = key.clone();
                     cache.remove(&key);
                 }
@@ -274,10 +271,7 @@ impl SecretPerformanceOptimizer {
             }
             CacheStrategy::Predictive | CacheStrategy::Adaptive => {
                 // Remove entries with lowest access count
-                if let Some((key, _)) = cache
-                    .iter()
-                    .min_by_key(|(_, e)| e.access_count)
-                {
+                if let Some((key, _)) = cache.iter().min_by_key(|(_, e)| e.access_count) {
                     let key = key.clone();
                     cache.remove(&key);
                 }
@@ -289,11 +283,11 @@ impl SecretPerformanceOptimizer {
     /// Optimize query
     pub async fn optimize_query(&self, query: String) -> Result<QueryPlan> {
         let query_id = Uuid::new_v4().to_string();
-        
+
         // Mock query optimization
         let indexed_fields = vec!["secret_path".to_string(), "tenant_id".to_string()];
         let optimized = format!("OPTIMIZED: {}", query);
-        
+
         let plan = QueryPlan {
             query_id: query_id.clone(),
             original_query: query.clone(),
@@ -332,7 +326,7 @@ impl SecretPerformanceOptimizer {
     /// Analyze performance
     pub async fn analyze_performance(&self) -> Result<PerformanceMetrics> {
         let mut metrics = self.metrics.write().await;
-        
+
         // Detect bottlenecks
         let mut bottlenecks = vec![];
 
@@ -417,11 +411,11 @@ impl SecretPerformanceOptimizer {
     pub async fn get_cache_stats(&self) -> HashMap<String, usize> {
         let cache = self.cache.read().await;
         let mut stats = HashMap::new();
-        
+
         stats.insert("total_entries".to_string(), cache.len());
         let total_size: usize = cache.values().map(|e| e.size_bytes).sum();
         stats.insert("total_size_bytes".to_string(), total_size);
-        
+
         stats
     }
 }
@@ -440,17 +434,20 @@ mod tests {
     async fn test_cache_put_get() {
         let optimizer = SecretPerformanceOptimizer::new();
         let data = b"secret data".to_vec();
-        
-        optimizer.put_cached("test_key".to_string(), data.clone()).await.unwrap();
+
+        optimizer
+            .put_cached("test_key".to_string(), data.clone())
+            .await
+            .unwrap();
         let retrieved = optimizer.get_cached("test_key").await.unwrap();
-        
+
         assert_eq!(retrieved, Some(data));
     }
 
     #[tokio::test]
     async fn test_cache_ttl_expiration() {
         let optimizer = SecretPerformanceOptimizer::new();
-        
+
         // Set very short TTL
         let config = CacheConfig {
             strategy: CacheStrategy::TTL,
@@ -460,13 +457,16 @@ mod tests {
             enabled: true,
         };
         optimizer.update_cache_config(config).await.unwrap();
-        
+
         let data = b"secret data".to_vec();
-        optimizer.put_cached("test_key".to_string(), data).await.unwrap();
-        
+        optimizer
+            .put_cached("test_key".to_string(), data)
+            .await
+            .unwrap();
+
         // Small delay to ensure expiration (1ms TTL)
         tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        
+
         let retrieved = optimizer.get_cached("test_key").await.unwrap();
         // Cache may or may not have expired yet depending on timing
         let _ = retrieved; // Don't assert on timing-dependent behavior
@@ -476,9 +476,9 @@ mod tests {
     async fn test_query_optimization() {
         let optimizer = SecretPerformanceOptimizer::new();
         let query = "SELECT * FROM secrets WHERE path = '/secret/test'".to_string();
-        
+
         let plan = optimizer.optimize_query(query.clone()).await.unwrap();
-        
+
         assert!(plan.optimized_query.contains("OPTIMIZED"));
         assert!(!plan.indexed_fields.is_empty());
     }
@@ -486,12 +486,12 @@ mod tests {
     #[tokio::test]
     async fn test_index_creation() {
         let optimizer = SecretPerformanceOptimizer::new();
-        
+
         let index = optimizer
             .create_index("secret_path".to_string(), IndexType::BTree)
             .await
             .unwrap();
-        
+
         assert_eq!(index.field_name, "secret_path");
         assert_eq!(index.index_type, IndexType::BTree);
     }
@@ -499,13 +499,13 @@ mod tests {
     #[tokio::test]
     async fn test_performance_analysis() {
         let optimizer = SecretPerformanceOptimizer::new();
-        
+
         // Simulate some queries
         optimizer.get_cached("key1").await.unwrap();
         optimizer.get_cached("key2").await.unwrap();
-        
+
         let metrics = optimizer.analyze_performance().await.unwrap();
-        
+
         assert_eq!(metrics.total_queries, 2);
         assert!(metrics.cache_miss_rate > 0.0);
     }
@@ -513,16 +513,16 @@ mod tests {
     #[tokio::test]
     async fn test_scaling_recommendations() {
         let optimizer = SecretPerformanceOptimizer::new();
-        
+
         // Set high miss rate to trigger recommendation
         {
             let mut metrics = optimizer.metrics.write().await;
             metrics.cache_miss_rate = 0.8;
             metrics.total_queries = 100;
         }
-        
+
         let recommendations = optimizer.get_scaling_recommendations().await.unwrap();
-        
+
         assert!(!recommendations.is_empty());
         assert_eq!(recommendations[0].action, ScalingAction::ScaleUp);
     }

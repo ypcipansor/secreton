@@ -1,8 +1,8 @@
 #![no_main]
 
+use chrono::{DateTime, Utc};
 use libfuzzer_sys::fuzz_target;
 use secreton_core::services::audit::*;
-use chrono::{DateTime, Utc};
 
 fuzz_target!(|data: &[u8]| {
     // Test audit logging operations

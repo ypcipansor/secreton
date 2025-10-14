@@ -199,7 +199,7 @@ impl KubernetesOperator {
         for schedule in schedules.iter_mut() {
             if schedule.next_rotation <= now {
                 let key = format!("{}/{}", schedule.namespace, schedule.secret_name);
-                
+
                 if let Some(secret) = secrets.get_mut(&key) {
                     // Mock rotation - in real implementation would fetch from Vault
                     secret.version += 1;
@@ -220,7 +220,12 @@ impl KubernetesOperator {
     }
 
     /// Sync secret from Vault to Kubernetes
-    pub async fn sync_from_vault(&self, vault_path: &str, k8s_name: &str, namespace: &str) -> Result<()> {
+    pub async fn sync_from_vault(
+        &self,
+        vault_path: &str,
+        k8s_name: &str,
+        namespace: &str,
+    ) -> Result<()> {
         // Mock fetching from Vault
         // Real implementation would call Vault API
         let vault_data = self.mock_fetch_from_vault(vault_path).await?;
@@ -257,9 +262,14 @@ impl KubernetesOperator {
     }
 
     /// Enable auto-rotation for secret
-    pub async fn enable_rotation(&self, secret_name: &str, namespace: &str, interval_hours: u64) -> Result<()> {
+    pub async fn enable_rotation(
+        &self,
+        secret_name: &str,
+        namespace: &str,
+        interval_hours: u64,
+    ) -> Result<()> {
         let key = format!("{}/{}", namespace, secret_name);
-        
+
         let mut secrets = self.secrets.write().await;
         if let Some(secret) = secrets.get_mut(&key) {
             secret.rotation_enabled = true;
@@ -285,7 +295,7 @@ impl KubernetesOperator {
     /// List managed secrets
     pub async fn list_managed_secrets(&self, namespace: Option<&str>) -> Vec<K8sSecret> {
         let secrets = self.secrets.read().await;
-        
+
         secrets
             .values()
             .filter(|s| namespace.map(|ns| s.namespace == ns).unwrap_or(true))
@@ -297,7 +307,7 @@ impl KubernetesOperator {
     pub async fn get_secret(&self, name: &str, namespace: &str) -> Result<K8sSecret> {
         let key = format!("{}/{}", namespace, name);
         let secrets = self.secrets.read().await;
-        
+
         secrets
             .get(&key)
             .cloned()
@@ -307,7 +317,7 @@ impl KubernetesOperator {
     /// Delete secret
     pub async fn delete_secret(&self, name: &str, namespace: &str) -> Result<()> {
         let key = format!("{}/{}", namespace, name);
-        
+
         let mut secrets = self.secrets.write().await;
         secrets
             .remove(&key)
@@ -322,7 +332,7 @@ impl KubernetesOperator {
     /// List pod injections
     pub async fn list_injections(&self, namespace: Option<&str>) -> Vec<PodInjection> {
         let injections = self.injections.read().await;
-        
+
         injections
             .iter()
             .filter(|i| namespace.map(|ns| i.namespace == ns).unwrap_or(true))

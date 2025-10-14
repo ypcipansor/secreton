@@ -1,7 +1,7 @@
 use anyhow::Result;
 use base64::prelude::*;
 use clap::{Parser, Subcommand};
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod config;

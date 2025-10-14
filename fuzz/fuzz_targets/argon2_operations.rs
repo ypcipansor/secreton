@@ -15,7 +15,8 @@ fuzz_target!(|data: &[u8]| {
 
         // Test with existing hash verification
         if let Ok(hash_result) = hashing::password::hash_password_argon2(password) {
-            let _verify_result = hashing::password::verify_password_argon2(password, &hash_result.hash);
+            let _verify_result =
+                hashing::password::verify_password_argon2(password, &hash_result.hash);
         }
 
         // Test key derivation with Argon2

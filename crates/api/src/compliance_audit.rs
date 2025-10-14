@@ -17,7 +17,7 @@ pub enum ComplianceFramework {
     GDPR,
     CCPA,
     SOX,
-    PCI_DSS,
+    PciDss,
     HIPAA,
     ISO27001,
     NIST,
@@ -30,7 +30,7 @@ impl ComplianceFramework {
             ComplianceFramework::GDPR => "GDPR",
             ComplianceFramework::CCPA => "CCPA",
             ComplianceFramework::SOX => "SOX",
-            ComplianceFramework::PCI_DSS => "PCI_DSS",
+            ComplianceFramework::PciDss => "PCI_DSS",
             ComplianceFramework::HIPAA => "HIPAA",
             ComplianceFramework::ISO27001 => "ISO27001",
             ComplianceFramework::NIST => "NIST",
@@ -41,14 +41,14 @@ impl ComplianceFramework {
     /// Get required audit retention period for this framework
     pub fn retention_period_days(&self) -> u32 {
         match self {
-            ComplianceFramework::GDPR => 2555, // 7 years
-            ComplianceFramework::CCPA => 365,  // 1 year
-            ComplianceFramework::SOX => 2555,  // 7 years
-            ComplianceFramework::PCI_DSS => 365, // 1 year minimum
-            ComplianceFramework::HIPAA => 2190, // 6 years
+            ComplianceFramework::GDPR => 2555,     // 7 years
+            ComplianceFramework::CCPA => 365,      // 1 year
+            ComplianceFramework::SOX => 2555,      // 7 years
+            ComplianceFramework::PciDss => 365,   // 1 year minimum
+            ComplianceFramework::HIPAA => 2190,    // 6 years
             ComplianceFramework::ISO27001 => 1095, // 3 years
-            ComplianceFramework::NIST => 2555, // 7 years
-            ComplianceFramework::FedRAMP => 2555, // 7 years
+            ComplianceFramework::NIST => 2555,     // 7 years
+            ComplianceFramework::FedRAMP => 2555,  // 7 years
         }
     }
 }
@@ -186,7 +186,9 @@ pub enum ViolationStatus {
 pub struct ComplianceManager {
     enabled_frameworks: Vec<ComplianceFramework>,
     audit_log: Arc<RwLock<Vec<AuditLogEntry>>>,
+    #[allow(dead_code)]
     retention_policies: HashMap<ComplianceFramework, u32>,
+    #[allow(dead_code)]
     max_log_size: usize,
 }
 
@@ -212,14 +214,15 @@ impl ComplianceManager {
         // Add retention requirement based on enabled frameworks
         let mut entry = entry;
         if !entry.compliance_frameworks.is_empty() {
-            let max_retention = self.enabled_frameworks.iter()
+            let max_retention = self
+                .enabled_frameworks
+                .iter()
                 .map(|f| f.retention_period_days())
                 .max()
                 .unwrap_or(2555); // Default 7 years
 
-            entry.retention_required_until = Some(
-                entry.timestamp + chrono::Duration::days(max_retention as i64)
-            );
+            entry.retention_required_until =
+                Some(entry.timestamp + chrono::Duration::days(max_retention as i64));
         }
 
         log.push(entry.clone());
@@ -246,11 +249,12 @@ impl ComplianceManager {
     ) -> ComplianceReport {
         let log = self.audit_log.read().await;
 
-        let framework_events: Vec<_> = log.iter()
+        let framework_events: Vec<_> = log
+            .iter()
             .filter(|entry| {
-                entry.compliance_frameworks.contains(framework) &&
-                entry.timestamp >= start_date &&
-                entry.timestamp <= end_date
+                entry.compliance_frameworks.contains(framework)
+                    && entry.timestamp >= start_date
+                    && entry.timestamp <= end_date
             })
             .collect();
 
@@ -260,7 +264,9 @@ impl ComplianceManager {
 
         for event in &framework_events {
             *events_by_type.entry(event.event_type.clone()).or_insert(0) += 1;
-            *events_by_severity.entry(event.severity.clone()).or_insert(0) += 1;
+            *events_by_severity
+                .entry(event.severity.clone())
+                .or_insert(0) += 1;
 
             // Check for compliance violations
             if let Some(violation) = self.check_compliance_violation(framework, event) {
@@ -272,9 +278,16 @@ impl ComplianceManager {
 
         let mut recommendations = Vec::new();
         if violations.len() > 0 {
-            recommendations.push(format!("Address {} compliance violations", violations.len()));
+            recommendations.push(format!(
+                "Address {} compliance violations",
+                violations.len()
+            ));
         }
-        if events_by_severity.get(&AuditSeverity::Critical).unwrap_or(&0) > &0 {
+        if events_by_severity
+            .get(&AuditSeverity::Critical)
+            .unwrap_or(&0)
+            > &0
+        {
             recommendations.push("Review critical security events immediately".to_string());
         }
 
@@ -293,33 +306,48 @@ impl ComplianceManager {
     }
 
     /// Check if an audit event represents a compliance violation
-    fn check_compliance_violation(&self, framework: &ComplianceFramework, event: &AuditLogEntry) -> Option<ComplianceViolation> {
+    fn check_compliance_violation(
+        &self,
+        framework: &ComplianceFramework,
+        event: &AuditLogEntry,
+    ) -> Option<ComplianceViolation> {
         match framework {
             ComplianceFramework::GDPR => {
                 // Check for unauthorized data access
-                if matches!(event.event_type, AuditEventType::SecretRetrieved | AuditEventType::SecretModified)
-                    && event.user_id.is_none() {
+                if matches!(
+                    event.event_type,
+                    AuditEventType::SecretRetrieved | AuditEventType::SecretModified
+                ) && event.user_id.is_none()
+                {
                     Some(ComplianceViolation {
                         violation_type: "UnauthorizedDataAccess".to_string(),
                         severity: AuditSeverity::High,
                         description: "Data accessed without proper authentication".to_string(),
                         timestamp: event.timestamp,
-                        remediation: Some("Implement mandatory authentication for all data access".to_string()),
+                        remediation: Some(
+                            "Implement mandatory authentication for all data access".to_string(),
+                        ),
                         status: ViolationStatus::Open,
                     })
                 } else {
                     None
                 }
             }
-            ComplianceFramework::PCI_DSS => {
+            ComplianceFramework::PciDss => {
                 // Check for weak encryption
-                if matches!(event.event_type, AuditEventType::Encryption | AuditEventType::Decryption) {
+                if matches!(
+                    event.event_type,
+                    AuditEventType::Encryption | AuditEventType::Decryption
+                ) {
                     Some(ComplianceViolation {
                         violation_type: "EncryptionValidation".to_string(),
                         severity: AuditSeverity::Medium,
-                        description: "Verify encryption strength meets PCI DSS requirements".to_string(),
+                        description: "Verify encryption strength meets PCI DSS requirements"
+                            .to_string(),
                         timestamp: event.timestamp,
-                        remediation: Some("Ensure AES-256 or stronger encryption is used".to_string()),
+                        remediation: Some(
+                            "Ensure AES-256 or stronger encryption is used".to_string(),
+                        ),
                         status: ViolationStatus::Open,
                     })
                 } else {
@@ -332,11 +360,13 @@ impl ComplianceManager {
 
     /// Determine overall compliance status
     fn determine_compliance_status(&self, violations: &[ComplianceViolation]) -> ComplianceStatus {
-        let critical_count = violations.iter()
+        let critical_count = violations
+            .iter()
             .filter(|v| v.severity == AuditSeverity::Critical)
             .count();
 
-        let high_count = violations.iter()
+        let high_count = violations
+            .iter()
             .filter(|v| v.severity == AuditSeverity::High)
             .count();
 
@@ -363,11 +393,7 @@ impl ComplianceManager {
         let log = self.audit_log.read().await;
         let limit = limit.unwrap_or(100);
 
-        log.iter()
-            .rev()
-            .take(limit)
-            .cloned()
-            .collect()
+        log.iter().rev().take(limit).cloned().collect()
     }
 
     /// Clean up old audit entries based on retention policies
@@ -385,7 +411,10 @@ impl ComplianceManager {
             }
         });
 
-        info!("Audit log cleanup completed. {} entries retained.", log.len());
+        info!(
+            "Audit log cleanup completed. {} entries retained.",
+            log.len()
+        );
     }
 }
 
@@ -503,7 +532,7 @@ pub async fn audit_crypto_operation(
         action,
         details: operation_details,
         result: "success".to_string(),
-        compliance_frameworks: vec![ComplianceFramework::PCI_DSS, ComplianceFramework::HIPAA],
+        compliance_frameworks: vec![ComplianceFramework::PciDss, ComplianceFramework::HIPAA],
         retention_required_until: None,
         immutable: true,
     };
@@ -551,7 +580,7 @@ pub async fn init_compliance_manager() -> Arc<ComplianceManager> {
     let frameworks = vec![
         ComplianceFramework::GDPR,
         ComplianceFramework::SOX,
-        ComplianceFramework::PCI_DSS,
+        ComplianceFramework::PciDss,
         ComplianceFramework::HIPAA,
     ];
 

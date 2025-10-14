@@ -30,7 +30,9 @@ mod tests {
         let result = tokio::spawn(async {
             tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
             42
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         assert_eq!(result, 42);
     }

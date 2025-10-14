@@ -104,7 +104,7 @@ pub mod zero_knowledge_proof;
 
 // Phase 25 - Enterprise Integration & End-to-End Workflows
 pub mod authenticated_key_operations;
+pub mod end_to_end_observability_pipeline;
 pub mod policy_enforced_crypto;
 pub mod privacy_preserving_auth;
 pub mod secure_collaborative_operations;
-pub mod end_to_end_observability_pipeline;

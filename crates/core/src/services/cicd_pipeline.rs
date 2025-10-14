@@ -169,10 +169,7 @@ impl CICDPipeline {
     }
 
     /// Inject secrets into environment
-    pub async fn inject_into_env(
-        &self,
-        job_id: &str,
-    ) -> Result<HashMap<String, String>> {
+    pub async fn inject_into_env(&self, job_id: &str) -> Result<HashMap<String, String>> {
         let injections = self.injections.read().await;
 
         let mut env_vars = HashMap::new();
@@ -270,9 +267,7 @@ impl CICDPipeline {
 
     /// Convert secret path to environment variable name
     fn path_to_env_var(&self, path: &str) -> String {
-        path.replace('/', "_")
-            .replace("-", "_")
-            .to_uppercase()
+        path.replace('/', "_").replace("-", "_").to_uppercase()
     }
 }
 

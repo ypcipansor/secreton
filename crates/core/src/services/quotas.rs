@@ -52,7 +52,7 @@ pub struct QuotaUsage {
     pub current_count: u64,
     pub limit: u64,
     pub window_start: Option<DateTime<Utc>>, // For rate limits
-    pub violations: u64, // Number of times quota was exceeded
+    pub violations: u64,                     // Number of times quota was exceeded
     pub last_violation: Option<DateTime<Utc>>,
     pub last_reset: DateTime<Utc>,
 }
@@ -127,12 +127,12 @@ impl QuotaConfig {
         if self.path == "*" {
             return true;
         }
-        
+
         if self.path.ends_with("/*") {
             let prefix = &self.path[..self.path.len() - 2];
             return path.starts_with(prefix);
         }
-        
+
         path == self.path
     }
 
@@ -222,26 +222,33 @@ impl QuotasService {
     pub async fn create_quota(&self, config: QuotaConfig) -> Result<()> {
         // Validate configuration
         if config.limit == 0 {
-            return Err(QuotaError::InvalidConfig("Limit must be greater than 0".to_string()));
+            return Err(QuotaError::InvalidConfig(
+                "Limit must be greater than 0".to_string(),
+            ));
         }
 
         if config.quota_type == QuotaType::RateLimit && config.window_seconds.is_none() {
-            return Err(QuotaError::InvalidConfig("Rate limit requires window_seconds".to_string()));
+            return Err(QuotaError::InvalidConfig(
+                "Rate limit requires window_seconds".to_string(),
+            ));
         }
 
         let mut quotas = self.quotas.write().await;
-        
+
         if quotas.contains_key(&config.name) {
             return Err(QuotaError::AlreadyExists(config.name.clone()));
         }
 
         let quota_name = config.name.clone();
         quotas.insert(config.name.clone(), config.clone());
-        
+
         // Initialize usage tracking
         drop(quotas);
         let mut usage = self.usage.write().await;
-        usage.insert(quota_name.clone(), QuotaUsage::new(quota_name, config.limit));
+        usage.insert(
+            quota_name.clone(),
+            QuotaUsage::new(quota_name, config.limit),
+        );
 
         Ok(())
     }
@@ -284,11 +291,11 @@ impl QuotasService {
                 reset_at: None,
             });
         }
-        
+
         // Keep first quota name for success result
         let first_quota_name = applicable[0].name.clone();
         let first_quota_limit = applicable[0].limit;
-        
+
         let mut usage = self.usage.write().await;
 
         // Check each applicable quota
@@ -300,7 +307,8 @@ impl QuotasService {
             // For rate limits, check if window has expired
             if quota.quota_type == QuotaType::RateLimit {
                 if let Some(window_start) = quota_usage.window_start {
-                    let window_duration = chrono::Duration::seconds(quota.window_seconds.unwrap() as i64);
+                    let window_duration =
+                        chrono::Duration::seconds(quota.window_seconds.unwrap() as i64);
                     if Utc::now() - window_start > window_duration {
                         // Window expired, reset
                         quota_usage.reset();
@@ -313,7 +321,7 @@ impl QuotasService {
 
             if quota_usage.is_exceeded() {
                 quota_usage.record_violation();
-                
+
                 let reset_at = if quota.quota_type == QuotaType::RateLimit {
                     quota_usage.window_start.map(|start| {
                         start + chrono::Duration::seconds(quota.window_seconds.unwrap() as i64)
@@ -353,7 +361,7 @@ impl QuotasService {
         entry_type: QuotaEntryType,
     ) -> Result<()> {
         let quotas = self.quotas.read().await;
-        
+
         let applicable: Vec<_> = quotas
             .values()
             .filter(|q| {
@@ -402,7 +410,7 @@ impl QuotasService {
         entry_type: QuotaEntryType,
     ) -> Result<()> {
         let quotas = self.quotas.read().await;
-        
+
         let applicable: Vec<_> = quotas
             .values()
             .filter(|q| {
@@ -492,7 +500,7 @@ impl QuotasService {
         limit: usize,
     ) -> Vec<QuotaEntry> {
         let entries = self.entries.read().await;
-        
+
         entries
             .iter()
             .filter(|e| {
@@ -519,7 +527,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_rate_limit_quota() {
         let service = QuotasService::new();
-        
+
         let config = QuotaConfig::new(
             "api-rate-limit".to_string(),
             QuotaType::RateLimit,
@@ -540,7 +548,7 @@ mod tests {
     #[tokio::test]
     async fn test_quota_enforcement() {
         let service = QuotasService::new();
-        
+
         let config = QuotaConfig::new(
             "lease-limit".to_string(),
             QuotaType::LeaseCount,
@@ -585,7 +593,7 @@ mod tests {
     #[tokio::test]
     async fn test_quota_release() {
         let service = QuotasService::new();
-        
+
         let config = QuotaConfig::new(
             "lease-limit".to_string(),
             QuotaType::LeaseCount,
@@ -621,7 +629,7 @@ mod tests {
     #[tokio::test]
     async fn test_namespace_scoped_quota() {
         let service = QuotasService::new();
-        
+
         let config = QuotaConfig::new(
             "org1-limit".to_string(),
             QuotaType::PathCount,
@@ -652,7 +660,7 @@ mod tests {
     #[tokio::test]
     async fn test_quota_violations_tracking() {
         let service = QuotasService::new();
-        
+
         let config = QuotaConfig::new(
             "test-limit".to_string(),
             QuotaType::LeaseCount,

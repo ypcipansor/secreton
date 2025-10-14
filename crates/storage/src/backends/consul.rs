@@ -3,12 +3,12 @@ use crate::{
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 /// Consul storage backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,9 +233,11 @@ impl StorageBackend for ConsulStorage {
 
         if let Some(kv) = kv_response.first() {
             let decoded =
-                STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
-                    message: format!("Failed to decode base64: {}", e),
-                })?;
+                STANDARD
+                    .decode(&kv.value)
+                    .map_err(|e| StorageError::SerializationError {
+                        message: format!("Failed to decode base64: {}", e),
+                    })?;
 
             let entry: VaultEntry =
                 serde_json::from_slice(&decoded).map_err(|e| StorageError::SerializationError {

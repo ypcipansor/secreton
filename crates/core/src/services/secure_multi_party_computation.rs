@@ -239,7 +239,11 @@ impl SMPCSystem {
     }
 
     /// Reconstruct secret from shares
-    pub async fn reconstruct_secret(&self, session_id: &str, shares: Vec<SecretShare>) -> Result<Vec<u8>> {
+    pub async fn reconstruct_secret(
+        &self,
+        session_id: &str,
+        shares: Vec<SecretShare>,
+    ) -> Result<Vec<u8>> {
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(session_id)
@@ -260,7 +264,11 @@ impl SMPCSystem {
     }
 
     /// Create threshold signature
-    pub async fn create_threshold_signature(&self, session_id: &str, message: &[u8]) -> Result<String> {
+    pub async fn create_threshold_signature(
+        &self,
+        session_id: &str,
+        message: &[u8],
+    ) -> Result<String> {
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(session_id)
@@ -542,7 +550,9 @@ mod tests {
         let system = SMPCSystem::new();
         let participants = create_test_participants();
 
-        let result = system.create_session(SMPCProtocol::Shamir, participants, 5).await;
+        let result = system
+            .create_session(SMPCProtocol::Shamir, participants, 5)
+            .await;
 
         assert!(result.is_err());
     }

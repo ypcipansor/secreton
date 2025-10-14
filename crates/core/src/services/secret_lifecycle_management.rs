@@ -110,7 +110,11 @@ impl SecretLifecycleManagement {
     }
 
     /// Set expiration for a secret
-    pub async fn set_expiration(&self, secret_path: String, ttl_days: u32) -> Result<SecretLifecycle> {
+    pub async fn set_expiration(
+        &self,
+        secret_path: String,
+        ttl_days: u32,
+    ) -> Result<SecretLifecycle> {
         let config = self.config.read().await;
         let grace_period_days = config.grace_period_days;
         drop(config);
@@ -142,7 +146,9 @@ impl SecretLifecycleManagement {
         lifecycles
             .values()
             .filter(|lc| {
-                lc.status == SecretStatus::Active && lc.expires_at <= threshold && lc.expires_at > Utc::now()
+                lc.status == SecretStatus::Active
+                    && lc.expires_at <= threshold
+                    && lc.expires_at > Utc::now()
             })
             .cloned()
             .collect()
@@ -200,7 +206,11 @@ impl SecretLifecycleManagement {
     }
 
     /// Extend TTL
-    pub async fn extend_ttl(&self, secret_path: &str, additional_days: u32) -> Result<SecretLifecycle> {
+    pub async fn extend_ttl(
+        &self,
+        secret_path: &str,
+        additional_days: u32,
+    ) -> Result<SecretLifecycle> {
         let mut lifecycles = self.lifecycles.write().await;
         let lifecycle = lifecycles
             .get_mut(secret_path)
@@ -214,9 +224,13 @@ impl SecretLifecycleManagement {
     }
 
     /// Trigger lifecycle hook
-    pub async fn trigger_lifecycle_hook(&self, hook_type: HookType, secret_path: &str) -> Result<()> {
+    pub async fn trigger_lifecycle_hook(
+        &self,
+        hook_type: HookType,
+        secret_path: &str,
+    ) -> Result<()> {
         let hooks = self.hooks.read().await;
-        
+
         let relevant_hooks: Vec<_> = hooks
             .values()
             .filter(|h| h.hook_type == hook_type && h.enabled)
@@ -224,7 +238,8 @@ impl SecretLifecycleManagement {
 
         for hook in relevant_hooks {
             // Mock: HTTP POST to webhook
-            self.mock_call_webhook(&hook.action_url, secret_path).await?;
+            self.mock_call_webhook(&hook.action_url, secret_path)
+                .await?;
         }
 
         Ok(())
@@ -430,12 +445,18 @@ mod tests {
             .await
             .unwrap();
 
-        let archive = lifecycle_mgmt.archive_secret("secret/archive").await.unwrap();
+        let archive = lifecycle_mgmt
+            .archive_secret("secret/archive")
+            .await
+            .unwrap();
 
         assert_eq!(archive.secret_path, "secret/archive");
         assert!(!archive.original_data_hash.is_empty());
 
-        let lifecycle = lifecycle_mgmt.get_lifecycle("secret/archive").await.unwrap();
+        let lifecycle = lifecycle_mgmt
+            .get_lifecycle("secret/archive")
+            .await
+            .unwrap();
         assert_eq!(lifecycle.status, SecretStatus::Archived);
     }
 
@@ -448,7 +469,10 @@ mod tests {
             .await
             .unwrap();
 
-        let extended = lifecycle_mgmt.extend_ttl("secret/extend", 30).await.unwrap();
+        let extended = lifecycle_mgmt
+            .extend_ttl("secret/extend", 30)
+            .await
+            .unwrap();
 
         assert_eq!(extended.ttl_days, 60);
         assert_eq!(extended.status, SecretStatus::Active);

@@ -158,7 +158,9 @@ impl KubernetesExternalSecrets {
         drop(external_secrets);
 
         // Mock: Fetch secret from Vault
-        let vault_data = self.mock_fetch_from_vault(&external_secret.vault_path).await?;
+        let vault_data = self
+            .mock_fetch_from_vault(&external_secret.vault_path)
+            .await?;
 
         // Create Kubernetes Secret with base64 encoded data
         let k8s_secret = KubernetesSecret {
@@ -403,7 +405,10 @@ mod tests {
             .await
             .unwrap();
 
-        let sync_record = operator.sync_secret("production", "db-credentials").await.unwrap();
+        let sync_record = operator
+            .sync_secret("production", "db-credentials")
+            .await
+            .unwrap();
 
         assert_eq!(sync_record.status, SyncStatus::Synced);
         assert_eq!(sync_record.target_secret_name, "db-secret");
@@ -420,7 +425,10 @@ mod tests {
             .await
             .unwrap();
 
-        operator.watch_secret("production", "db-credentials").await.unwrap();
+        operator
+            .watch_secret("production", "db-credentials")
+            .await
+            .unwrap();
 
         let events = operator.get_watch_events("production").await;
         assert_eq!(events.len(), 1);
@@ -453,7 +461,10 @@ mod tests {
             .await
             .unwrap();
 
-        operator.sync_secret("production", "db-credentials").await.unwrap();
+        operator
+            .sync_secret("production", "db-credentials")
+            .await
+            .unwrap();
 
         operator
             .delete_external_secret("production", "db-credentials")
@@ -474,7 +485,10 @@ mod tests {
             .await
             .unwrap();
 
-        operator.sync_secret("production", "db-credentials").await.unwrap();
+        operator
+            .sync_secret("production", "db-credentials")
+            .await
+            .unwrap();
 
         let status = operator
             .get_sync_status("production", "db-credentials")

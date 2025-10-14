@@ -248,7 +248,11 @@ impl AdvancedKeyManager {
                 .ok_or_else(|| KeyManagerError::KeyNotFound(request.parent_key_id.clone()))?;
 
             // Mock key derivation (in real implementation, use HKDF, BIP32, etc.)
-            (parent.key_type.clone(), parent.metadata.owner.clone(), parent.metadata.tags.clone())
+            (
+                parent.key_type.clone(),
+                parent.metadata.owner.clone(),
+                parent.metadata.tags.clone(),
+            )
         };
 
         let metadata = KeyMetadata {
@@ -258,12 +262,16 @@ impl AdvancedKeyManager {
             derivation_path: Some(request.derivation_path),
         };
 
-        self.generate_key(key_type, request.purpose, metadata)
-            .await
+        self.generate_key(key_type, request.purpose, metadata).await
     }
 
     /// Split key into shares (Shamir Secret Sharing)
-    pub async fn split_key(&self, key_id: &str, threshold: usize, total_shares: usize) -> Result<String> {
+    pub async fn split_key(
+        &self,
+        key_id: &str,
+        threshold: usize,
+        total_shares: usize,
+    ) -> Result<String> {
         if threshold > total_shares {
             return Err(KeyManagerError::InsufficientShares(
                 "Threshold cannot exceed total shares".to_string(),

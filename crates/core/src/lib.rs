@@ -45,7 +45,7 @@ pub mod types;
 // #[cfg(any(test, feature = "test-utils"))]
 // pub mod test_utils;
 
-pub use api::{start_security_server, SecurityAPI};
+pub use api::{SecurityAPI, start_security_server};
 pub use audit::{AuditLog, AuditLogger, AuditStatus};
 pub use error::CoreError;
 // Commented out imports that don't exist yet

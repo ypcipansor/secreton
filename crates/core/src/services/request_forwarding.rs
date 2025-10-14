@@ -83,8 +83,8 @@ pub struct ForwardingStats {
 /// Circuit breaker state for fault tolerance
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CircuitBreakerState {
-    Closed,  // Normal operation
-    Open,    // Too many failures, stop forwarding
+    Closed,   // Normal operation
+    Open,     // Too many failures, stop forwarding
     HalfOpen, // Testing if node recovered
 }
 
@@ -227,7 +227,8 @@ impl ForwardingStats {
 
         // Update average latency (simple moving average)
         let total_requests = self.total_forwarded;
-        self.average_latency_ms = ((self.average_latency_ms * (total_requests - 1)) + latency_ms) / total_requests;
+        self.average_latency_ms =
+            ((self.average_latency_ms * (total_requests - 1)) + latency_ms) / total_requests;
     }
 
     pub fn success_rate(&self) -> f64 {
@@ -264,7 +265,10 @@ impl RequestForwardingService {
         *local_id = node_id.clone();
 
         let mut nodes = self.cluster_nodes.write().await;
-        nodes.insert(node_id.clone(), ClusterNode::new(node_id.clone(), address, role));
+        nodes.insert(
+            node_id.clone(),
+            ClusterNode::new(node_id.clone(), address, role),
+        );
 
         let mut stats = self.stats.write().await;
         stats.insert(node_id.clone(), ForwardingStats::new(node_id));
@@ -292,7 +296,7 @@ impl RequestForwardingService {
     /// Get the current leader node
     pub async fn get_leader(&self) -> Result<ClusterNode> {
         let nodes = self.cluster_nodes.read().await;
-        
+
         nodes
             .values()
             .find(|n| n.role == NodeRole::Leader && n.is_healthy())
@@ -304,7 +308,7 @@ impl RequestForwardingService {
     pub async fn is_leader(&self) -> bool {
         let local_id = self.local_node_id.read().await;
         let nodes = self.cluster_nodes.read().await;
-        
+
         if let Some(node) = nodes.get(&*local_id) {
             node.role == NodeRole::Leader
         } else {
@@ -322,10 +326,10 @@ impl RequestForwardingService {
 
         // Check if we're the leader
         let is_leader = self.is_leader().await;
-        
+
         // Write operations must go to leader
         let is_write_operation = matches!(method, "POST" | "PUT" | "DELETE" | "PATCH");
-        
+
         if is_write_operation && !is_leader {
             return Ok(true); // Forward to leader
         }
@@ -377,7 +381,9 @@ impl RequestForwardingService {
         let start_time = Utc::now();
 
         // Simulate forwarding (in production, would make HTTP request)
-        let success = self.simulate_forward(&leader.api_address, &method, &path).await;
+        let success = self
+            .simulate_forward(&leader.api_address, &method, &path)
+            .await;
 
         let latency_ms = (Utc::now() - start_time).num_milliseconds() as u64;
 
@@ -490,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_initialize_service() {
         let service = RequestForwardingService::new();
-        
+
         service
             .initialize(
                 "node-1".to_string(),
@@ -506,9 +512,13 @@ mod tests {
     #[tokio::test]
     async fn test_register_nodes() {
         let service = RequestForwardingService::new();
-        
+
         service
-            .initialize("node-1".to_string(), "127.0.0.1:8200".to_string(), NodeRole::Leader)
+            .initialize(
+                "node-1".to_string(),
+                "127.0.0.1:8200".to_string(),
+                NodeRole::Leader,
+            )
             .await
             .unwrap();
 
@@ -527,10 +537,14 @@ mod tests {
     #[tokio::test]
     async fn test_should_forward() {
         let service = RequestForwardingService::new();
-        
+
         // Initialize as follower
         service
-            .initialize("node-1".to_string(), "127.0.0.1:8200".to_string(), NodeRole::Follower)
+            .initialize(
+                "node-1".to_string(),
+                "127.0.0.1:8200".to_string(),
+                NodeRole::Follower,
+            )
             .await
             .unwrap();
 
@@ -553,7 +567,7 @@ mod tests {
     #[tokio::test]
     async fn test_circuit_breaker() {
         let mut breaker = CircuitBreaker::new("test-node".to_string());
-        
+
         assert_eq!(breaker.state, CircuitBreakerState::Closed);
         assert!(breaker.can_attempt());
 
@@ -569,7 +583,7 @@ mod tests {
     #[tokio::test]
     async fn test_forwarding_stats() {
         let mut stats = ForwardingStats::new("node-1".to_string());
-        
+
         stats.record_forward(true, 10);
         stats.record_forward(true, 20);
         stats.record_forward(false, 30);

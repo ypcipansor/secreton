@@ -9,8 +9,8 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Split data into password and salt
-    let password_data = &data[..data.len()/2];
-    let salt_data = &data[data.len()/2..];
+    let password_data = &data[..data.len() / 2];
+    let salt_data = &data[data.len() / 2..];
 
     if password_data.is_empty() {
         return;

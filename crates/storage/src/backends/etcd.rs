@@ -3,12 +3,12 @@ use crate::{
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 /// etcd storage backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,10 +229,11 @@ impl StorageBackend for EtcdStorage {
 
         if let Some(kvs) = etcd_response.kvs {
             if let Some(kv) = kvs.first() {
-                let decoded =
-                    BASE64_STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
+                let decoded = BASE64_STANDARD.decode(&kv.value).map_err(|e| {
+                    StorageError::SerializationError {
                         message: format!("Failed to decode base64: {}", e),
-                    })?;
+                    }
+                })?;
 
                 let entry: VaultEntry = serde_json::from_slice(&decoded).map_err(|e| {
                     StorageError::SerializationError {
@@ -346,10 +347,11 @@ impl StorageBackend for EtcdStorage {
         let mut entries = Vec::new();
         if let Some(kvs) = etcd_response.kvs {
             for kv in kvs {
-                let decoded =
-                    BASE64_STANDARD.decode(&kv.value).map_err(|e| StorageError::SerializationError {
+                let decoded = BASE64_STANDARD.decode(&kv.value).map_err(|e| {
+                    StorageError::SerializationError {
                         message: format!("Failed to decode value: {}", e),
-                    })?;
+                    }
+                })?;
 
                 let entry: VaultEntry = serde_json::from_slice(&decoded).map_err(|e| {
                     StorageError::SerializationError {

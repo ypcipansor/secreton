@@ -141,7 +141,11 @@ impl ComplianceFramework {
     }
 
     /// Check compliance
-    pub async fn check_compliance(&self, profile_id: &str, resource: &str) -> Result<Vec<ComplianceViolation>> {
+    pub async fn check_compliance(
+        &self,
+        profile_id: &str,
+        resource: &str,
+    ) -> Result<Vec<ComplianceViolation>> {
         let profiles = self.profiles.read().await;
         let profile = profiles
             .get(profile_id)
@@ -167,7 +171,7 @@ impl ComplianceFramework {
                             remediation: Some("Apply recommended security controls".to_string()),
                         };
                         violations.push(violation.clone());
-                        
+
                         let mut violations_map = self.violations.write().await;
                         violations_map.insert(violation.violation_id.clone(), violation);
                     }
@@ -194,7 +198,8 @@ impl ComplianceFramework {
         let profile_violations: Vec<_> = violations
             .values()
             .filter(|v| {
-                profile.requirements
+                profile
+                    .requirements
                     .iter()
                     .any(|req| req.policy_rules.contains(&v.rule_id))
             })
@@ -296,27 +301,25 @@ mod tests {
     #[tokio::test]
     async fn test_generate_compliance_report() {
         let framework = ComplianceFramework::new();
-        
+
         let profile = ComplianceProfile {
             profile_id: "pci".to_string(),
             name: "PCI DSS".to_string(),
             standard: ComplianceStandard::PCI_DSS,
-            requirements: vec![
-                ComplianceRequirement {
-                    requirement_id: "req1".to_string(),
-                    title: "Encryption".to_string(),
-                    description: "Encrypt sensitive data".to_string(),
-                    policy_rules: vec!["rule1".to_string()],
-                    mandatory: true,
-                },
-            ],
+            requirements: vec![ComplianceRequirement {
+                requirement_id: "req1".to_string(),
+                title: "Encryption".to_string(),
+                description: "Encrypt sensitive data".to_string(),
+                policy_rules: vec!["rule1".to_string()],
+                mandatory: true,
+            }],
             enabled: true,
         };
 
         framework.apply_profile(profile).await.unwrap();
 
         let report = framework.generate_report("pci").await.unwrap();
-        
+
         assert_eq!(report.profile_id, "pci");
         assert!(report.compliance_score >= 0.0 && report.compliance_score <= 100.0);
     }
@@ -324,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_compliance() {
         let framework = ComplianceFramework::new();
-        
+
         let rule = PolicyRule {
             rule_id: "rule1".to_string(),
             name: "Test Rule".to_string(),
@@ -338,27 +341,28 @@ mod tests {
             profile_id: "test".to_string(),
             name: "Test Profile".to_string(),
             standard: ComplianceStandard::Custom("Test".to_string()),
-            requirements: vec![
-                ComplianceRequirement {
-                    requirement_id: "req1".to_string(),
-                    title: "Test".to_string(),
-                    description: "Test".to_string(),
-                    policy_rules: vec!["rule1".to_string()],
-                    mandatory: true,
-                },
-            ],
+            requirements: vec![ComplianceRequirement {
+                requirement_id: "req1".to_string(),
+                title: "Test".to_string(),
+                description: "Test".to_string(),
+                policy_rules: vec!["rule1".to_string()],
+                mandatory: true,
+            }],
             enabled: true,
         };
         framework.apply_profile(profile).await.unwrap();
 
-        let violations = framework.check_compliance("test", "/secret/test").await.unwrap();
+        let violations = framework
+            .check_compliance("test", "/secret/test")
+            .await
+            .unwrap();
         assert!(violations.len() >= 0);
     }
 
     #[tokio::test]
     async fn test_list_profiles() {
         let framework = ComplianceFramework::new();
-        
+
         let profile = ComplianceProfile {
             profile_id: "gdpr".to_string(),
             name: "GDPR".to_string(),

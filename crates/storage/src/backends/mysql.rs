@@ -62,7 +62,10 @@ impl MySQLStorage {
         // Only allow alphanumeric and underscore (no spaces, special chars)
         if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(StorageError::ConfigurationError {
-                message: format!("Table name '{}' contains invalid characters. Only alphanumeric and underscore allowed.", name),
+                message: format!(
+                    "Table name '{}' contains invalid characters. Only alphanumeric and underscore allowed.",
+                    name
+                ),
             });
         }
 

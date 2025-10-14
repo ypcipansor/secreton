@@ -25,18 +25,18 @@ pub type Result<T> = std::result::Result<T, StreamError>;
 /// Destination type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DestinationType {
-    Syslog,       // Syslog server
-    HTTP,         // HTTP endpoint
-    Kafka,        // Kafka topic
-    File,         // File system
+    Syslog, // Syslog server
+    HTTP,   // HTTP endpoint
+    Kafka,  // Kafka topic
+    File,   // File system
 }
 
 /// Event format
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EventFormat {
-    JSON,         // JSON format
-    CEF,          // Common Event Format
-    LEEF,         // Log Event Extended Format
+    JSON, // JSON format
+    CEF,  // Common Event Format
+    LEEF, // Log Event Extended Format
 }
 
 /// Delivery status
@@ -91,16 +91,16 @@ impl StreamBuffer {
 
     fn push(&mut self, event: AuditEvent) -> Result<()> {
         if self.events.len() >= self.max_size {
-            return Err(StreamError::BufferFull(
-                "Stream buffer is full".to_string(),
-            ));
+            return Err(StreamError::BufferFull("Stream buffer is full".to_string()));
         }
         self.events.push_back(event);
         Ok(())
     }
 
     fn drain(&mut self, count: usize) -> Vec<AuditEvent> {
-        self.events.drain(..std::cmp::min(count, self.events.len())).collect()
+        self.events
+            .drain(..std::cmp::min(count, self.events.len()))
+            .collect()
     }
 
     fn len(&self) -> usize {
@@ -165,17 +165,29 @@ impl AuditStreamEngine {
     /// Stream event to all destinations
     pub async fn stream_event(&self, event: AuditEvent) -> Result<()> {
         let destinations = self.destinations.read().await;
-        
+
         for destination in destinations.values() {
             match self.deliver_to_destination(&event, destination).await {
                 Ok(_) => {
-                    self.record_delivery(destination.id.clone(), event.clone(), DeliveryStatus::Delivered, None).await;
+                    self.record_delivery(
+                        destination.id.clone(),
+                        event.clone(),
+                        DeliveryStatus::Delivered,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     // Buffer event for retry
                     let mut buffer = self.buffer.write().await;
                     buffer.push(event.clone())?;
-                    self.record_delivery(destination.id.clone(), event.clone(), DeliveryStatus::Failed, Some(e.to_string())).await;
+                    self.record_delivery(
+                        destination.id.clone(),
+                        event.clone(),
+                        DeliveryStatus::Failed,
+                        Some(e.to_string()),
+                    )
+                    .await;
                 }
             }
         }
@@ -219,8 +231,7 @@ impl AuditStreamEngine {
     fn format_event(&self, event: &AuditEvent, format: &EventFormat) -> Result<String> {
         match format {
             EventFormat::JSON => {
-                serde_json::to_string(event)
-                    .map_err(|e| StreamError::StreamError(e.to_string()))
+                serde_json::to_string(event).map_err(|e| StreamError::StreamError(e.to_string()))
             }
             EventFormat::CEF => {
                 // Common Event Format
@@ -317,16 +328,28 @@ impl AuditStreamEngine {
         let buffer = self.buffer.read().await;
         let deliveries = self.deliveries.read().await;
 
-        let delivered = deliveries.iter().filter(|d| d.status == DeliveryStatus::Delivered).count();
-        let failed = deliveries.iter().filter(|d| d.status == DeliveryStatus::Failed).count();
-        let retrying = deliveries.iter().filter(|d| d.status == DeliveryStatus::Retrying).count();
+        let delivered = deliveries
+            .iter()
+            .filter(|d| d.status == DeliveryStatus::Delivered)
+            .count();
+        let failed = deliveries
+            .iter()
+            .filter(|d| d.status == DeliveryStatus::Failed)
+            .count();
+        let retrying = deliveries
+            .iter()
+            .filter(|d| d.status == DeliveryStatus::Retrying)
+            .count();
 
         let mut metrics = HashMap::new();
         metrics.insert("buffer_size".to_string(), serde_json::json!(buffer.len()));
         metrics.insert("delivered_count".to_string(), serde_json::json!(delivered));
         metrics.insert("failed_count".to_string(), serde_json::json!(failed));
         metrics.insert("retrying_count".to_string(), serde_json::json!(retrying));
-        metrics.insert("total_deliveries".to_string(), serde_json::json!(deliveries.len()));
+        metrics.insert(
+            "total_deliveries".to_string(),
+            serde_json::json!(deliveries.len()),
+        );
 
         metrics
     }
@@ -424,7 +447,7 @@ mod tests {
         };
 
         let engine = AuditStreamEngine::new(config);
-        
+
         // No destinations configured, so delivery will use buffer
         let event = create_test_event();
         let result = engine.stream_event(event).await;
@@ -516,7 +539,7 @@ mod tests {
 
         // Retry failed
         let retry_count = engine.retry_failed().await.unwrap();
-        
+
         let metrics = engine.get_stream_metrics().await;
         assert!(metrics["total_deliveries"].as_u64().unwrap() > 0);
     }

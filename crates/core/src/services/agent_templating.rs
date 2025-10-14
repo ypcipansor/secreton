@@ -29,7 +29,10 @@ pub enum CTLFunction {
     /// {{ secret "secret/data/app" }}
     Secret { path: String },
     /// {{ pkiCert "pki/issue/role" "common_name=example.com" }}
-    PkiCert { path: String, params: HashMap<String, String> },
+    PkiCert {
+        path: String,
+        params: HashMap<String, String>,
+    },
     /// {{ key "config/key" }}
     Key { path: String },
     /// {{ range secrets "secret/data" }}...{{ end }}
@@ -159,16 +162,16 @@ impl AgentTemplatingService {
     /// Parse a CTL function from expression
     fn parse_function(&self, expr: &str) -> Result<CTLFunction> {
         let expr = expr.trim();
-        
+
         // Handle variable references starting with .
         if expr.starts_with('.') {
             return Ok(CTLFunction::Variable {
                 path: expr.to_string(),
             });
         }
-        
+
         let parts: Vec<&str> = expr.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return Err(TemplatingError::ParseError("Empty expression".to_string()));
         }
@@ -176,7 +179,9 @@ impl AgentTemplatingService {
         match parts[0] {
             "secret" => {
                 if parts.len() < 2 {
-                    return Err(TemplatingError::ParseError("secret requires path".to_string()));
+                    return Err(TemplatingError::ParseError(
+                        "secret requires path".to_string(),
+                    ));
                 }
                 Ok(CTLFunction::Secret {
                     path: parts[1].trim_matches('"').to_string(),
@@ -192,17 +197,17 @@ impl AgentTemplatingService {
                     path: parts[2].trim_matches('"').to_string(),
                 })
             }
-            "end" => {
-                Ok(CTLFunction::End)
-            }
+            "end" => Ok(CTLFunction::End),
             "pkiCert" => {
                 if parts.len() < 2 {
-                    return Err(TemplatingError::ParseError("pkiCert requires path".to_string()));
+                    return Err(TemplatingError::ParseError(
+                        "pkiCert requires path".to_string(),
+                    ));
                 }
-                
+
                 let path = parts[1].trim_matches('"').to_string();
                 let mut params = HashMap::new();
-                
+
                 // Parse parameters like "key=value"
                 for part in parts.iter().skip(2) {
                     let param = part.trim_matches('"');
@@ -212,7 +217,7 @@ impl AgentTemplatingService {
                         params.insert(key, value);
                     }
                 }
-                
+
                 Ok(CTLFunction::PkiCert { path, params })
             }
             "key" => {
@@ -260,7 +265,7 @@ impl AgentTemplatingService {
 
         // Parse and evaluate CTL expressions
         let expressions = self.parse_template(&content)?;
-        
+
         // Replace from end to start to maintain positions
         for expr in expressions.iter().rev() {
             let replacement = self.evaluate_function(&expr.function, &context).await?;
@@ -290,25 +295,15 @@ impl AgentTemplatingService {
         context: &RenderContext,
     ) -> Result<String> {
         match function {
-            CTLFunction::Secret { path } => {
-                self.get_secret_value(path, context).await
-            }
+            CTLFunction::Secret { path } => self.get_secret_value(path, context).await,
             CTLFunction::With { path } => {
                 // For 'with' blocks, just return the data
                 self.get_secret_value(path, context).await
             }
-            CTLFunction::PkiCert { path, params } => {
-                self.get_pki_cert(path, params).await
-            }
-            CTLFunction::Key { path } => {
-                self.get_key_value(path, context).await
-            }
-            CTLFunction::Range { path } => {
-                self.list_secrets(path, context).await
-            }
-            CTLFunction::Variable { path } => {
-                self.get_variable_value(path, context).await
-            }
+            CTLFunction::PkiCert { path, params } => self.get_pki_cert(path, params).await,
+            CTLFunction::Key { path } => self.get_key_value(path, context).await,
+            CTLFunction::Range { path } => self.list_secrets(path, context).await,
+            CTLFunction::Variable { path } => self.get_variable_value(path, context).await,
             CTLFunction::End => {
                 // Control structure, no output
                 Ok(String::new())
@@ -317,11 +312,7 @@ impl AgentTemplatingService {
     }
 
     /// Get secret value from Vault
-    async fn get_secret_value(
-        &self,
-        path: &str,
-        context: &RenderContext,
-    ) -> Result<String> {
+    async fn get_secret_value(&self, path: &str, context: &RenderContext) -> Result<String> {
         // Check context first
         if let Some(data) = context.vault_secrets.get(path) {
             return Ok(serde_json::to_string_pretty(data)
@@ -339,14 +330,10 @@ impl AgentTemplatingService {
     }
 
     /// Get PKI certificate
-    async fn get_pki_cert(
-        &self,
-        path: &str,
-        params: &HashMap<String, String>,
-    ) -> Result<String> {
+    async fn get_pki_cert(&self, path: &str, params: &HashMap<String, String>) -> Result<String> {
         // Mock PKI certificate generation
         let common_name = params.get("common_name").cloned().unwrap_or_default();
-        
+
         Ok(format!(
             "-----BEGIN CERTIFICATE-----\nMockCert for {} at {}\n-----END CERTIFICATE-----",
             common_name, path
@@ -365,7 +352,7 @@ impl AgentTemplatingService {
     /// List secrets at path
     async fn list_secrets(&self, path: &str, _context: &RenderContext) -> Result<String> {
         let vault_data = self.vault_data.read().await;
-        
+
         let secrets: Vec<String> = vault_data
             .keys()
             .filter(|k| k.starts_with(path))
@@ -383,7 +370,10 @@ impl AgentTemplatingService {
             ".Data.host" => Ok("db.example.com".to_string()),
             ".Data.port" => Ok("5432".to_string()),
             ".Data.username" => Ok("admin".to_string()),
-            _ => Err(TemplatingError::RenderError(format!("Variable {} not found", path))),
+            _ => Err(TemplatingError::RenderError(format!(
+                "Variable {} not found",
+                path
+            ))),
         }
     }
 
@@ -424,7 +414,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_template() {
         let service = AgentTemplatingService::new();
-        
+
         let content = r#"
             Config: {{ secret "secret/data/app" }}
             {{ with secret "secret/data/db" }}
@@ -467,7 +457,7 @@ mod tests {
     #[tokio::test]
     async fn test_render_secret_function() {
         let service = AgentTemplatingService::new();
-        
+
         // Add mock data
         service
             .add_vault_data(
@@ -503,11 +493,10 @@ mod tests {
     #[tokio::test]
     async fn test_render_pki_cert() {
         let service = AgentTemplatingService::new();
-        
+
         let template = Template {
             name: "cert-config".to_string(),
-            content: r#"{{ pkiCert "pki/issue/server" "common_name=example.com" }}"#
-                .to_string(),
+            content: r#"{{ pkiCert "pki/issue/server" "common_name=example.com" }}"#.to_string(),
             destination: "/etc/ssl/cert.pem".to_string(),
             permissions: 0o644,
             variables: HashMap::new(),
@@ -528,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_variable_substitution() {
         let service = AgentTemplatingService::new();
-        
+
         let template = Template {
             name: "var-config".to_string(),
             content: "Environment: ${ENV}\nRegion: ${REGION}".to_string(),
@@ -555,7 +544,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_file() {
         let service = AgentTemplatingService::new();
-        
+
         let rendered = RenderedFile {
             path: "/etc/test/config".to_string(),
             content: "test content".to_string(),
@@ -565,17 +554,14 @@ mod tests {
 
         service.write_file(&rendered).await.unwrap();
 
-        let retrieved = service
-            .get_rendered_file("/etc/test/config")
-            .await
-            .unwrap();
+        let retrieved = service.get_rendered_file("/etc/test/config").await.unwrap();
         assert_eq!(retrieved.content, "test content");
     }
 
     #[tokio::test]
     async fn test_parse_pki_function() {
         let service = AgentTemplatingService::new();
-        
+
         let expr = r#"pkiCert "pki/issue/role" "common_name=test.com" "ttl=24h""#;
         let function = service.parse_function(expr).unwrap();
 

@@ -137,7 +137,8 @@ impl SecretVersioning {
         // Auto-prune if enabled
         let config = self.config.read().await;
         if config.auto_prune {
-            self.prune_old_versions_internal(history, config.max_versions).await;
+            self.prune_old_versions_internal(history, config.max_versions)
+                .await;
         }
         drop(config);
 
@@ -266,7 +267,7 @@ impl SecretVersioning {
         // Delete versions older than retention period (but keep at least one)
         if history.versions.len() > 1 {
             history.versions.retain(|v| v.created_at > cutoff);
-            
+
             // Ensure at least one version remains
             if history.versions.is_empty() {
                 return Err(VersionError::VersionError(
@@ -321,8 +322,7 @@ impl SecretVersioning {
             .get(secret_path)
             .ok_or_else(|| VersionError::SecretNotFound(secret_path.to_string()))?;
 
-        serde_json::to_string_pretty(history)
-            .map_err(|e| VersionError::VersionError(e.to_string()))
+        serde_json::to_string_pretty(history).map_err(|e| VersionError::VersionError(e.to_string()))
     }
 
     /// Get current version
@@ -421,12 +421,22 @@ mod tests {
         };
 
         versioning
-            .create_version("/secret/db", create_test_data_v1(), "user1", metadata.clone())
+            .create_version(
+                "/secret/db",
+                create_test_data_v1(),
+                "user1",
+                metadata.clone(),
+            )
             .await
             .unwrap();
 
         versioning
-            .create_version("/secret/db", create_test_data_v2(), "user2", metadata.clone())
+            .create_version(
+                "/secret/db",
+                create_test_data_v2(),
+                "user2",
+                metadata.clone(),
+            )
             .await
             .unwrap();
 
@@ -452,7 +462,12 @@ mod tests {
         };
 
         versioning
-            .create_version("/secret/db", create_test_data_v1(), "user1", metadata.clone())
+            .create_version(
+                "/secret/db",
+                create_test_data_v1(),
+                "user1",
+                metadata.clone(),
+            )
             .await
             .unwrap();
 
@@ -501,7 +516,7 @@ mod tests {
         }
 
         let versions = versioning.list_versions("/secret/db").await.unwrap();
-        
+
         // Should keep only max_versions (3)
         assert_eq!(versions.len(), 3);
         assert_eq!(versions[0].version_id, 3);

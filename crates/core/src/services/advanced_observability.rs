@@ -176,7 +176,7 @@ impl ObservabilityPlatform {
     /// Record metric
     pub async fn record_metric(&self, metric: Metric) -> Result<()> {
         let mut metrics = self.metrics.write().await;
-        
+
         let key = format!("{}_{}", metric.name, metric.timestamp.timestamp());
         metrics.insert(key, metric.clone());
 
@@ -189,7 +189,7 @@ impl ObservabilityPlatform {
     /// Get metric
     pub async fn get_metric(&self, name: &str) -> Result<Metric> {
         let metrics = self.metrics.read().await;
-        
+
         // Get latest metric with this name
         let latest = metrics
             .values()
@@ -203,7 +203,7 @@ impl ObservabilityPlatform {
     /// Query metrics
     pub async fn query_metrics(&self, query: &str) -> Vec<Metric> {
         let metrics = self.metrics.read().await;
-        
+
         // Simple query matching (could be enhanced with PromQL parser)
         metrics
             .values()
@@ -225,7 +225,9 @@ impl ObservabilityPlatform {
         for (name, metric_list) in grouped {
             if let Some(first) = metric_list.first() {
                 output.push_str(&format!("# HELP {} {}\n", name, first.help));
-                output.push_str(&format!("# TYPE {} {}\n", name, 
+                output.push_str(&format!(
+                    "# TYPE {} {}\n",
+                    name,
                     match first.metric_type {
                         MetricType::Counter => "counter",
                         MetricType::Gauge => "gauge",
@@ -238,7 +240,8 @@ impl ObservabilityPlatform {
                     let labels = if metric.labels.is_empty() {
                         String::new()
                     } else {
-                        let label_str: Vec<String> = metric.labels
+                        let label_str: Vec<String> = metric
+                            .labels
                             .iter()
                             .map(|(k, v)| format!("{}=\"{}\"", k, v))
                             .collect();
@@ -273,7 +276,7 @@ impl ObservabilityPlatform {
     /// Add widget to dashboard
     pub async fn add_widget(&self, dashboard_id: &str, widget: DashboardWidget) -> Result<()> {
         let mut dashboards = self.dashboards.write().await;
-        
+
         let dashboard = dashboards
             .get_mut(dashboard_id)
             .ok_or_else(|| ObservabilityError::DashboardNotFound(dashboard_id.to_string()))?;
@@ -344,7 +347,7 @@ impl ObservabilityPlatform {
     /// Acknowledge alert
     pub async fn acknowledge_alert(&self, alert_id: &str) -> Result<()> {
         let mut alerts = self.alerts.write().await;
-        
+
         let alert = alerts
             .get_mut(alert_id)
             .ok_or_else(|| ObservabilityError::AlertRuleNotFound(alert_id.to_string()))?;
@@ -356,7 +359,7 @@ impl ObservabilityPlatform {
     /// Resolve alert
     pub async fn resolve_alert(&self, alert_id: &str) -> Result<()> {
         let mut alerts = self.alerts.write().await;
-        
+
         let alert = alerts
             .get_mut(alert_id)
             .ok_or_else(|| ObservabilityError::AlertRuleNotFound(alert_id.to_string()))?;
@@ -369,11 +372,8 @@ impl ObservabilityPlatform {
     /// Record trace span
     pub async fn record_trace_span(&self, span: TraceSpan) -> Result<()> {
         let mut traces = self.traces.write().await;
-        
-        traces
-            .entry(span.trace_id.clone())
-            .or_default()
-            .push(span);
+
+        traces.entry(span.trace_id.clone()).or_default().push(span);
 
         Ok(())
     }
@@ -410,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_metric() {
         let platform = ObservabilityPlatform::new();
-        
+
         let metric = Metric {
             name: "http_requests_total".to_string(),
             metric_type: MetricType::Counter,
@@ -421,7 +421,7 @@ mod tests {
         };
 
         platform.record_metric(metric.clone()).await.unwrap();
-        
+
         let retrieved = platform.get_metric(&metric.name).await.unwrap();
         assert_eq!(retrieved.name, "http_requests_total");
         assert_eq!(retrieved.value, 100.0);
@@ -430,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_dashboard() {
         let platform = ObservabilityPlatform::new();
-        
+
         let dashboard = Dashboard {
             dashboard_id: "dash1".to_string(),
             name: "System Overview".to_string(),
@@ -450,7 +450,7 @@ mod tests {
     #[tokio::test]
     async fn test_alert_rule_trigger() {
         let platform = ObservabilityPlatform::new();
-        
+
         let rule = AlertRule {
             rule_id: "rule1".to_string(),
             name: "High CPU".to_string(),
@@ -486,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn test_prometheus_export() {
         let platform = ObservabilityPlatform::new();
-        
+
         let metric = Metric {
             name: "http_requests_total".to_string(),
             metric_type: MetricType::Counter,
@@ -507,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn test_trace_recording() {
         let platform = ObservabilityPlatform::new();
-        
+
         let trace_id = Uuid::new_v4().to_string();
         let span = TraceSpan {
             span_id: Uuid::new_v4().to_string(),
@@ -529,7 +529,7 @@ mod tests {
     #[tokio::test]
     async fn test_acknowledge_alert() {
         let platform = ObservabilityPlatform::new();
-        
+
         let rule = AlertRule {
             rule_id: "rule1".to_string(),
             name: "High Memory".to_string(),

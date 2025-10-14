@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use secreton_crypto::{encryption::CryptoEngine, AlgorithmId};
+use secreton_crypto::{AlgorithmId, encryption::CryptoEngine};
 
 fuzz_target!(|data: &[u8]| {
     if data.len() < 32 {

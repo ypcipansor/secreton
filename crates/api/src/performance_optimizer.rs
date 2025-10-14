@@ -3,15 +3,9 @@
 //! Provides different optimization levels that balance security requirements
 //! with performance needs for various deployment scenarios.
 
-use axum::{
-    extract::State,
-    response::Json,
-    routing::get,
-    Router,
-};
+use axum::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
@@ -19,7 +13,7 @@ use crate::ApiState;
 
 /// Create performance monitoring routes
 pub fn performance_routes() -> Router<ApiState> {
-    use axum::{extract::State, response::Json, routing::get, Router};
+    use axum::{Router, extract::State, response::Json, routing::get};
 
     async fn get_performance_metrics(
         State(state): State<ApiState>,
@@ -28,20 +22,24 @@ pub fn performance_routes() -> Router<ApiState> {
         Json(optimizer.get_metrics().clone())
     }
 
-    async fn get_optimization_recommendations(
-        State(state): State<ApiState>,
-    ) -> Json<Vec<String>> {
-        let optimizer = state.performance_optimizer.write().expect("Failed to acquire write lock");
+    async fn get_optimization_recommendations(State(state): State<ApiState>) -> Json<Vec<String>> {
+        let optimizer = state
+            .performance_optimizer
+            .write()
+            .expect("Failed to acquire write lock");
         Json(optimizer.get_optimization_recommendations())
     }
 
     Router::new()
         .route("/performance/metrics", get(get_performance_metrics))
-        .route("/performance/recommendations", get(get_optimization_recommendations))
+        .route(
+            "/performance/recommendations",
+            get(get_optimization_recommendations),
+        )
 }
 
 /// Security vs Performance optimization levels
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OptimizationLevel {
     /// Maximum security, minimum performance (Production-Critical)
     MaximumSecurity,
@@ -92,8 +90,12 @@ impl OptimizationLevel {
     /// Get recommended use case
     pub fn recommended_use(&self) -> &'static str {
         match self {
-            OptimizationLevel::MaximumSecurity => "Production systems with highest security requirements (banking, healthcare)",
-            OptimizationLevel::HighSecurity => "Standard production deployments (enterprise applications)",
+            OptimizationLevel::MaximumSecurity => {
+                "Production systems with highest security requirements (banking, healthcare)"
+            }
+            OptimizationLevel::HighSecurity => {
+                "Standard production deployments (enterprise applications)"
+            }
             OptimizationLevel::Balanced => "Development and staging environments",
             OptimizationLevel::MaximumPerformance => "Testing and development (NOT for production)",
         }
@@ -166,8 +168,10 @@ impl SecurityPerformanceOptimizer {
         let duration_ms = duration.as_millis() as u64;
         let now = chrono::Utc::now();
 
-        let metrics = self.metrics.entry(operation_name.to_string()).or_insert_with(|| {
-            OperationMetrics {
+        let metrics = self
+            .metrics
+            .entry(operation_name.to_string())
+            .or_insert_with(|| OperationMetrics {
                 operation_name: operation_name.to_string(),
                 total_operations: 0,
                 total_time_ms: 0,
@@ -178,8 +182,7 @@ impl SecurityPerformanceOptimizer {
                 p99_time_ms: 0,
                 error_count: 0,
                 last_updated: now,
-            }
-        });
+            });
 
         metrics.total_operations += 1;
         metrics.total_time_ms += duration_ms;
@@ -204,13 +207,21 @@ impl SecurityPerformanceOptimizer {
         // Log slow operations based on optimization level
         match self.config.optimization_level {
             OptimizationLevel::MaximumSecurity => {
-                if duration_ms > 1000 { // 1 second
-                    warn!("Slow operation detected: {} took {}ms", operation_name, duration_ms);
+                if duration_ms > 1000 {
+                    // 1 second
+                    warn!(
+                        "Slow operation detected: {} took {}ms",
+                        operation_name, duration_ms
+                    );
                 }
             }
             OptimizationLevel::HighSecurity => {
-                if duration_ms > 5000 { // 5 seconds
-                    warn!("Slow operation detected: {} took {}ms", operation_name, duration_ms);
+                if duration_ms > 5000 {
+                    // 5 seconds
+                    warn!(
+                        "Slow operation detected: {} took {}ms",
+                        operation_name, duration_ms
+                    );
                 }
             }
             _ => {} // Less strict for other levels
@@ -223,7 +234,7 @@ impl SecurityPerformanceOptimizer {
     }
 
     /// Check if operation is within performance bounds
-    pub fn check_performance_bounds(&self, operation_name: &str, duration: Duration) -> bool {
+    pub fn check_performance_bounds(&self, _operation_name: &str, duration: Duration) -> bool {
         let duration_ms = duration.as_millis() as u64;
 
         match self.config.optimization_level {
@@ -240,7 +251,8 @@ impl SecurityPerformanceOptimizer {
 
         // Check for slow operations
         for (operation, metrics) in &self.metrics {
-            if metrics.avg_time_ms > 1000 { // Operations taking > 1 second on average
+            if metrics.avg_time_ms > 1000 {
+                // Operations taking > 1 second on average
                 recommendations.push(format!(
                     "Optimize {}: average {}ms (consider caching or algorithm improvements)",
                     operation, metrics.avg_time_ms
@@ -250,10 +262,12 @@ impl SecurityPerformanceOptimizer {
             // Check error rates
             if metrics.total_operations > 0 {
                 let error_rate = metrics.error_count as f64 / metrics.total_operations as f64;
-                if error_rate > 0.01 { // > 1% error rate
+                if error_rate > 0.01 {
+                    // > 1% error rate
                     recommendations.push(format!(
                         "High error rate in {}: {:.2}% (investigate reliability issues)",
-                        operation, error_rate * 100.0
+                        operation,
+                        error_rate * 100.0
                     ));
                 }
             }
@@ -265,7 +279,10 @@ impl SecurityPerformanceOptimizer {
                 recommendations.push("Memory zeroization enabled - consider connection pooling for frequently accessed resources".to_string());
             }
             OptimizationLevel::MaximumPerformance => {
-                recommendations.push("Memory zeroization disabled for performance - ensure sensitive data cleanup".to_string());
+                recommendations.push(
+                    "Memory zeroization disabled for performance - ensure sensitive data cleanup"
+                        .to_string(),
+                );
             }
             _ => {}
         }
@@ -275,33 +292,40 @@ impl SecurityPerformanceOptimizer {
 
     /// Adaptive optimization based on runtime metrics
     pub fn suggest_adaptive_optimization(&mut self) -> Option<OptimizationLevel> {
-        let crypto_operations = self.metrics.values()
-            .filter(|m| m.operation_name.contains("crypto") || m.operation_name.contains("encrypt") || m.operation_name.contains("decrypt"))
+        let crypto_operations = self
+            .metrics
+            .values()
+            .filter(|m| {
+                m.operation_name.contains("crypto")
+                    || m.operation_name.contains("encrypt")
+                    || m.operation_name.contains("decrypt")
+            })
             .collect::<Vec<_>>();
 
         if crypto_operations.is_empty() {
             return None;
         }
 
-        let avg_crypto_time: u64 = crypto_operations.iter()
-            .map(|m| m.avg_time_ms)
-            .sum::<u64>() / crypto_operations.len() as u64;
+        let avg_crypto_time: u64 = crypto_operations.iter().map(|m| m.avg_time_ms).sum::<u64>()
+            / crypto_operations.len() as u64;
 
         // If crypto operations are consistently slow, suggest optimization
-        if avg_crypto_time > 1000 { // > 1 second average
+        if avg_crypto_time > 1000 {
+            // > 1 second average
             match self.config.optimization_level {
                 OptimizationLevel::MaximumSecurity => {
                     // Already at maximum security, suggest hardware acceleration
-                    info!("Crypto operations slow ({}ms avg) at maximum security - consider hardware acceleration", avg_crypto_time);
+                    info!(
+                        "Crypto operations slow ({}ms avg) at maximum security - consider hardware acceleration",
+                        avg_crypto_time
+                    );
                     None
                 }
                 OptimizationLevel::HighSecurity => {
                     // Could optimize further
                     Some(OptimizationLevel::Balanced)
                 }
-                OptimizationLevel::Balanced => {
-                    Some(OptimizationLevel::MaximumPerformance)
-                }
+                OptimizationLevel::Balanced => Some(OptimizationLevel::MaximumPerformance),
                 OptimizationLevel::MaximumPerformance => {
                     // Already at maximum performance
                     None
@@ -389,9 +413,18 @@ mod tests {
     #[test]
     fn test_optimization_level_scoring() {
         assert_eq!(OptimizationLevel::MaximumSecurity.security_score(), 1.0);
-        assert_eq!(OptimizationLevel::MaximumPerformance.performance_score(), 1.0);
-        assert!(OptimizationLevel::HighSecurity.security_score() > OptimizationLevel::Balanced.security_score());
-        assert!(OptimizationLevel::Balanced.performance_score() > OptimizationLevel::HighSecurity.performance_score());
+        assert_eq!(
+            OptimizationLevel::MaximumPerformance.performance_score(),
+            1.0
+        );
+        assert!(
+            OptimizationLevel::HighSecurity.security_score()
+                > OptimizationLevel::Balanced.security_score()
+        );
+        assert!(
+            OptimizationLevel::Balanced.performance_score()
+                > OptimizationLevel::HighSecurity.performance_score()
+        );
     }
 
     #[test]

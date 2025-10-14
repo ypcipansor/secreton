@@ -47,8 +47,8 @@ impl Default for PoolConfig {
             min_connections: 2,
             max_connections: 10,
             connection_timeout_ms: 5000,
-            idle_timeout_secs: 600,      // 10 minutes
-            max_lifetime_secs: 3600,     // 1 hour
+            idle_timeout_secs: 600,  // 10 minutes
+            max_lifetime_secs: 3600, // 1 hour
             health_check_interval_secs: 30,
         }
     }
@@ -140,11 +140,7 @@ impl ConnectionPoolBackend {
     }
 
     pub fn status(&self) -> PoolStatus {
-        let healthy_count = self
-            .connections
-            .iter()
-            .filter(|c| c.is_healthy)
-            .count();
+        let healthy_count = self.connections.iter().filter(|c| c.is_healthy).count();
 
         let total = self.connections.len();
 
@@ -327,26 +323,15 @@ impl ConnectionPoolingService {
 
         // Update metrics
         pool.metrics.total_connections = pool.connections.len();
-        pool.metrics.idle_connections = pool
-            .connections
-            .iter()
-            .filter(|c| !c.in_use)
-            .count();
+        pool.metrics.idle_connections = pool.connections.iter().filter(|c| !c.in_use).count();
 
         Ok(evicted)
     }
 
     /// Resize pool dynamically
-    pub async fn resize_pool(
-        &self,
-        backend: &str,
-        new_max: usize,
-        new_min: usize,
-    ) -> Result<()> {
+    pub async fn resize_pool(&self, backend: &str, new_max: usize, new_min: usize) -> Result<()> {
         if new_min > new_max {
-            return Err(PoolError::ConfigError(
-                "min cannot exceed max".to_string(),
-            ));
+            return Err(PoolError::ConfigError("min cannot exceed max".to_string()));
         }
 
         let mut pools = self.pools.write().await;
@@ -533,10 +518,7 @@ mod tests {
             .unwrap();
 
         // Resize to larger
-        service
-            .resize_pool("scalable-db", 20, 5)
-            .await
-            .unwrap();
+        service.resize_pool("scalable-db", 20, 5).await.unwrap();
 
         let metrics = service.get_metrics("scalable-db").await.unwrap();
         assert_eq!(metrics.total_connections, 5); // Increased to new min

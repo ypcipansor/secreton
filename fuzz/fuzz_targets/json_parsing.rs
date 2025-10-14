@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use secreton_core::config::{AuthConfig, Config, DatabaseConfig, ServerConfig};
 use serde_json;
-use secreton_core::config::{ServerConfig, DatabaseConfig, AuthConfig, Config};
 
 fuzz_target!(|data: &[u8]| {
     // Test JSON configuration parsing

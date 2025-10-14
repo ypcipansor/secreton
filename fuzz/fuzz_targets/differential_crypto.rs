@@ -23,20 +23,30 @@ fuzz_target!(|data: &[u8]| {
     match (aes_encrypted, chacha_encrypted) {
         (Ok(aes_result), Ok(chacha_result)) => {
             // Both succeeded - verify they can both decrypt correctly
-            let aes_decrypted = engine.decrypt(&aes_result, key)
+            let aes_decrypted = engine
+                .decrypt(&aes_result, key)
                 .expect("AES decryption should work");
-            let chacha_decrypted = engine.decrypt(&chacha_result, key)
+            let chacha_decrypted = engine
+                .decrypt(&chacha_result, key)
                 .expect("ChaCha20 decryption should work");
 
             // Both should decrypt to the same plaintext
-            assert_eq!(aes_decrypted.as_slice(), plaintext,
-                "AES-GCM decryption should match original plaintext");
-            assert_eq!(chacha_decrypted.as_slice(), plaintext,
-                "ChaCha20-Poly1305 decryption should match original plaintext");
+            assert_eq!(
+                aes_decrypted.as_slice(),
+                plaintext,
+                "AES-GCM decryption should match original plaintext"
+            );
+            assert_eq!(
+                chacha_decrypted.as_slice(),
+                plaintext,
+                "ChaCha20-Poly1305 decryption should match original plaintext"
+            );
 
             // Nonces should be different (both algorithms use random nonces)
-            assert_ne!(aes_result.nonce, chacha_result.nonce,
-                "Different algorithms should use different nonces");
+            assert_ne!(
+                aes_result.nonce, chacha_result.nonce,
+                "Different algorithms should use different nonces"
+            );
         }
         (Err(_), Err(_)) => {
             // Both failed - this might be acceptable for edge cases
@@ -66,7 +76,7 @@ fuzz_target!(|data: &[u8]| {
     if hash_results.len() == hash_algorithms.len() {
         // All succeeded - verify they produce different outputs (collision resistance)
         for i in 0..hash_results.len() {
-            for j in i+1..hash_results.len() {
+            for j in i + 1..hash_results.len() {
                 let (_, hash1) = hash_results[i];
                 let (_, hash2) = hash_results[j];
                 // Different algorithms should produce different hash outputs
@@ -92,11 +102,17 @@ fuzz_target!(|data: &[u8]| {
             (Ok(pbkdf2_result), Ok(argon2_result)) => {
                 // Both should produce 32-byte keys
                 assert_eq!(pbkdf2_result.len(), 32, "PBKDF2 should produce 32-byte key");
-                assert_eq!(argon2_result.len(), 32, "Argon2id should produce 32-byte key");
+                assert_eq!(
+                    argon2_result.len(),
+                    32,
+                    "Argon2id should produce 32-byte key"
+                );
 
                 // They should be different (different algorithms)
-                assert_ne!(pbkdf2_result, argon2_result,
-                    "PBKDF2 and Argon2id should produce different results");
+                assert_ne!(
+                    pbkdf2_result, argon2_result,
+                    "PBKDF2 and Argon2id should produce different results"
+                );
             }
             (Err(_), Err(_)) => {
                 // Both failed - might be acceptable

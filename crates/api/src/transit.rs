@@ -1,16 +1,16 @@
 use axum::{
+    Router,
     extract::{Path, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use secreton_crypto::transit::{keys::KeyOptions, KeyType, TransitEngine};
+use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -123,7 +123,7 @@ pub async fn encrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, StatusCode> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 plaintext
     let plaintext_bytes = match BASE64.decode(&request.plaintext) {
@@ -163,7 +163,7 @@ pub async fn decrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<DecryptResponse>, StatusCode> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode context if provided
     let context = if let Some(ctx) = request.context {

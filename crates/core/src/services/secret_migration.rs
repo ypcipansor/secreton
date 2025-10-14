@@ -230,7 +230,8 @@ impl SecretMigrationService {
                         let mut progress = self.progress.write().await;
                         if let Some(prog) = progress.get_mut(&plan.id) {
                             prog.failed_items += 1;
-                            prog.errors.push(format!("Failed to migrate {}: {}", entry.path, e));
+                            prog.errors
+                                .push(format!("Failed to migrate {}: {}", entry.path, e));
                         }
                     }
                 }
@@ -255,7 +256,7 @@ impl SecretMigrationService {
     /// Verify migrated entries
     async fn verify_batch(&self, batch: &[SecretEntry]) -> Result<()> {
         let dest = self.dest_storage.read().await;
-        
+
         for entry in batch {
             if !dest.contains_key(&entry.path) {
                 return Err(MigrationError::MigrationFailed(format!(
@@ -366,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_migration_plan() {
         let service = SecretMigrationService::new();
-        
+
         let plan = MigrationPlan {
             id: "mig-1".to_string(),
             name: "Test Migration".to_string(),
@@ -395,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn test_migration_execution() {
         let service = SecretMigrationService::new();
-        
+
         // Add source data
         service
             .add_source_data("secret/key1".to_string(), b"value1".to_vec())
@@ -439,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn test_path_filtering() {
         let service = SecretMigrationService::new();
-        
+
         service
             .add_source_data("secret/app1/key".to_string(), b"val1".to_vec())
             .await;
@@ -479,7 +480,7 @@ mod tests {
     #[tokio::test]
     async fn test_migration_progress() {
         let service = SecretMigrationService::new();
-        
+
         for i in 0..5 {
             service
                 .add_source_data(format!("secret/key{}", i), format!("val{}", i).into_bytes())
@@ -517,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn test_pause_resume() {
         let service = SecretMigrationService::new();
-        
+
         let plan = MigrationPlan {
             id: "mig-1".to_string(),
             name: "Pausable".to_string(),

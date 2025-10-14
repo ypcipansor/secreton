@@ -3,13 +3,7 @@
 //! Provides comprehensive runtime security validation, health monitoring,
 //! and self-healing capabilities for production deployments.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::State, response::Json, routing::get};
 use bollard::Docker;
 use chrono::{DateTime, Utc};
 use kube::{Client, Config};
@@ -18,7 +12,6 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 use crate::{ApiState, AppError};
@@ -55,6 +48,7 @@ pub struct RuntimeSecurityValidator {
     docker_client: Option<Docker>,
     k8s_client: Option<Client>,
     start_time: Instant,
+    #[allow(dead_code)]
     check_interval: Duration,
 }
 
@@ -189,7 +183,9 @@ impl RuntimeSecurityValidator {
                         status: SecurityStatus::Warning,
                         message: "Unable to check memory information".to_string(),
                         last_checked: Utc::now(),
-                        remediation: Some("Verify system memory monitoring is available".to_string()),
+                        remediation: Some(
+                            "Verify system memory monitoring is available".to_string(),
+                        ),
                     }
                 }
             }
@@ -223,7 +219,9 @@ impl RuntimeSecurityValidator {
                 status: SecurityStatus::Critical,
                 message: format!("Cryptographic module failure: {}", e),
                 last_checked: Utc::now(),
-                remediation: Some("Restart cryptographic services and check key material".to_string()),
+                remediation: Some(
+                    "Restart cryptographic services and check key material".to_string(),
+                ),
             },
         }
     }
@@ -258,9 +256,7 @@ impl RuntimeSecurityValidator {
     /// Check network security configuration
     async fn check_network_security(&self) -> SecurityCheckResult {
         // Check if we're listening on secure ports only
-        let output = Command::new("ss")
-            .arg("-tuln")
-            .output();
+        let output = Command::new("ss").arg("-tuln").output();
 
         match output {
             Ok(result) => {
@@ -373,13 +369,14 @@ pub async fn get_runtime_security_status(
         Ok(Json(status))
     } else {
         Err(AppError::Internal(
-            "Runtime security validator not initialized".to_string()
+            "Runtime security validator not initialized".to_string(),
         ))
     }
 }
 
 /// Initialize runtime security validation
-pub async fn init_runtime_security() -> Result<Arc<RuntimeSecurityValidator>, Box<dyn std::error::Error>> {
+pub async fn init_runtime_security()
+-> Result<Arc<RuntimeSecurityValidator>, Box<dyn std::error::Error>> {
     let validator = RuntimeSecurityValidator::new().await?;
     let validator = Arc::new(validator);
 
@@ -393,7 +390,11 @@ pub async fn init_runtime_security() -> Result<Arc<RuntimeSecurityValidator>, Bo
         loop {
             interval.tick().await;
 
-            match validator_clone.validate_runtime_security().await.overall_status {
+            match validator_clone
+                .validate_runtime_security()
+                .await
+                .overall_status
+            {
                 SecurityStatus::Healthy => {
                     info!("Runtime security validation: HEALTHY");
                 }
@@ -415,8 +416,7 @@ pub async fn init_runtime_security() -> Result<Arc<RuntimeSecurityValidator>, Bo
 
 /// Create runtime security routes
 pub fn runtime_security_routes() -> Router<ApiState> {
-    Router::new()
-        .route("/health/runtime", get(runtime_security_health_check))
+    Router::new().route("/health/runtime", get(runtime_security_health_check))
 }
 
 /// Runtime security health check endpoint
@@ -427,7 +427,9 @@ pub async fn runtime_security_health_check(
         let status = validator.validate_runtime_security().await;
         Ok(Json(status))
     } else {
-        Err(AppError::Internal("Runtime security validator not initialized".to_string()))
+        Err(AppError::Internal(
+            "Runtime security validator not initialized".to_string(),
+        ))
     }
 }
 

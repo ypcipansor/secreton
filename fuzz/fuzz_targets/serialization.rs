@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use secreton_core::storage::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 fuzz_target!(|data: &[u8]| {
     // Test serialization/deserialization operations
@@ -23,7 +23,8 @@ fuzz_target!(|data: &[u8]| {
         // Try to deserialize various types
         let _vault_entry: Result<VaultEntry, _> = serde_json::from_str(json_str);
         let _secret_data: Result<HashMap<String, String>, _> = serde_json::from_str(json_str);
-        let _metadata: Result<HashMap<String, serde_json::Value>, _> = serde_json::from_str(json_str);
+        let _metadata: Result<HashMap<String, serde_json::Value>, _> =
+            serde_json::from_str(json_str);
 
         // Test round-trip serialization
         if let Ok(secret_data) = serde_json::from_str::<HashMap<String, String>>(json_str) {
@@ -33,7 +34,8 @@ fuzz_target!(|data: &[u8]| {
 
     // Test binary serialization/deserialization
     let _bincode_result: Result<HashMap<String, String>, _> = bincode::deserialize(bincode_data);
-    let _bincode_metadata: Result<HashMap<String, serde_json::Value>, _> = bincode::deserialize(bincode_data);
+    let _bincode_metadata: Result<HashMap<String, serde_json::Value>, _> =
+        bincode::deserialize(bincode_data);
 
     // Test raw data handling
     let _ = validate_raw_data(raw_data);

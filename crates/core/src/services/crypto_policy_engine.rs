@@ -138,7 +138,7 @@ pub struct CryptoPolicyEngine {
 impl CryptoPolicyEngine {
     pub fn new() -> Self {
         let metadata = Self::create_default_metadata();
-        
+
         Self {
             policies: Arc::new(RwLock::new(HashMap::new())),
             algorithm_metadata: Arc::new(RwLock::new(metadata)),
@@ -156,7 +156,11 @@ impl CryptoPolicyEngine {
     }
 
     /// Validate operation against policy
-    pub async fn validate_operation(&self, request: &CryptoOperationRequest, policy_id: &str) -> Result<()> {
+    pub async fn validate_operation(
+        &self,
+        request: &CryptoOperationRequest,
+        policy_id: &str,
+    ) -> Result<()> {
         let policies = self.policies.read().await;
         let policy = policies
             .get(policy_id)
@@ -170,7 +174,10 @@ impl CryptoPolicyEngine {
 
         // Check algorithm allowlist
         if !policy.allowed_algorithms.contains(&request.algorithm) {
-            violations.push(format!("Algorithm {:?} not in allowed list", request.algorithm));
+            violations.push(format!(
+                "Algorithm {:?} not in allowed list",
+                request.algorithm
+            ));
         }
 
         // Check algorithm status
@@ -223,7 +230,11 @@ impl CryptoPolicyEngine {
     }
 
     /// Select best algorithm for purpose
-    pub async fn select_algorithm(&self, purpose: &str, policy_id: &str) -> Result<CryptoAlgorithm> {
+    pub async fn select_algorithm(
+        &self,
+        purpose: &str,
+        policy_id: &str,
+    ) -> Result<CryptoAlgorithm> {
         let policies = self.policies.read().await;
         let policy = policies
             .get(policy_id)
@@ -246,11 +257,18 @@ impl CryptoPolicyEngine {
         // Select based on purpose
         let selected = match purpose {
             "encryption" => {
-                candidates.retain(|a| matches!(a, CryptoAlgorithm::AES256_GCM | CryptoAlgorithm::ChaCha20Poly1305));
+                candidates.retain(|a| {
+                    matches!(
+                        a,
+                        CryptoAlgorithm::AES256_GCM | CryptoAlgorithm::ChaCha20Poly1305
+                    )
+                });
                 candidates.first().cloned()
             }
             "signing" => {
-                candidates.retain(|a| matches!(a, CryptoAlgorithm::ED25519 | CryptoAlgorithm::ECDSA_P256));
+                candidates.retain(|a| {
+                    matches!(a, CryptoAlgorithm::ED25519 | CryptoAlgorithm::ECDSA_P256)
+                });
                 candidates.first().cloned()
             }
             _ => candidates.first().cloned(),
@@ -381,7 +399,7 @@ impl CryptoPolicyEngine {
                 recommended_replacement: Some(CryptoAlgorithm::RSA4096),
             },
         );
-        
+
         metadata
     }
 
@@ -407,7 +425,10 @@ impl CryptoPolicyEngine {
     }
 
     /// Get algorithm metadata
-    pub async fn get_algorithm_metadata(&self, algorithm: &CryptoAlgorithm) -> Option<AlgorithmMetadata> {
+    pub async fn get_algorithm_metadata(
+        &self,
+        algorithm: &CryptoAlgorithm,
+    ) -> Option<AlgorithmMetadata> {
         let metadata = self.algorithm_metadata.read().await;
         metadata.get(algorithm).cloned()
     }
@@ -492,7 +513,10 @@ mod tests {
         let policy = CryptoPolicy {
             policy_id: "pol1".to_string(),
             name: "Test Policy".to_string(),
-            allowed_algorithms: vec![CryptoAlgorithm::AES256_GCM, CryptoAlgorithm::ChaCha20Poly1305],
+            allowed_algorithms: vec![
+                CryptoAlgorithm::AES256_GCM,
+                CryptoAlgorithm::ChaCha20Poly1305,
+            ],
             min_key_sizes: HashMap::new(),
             compliance_standards: vec![],
             enforce_rotation: false,
@@ -515,12 +539,17 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         engine
-            .deprecate_algorithm(CryptoAlgorithm::AES128_GCM, Some(CryptoAlgorithm::AES256_GCM))
+            .deprecate_algorithm(
+                CryptoAlgorithm::AES128_GCM,
+                Some(CryptoAlgorithm::AES256_GCM),
+            )
             .await
             .ok();
 
         // RSA2048 should already be deprecated from initialization
-        let metadata = engine.get_algorithm_metadata(&CryptoAlgorithm::RSA2048).await;
+        let metadata = engine
+            .get_algorithm_metadata(&CryptoAlgorithm::RSA2048)
+            .await;
         assert!(metadata.is_some());
         assert_eq!(metadata.unwrap().status, AlgorithmStatus::Deprecated);
     }

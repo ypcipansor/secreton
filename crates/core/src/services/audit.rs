@@ -21,24 +21,24 @@ pub enum AuditEventType {
     AuthTokenCreate,
     AuthTokenRevoke,
     AuthTokenRenew,
-    
+
     /// Secret operations
     SecretRead,
     SecretWrite,
     SecretDelete,
     SecretList,
-    
+
     /// Policy operations
     PolicyCreate,
     PolicyUpdate,
     PolicyDelete,
     PolicyRead,
-    
+
     /// Lease operations
     LeaseCreate,
     LeaseRenew,
     LeaseRevoke,
-    
+
     /// System operations
     SysMount,
     SysUnmount,
@@ -46,7 +46,7 @@ pub enum AuditEventType {
     SysSeal,
     SysUnseal,
     SysRotate,
-    
+
     /// Other
     Custom(String),
 }
@@ -113,49 +113,49 @@ impl AuditStatus {
 pub struct AuditEvent {
     /// Event ID
     pub id: String,
-    
+
     /// Timestamp
     pub timestamp: DateTime<Utc>,
-    
+
     /// Event type
     pub event_type: AuditEventType,
-    
+
     /// Status
     pub status: AuditStatus,
-    
+
     /// User/entity performing the action
     pub user: String,
-    
+
     /// User display name
     pub display_name: Option<String>,
-    
+
     /// Client IP address
     pub client_ip: Option<String>,
-    
+
     /// Resource path/identifier
     pub resource: String,
-    
+
     /// Operation details
     pub operation: String,
-    
+
     /// HTTP method (if applicable)
     pub method: Option<String>,
-    
+
     /// Request ID
     pub request_id: Option<String>,
-    
+
     /// Token accessor (not the actual token)
     pub token_accessor: Option<String>,
-    
+
     /// Policies applied
     pub policies: Vec<String>,
-    
+
     /// Error message (if failed)
     pub error: Option<String>,
-    
+
     /// Additional metadata
     pub metadata: HashMap<String, String>,
-    
+
     /// Duration in milliseconds
     pub duration_ms: Option<u64>,
 }
@@ -188,12 +188,12 @@ impl AuditEvent {
             duration_ms: None,
         }
     }
-    
+
     /// Format as JSON line
     pub fn to_json_line(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
     }
-    
+
     /// Format as syslog message
     pub fn to_syslog(&self) -> String {
         format!(
@@ -212,8 +212,9 @@ impl AuditEvent {
 #[async_trait]
 pub trait AuditDevice: Send + Sync {
     /// Log audit event
-    async fn log(&self, event: &AuditEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+    async fn log(&self, event: &AuditEvent)
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
     /// Flush buffered events
     async fn flush(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
@@ -234,12 +235,15 @@ pub enum FileFormat {
 
 #[async_trait]
 impl AuditDevice for FileAuditDevice {
-    async fn log(&self, event: &AuditEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn log(
+        &self,
+        event: &AuditEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.file_path)?;
-        
+
         let line = match self.format {
             FileFormat::Json => format!("{}\n", event.to_json_line()),
             FileFormat::Text => format!(
@@ -252,7 +256,7 @@ impl AuditDevice for FileAuditDevice {
                 event.status.as_str()
             ),
         };
-        
+
         file.write_all(line.as_bytes())?;
         Ok(())
     }
@@ -265,7 +269,10 @@ pub struct DbAuditDevice {
 
 #[async_trait]
 impl AuditDevice for DbAuditDevice {
-    async fn log(&self, event: &AuditEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn log(
+        &self,
+        event: &AuditEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // In production, would insert into database
         log_audit_db(
             &event.user,
@@ -284,7 +291,10 @@ pub struct SyslogAuditDevice {
 
 #[async_trait]
 impl AuditDevice for SyslogAuditDevice {
-    async fn log(&self, event: &AuditEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn log(
+        &self,
+        event: &AuditEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // In production, would send to syslog server
         // For now, just format the message
         let _message = event.to_syslog();
@@ -299,7 +309,10 @@ pub struct WebhookAuditDevice {
 
 #[async_trait]
 impl AuditDevice for WebhookAuditDevice {
-    async fn log(&self, event: &AuditEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn log(
+        &self,
+        event: &AuditEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let payload = serde_json::json!({
             "id": event.id,
             "timestamp": event.timestamp.to_rfc3339(),
@@ -310,13 +323,13 @@ impl AuditDevice for WebhookAuditDevice {
             "status": event.status.as_str(),
             "metadata": event.metadata,
         });
-        
+
         reqwest::Client::new()
             .post(&self.url)
             .json(&payload)
             .send()
             .await?;
-        
+
         Ok(())
     }
 }
@@ -337,25 +350,25 @@ impl AuditService {
             buffer_size,
         }
     }
-    
+
     /// Add audit device
     pub async fn add_device(&self, device: Box<dyn AuditDevice>) {
         let mut devices = self.devices.write().await;
         devices.push(device);
     }
-    
+
     /// Log audit event
     pub async fn log(&self, event: AuditEvent) {
         let mut buffer = self.buffer.write().await;
         buffer.push(event.clone());
-        
+
         // Flush if buffer is full
         if buffer.len() >= self.buffer_size {
             drop(buffer);
             let _ = self.flush().await;
         } else {
             drop(buffer);
-            
+
             // Log to devices immediately for critical events
             if matches!(event.status, AuditStatus::Denied | AuditStatus::Failure) {
                 let devices = self.devices.read().await;
@@ -365,23 +378,23 @@ impl AuditService {
             }
         }
     }
-    
+
     /// Flush buffered events
     pub async fn flush(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut buffer = self.buffer.write().await;
         let events: Vec<AuditEvent> = buffer.drain(..).collect();
         drop(buffer);
-        
+
         let devices = self.devices.read().await;
         for event in events {
             for device in devices.iter() {
                 let _ = device.log(&event).await;
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get buffer size
     pub async fn buffer_len(&self) -> usize {
         let buffer = self.buffer.read().await;
@@ -423,16 +436,16 @@ mod tests {
             "/secret/data/myapp".to_string(),
             "read".to_string(),
         );
-        
+
         assert_eq!(event.event_type.as_str(), "secret.read");
         assert_eq!(event.status.as_str(), "success");
         assert!(!event.id.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_audit_service() {
         let service = AuditService::new(10);
-        
+
         let event = AuditEvent::new(
             AuditEventType::AuthLogin,
             AuditStatus::Success,
@@ -440,11 +453,11 @@ mod tests {
             "/auth/login".to_string(),
             "login".to_string(),
         );
-        
+
         service.log(event).await;
         assert_eq!(service.buffer_len().await, 1);
     }
-    
+
     #[tokio::test]
     async fn test_json_formatting() {
         let event = AuditEvent::new(
@@ -454,7 +467,7 @@ mod tests {
             "/secret/data/test".to_string(),
             "write".to_string(),
         );
-        
+
         let json = event.to_json_line();
         assert!(json.contains("secret.write"));
         assert!(json.contains("admin"));

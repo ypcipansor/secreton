@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use secreton_storage::{
+    EncryptionMetadata, SecurityLevel, StorageBackend, VaultEntry,
     backends::{
         AzureBlobStorage, CassandraStorage, CockroachDBStorage, GoogleCloudStorage, MongoDBStorage,
     },
-    EncryptionMetadata, SecurityLevel, StorageBackend, VaultEntry,
 };
 
 #[tokio::test]
@@ -55,10 +55,12 @@ async fn test_cockroachdb_storage_basic_operations() {
     assert_eq!(retrieved.security_level, entry.security_level);
 
     // Test exists
-    assert!(storage
-        .exists("test/cockroachdb/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        storage
+            .exists("test/cockroachdb/path")
+            .await
+            .expect("Failed to check existence")
+    );
 
     // Test list
     let entries = storage
@@ -68,16 +70,20 @@ async fn test_cockroachdb_storage_basic_operations() {
     assert!(!entries.is_empty());
 
     // Test delete
-    assert!(storage
-        .delete_by_path("test/cockroachdb/path")
-        .await
-        .expect("Failed to delete"));
+    assert!(
+        storage
+            .delete_by_path("test/cockroachdb/path")
+            .await
+            .expect("Failed to delete")
+    );
 
     // Verify deletion
-    assert!(!storage
-        .exists("test/cockroachdb/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        !storage
+            .exists("test/cockroachdb/path")
+            .await
+            .expect("Failed to check existence")
+    );
 }
 
 #[tokio::test]
@@ -127,10 +133,12 @@ async fn test_cassandra_storage_basic_operations() {
     assert_eq!(retrieved.security_level, entry.security_level);
 
     // Test exists
-    assert!(storage
-        .exists("test/cassandra/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        storage
+            .exists("test/cassandra/path")
+            .await
+            .expect("Failed to check existence")
+    );
 
     // Test list
     let entries = storage
@@ -140,16 +148,20 @@ async fn test_cassandra_storage_basic_operations() {
     assert!(!entries.is_empty());
 
     // Test delete
-    assert!(storage
-        .delete_by_path("test/cassandra/path")
-        .await
-        .expect("Failed to delete"));
+    assert!(
+        storage
+            .delete_by_path("test/cassandra/path")
+            .await
+            .expect("Failed to delete")
+    );
 
     // Verify deletion
-    assert!(!storage
-        .exists("test/cassandra/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        !storage
+            .exists("test/cassandra/path")
+            .await
+            .expect("Failed to check existence")
+    );
 }
 
 #[tokio::test]
@@ -199,10 +211,12 @@ async fn test_mongodb_storage_basic_operations() {
     assert_eq!(retrieved.security_level, entry.security_level);
 
     // Test exists
-    assert!(storage
-        .exists("test/mongodb/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        storage
+            .exists("test/mongodb/path")
+            .await
+            .expect("Failed to check existence")
+    );
 
     // Test list
     let entries = storage
@@ -212,16 +226,20 @@ async fn test_mongodb_storage_basic_operations() {
     assert!(!entries.is_empty());
 
     // Test delete
-    assert!(storage
-        .delete_by_path("test/mongodb/path")
-        .await
-        .expect("Failed to delete"));
+    assert!(
+        storage
+            .delete_by_path("test/mongodb/path")
+            .await
+            .expect("Failed to delete")
+    );
 
     // Verify deletion
-    assert!(!storage
-        .exists("test/mongodb/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        !storage
+            .exists("test/mongodb/path")
+            .await
+            .expect("Failed to check existence")
+    );
 }
 
 #[tokio::test]
@@ -278,10 +296,12 @@ async fn test_azure_blob_storage_basic_operations() {
     assert_eq!(retrieved.security_level, entry.security_level);
 
     // Test exists
-    assert!(storage
-        .exists("test/azure/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        storage
+            .exists("test/azure/path")
+            .await
+            .expect("Failed to check existence")
+    );
 
     // Test list
     let entries = storage
@@ -291,16 +311,20 @@ async fn test_azure_blob_storage_basic_operations() {
     assert!(!entries.is_empty());
 
     // Test delete
-    assert!(storage
-        .delete_by_path("test/azure/path")
-        .await
-        .expect("Failed to delete"));
+    assert!(
+        storage
+            .delete_by_path("test/azure/path")
+            .await
+            .expect("Failed to delete")
+    );
 
     // Verify deletion
-    assert!(!storage
-        .exists("test/azure/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        !storage
+            .exists("test/azure/path")
+            .await
+            .expect("Failed to check existence")
+    );
 }
 
 #[tokio::test]
@@ -355,10 +379,12 @@ async fn test_gcs_storage_basic_operations() {
     assert_eq!(retrieved.security_level, entry.security_level);
 
     // Test exists
-    assert!(storage
-        .exists("test/gcs/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        storage
+            .exists("test/gcs/path")
+            .await
+            .expect("Failed to check existence")
+    );
 
     // Test list
     let entries = storage
@@ -368,16 +394,20 @@ async fn test_gcs_storage_basic_operations() {
     assert!(!entries.is_empty());
 
     // Test delete
-    assert!(storage
-        .delete_by_path("test/gcs/path")
-        .await
-        .expect("Failed to delete"));
+    assert!(
+        storage
+            .delete_by_path("test/gcs/path")
+            .await
+            .expect("Failed to delete")
+    );
 
     // Verify deletion
-    assert!(!storage
-        .exists("test/gcs/path")
-        .await
-        .expect("Failed to check existence"));
+    assert!(
+        !storage
+            .exists("test/gcs/path")
+            .await
+            .expect("Failed to check existence")
+    );
 }
 
 #[test]

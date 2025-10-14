@@ -65,8 +65,8 @@ pub struct LogStreamConfig {
 pub struct LogDestination {
     pub id: String,
     pub destination_type: DestinationType,
-    pub endpoint: String, // URL or file path
-    pub tag: String,      // For Fluentd
+    pub endpoint: String,      // URL or file path
+    pub tag: String,           // For Fluentd
     pub index: Option<String>, // For Logstash (ES index)
     pub enabled: bool,
 }
@@ -251,7 +251,9 @@ impl LogStreaming {
         destination: &LogDestination,
     ) -> Result<()> {
         let config = self.config.read().await;
-        let formatted = self.format_event(event, &config.format, destination).await?;
+        let formatted = self
+            .format_event(event, &config.format, destination)
+            .await?;
         drop(config);
 
         // Mock delivery based on destination type
@@ -272,8 +274,7 @@ impl LogStreaming {
     ) -> Result<String> {
         match format {
             LogFormat::JSON => {
-                serde_json::to_string(event)
-                    .map_err(|e| LogStreamError::StreamError(e.to_string()))
+                serde_json::to_string(event).map_err(|e| LogStreamError::StreamError(e.to_string()))
             }
             LogFormat::Fluentd => self.format_for_fluentd(event, &destination.tag),
             LogFormat::Logstash => self.format_for_logstash(event, destination),
@@ -283,14 +284,18 @@ impl LogStreaming {
     /// Format for Fluentd (tag + JSON)
     fn format_for_fluentd(&self, event: &LogEvent, tag: &str) -> Result<String> {
         let timestamp = event.timestamp.timestamp();
-        let json = serde_json::to_string(event)
-            .map_err(|e| LogStreamError::StreamError(e.to_string()))?;
+        let json =
+            serde_json::to_string(event).map_err(|e| LogStreamError::StreamError(e.to_string()))?;
 
         Ok(format!("[{}, {}, {}]", tag, timestamp, json))
     }
 
     /// Format for Logstash (JSON with @timestamp and @metadata)
-    fn format_for_logstash(&self, event: &LogEvent, destination: &LogDestination) -> Result<String> {
+    fn format_for_logstash(
+        &self,
+        event: &LogEvent,
+        destination: &LogDestination,
+    ) -> Result<String> {
         let mut logstash_event = serde_json::json!({
             "@timestamp": event.timestamp.to_rfc3339(),
             "@version": "1",
@@ -505,9 +510,7 @@ mod tests {
         };
 
         let event = create_test_event();
-        let formatted = streaming
-            .format_for_logstash(&event, &destination)
-            .unwrap();
+        let formatted = streaming.format_for_logstash(&event, &destination).unwrap();
 
         assert!(formatted.contains("@timestamp"));
         assert!(formatted.contains("@version"));
@@ -545,7 +548,9 @@ mod tests {
     async fn test_enrichment() {
         let config = create_test_config();
         let mut enrichment = create_test_enrichment();
-        enrichment.custom_fields.insert("environment".to_string(), "production".to_string());
+        enrichment
+            .custom_fields
+            .insert("environment".to_string(), "production".to_string());
 
         let streaming = LogStreaming::new(config, enrichment.clone());
 
@@ -555,6 +560,9 @@ mod tests {
         assert!(event.hostname.is_some());
         assert!(event.pod_name.is_some());
         assert!(event.trace_id.is_some());
-        assert_eq!(event.context.get("environment"), Some(&"production".to_string()));
+        assert_eq!(
+            event.context.get("environment"),
+            Some(&"production".to_string())
+        );
     }
 }

@@ -145,7 +145,12 @@ impl ZKPSystem {
     }
 
     /// Open commitment
-    pub async fn open_commitment(&self, commitment_id: &str, value: &[u8], randomness: &[u8]) -> Result<bool> {
+    pub async fn open_commitment(
+        &self,
+        commitment_id: &str,
+        value: &[u8],
+        randomness: &[u8],
+    ) -> Result<bool> {
         let commitments = self.commitments.read().await;
         let commitment = commitments
             .get(commitment_id)
@@ -251,18 +256,16 @@ impl ZKPSystem {
             .ok_or_else(|| ZKPError::ChallengeNotFound(challenge_id.to_string()))?;
 
         if Utc::now() > challenge.expires_at {
-            return Err(ZKPError::VerificationFailed("Challenge expired".to_string()));
+            return Err(ZKPError::VerificationFailed(
+                "Challenge expired".to_string(),
+            ));
         }
 
         drop(challenges);
 
         // Generate proof for authentication
         let proof = self
-            .generate_proof(
-                ZKPProtocol::Schnorr,
-                "authentication".to_string(),
-                witness,
-            )
+            .generate_proof(ZKPProtocol::Schnorr, "authentication".to_string(), witness)
             .await?;
 
         Ok(AuthResponse {
@@ -273,14 +276,20 @@ impl ZKPSystem {
     }
 
     /// Verify authentication response
-    pub async fn verify_auth_response(&self, response: &AuthResponse, verifier: &str) -> Result<bool> {
+    pub async fn verify_auth_response(
+        &self,
+        response: &AuthResponse,
+        verifier: &str,
+    ) -> Result<bool> {
         let challenges = self.challenges.read().await;
         let challenge = challenges
             .get(&response.challenge_id)
             .ok_or_else(|| ZKPError::ChallengeNotFound(response.challenge_id.clone()))?;
 
         if Utc::now() > challenge.expires_at {
-            return Err(ZKPError::VerificationFailed("Challenge expired".to_string()));
+            return Err(ZKPError::VerificationFailed(
+                "Challenge expired".to_string(),
+            ));
         }
 
         drop(challenges);
@@ -325,7 +334,10 @@ impl ZKPSystem {
     }
 
     /// Get verification history
-    pub async fn get_verification_history(&self, proof_id: Option<&str>) -> Vec<VerificationResult> {
+    pub async fn get_verification_history(
+        &self,
+        proof_id: Option<&str>,
+    ) -> Vec<VerificationResult> {
         let verifications = self.verifications.read().await;
 
         if let Some(pid) = proof_id {

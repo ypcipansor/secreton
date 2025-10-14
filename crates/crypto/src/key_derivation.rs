@@ -1,6 +1,6 @@
 //! Key derivation functions for secure password-based key generation
 
-use crate::{generate_random_bytes, AlgorithmId, CryptoError, CryptoResult};
+use crate::{AlgorithmId, CryptoError, CryptoResult, generate_random_bytes};
 use argon2::{Algorithm, Argon2, Params, Version};
 use pbkdf2::pbkdf2_hmac;
 use serde::{Deserialize, Serialize};

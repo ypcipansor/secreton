@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use secreton_crypto::transit::{KeyType, TransitEngine, SignatureAlgorithm};
+use secreton_crypto::transit::{KeyType, SignatureAlgorithm, TransitEngine};
 
 fuzz_target!(|data: &[u8]| {
     if data.len() < 32 {
@@ -19,14 +19,31 @@ fuzz_target!(|data: &[u8]| {
             // Test signing with random message
             let message = &data[32..];
             if !message.is_empty() {
-                if let Ok(signature) = engine.sign(&key_name, message, Some(SignatureAlgorithm::Ed25519), None).await {
+                if let Ok(signature) = engine
+                    .sign(&key_name, message, Some(SignatureAlgorithm::Ed25519), None)
+                    .await
+                {
                     // Test signature verification
-                    let _is_valid = engine.verify(&key_name, message, &signature, Some(SignatureAlgorithm::Ed25519)).await;
+                    let _is_valid = engine
+                        .verify(
+                            &key_name,
+                            message,
+                            &signature,
+                            Some(SignatureAlgorithm::Ed25519),
+                        )
+                        .await;
 
                     // Test signature verification with wrong message
                     if message.len() > 1 {
                         let wrong_message = &message[1..];
-                        let _is_invalid = engine.verify(&key_name, wrong_message, &signature, Some(SignatureAlgorithm::Ed25519)).await;
+                        let _is_invalid = engine
+                            .verify(
+                                &key_name,
+                                wrong_message,
+                                &signature,
+                                Some(SignatureAlgorithm::Ed25519),
+                            )
+                            .await;
                     }
                 }
             }

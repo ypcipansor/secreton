@@ -26,11 +26,11 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Test API response creation
-    let test_data = HashMap::from([
-        ("test_key".to_string(), "test_value".to_string()),
-    ]);
-    let _success_response: ApiResponse<HashMap<String, String>> = ApiResponse::success(test_data.clone());
-    let _error_response: ApiResponse<HashMap<String, String>> = ApiResponse::error("Test error".to_string());
+    let test_data = HashMap::from([("test_key".to_string(), "test_value".to_string())]);
+    let _success_response: ApiResponse<HashMap<String, String>> =
+        ApiResponse::success(test_data.clone());
+    let _error_response: ApiResponse<HashMap<String, String>> =
+        ApiResponse::error("Test error".to_string());
 
     // Test serialization of responses
     let _ = serde_json::to_string(&_success_response);

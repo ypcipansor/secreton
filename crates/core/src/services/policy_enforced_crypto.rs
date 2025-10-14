@@ -8,12 +8,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::services::crypto_policy_engine::{AlgorithmMetadata, AlgorithmStatus, CryptoPolicy};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::crypto_policy_engine::{
-    AlgorithmMetadata, AlgorithmStatus, ComplianceStandard, CryptoAlgorithm, CryptoAudit, CryptoOperationRequest, CryptoPolicy, CryptoPolicyEngine,
+    ComplianceStandard, CryptoAlgorithm, CryptoOperationRequest, CryptoPolicyEngine,
 };
 
 #[derive(Debug, Error)]
@@ -167,7 +169,7 @@ impl PolicyEnforcedCryptoOperations {
             let compliance_standards = policy_engine
                 .check_compliance(ComplianceStandard::FIPS_140_3)
                 .await;
-            
+
             (selected_algorithm, compliance_standards)
         };
 
@@ -374,7 +376,10 @@ impl PolicyEnforcedCryptoOperations {
         status: RemediationStatus,
     ) -> Result<()> {
         let mut violations = self.violations.write().await;
-        if let Some(violation) = violations.iter_mut().find(|v| v.violation_id == violation_id) {
+        if let Some(violation) = violations
+            .iter_mut()
+            .find(|v| v.violation_id == violation_id)
+        {
             violation.remediation_status = status;
             Ok(())
         } else {
@@ -402,14 +407,17 @@ mod tests {
         // Register ChaCha20Poly1305 as approved algorithm
         {
             let policy_engine = ops.policy_engine.read().await;
-            policy_engine.register_algorithm(AlgorithmMetadata {
-                algorithm: CryptoAlgorithm::ChaCha20Poly1305,
-                status: AlgorithmStatus::Approved,
-                security_level: 256,
-                compliance: vec![ComplianceStandard::FIPS_140_3],
-                deprecation_date: None,
-                recommended_replacement: None,
-            }).await.unwrap();
+            policy_engine
+                .register_algorithm(AlgorithmMetadata {
+                    algorithm: CryptoAlgorithm::ChaCha20Poly1305,
+                    status: AlgorithmStatus::Approved,
+                    security_level: 256,
+                    compliance: vec![ComplianceStandard::FIPS_140_3],
+                    deprecation_date: None,
+                    recommended_replacement: None,
+                })
+                .await
+                .unwrap();
         }
 
         // Create a test policy first
@@ -426,9 +434,7 @@ mod tests {
                 ("ChaCha20Poly1305".to_string(), 256),
                 ("ED25519".to_string(), 256),
             ]),
-            compliance_standards: vec![
-                ComplianceStandard::FIPS_140_3,
-            ],
+            compliance_standards: vec![ComplianceStandard::FIPS_140_3],
             enforce_rotation: true,
             max_key_age_days: Some(365),
             enabled: true,

@@ -48,7 +48,7 @@ pub enum ContentType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AzureSecret {
     pub secret_name: String,
-    pub secret_id: String, // Azure resource ID
+    pub secret_id: String,  // Azure resource ID
     pub vault_path: String, // Vault path mapping
     pub value: String,
     pub content_type: ContentType,
@@ -174,7 +174,9 @@ impl AzureKeyVaultBackend {
 
         for (name, azure_secret) in secrets.iter() {
             // Mock: Check if secret exists in Vault
-            let vault_exists = self.mock_vault_secret_exists(&azure_secret.vault_path).await;
+            let vault_exists = self
+                .mock_vault_secret_exists(&azure_secret.vault_path)
+                .await;
 
             if vault_exists {
                 // Handle conflict
@@ -187,7 +189,8 @@ impl AzureKeyVaultBackend {
                     }
                     ConflictResolution::PreferVault => {
                         // Update Azure with Vault value
-                        let vault_value = self.mock_get_vault_value(&azure_secret.vault_path).await?;
+                        let vault_value =
+                            self.mock_get_vault_value(&azure_secret.vault_path).await?;
                         // Would update Azure here
                         synced_count += 1;
                     }
@@ -239,11 +242,7 @@ impl AzureKeyVaultBackend {
     }
 
     /// Encrypt with Azure key
-    pub async fn encrypt_with_azure_key(
-        &self,
-        key_name: &str,
-        plaintext: &str,
-    ) -> Result<String> {
+    pub async fn encrypt_with_azure_key(&self, key_name: &str, plaintext: &str) -> Result<String> {
         let keys = self.keys.read().await;
         let key = keys
             .get(key_name)

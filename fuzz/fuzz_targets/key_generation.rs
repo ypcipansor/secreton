@@ -20,22 +20,33 @@ fuzz_target!(|data: &[u8]| {
         if let Ok(key) = generate_key(algorithm) {
             // Verify key length matches algorithm requirements
             let expected_len = SecurityParams::new(algorithm).key_size;
-            assert_eq!(key.len(), expected_len,
-                "Key length mismatch for algorithm {:?}", algorithm);
+            assert_eq!(
+                key.len(),
+                expected_len,
+                "Key length mismatch for algorithm {:?}",
+                algorithm
+            );
         }
 
         // Test nonce generation where applicable
         if let Ok(nonce) = generate_nonce(algorithm) {
             // Verify nonce length matches algorithm requirements
             if let Some(expected_len) = SecurityParams::new(algorithm).salt_size {
-                assert_eq!(nonce.len(), expected_len,
-                    "Nonce length mismatch for algorithm {:?}", algorithm);
+                assert_eq!(
+                    nonce.len(),
+                    expected_len,
+                    "Nonce length mismatch for algorithm {:?}",
+                    algorithm
+                );
             }
         }
 
         // Test security parameters validation
         let params = SecurityParams::new(algorithm);
-        assert!(params.is_secure(),
-            "Security parameters should be secure for algorithm {:?}", algorithm);
+        assert!(
+            params.is_secure(),
+            "Security parameters should be secure for algorithm {:?}",
+            algorithm
+        );
     }
 });

@@ -4,18 +4,16 @@
 //! for production Secreton vault deployments.
 
 use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    routing::{get, post},
     Router,
+    extract::State,
+    response::Json,
+    routing::get,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::{ApiState, AppError};
@@ -72,7 +70,10 @@ impl SecurityMetrics {
             let failures = self.auth_failures.load(Ordering::Relaxed);
             if failures % 5 == 0 {
                 self.brute_force_attempts.fetch_add(1, Ordering::Relaxed);
-                warn!("Potential brute force attack detected: {} failed attempts", failures);
+                warn!(
+                    "Potential brute force attack detected: {} failed attempts",
+                    failures
+                );
             }
         }
     }
@@ -80,10 +81,18 @@ impl SecurityMetrics {
     /// Record a cryptographic operation
     pub fn record_crypto_operation(&self, operation: &str, success: bool) {
         match operation {
-            "encrypt" => { self.crypto_encrypts.fetch_add(1, Ordering::Relaxed); },
-            "decrypt" => { self.crypto_decrypts.fetch_add(1, Ordering::Relaxed); },
-            "sign" => { self.crypto_signs.fetch_add(1, Ordering::Relaxed); },
-            "verify" => { self.crypto_verifies.fetch_add(1, Ordering::Relaxed); },
+            "encrypt" => {
+                self.crypto_encrypts.fetch_add(1, Ordering::Relaxed);
+            }
+            "decrypt" => {
+                self.crypto_decrypts.fetch_add(1, Ordering::Relaxed);
+            }
+            "sign" => {
+                self.crypto_signs.fetch_add(1, Ordering::Relaxed);
+            }
+            "verify" => {
+                self.crypto_verifies.fetch_add(1, Ordering::Relaxed);
+            }
             _ => {}
         }
 
@@ -94,14 +103,17 @@ impl SecurityMetrics {
 
     /// Record response time for performance monitoring
     pub fn record_response_time(&self, duration_ms: u64) {
-        self.avg_response_time_ms.store(duration_ms, Ordering::Relaxed);
+        self.avg_response_time_ms
+            .store(duration_ms, Ordering::Relaxed);
 
         // Update percentiles (simplified implementation)
         if duration_ms > self.p95_response_time_ms.load(Ordering::Relaxed) {
-            self.p95_response_time_ms.store(duration_ms, Ordering::Relaxed);
+            self.p95_response_time_ms
+                .store(duration_ms, Ordering::Relaxed);
         }
         if duration_ms > self.p99_response_time_ms.load(Ordering::Relaxed) {
-            self.p99_response_time_ms.store(duration_ms, Ordering::Relaxed);
+            self.p99_response_time_ms
+                .store(duration_ms, Ordering::Relaxed);
         }
     }
 
@@ -109,19 +121,31 @@ impl SecurityMetrics {
     pub fn to_prometheus(&self) -> HashMap<String, u64> {
         let mut metrics = HashMap::new();
 
-        metrics.insert("secreton_auth_attempts_total".to_string(),
-                      self.auth_attempts.load(Ordering::Relaxed));
-        metrics.insert("secreton_auth_successes_total".to_string(),
-                      self.auth_successes.load(Ordering::Relaxed));
-        metrics.insert("secreton_auth_failures_total".to_string(),
-                      self.auth_failures.load(Ordering::Relaxed));
-        metrics.insert("secreton_crypto_operations_total".to_string(),
-                      self.crypto_encrypts.load(Ordering::Relaxed) +
-                      self.crypto_decrypts.load(Ordering::Relaxed));
-        metrics.insert("secreton_crypto_failures_total".to_string(),
-                      self.crypto_failures.load(Ordering::Relaxed));
-        metrics.insert("secreton_brute_force_attempts_total".to_string(),
-                      self.brute_force_attempts.load(Ordering::Relaxed));
+        metrics.insert(
+            "secreton_auth_attempts_total".to_string(),
+            self.auth_attempts.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "secreton_auth_successes_total".to_string(),
+            self.auth_successes.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "secreton_auth_failures_total".to_string(),
+            self.auth_failures.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "secreton_crypto_operations_total".to_string(),
+            self.crypto_encrypts.load(Ordering::Relaxed)
+                + self.crypto_decrypts.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "secreton_crypto_failures_total".to_string(),
+            self.crypto_failures.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "secreton_brute_force_attempts_total".to_string(),
+            self.brute_force_attempts.load(Ordering::Relaxed),
+        );
 
         metrics
     }
@@ -158,15 +182,18 @@ pub async fn security_health_check(
     // Check for security anomalies
     let metrics = &state.metrics;
     let failure_rate = if metrics.auth_attempts.load(Ordering::Relaxed) > 0 {
-        metrics.auth_failures.load(Ordering::Relaxed) as f64 /
-        metrics.auth_attempts.load(Ordering::Relaxed) as f64
+        metrics.auth_failures.load(Ordering::Relaxed) as f64
+            / metrics.auth_attempts.load(Ordering::Relaxed) as f64
     } else {
         0.0
     };
 
     if failure_rate > 0.1 {
         security_checks.insert("high_failure_rate".to_string(), false);
-        warn!("High authentication failure rate detected: {:.2}%", failure_rate * 100.0);
+        warn!(
+            "High authentication failure rate detected: {:.2}%",
+            failure_rate * 100.0
+        );
     }
 
     let response = SecurityHealthResponse {
@@ -206,7 +233,10 @@ impl Default for SecurityAlertConfig {
 async fn send_security_alert(alert_type: &str, message: &str, config: &SecurityAlertConfig) {
     if let Some(webhook_url) = &config.alert_webhook_url {
         // Send webhook alert (implementation would use reqwest)
-        info!("Security alert '{}' sent to webhook: {}", alert_type, webhook_url);
+        info!(
+            "Security alert '{}' sent to webhook: {}",
+            alert_type, webhook_url
+        );
     }
 
     if let Some(email) = &config.alert_email {
@@ -219,10 +249,7 @@ async fn send_security_alert(alert_type: &str, message: &str, config: &SecurityA
 }
 
 /// Monitor security metrics and trigger alerts
-pub async fn security_monitor_task(
-    metrics: Arc<SecurityMetrics>,
-    config: SecurityAlertConfig,
-) {
+pub async fn security_monitor_task(metrics: Arc<SecurityMetrics>, config: SecurityAlertConfig) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
 
     loop {
@@ -240,7 +267,8 @@ pub async fn security_monitor_task(
                     "HIGH_FAILURE_RATE",
                     &format!("Authentication failure rate: {:.2}%", failure_rate * 100.0),
                     &config,
-                ).await;
+                )
+                .await;
             }
         }
 
@@ -251,7 +279,8 @@ pub async fn security_monitor_task(
                 "BRUTE_FORCE_DETECTED",
                 &format!("Brute force attempts detected: {}", brute_force_attempts),
                 &config,
-            ).await;
+            )
+            .await;
         }
 
         // Check crypto failures
@@ -261,7 +290,8 @@ pub async fn security_monitor_task(
                 "CRYPTO_FAILURES",
                 &format!("Cryptographic operation failures: {}", crypto_failures),
                 &config,
-            ).await;
+            )
+            .await;
         }
 
         // Check for suspicious patterns
@@ -271,15 +301,14 @@ pub async fn security_monitor_task(
                 "SUSPICIOUS_ACTIVITY",
                 &format!("Suspicious activities detected: {}", suspicious_activities),
                 &config,
-            ).await;
+            )
+            .await;
         }
     }
 }
 
 /// Prometheus metrics endpoint
-pub async fn prometheus_metrics(
-    State(state): State<ApiState>,
-) -> Result<String, AppError> {
+pub async fn prometheus_metrics(State(state): State<ApiState>) -> Result<String, AppError> {
     let metrics = state.metrics.to_prometheus();
     let mut output = String::new();
 

@@ -178,9 +178,7 @@ impl SentinelEngine {
             });
         }
 
-        if policy.code.contains("block_production")
-            && context.request_path.contains("production")
-        {
+        if policy.code.contains("block_production") && context.request_path.contains("production") {
             violations.push(Violation {
                 rule: "block_production".to_string(),
                 message: "Production access blocked by policy".to_string(),
@@ -217,10 +215,7 @@ impl SentinelEngine {
     }
 
     /// Check authorization with policies
-    pub async fn check_authorization(
-        &self,
-        context: EvaluationContext,
-    ) -> Result<bool> {
+    pub async fn check_authorization(&self, context: EvaluationContext) -> Result<bool> {
         let results = self.evaluate_request(context.clone()).await?;
 
         // Log to audit

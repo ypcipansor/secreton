@@ -24,6 +24,7 @@ aide.workspace = true
 # Async
 tokio.workspace = true
 async-trait.workspace = true
+futures.workspace = true
 
 # Storage
 secreton-storage.workspace = true
@@ -71,7 +72,7 @@ qrcode.workspace = true
 argon2.workspace = true
 bcrypt.workspace = true
 scrypt.workspace = true
-jsonwebtoken.workspace = true
+# jwt-simple.workspace = true  # Removed due to rsa dependency
 x25519-dalek.workspace = true
 axum.workspace = true
 totp-rs.workspace = true

@@ -180,7 +180,13 @@ impl ACMEPKI {
             status: OrderStatus::Pending,
             authorizations: domains
                 .iter()
-                .map(|d| format!("https://acme.example.com/authz/{}-{}", d, uuid::Uuid::new_v4()))
+                .map(|d| {
+                    format!(
+                        "https://acme.example.com/authz/{}-{}",
+                        d,
+                        uuid::Uuid::new_v4()
+                    )
+                })
                 .collect(),
             finalize_url: format!("https://acme.example.com/finalize/{}", uuid::Uuid::new_v4()),
             certificate_url: None,
@@ -245,9 +251,7 @@ impl ACMEPKI {
             .ok_or_else(|| ACMEError::ACMEError("Order not found".to_string()))?;
 
         if order.status != OrderStatus::Valid {
-            return Err(ACMEError::CertificateError(
-                "Order not valid".to_string(),
-            ));
+            return Err(ACMEError::CertificateError("Order not valid".to_string()));
         }
 
         // Mock certificate download
@@ -271,12 +275,12 @@ impl ACMEPKI {
     /// Auto-renew certificates
     pub async fn auto_renew_certificates(&self) -> Result<Vec<String>> {
         let mut renewed = Vec::new();
-        
+
         // Collect domains to renew
         let domains_to_renew: Vec<Vec<String>> = {
             let certificates = self.certificates.read().await;
             let mut domains = Vec::new();
-            
+
             for (domain, cert) in certificates.iter() {
                 if !cert.auto_renew {
                     continue;
@@ -290,16 +294,16 @@ impl ACMEPKI {
             }
             domains
         };
-        
+
         // Now renew without holding the lock
         for domains in domains_to_renew {
             // Request new certificate
             let order = self.request_certificate(domains.clone()).await?;
-            
+
             // Mock validation and finalization
             self.finalize_order(&order.order_url).await?;
             self.download_certificate(&order.order_url).await?;
-            
+
             renewed.push(domains[0].clone());
         }
 
@@ -435,7 +439,11 @@ mod tests {
         assert_eq!(challenge.challenge_type, ChallengeType::HTTP01);
         assert_eq!(challenge.token, "token123");
         assert_eq!(challenge.status, ChallengeStatus::Valid);
-        assert!(challenge.validation_url.contains(".well-known/acme-challenge"));
+        assert!(
+            challenge
+                .validation_url
+                .contains(".well-known/acme-challenge")
+        );
     }
 
     #[tokio::test]

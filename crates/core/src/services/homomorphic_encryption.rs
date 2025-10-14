@@ -142,7 +142,12 @@ impl HESystem {
     }
 
     /// Encrypt data
-    pub async fn encrypt(&self, public_key_id: &str, plaintext: &[u8], owner: &str) -> Result<Ciphertext> {
+    pub async fn encrypt(
+        &self,
+        public_key_id: &str,
+        plaintext: &[u8],
+        owner: &str,
+    ) -> Result<Ciphertext> {
         let pub_keys = self.public_keys.read().await;
         let public_key = pub_keys
             .get(public_key_id)
@@ -182,7 +187,11 @@ impl HESystem {
     }
 
     /// Homomorphic addition
-    pub async fn add(&self, ciphertext1: &Ciphertext, ciphertext2: &Ciphertext) -> Result<Ciphertext> {
+    pub async fn add(
+        &self,
+        ciphertext1: &Ciphertext,
+        ciphertext2: &Ciphertext,
+    ) -> Result<Ciphertext> {
         if ciphertext1.scheme != ciphertext2.scheme {
             return Err(HEError::OperationNotSupported(
                 "Ciphertexts must use same scheme".to_string(),
@@ -230,7 +239,11 @@ impl HESystem {
     }
 
     /// Aggregate multiple ciphertexts
-    pub async fn aggregate(&self, ciphertext_ids: Vec<String>, operation: HEOperation) -> Result<AggregationResult> {
+    pub async fn aggregate(
+        &self,
+        ciphertext_ids: Vec<String>,
+        operation: HEOperation,
+    ) -> Result<AggregationResult> {
         let ciphertexts = self.ciphertexts.read().await;
 
         let mut result_data = vec![];
@@ -251,7 +264,8 @@ impl HESystem {
             }
         }
 
-        let scheme = scheme.ok_or_else(|| HEError::EncryptionFailed("No ciphertexts provided".to_string()))?;
+        let scheme = scheme
+            .ok_or_else(|| HEError::EncryptionFailed("No ciphertexts provided".to_string()))?;
 
         let result_ciphertext = Ciphertext {
             ciphertext_id: Uuid::new_v4().to_string(),
@@ -288,7 +302,8 @@ impl HESystem {
             .ok_or_else(|| HEError::CiphertextNotFound(ciphertext_id.to_string()))?;
 
         // Mock keyword encryption
-        let encrypted_keywords: Vec<Vec<u8>> = keywords.iter().map(|k| k.as_bytes().to_vec()).collect();
+        let encrypted_keywords: Vec<Vec<u8>> =
+            keywords.iter().map(|k| k.as_bytes().to_vec()).collect();
 
         let entry = SearchIndexEntry {
             entry_id: Uuid::new_v4().to_string(),
@@ -344,7 +359,12 @@ impl HESystem {
     }
 
     /// Re-encrypt ciphertext
-    pub async fn reencrypt(&self, old_key_id: &str, new_key_id: &str, ciphertext: &Ciphertext) -> Result<Ciphertext> {
+    pub async fn reencrypt(
+        &self,
+        old_key_id: &str,
+        new_key_id: &str,
+        ciphertext: &Ciphertext,
+    ) -> Result<Ciphertext> {
         // Decrypt with old key
         let plaintext = self.decrypt(old_key_id, ciphertext).await?;
 
@@ -381,7 +401,10 @@ mod tests {
         let (pub_key_id, sec_key_id) = system.generate_keypair(HEScheme::Paillier).await.unwrap();
 
         let plaintext = b"secret data";
-        let ciphertext = system.encrypt(&pub_key_id, plaintext, "alice").await.unwrap();
+        let ciphertext = system
+            .encrypt(&pub_key_id, plaintext, "alice")
+            .await
+            .unwrap();
 
         let decrypted = system.decrypt(&sec_key_id, &ciphertext).await.unwrap();
 
@@ -444,10 +467,16 @@ mod tests {
 
         let (pub_key_id, _) = system.generate_keypair(HEScheme::CKKS).await.unwrap();
 
-        let ct = system.encrypt(&pub_key_id, b"document", "bob").await.unwrap();
+        let ct = system
+            .encrypt(&pub_key_id, b"document", "bob")
+            .await
+            .unwrap();
 
         system
-            .index_for_search(&ct.ciphertext_id, vec!["keyword1".to_string(), "keyword2".to_string()])
+            .index_for_search(
+                &ct.ciphertext_id,
+                vec!["keyword1".to_string(), "keyword2".to_string()],
+            )
             .await
             .unwrap();
 

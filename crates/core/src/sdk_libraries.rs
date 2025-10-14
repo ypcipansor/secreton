@@ -3,9 +3,9 @@
 //! This module provides SDK implementations for multiple programming languages
 //! to interact with the Secreton secrets management system.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// Common SDK configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

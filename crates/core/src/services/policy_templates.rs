@@ -167,7 +167,7 @@ impl PolicyTemplateService {
     /// Create a new policy template
     pub async fn create_template(&self, template: PolicyTemplate) -> Result<()> {
         let mut templates = self.templates.write().await;
-        
+
         if templates.contains_key(&template.name) {
             return Err(PolicyTemplateError::AlreadyExists(template.name.clone()));
         }
@@ -188,7 +188,7 @@ impl PolicyTemplateService {
     /// Update a template
     pub async fn update_template(&self, name: &str, template: PolicyTemplate) -> Result<()> {
         let mut templates = self.templates.write().await;
-        
+
         let existing = templates
             .get_mut(name)
             .ok_or_else(|| PolicyTemplateError::NotFound(name.to_string()))?;
@@ -354,7 +354,7 @@ mod tests {
     #[tokio::test]
     async fn test_service_create_and_get() {
         let service = PolicyTemplateService::new();
-        
+
         let template = PolicyTemplate::new(
             "test-template".to_string(),
             "path \"{{path}}\" { capabilities = [\"read\"] }".to_string(),
@@ -369,7 +369,7 @@ mod tests {
     #[tokio::test]
     async fn test_service_render_policy() {
         let service = PolicyTemplateService::new();
-        
+
         let mut template = PolicyTemplate::new(
             "test".to_string(),
             "path \"{{path}}\" { capabilities = [\"{{cap}}\"] }".to_string(),
@@ -408,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_rendered_by_template() {
         let service = PolicyTemplateService::new();
-        
+
         let template = PolicyTemplate::new(
             "base".to_string(),
             "path \"{{path}}\" { capabilities = [\"read\"] }".to_string(),

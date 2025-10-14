@@ -4,11 +4,11 @@
 //! and other middleware functionality.
 
 use axum::{
+    Json,
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 use x509_parser::prelude::*;
 
-use crate::auth::{extract_bearer_token, AuthError, AuthService};
 use crate::ApiState;
+use crate::auth::{AuthError, AuthService, extract_bearer_token};
 
 /// Certificate cache for performance optimization
 #[derive(Debug)]
@@ -64,6 +64,7 @@ pub fn init_certificate_cache(ttl_seconds: u64) {
 }
 
 /// Get certificate cache instance
+#[allow(dead_code)]
 fn get_cert_cache() -> Option<Arc<CertificateCache>> {
     CERT_CACHE.lock().unwrap().as_ref().cloned()
 }
@@ -182,8 +183,8 @@ pub fn extract_client_certificate_from_tls(request: &Request) -> Option<Vec<u8>>
 
 /// Enhanced mTLS authentication middleware with proper TLS integration
 pub async fn mtls_auth_middleware(
-    State(state): State<ApiState>,
-    headers: HeaderMap,
+    State(_state): State<ApiState>,
+    _headers: HeaderMap,
     mut request: Request,
     next: Next,
 ) -> Result<Response, AuthError> {
@@ -355,8 +356,7 @@ pub async fn auth_middleware(
     let auth_service = AuthService::new(auth_config);
 
     // Validate token
-    let token_data = auth_service.validate_token(&token)?;
-    let claims = token_data.claims;
+    let claims = auth_service.validate_token(&token)?;
 
     info!(
         "Authenticated user: {} ({}) with roles: {:?}",

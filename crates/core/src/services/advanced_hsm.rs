@@ -152,7 +152,7 @@ impl AdvancedHSM {
     pub async fn initialize_hsm(&self, config: HSMConfig) -> Result<String> {
         // Mock PKCS#11 initialization
         let hsm_id = Uuid::new_v4().to_string();
-        
+
         let mut hsm_config = config;
         hsm_config.hsm_id = hsm_id.clone();
 
@@ -222,11 +222,7 @@ impl AdvancedHSM {
     }
 
     /// Encrypt data with HSM key
-    pub async fn encrypt_with_hsm(
-        &self,
-        key_id: &str,
-        plaintext: Vec<u8>,
-    ) -> Result<CryptoResult> {
+    pub async fn encrypt_with_hsm(&self, key_id: &str, plaintext: Vec<u8>) -> Result<CryptoResult> {
         let keys = self.keys.read().await;
         let key = keys
             .get(key_id)
@@ -381,7 +377,7 @@ impl AdvancedHSM {
 
         // Move current primary to secondary list
         cluster.secondary_hsms.push(cluster.primary_hsm.clone());
-        
+
         // Promote first secondary to primary
         cluster.primary_hsm = cluster.secondary_hsms.remove(0);
 
@@ -513,8 +509,14 @@ mod tests {
             .unwrap();
 
         let plaintext = b"Hello, HSM!".to_vec();
-        let encrypted = hsm.encrypt_with_hsm(&key.key_id, plaintext.clone()).await.unwrap();
-        let decrypted = hsm.decrypt_with_hsm(&key.key_id, encrypted.result_data).await.unwrap();
+        let encrypted = hsm
+            .encrypt_with_hsm(&key.key_id, plaintext.clone())
+            .await
+            .unwrap();
+        let decrypted = hsm
+            .decrypt_with_hsm(&key.key_id, encrypted.result_data)
+            .await
+            .unwrap();
 
         assert_eq!(plaintext, decrypted.result_data);
     }
@@ -551,7 +553,7 @@ mod tests {
     #[tokio::test]
     async fn test_hsm_cluster_failover() {
         let hsm = AdvancedHSM::new();
-        
+
         let config1 = HSMConfig {
             hsm_id: String::new(),
             provider: HSMProvider::SoftHSM,

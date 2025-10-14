@@ -1,12 +1,12 @@
 //! Transit keys implementation with RustCrypto integration
 
 use aes_gcm::{
+    Aes256Gcm, KeyInit, Nonce,
     aead::{Aead, Key},
-    Aes256Gcm, KeyInit,
 };
-use chacha20poly1305::{ChaCha20Poly1305, XChaCha20Poly1305};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce, XChaCha20Poly1305, XNonce};
 // RSA imports removed - using Ed25519 instead
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 // CLEANUP: Removed unused imports
 // use digest::Digest; // Not used
 use ed25519_dalek::{
@@ -16,12 +16,12 @@ use ed25519_dalek::{
 };
 use hkdf::Hkdf;
 use k256::{
-    ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey},
     SecretKey as K256SecretKey, // Re-enable: used in KeyMaterial enum
+    ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey},
 };
 use p256::{
-    ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey},
     SecretKey as P256SecretKey, // Re-enable: used in KeyMaterial enum
+    ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey},
 };
 use sha2::Sha256;
 // use sha2::{Sha384, Sha512}; // Not used
@@ -221,7 +221,7 @@ impl TransitKey {
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = aes_gcm::aead::generic_array::GenericArray::from_slice(&nonce_bytes);
+                let nonce = Nonce::from_slice(&nonce_bytes);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -241,12 +241,17 @@ impl TransitKey {
             }
 
             KeyMaterial::ChaCha20Poly1305(key_bytes) => {
-                let key = chacha20poly1305::Key::from_slice(key_bytes.as_slice());
-                let cipher = ChaCha20Poly1305::new(key);
+                let cipher =
+                    ChaCha20Poly1305::new_from_slice(key_bytes.as_slice()).map_err(|_| {
+                        CryptoError::InvalidKeyLength {
+                            expected: 32,
+                            actual: key_bytes.len(),
+                        }
+                    })?;
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+                let nonce = ChaChaNonce::from_slice(&nonce_bytes);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -265,8 +270,13 @@ impl TransitKey {
             }
 
             KeyMaterial::XChaCha20Poly1305(key_bytes) => {
-                let key = chacha20poly1305::Key::from_slice(key_bytes.as_slice());
-                let cipher = XChaCha20Poly1305::new(key);
+                let cipher =
+                    XChaCha20Poly1305::new_from_slice(key_bytes.as_slice()).map_err(|_| {
+                        CryptoError::InvalidKeyLength {
+                            expected: 32,
+                            actual: key_bytes.len(),
+                        }
+                    })?;
 
                 let mut nonce_bytes = [0u8; 24]; // XChaCha20 uses 192-bit nonce
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -347,7 +357,7 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce = aes_gcm::aead::generic_array::GenericArray::from_slice(&nonce_bytes);
+                let nonce = Nonce::from_slice(&nonce_bytes);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())
@@ -374,13 +384,18 @@ impl TransitKey {
                     ));
                 }
 
-                let key = chacha20poly1305::Key::from_slice(key_bytes.as_slice());
-                let cipher = ChaCha20Poly1305::new(key);
+                let cipher =
+                    ChaCha20Poly1305::new_from_slice(key_bytes.as_slice()).map_err(|_| {
+                        CryptoError::InvalidKeyLength {
+                            expected: 32,
+                            actual: key_bytes.len(),
+                        }
+                    })?;
 
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+                let nonce = ChaChaNonce::from_slice(&nonce_bytes);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())

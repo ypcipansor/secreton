@@ -80,7 +80,7 @@ pub struct CRL {
 impl CRL {
     pub fn new(issuer: String, crl_number: u64) -> Self {
         let now = Utc::now();
-        
+
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             issuer,
@@ -127,7 +127,10 @@ pub struct OCSPRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OCSPStatus {
     Good,
-    Revoked { time: DateTime<Utc>, reason: RevocationReason },
+    Revoked {
+        time: DateTime<Utc>,
+        reason: RevocationReason,
+    },
     Unknown,
 }
 
@@ -147,7 +150,7 @@ pub struct OCSPResponse {
 impl OCSPResponse {
     pub fn good(request_id: String, cert_serial: String, responder_id: String) -> Self {
         let now = Utc::now();
-        
+
         Self {
             request_id,
             cert_serial,
@@ -168,7 +171,7 @@ impl OCSPResponse {
         reason: RevocationReason,
     ) -> Self {
         let now = Utc::now();
-        
+
         Self {
             request_id,
             cert_serial,
@@ -186,7 +189,7 @@ impl OCSPResponse {
 
     pub fn unknown(request_id: String, cert_serial: String, responder_id: String) -> Self {
         let now = Utc::now();
-        
+
         Self {
             request_id,
             cert_serial,
@@ -313,10 +316,7 @@ impl CertificateRevocationService {
 
         // Get current CRL number
         let crls = self.crls.read().await;
-        let crl_number = crls
-            .get(issuer)
-            .map(|c| c.crl_number + 1)
-            .unwrap_or(1);
+        let crl_number = crls.get(issuer).map(|c| c.crl_number + 1).unwrap_or(1);
         drop(crls);
 
         // Create new CRL
@@ -355,9 +355,13 @@ impl CertificateRevocationService {
     }
 
     /// Check if certificate is revoked via CRL
-    pub async fn check_crl(&self, serial_number: &str, issuer: &str) -> Result<Option<RevokedCertificate>> {
+    pub async fn check_crl(
+        &self,
+        serial_number: &str,
+        issuer: &str,
+    ) -> Result<Option<RevokedCertificate>> {
         let crl = self.get_crl(issuer).await?;
-        
+
         if crl.is_expired() {
             // CRL expired, rebuild
             self.rebuild_crl(issuer).await?;
@@ -380,7 +384,7 @@ impl CertificateRevocationService {
         let config = ocsp_config
             .as_ref()
             .ok_or_else(|| RevocationError::OCSPError("OCSP not configured".to_string()))?;
-        
+
         let responder_id = config.responder_id.clone();
         drop(ocsp_config);
 
@@ -451,7 +455,7 @@ impl CertificateRevocationService {
     /// List all revoked certificates
     pub async fn list_revoked(&self, issuer: Option<&str>) -> Vec<RevokedCertificate> {
         let revoked = self.revoked_certs.read().await;
-        
+
         revoked
             .values()
             .filter(|c| issuer.map_or(true, |iss| c.issuer == iss))
@@ -501,7 +505,7 @@ impl CertificateRevocationService {
     pub async fn cleanup_old_ocsp_responses(&self, older_than_hours: u64) -> u64 {
         let mut responses = self.ocsp_responses.write().await;
         let initial_count = responses.len();
-        
+
         let cutoff = Utc::now() - Duration::hours(older_than_hours as i64);
         responses.retain(|_, resp| resp.produced_at >= cutoff);
 
@@ -522,7 +526,7 @@ mod tests {
     #[tokio::test]
     async fn test_revoke_certificate() {
         let service = CertificateRevocationService::new();
-        
+
         service
             .revoke_certificate(
                 "ABC123".to_string(),
@@ -534,7 +538,7 @@ mod tests {
             .unwrap();
 
         assert!(service.is_revoked("ABC123").await);
-        
+
         let revoked = service.get_revoked_cert("ABC123").await.unwrap();
         assert_eq!(revoked.reason, RevocationReason::KeyCompromise);
     }
@@ -542,7 +546,7 @@ mod tests {
     #[tokio::test]
     async fn test_crl_generation() {
         let service = CertificateRevocationService::new();
-        
+
         let config = CRLConfig {
             issuer: "CN=Test CA".to_string(),
             validity_period_days: 7,
@@ -572,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn test_ocsp_request() {
         let service = CertificateRevocationService::new();
-        
+
         let ocsp_config = OCSPConfig {
             responder_id: "OCSP Responder".to_string(),
             responder_url: "http://ocsp.example.com".to_string(),
@@ -595,7 +599,7 @@ mod tests {
     #[tokio::test]
     async fn test_ocsp_revoked_certificate() {
         let service = CertificateRevocationService::new();
-        
+
         let ocsp_config = OCSPConfig {
             responder_id: "OCSP Responder".to_string(),
             responder_url: "http://ocsp.example.com".to_string(),
@@ -634,7 +638,7 @@ mod tests {
     #[tokio::test]
     async fn test_unrevoke_certificate() {
         let service = CertificateRevocationService::new();
-        
+
         let config = CRLConfig {
             issuer: "CN=Test CA".to_string(),
             validity_period_days: 7,
@@ -665,7 +669,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_revoked_by_issuer() {
         let service = CertificateRevocationService::new();
-        
+
         service
             .revoke_certificate(
                 "CA1-123".to_string(),

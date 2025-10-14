@@ -134,11 +134,7 @@ impl TerraformIntegration {
     }
 
     /// Update state
-    pub async fn update_state(
-        &self,
-        workspace: &str,
-        state: TerraformState,
-    ) -> Result<()> {
+    pub async fn update_state(&self, workspace: &str, state: TerraformState) -> Result<()> {
         let mut states = self.states.write().await;
         states.insert(workspace.to_string(), state);
 
@@ -386,9 +382,7 @@ mod tests {
         tf.init_backend().await.unwrap();
 
         // Create workspace
-        tf.create_workspace("production".to_string())
-            .await
-            .unwrap();
+        tf.create_workspace("production".to_string()).await.unwrap();
 
         // List workspaces
         let workspaces = tf.list_workspaces().await;

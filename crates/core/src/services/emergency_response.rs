@@ -295,25 +295,21 @@ impl EmergencyResponse {
             summary,
             root_cause,
             impact,
-            timeline: vec![
-                TimelineEvent {
-                    timestamp: Utc::now(),
-                    description: "Incident detected".to_string(),
-                    actor: "system".to_string(),
-                },
-            ],
+            timeline: vec![TimelineEvent {
+                timestamp: Utc::now(),
+                description: "Incident detected".to_string(),
+                actor: "system".to_string(),
+            }],
             lessons_learned: vec![
                 "Improve monitoring coverage".to_string(),
                 "Update runbooks".to_string(),
             ],
-            action_items: vec![
-                ActionItem {
-                    description: "Review access controls".to_string(),
-                    owner: "security-team".to_string(),
-                    due_date: Some(Utc::now() + Duration::days(7)),
-                    completed: false,
-                },
-            ],
+            action_items: vec![ActionItem {
+                description: "Review access controls".to_string(),
+                owner: "security-team".to_string(),
+                due_date: Some(Utc::now() + Duration::days(7)),
+                completed: false,
+            }],
             created_at: Utc::now(),
         };
 
@@ -380,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_detect_incident() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::SecurityBreach,
@@ -398,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn test_grant_emergency_access() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::ServiceOutage,
@@ -426,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_response_workflow() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::SecurityBreach,
@@ -437,18 +433,27 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow = response.get_incident_workflow(&incident.incident_id).await.unwrap();
-        
-        response.execute_response(&workflow.workflow_id).await.unwrap();
+        let workflow = response
+            .get_incident_workflow(&incident.incident_id)
+            .await
+            .unwrap();
 
-        let updated = response.get_incident_workflow(&incident.incident_id).await.unwrap();
+        response
+            .execute_response(&workflow.workflow_id)
+            .await
+            .unwrap();
+
+        let updated = response
+            .get_incident_workflow(&incident.incident_id)
+            .await
+            .unwrap();
         assert!(updated.steps.iter().all(|s| s.completed));
     }
 
     #[tokio::test]
     async fn test_resolve_incident() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::DataLeak,
@@ -459,7 +464,10 @@ mod tests {
             .await
             .unwrap();
 
-        response.resolve_incident(&incident.incident_id).await.unwrap();
+        response
+            .resolve_incident(&incident.incident_id)
+            .await
+            .unwrap();
 
         let resolved = response.get_incident(&incident.incident_id).await.unwrap();
         assert_eq!(resolved.status, IncidentStatus::Resolved);
@@ -469,7 +477,7 @@ mod tests {
     #[tokio::test]
     async fn test_post_incident_report() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::ComplianceViolation,
@@ -497,7 +505,7 @@ mod tests {
     #[tokio::test]
     async fn test_revoke_access() {
         let response = EmergencyResponse::new();
-        
+
         let incident = response
             .detect_incident(
                 IncidentType::SystemFailure,
@@ -521,7 +529,10 @@ mod tests {
         response.revoke_access(&access.access_id).await.unwrap();
 
         let accesses = response.list_break_glass_accesses().await;
-        let revoked = accesses.iter().find(|a| a.access_id == access.access_id).unwrap();
+        let revoked = accesses
+            .iter()
+            .find(|a| a.access_id == access.access_id)
+            .unwrap();
         assert!(revoked.revoked);
     }
 }

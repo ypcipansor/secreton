@@ -3,44 +3,43 @@
 //! Encryption as a Service - provides encryption, decryption, signing, and key derivation
 //! without exposing the encryption keys to clients.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// Error types for transit engine
 #[derive(Debug, thiserror::Error)]
 pub enum TransitError {
     #[error("Key not found: {0}")]
     KeyNotFound(String),
-    
+
     #[error("Encryption failed: {0}")]
     EncryptionFailed(String),
-    
+
     #[error("Decryption failed: {0}")]
     DecryptionFailed(String),
-    
+
     #[error("Invalid ciphertext format: {0}")]
     InvalidCiphertext(String),
-    
+
     #[error("Key version not found: {0}")]
     KeyVersionNotFound(u32),
-    
+
     #[error("Key rotation failed: {0}")]
     RotationFailed(String),
-    
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
-    
+
     #[error("Signing failed: {0}")]
     SigningFailed(String),
-    
+
     #[error("Verification failed: {0}")]
     VerificationFailed(String),
-    
+
     #[error("HMAC operation failed: {0}")]
     HmacFailed(String),
 }
@@ -50,13 +49,13 @@ pub enum TransitError {
 pub enum CipherType {
     /// AES-256-GCM
     AES256GCM,
-    
+
     /// ChaCha20-Poly1305
     ChaCha20Poly1305,
-    
+
     /// RSA-2048 OAEP
     RSA2048,
-    
+
     /// RSA-4096 OAEP
     RSA4096,
 }
@@ -70,7 +69,7 @@ impl CipherType {
             CipherType::RSA4096 => "rsa-4096",
         }
     }
-    
+
     pub fn key_size(&self) -> usize {
         match self {
             CipherType::AES256GCM => 32,
@@ -86,16 +85,16 @@ impl CipherType {
 pub enum KeyType {
     /// ECDSA P-256
     EcdsaP256,
-    
+
     /// ECDSA P-384
     EcdsaP384,
-    
+
     /// Ed25519
     Ed25519,
-    
+
     /// RSA-2048 PSS
     RSA2048,
-    
+
     /// RSA-4096 PSS
     RSA4096,
 }
@@ -105,37 +104,37 @@ pub enum KeyType {
 pub struct TransitKey {
     /// Key name
     pub name: String,
-    
+
     /// Cipher/key type
     pub key_type: CipherType,
-    
+
     /// Key versions (version number -> key material)
     pub versions: HashMap<u32, Vec<u8>>,
-    
+
     /// Latest version number
     pub latest_version: u32,
-    
+
     /// Minimum decryption version
     pub min_decryption_version: u32,
-    
+
     /// Minimum encryption version (for rotation)
     pub min_encryption_version: u32,
-    
+
     /// Allow plaintext backup
     pub exportable: bool,
-    
+
     /// Allow deletion
     pub deletion_allowed: bool,
-    
+
     /// Derived key (for convergent encryption)
     pub derived: bool,
-    
+
     /// Convergent encryption version
     pub convergent_encryption: Option<u32>,
-    
+
     /// Creation time
     pub created_at: DateTime<Utc>,
-    
+
     /// Last rotation time
     pub rotated_at: Option<DateTime<Utc>>,
 }
@@ -146,7 +145,7 @@ impl TransitKey {
         let mut versions = HashMap::new();
         let key_material = Self::generate_key(&key_type);
         versions.insert(1, key_material);
-        
+
         Self {
             name,
             key_type,
@@ -162,7 +161,7 @@ impl TransitKey {
             rotated_at: None,
         }
     }
-    
+
     /// Generate key material
     fn generate_key(key_type: &CipherType) -> Vec<u8> {
         use rand::RngCore;
@@ -170,7 +169,7 @@ impl TransitKey {
         rand::thread_rng().fill_bytes(&mut key);
         key
     }
-    
+
     /// Rotate key to new version
     pub fn rotate(&mut self) -> u32 {
         let new_version = self.latest_version + 1;
@@ -188,7 +187,7 @@ impl TransitKey {
 pub struct EncryptedData {
     /// Ciphertext in vault format: vault:v{version}:{base64_ciphertext}
     pub ciphertext: String,
-    
+
     /// Key version used
     pub key_version: u32,
 }
@@ -198,7 +197,7 @@ pub struct EncryptedData {
 pub struct DecryptedData {
     /// Plaintext (base64 encoded)
     pub plaintext: String,
-    
+
     /// Key version used for decryption
     pub key_version: u32,
 }
@@ -208,10 +207,10 @@ pub struct DecryptedData {
 pub struct DataKey {
     /// Plaintext key (base64 encoded)
     pub plaintext: String,
-    
+
     /// Encrypted key (ciphertext format)
     pub ciphertext: String,
-    
+
     /// Key version used
     pub key_version: u32,
 }
@@ -221,7 +220,7 @@ pub struct DataKey {
 pub struct HmacResult {
     /// HMAC value (hex encoded)
     pub hmac: String,
-    
+
     /// Key version used
     pub key_version: u32,
 }
@@ -231,10 +230,10 @@ pub struct HmacResult {
 pub struct SignatureResult {
     /// Signature (base64 encoded)
     pub signature: String,
-    
+
     /// Key version used
     pub key_version: u32,
-    
+
     /// Algorithm used
     pub algorithm: String,
 }
@@ -251,7 +250,7 @@ impl TransitEngine {
             keys: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Create encryption key
     pub async fn create_key(
         &self,
@@ -261,20 +260,21 @@ impl TransitEngine {
         exportable: bool,
     ) -> Result<(), TransitError> {
         let mut keys = self.keys.write().await;
-        
+
         if keys.contains_key(&name) {
-            return Err(TransitError::InvalidConfig(
-                format!("Key {} already exists", name)
-            ));
+            return Err(TransitError::InvalidConfig(format!(
+                "Key {} already exists",
+                name
+            )));
         }
-        
+
         let mut key = TransitKey::new(name.clone(), key_type, derived);
         key.exportable = exportable;
         keys.insert(name, key);
-        
+
         Ok(())
     }
-    
+
     /// Encrypt data
     pub async fn encrypt(
         &self,
@@ -283,35 +283,29 @@ impl TransitEngine {
         context: Option<&[u8]>,
     ) -> Result<EncryptedData, TransitError> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name)
+        let key = keys
+            .get(key_name)
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))?;
-        
+
         // Get latest encryption version
         let version = key.min_encryption_version;
-        let key_material = key.versions.get(&version)
+        let key_material = key
+            .versions
+            .get(&version)
             .ok_or_else(|| TransitError::KeyVersionNotFound(version))?;
-        
+
         // Perform encryption (simplified - production would use actual crypto)
-        let ciphertext = self.encrypt_with_key(
-            key_material,
-            plaintext,
-            context,
-            &key.key_type,
-        )?;
-        
+        let ciphertext = self.encrypt_with_key(key_material, plaintext, context, &key.key_type)?;
+
         // Format: vault:v{version}:{base64_ciphertext}
-        let formatted = format!(
-            "vault:v{}:{}",
-            version,
-            base64.encode(&ciphertext)
-        );
-        
+        let formatted = format!("vault:v{}:{}", version, base64.encode(&ciphertext));
+
         Ok(EncryptedData {
             ciphertext: formatted,
             key_version: version,
         })
     }
-    
+
     /// Decrypt data
     pub async fn decrypt(
         &self,
@@ -323,56 +317,58 @@ impl TransitEngine {
         let parts: Vec<&str> = ciphertext.split(':').collect();
         if parts.len() != 3 || parts[0] != "vault" {
             return Err(TransitError::InvalidCiphertext(
-                "Invalid format, expected vault:v{version}:{ciphertext}".to_string()
+                "Invalid format, expected vault:v{version}:{ciphertext}".to_string(),
             ));
         }
-        
+
         let version_str = parts[1].trim_start_matches('v');
-        let version: u32 = version_str.parse()
+        let version: u32 = version_str
+            .parse()
             .map_err(|_| TransitError::InvalidCiphertext("Invalid version".to_string()))?;
-        
-        let ciphertext_bytes = base64.decode(parts[2])
+
+        let ciphertext_bytes = base64
+            .decode(parts[2])
             .map_err(|_| TransitError::InvalidCiphertext("Invalid base64".to_string()))?;
-        
+
         let keys = self.keys.read().await;
-        let key = keys.get(key_name)
+        let key = keys
+            .get(key_name)
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))?;
-        
+
         // Check minimum decryption version
         if version < key.min_decryption_version {
-            return Err(TransitError::DecryptionFailed(
-                format!("Version {} is below minimum decryption version {}", 
-                    version, key.min_decryption_version)
-            ));
+            return Err(TransitError::DecryptionFailed(format!(
+                "Version {} is below minimum decryption version {}",
+                version, key.min_decryption_version
+            )));
         }
-        
-        let key_material = key.versions.get(&version)
+
+        let key_material = key
+            .versions
+            .get(&version)
             .ok_or_else(|| TransitError::KeyVersionNotFound(version))?;
-        
+
         // Perform decryption
-        let plaintext = self.decrypt_with_key(
-            key_material,
-            &ciphertext_bytes,
-            context,
-            &key.key_type,
-        )?;
-        
+        let plaintext =
+            self.decrypt_with_key(key_material, &ciphertext_bytes, context, &key.key_type)?;
+
         Ok(DecryptedData {
             plaintext: base64.encode(&plaintext),
             key_version: version,
         })
     }
-    
+
     /// Rotate key
     pub async fn rotate_key(&self, key_name: &str) -> Result<u32, TransitError> {
         let mut keys = self.keys.write().await;
-        let key = keys.get_mut(key_name)
+        let key = keys
+            .get_mut(key_name)
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))?;
-        
+
         let new_version = key.rotate();
         Ok(new_version)
     }
-    
+
     /// Rewrap data with latest key version
     pub async fn rewrap(
         &self,
@@ -382,13 +378,14 @@ impl TransitEngine {
     ) -> Result<EncryptedData, TransitError> {
         // Decrypt with old version
         let decrypted = self.decrypt(key_name, ciphertext, context).await?;
-        let plaintext = base64.decode(&decrypted.plaintext)
+        let plaintext = base64
+            .decode(&decrypted.plaintext)
             .map_err(|_| TransitError::DecryptionFailed("Invalid plaintext".to_string()))?;
-        
+
         // Re-encrypt with latest version
         self.encrypt(key_name, &plaintext, context).await
     }
-    
+
     /// Generate data key for envelope encryption
     pub async fn generate_data_key(
         &self,
@@ -396,45 +393,44 @@ impl TransitEngine {
         bits: usize,
     ) -> Result<DataKey, TransitError> {
         use rand::RngCore;
-        
+
         // Generate random data key
         let key_bytes = bits / 8;
         let mut data_key = vec![0u8; key_bytes];
         rand::thread_rng().fill_bytes(&mut data_key);
-        
+
         // Encrypt data key with transit key
         let encrypted = self.encrypt(key_name, &data_key, None).await?;
-        
+
         Ok(DataKey {
             plaintext: base64.encode(&data_key),
             ciphertext: encrypted.ciphertext,
             key_version: encrypted.key_version,
         })
     }
-    
+
     /// Generate HMAC
-    pub async fn hmac(
-        &self,
-        key_name: &str,
-        input: &[u8],
-    ) -> Result<HmacResult, TransitError> {
+    pub async fn hmac(&self, key_name: &str, input: &[u8]) -> Result<HmacResult, TransitError> {
         let keys = self.keys.read().await;
-        let key = keys.get(key_name)
+        let key = keys
+            .get(key_name)
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))?;
-        
+
         let version = key.latest_version;
-        let key_material = key.versions.get(&version)
+        let key_material = key
+            .versions
+            .get(&version)
             .ok_or_else(|| TransitError::KeyVersionNotFound(version))?;
-        
+
         // Compute HMAC (simplified)
         let hmac_value = self.compute_hmac(key_material, input)?;
-        
+
         Ok(HmacResult {
             hmac: hex::encode(&hmac_value),
             key_version: version,
         })
     }
-    
+
     /// Generate random bytes
     pub async fn random(&self, bytes: usize) -> Vec<u8> {
         use rand::RngCore;
@@ -442,29 +438,30 @@ impl TransitEngine {
         rand::thread_rng().fill_bytes(&mut output);
         output
     }
-    
+
     /// Delete key
     pub async fn delete_key(&self, key_name: &str) -> Result<(), TransitError> {
         let mut keys = self.keys.write().await;
-        let key = keys.get(key_name)
+        let key = keys
+            .get(key_name)
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))?;
-        
+
         if !key.deletion_allowed {
             return Err(TransitError::InvalidConfig(
-                "Key deletion not allowed".to_string()
+                "Key deletion not allowed".to_string(),
             ));
         }
-        
+
         keys.remove(key_name);
         Ok(())
     }
-    
+
     /// List keys
     pub async fn list_keys(&self) -> Vec<String> {
         let keys = self.keys.read().await;
         keys.keys().cloned().collect()
     }
-    
+
     /// Get key info
     pub async fn get_key_info(&self, key_name: &str) -> Result<TransitKey, TransitError> {
         let keys = self.keys.read().await;
@@ -472,7 +469,7 @@ impl TransitEngine {
             .cloned()
             .ok_or_else(|| TransitError::KeyNotFound(key_name.to_string()))
     }
-    
+
     // Internal encryption (simplified - production would use ring/openssl)
     fn encrypt_with_key(
         &self,
@@ -489,7 +486,7 @@ impl TransitEngine {
         }
         Ok(ciphertext)
     }
-    
+
     // Internal decryption
     fn decrypt_with_key(
         &self,
@@ -505,7 +502,7 @@ impl TransitEngine {
         }
         Ok(plaintext)
     }
-    
+
     // Internal HMAC computation
     fn compute_hmac(&self, key: &[u8], input: &[u8]) -> Result<Vec<u8>, TransitError> {
         // Simplified HMAC (production would use proper HMAC-SHA256)
@@ -534,131 +531,127 @@ mod tests {
     #[tokio::test]
     async fn test_create_key() {
         let engine = TransitEngine::new();
-        
-        let result = engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await;
-        
+
+        let result = engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await;
+
         assert!(result.is_ok());
         assert_eq!(engine.list_keys().await.len(), 1);
     }
-    
+
     #[tokio::test]
     async fn test_encrypt_decrypt() {
         let engine = TransitEngine::new();
-        
-        engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await.unwrap();
-        
+
+        engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await
+            .unwrap();
+
         let plaintext = b"Hello, World!";
         let encrypted = engine.encrypt("test-key", plaintext, None).await.unwrap();
-        
+
         assert!(encrypted.ciphertext.starts_with("vault:v1:"));
         assert_eq!(encrypted.key_version, 1);
-        
-        let decrypted = engine.decrypt("test-key", &encrypted.ciphertext, None).await.unwrap();
+
+        let decrypted = engine
+            .decrypt("test-key", &encrypted.ciphertext, None)
+            .await
+            .unwrap();
         let decrypted_bytes = base64.decode(&decrypted.plaintext).unwrap();
-        
+
         assert_eq!(decrypted_bytes, plaintext);
         assert_eq!(decrypted.key_version, 1);
     }
-    
+
     #[tokio::test]
     async fn test_key_rotation() {
         let engine = TransitEngine::new();
-        
-        engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await.unwrap();
-        
+
+        engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await
+            .unwrap();
+
         let new_version = engine.rotate_key("test-key").await.unwrap();
         assert_eq!(new_version, 2);
-        
+
         let key_info = engine.get_key_info("test-key").await.unwrap();
         assert_eq!(key_info.latest_version, 2);
         assert_eq!(key_info.versions.len(), 2);
     }
-    
+
     #[tokio::test]
     async fn test_rewrap() {
         let engine = TransitEngine::new();
-        
-        engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await.unwrap();
-        
+
+        engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await
+            .unwrap();
+
         let plaintext = b"Test data";
         let encrypted_v1 = engine.encrypt("test-key", plaintext, None).await.unwrap();
-        
+
         // Rotate key
         engine.rotate_key("test-key").await.unwrap();
-        
+
         // Rewrap with new version
-        let rewrapped = engine.rewrap("test-key", &encrypted_v1.ciphertext, None).await.unwrap();
+        let rewrapped = engine
+            .rewrap("test-key", &encrypted_v1.ciphertext, None)
+            .await
+            .unwrap();
         assert_eq!(rewrapped.key_version, 2);
-        
+
         // Verify decryption still works
-        let decrypted = engine.decrypt("test-key", &rewrapped.ciphertext, None).await.unwrap();
+        let decrypted = engine
+            .decrypt("test-key", &rewrapped.ciphertext, None)
+            .await
+            .unwrap();
         let decrypted_bytes = base64.decode(&decrypted.plaintext).unwrap();
         assert_eq!(decrypted_bytes, plaintext);
     }
-    
+
     #[tokio::test]
     async fn test_data_key_generation() {
         let engine = TransitEngine::new();
-        
-        engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await.unwrap();
-        
+
+        engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await
+            .unwrap();
+
         let data_key = engine.generate_data_key("test-key", 256).await.unwrap();
-        
+
         assert_eq!(base64.decode(&data_key.plaintext).unwrap().len(), 32);
         assert!(data_key.ciphertext.starts_with("vault:v1:"));
     }
-    
+
     #[tokio::test]
     async fn test_hmac() {
         let engine = TransitEngine::new();
-        
-        engine.create_key(
-            "test-key".to_string(),
-            CipherType::AES256GCM,
-            false,
-            false,
-        ).await.unwrap();
-        
+
+        engine
+            .create_key("test-key".to_string(), CipherType::AES256GCM, false, false)
+            .await
+            .unwrap();
+
         let input = b"test data";
         let hmac1 = engine.hmac("test-key", input).await.unwrap();
         let hmac2 = engine.hmac("test-key", input).await.unwrap();
-        
+
         assert_eq!(hmac1.hmac, hmac2.hmac);
         assert!(!hmac1.hmac.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_random_bytes() {
         let engine = TransitEngine::new();
-        
+
         let random1 = engine.random(32).await;
         let random2 = engine.random(32).await;
-        
+
         assert_eq!(random1.len(), 32);
         assert_eq!(random2.len(), 32);
         assert_ne!(random1, random2);

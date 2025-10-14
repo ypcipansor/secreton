@@ -19,21 +19,25 @@ pub struct PrivateKey {
 impl PrivateKey {
     pub fn generate_rsa(_bits: u32) -> Result<Self, String> {
         Ok(Self {
-            pem_data: "-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END RSA PRIVATE KEY-----".to_string(),
+            pem_data:
+                "-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END RSA PRIVATE KEY-----"
+                    .to_string(),
             key_type: "RSA".to_string(),
         })
     }
-    
+
     pub fn generate_ec(_bits: u32) -> Result<Self, String> {
         Ok(Self {
-            pem_data: "-----BEGIN EC PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END EC PRIVATE KEY-----".to_string(),
+            pem_data: "-----BEGIN EC PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END EC PRIVATE KEY-----"
+                .to_string(),
             key_type: "EC".to_string(),
         })
     }
-    
+
     pub fn generate_ed25519() -> Result<Self, String> {
         Ok(Self {
-            pem_data: "-----BEGIN PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END PRIVATE KEY-----".to_string(),
+            pem_data: "-----BEGIN PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END PRIVATE KEY-----"
+                .to_string(),
             key_type: "Ed25519".to_string(),
         })
     }
@@ -55,25 +59,28 @@ impl CertificateBuilder {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn common_name(&mut self, cn: &str) -> &mut Self {
         self.common_name = cn.to_string();
         self
     }
-    
+
     pub fn serial_number(&mut self, sn: &str) -> &mut Self {
         self.serial_number = sn.to_string();
         self
     }
-    
+
     pub fn add_alt_name(&mut self, alt: &str) -> &mut Self {
         self.alt_names.push(alt.to_string());
         self
     }
-    
+
     pub fn build(&self, _key: &PrivateKey) -> Result<Certificate, String> {
         Ok(Certificate {
-            pem_data: format!("-----BEGIN CERTIFICATE-----\nMOCK_CERT_{}\n-----END CERTIFICATE-----", self.common_name),
+            pem_data: format!(
+                "-----BEGIN CERTIFICATE-----\nMOCK_CERT_{}\n-----END CERTIFICATE-----",
+                self.common_name
+            ),
         })
     }
 }
@@ -85,22 +92,22 @@ type SignatureAlgorithm = String;
 pub enum PkiError {
     #[error("CA not found: {0}")]
     CaNotFound(String),
-    
+
     #[error("Certificate not found: {0}")]
     CertNotFound(String),
-    
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
-    
+
     #[error("Certificate generation failed: {0}")]
     GenerationFailed(String),
-    
+
     #[error("Certificate revocation failed: {0}")]
     RevocationFailed(String),
-    
+
     #[error("Invalid certificate: {0}")]
     InvalidCert(String),
-    
+
     #[error("CRL generation failed: {0}")]
     CrlFailed(String),
 }
@@ -110,52 +117,52 @@ pub enum PkiError {
 pub struct CaConfig {
     /// CA name
     pub name: String,
-    
+
     /// CA certificate
     pub certificate: String,
-    
+
     /// CA private key (encrypted)
     pub private_key: String,
-    
+
     /// Key type (RSA, ECDSA, Ed25519)
     pub key_type: String,
-    
+
     /// Key bits
     pub key_bits: u32,
-    
+
     /// Signature algorithm
     pub signature_algorithm: String,
-    
+
     /// Maximum TTL for issued certificates
     pub max_ttl: u32,
-    
+
     /// Default TTL
     pub default_ttl: u32,
-    
+
     /// Maximum path length for intermediate CAs
     pub max_path_length: Option<u32>,
-    
+
     /// Permitted DNS domains
     pub permitted_dns_domains: Vec<String>,
-    
+
     /// Allowed key usages
     pub allowed_key_usages: Vec<String>,
-    
+
     /// Allowed extended key usages
     pub allowed_ext_key_usages: Vec<String>,
-    
+
     /// CRL distribution points
     pub crl_distribution_points: Vec<String>,
-    
+
     /// OCSP servers
     pub ocsp_servers: Vec<String>,
-    
+
     /// Creation time
     pub created_at: DateTime<Utc>,
-    
+
     /// Is intermediate CA
     pub is_intermediate: bool,
-    
+
     /// Parent CA name (for intermediate)
     pub parent_ca: Option<String>,
 }
@@ -169,7 +176,7 @@ impl Default for CaConfig {
             key_type: "RSA".to_string(),
             key_bits: 2048,
             signature_algorithm: "SHA256withRSA".to_string(),
-            max_ttl: 315360000, // 10 years
+            max_ttl: 315360000,    // 10 years
             default_ttl: 31536000, // 1 year
             max_path_length: Some(0),
             permitted_dns_domains: Vec::new(),
@@ -177,10 +184,7 @@ impl Default for CaConfig {
                 "DigitalSignature".to_string(),
                 "KeyEncipherment".to_string(),
             ],
-            allowed_ext_key_usages: vec![
-                "ServerAuth".to_string(),
-                "ClientAuth".to_string(),
-            ],
+            allowed_ext_key_usages: vec!["ServerAuth".to_string(), "ClientAuth".to_string()],
             crl_distribution_points: Vec::new(),
             ocsp_servers: Vec::new(),
             created_at: Utc::now(),
@@ -195,68 +199,68 @@ impl Default for CaConfig {
 pub struct CertificateRole {
     /// Role name
     pub name: String,
-    
+
     /// CA to use for signing
     pub ca_name: String,
-    
+
     /// TTL for certificates
     pub ttl: u32,
-    
+
     /// Maximum TTL
     pub max_ttl: u32,
-    
+
     /// Allowed domains (wildcards supported)
     pub allowed_domains: Vec<String>,
-    
+
     /// Allow bare domains
     pub allow_bare_domains: bool,
-    
+
     /// Allow subdomains
     pub allow_subdomains: bool,
-    
+
     /// Allow wildcard certificates
     pub allow_wildcard_certificates: bool,
-    
+
     /// Allow any name
     pub allow_any_name: bool,
-    
+
     /// Allow IP SANs
     pub allow_ip_sans: bool,
-    
+
     /// Allow localhost
     pub allow_localhost: bool,
-    
+
     /// Server flag
     pub server_flag: bool,
-    
+
     /// Client flag
     pub client_flag: bool,
-    
+
     /// Code signing flag
     pub code_signing_flag: bool,
-    
+
     /// Email protection flag
     pub email_protection_flag: bool,
-    
+
     /// Key type
     pub key_type: String,
-    
+
     /// Key bits
     pub key_bits: u32,
-    
+
     /// Use CSR values
     pub use_csr_common_name: bool,
     pub use_csr_sans: bool,
-    
+
     /// Organization
     pub organization: Vec<String>,
-    
+
     /// OU
     pub ou: Vec<String>,
-    
+
     /// Country
     pub country: Vec<String>,
-    
+
     /// Require CN
     pub require_cn: bool,
 }
@@ -296,43 +300,43 @@ impl Default for CertificateRole {
 pub struct IssuedCertificate {
     /// Serial number
     pub serial_number: String,
-    
+
     /// Certificate PEM
     pub certificate: String,
-    
+
     /// CA chain
     pub ca_chain: Vec<String>,
-    
+
     /// Private key (if generated by vault)
     pub private_key: Option<String>,
-    
+
     /// Common name
     pub common_name: String,
-    
+
     /// Subject alternative names
     pub alt_names: Vec<String>,
-    
+
     /// Issuer
     pub issuer: String,
-    
+
     /// Issued at
     pub issued_at: DateTime<Utc>,
-    
+
     /// Expires at
     pub expires_at: DateTime<Utc>,
-    
+
     /// Role used
     pub role_name: String,
-    
+
     /// CA used
     pub ca_name: String,
-    
+
     /// Revoked
     pub revoked: bool,
-    
+
     /// Revocation time
     pub revoked_at: Option<DateTime<Utc>>,
-    
+
     /// Revocation reason
     pub revocation_reason: Option<String>,
 }
@@ -342,10 +346,10 @@ pub struct IssuedCertificate {
 pub struct CrlEntry {
     /// Serial number
     pub serial_number: String,
-    
+
     /// Revocation time
     pub revoked_at: DateTime<Utc>,
-    
+
     /// Reason
     pub reason: String,
 }
@@ -368,7 +372,7 @@ impl PkiEngine {
             crl: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Generate root CA
     pub async fn generate_root_ca(
         &self,
@@ -383,18 +387,24 @@ impl PkiEngine {
             "RSA" => PrivateKey::generate_rsa(key_bits),
             "EC" => PrivateKey::generate_ec(key_bits),
             "Ed25519" => PrivateKey::generate_ed25519(),
-            _ => return Err(PkiError::InvalidConfig(format!("Unsupported key type: {}", key_type))),
+            _ => {
+                return Err(PkiError::InvalidConfig(format!(
+                    "Unsupported key type: {}",
+                    key_type
+                )));
+            }
         }
         .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         // Build CA certificate
         let mut builder = CertificateBuilder::new();
         builder.common_name(&common_name);
         builder.serial_number("1");
-        
-        let certificate = builder.build(&private_key)
+
+        let certificate = builder
+            .build(&private_key)
             .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         let ca_config = CaConfig {
             name: name.clone(),
             certificate: certificate.pem_data.clone(),
@@ -409,13 +419,13 @@ impl PkiEngine {
             parent_ca: None,
             ..Default::default()
         };
-        
+
         let mut cas = self.cas.write().await;
         cas.insert(name, ca_config.clone());
-        
+
         Ok(ca_config)
     }
-    
+
     /// Generate intermediate CA
     pub async fn generate_intermediate_ca(
         &self,
@@ -428,25 +438,32 @@ impl PkiEngine {
     ) -> Result<CaConfig, PkiError> {
         // Verify parent CA exists
         let cas = self.cas.read().await;
-        let _parent = cas.get(&parent_ca_name)
+        let _parent = cas
+            .get(&parent_ca_name)
             .ok_or_else(|| PkiError::CaNotFound(parent_ca_name.clone()))?;
         drop(cas);
-        
+
         // Generate intermediate key and cert (similar to root)
         let private_key = match key_type.as_str() {
             "RSA" => PrivateKey::generate_rsa(key_bits),
             "EC" => PrivateKey::generate_ec(key_bits),
             "Ed25519" => PrivateKey::generate_ed25519(),
-            _ => return Err(PkiError::InvalidConfig(format!("Unsupported key type: {}", key_type))),
+            _ => {
+                return Err(PkiError::InvalidConfig(format!(
+                    "Unsupported key type: {}",
+                    key_type
+                )));
+            }
         }
         .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         let mut builder = CertificateBuilder::new();
         builder.common_name(&common_name);
-        
-        let certificate = builder.build(&private_key)
+
+        let certificate = builder
+            .build(&private_key)
             .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         let ca_config = CaConfig {
             name: name.clone(),
             certificate: certificate.pem_data,
@@ -461,32 +478,34 @@ impl PkiEngine {
             parent_ca: Some(parent_ca_name),
             ..Default::default()
         };
-        
+
         let mut cas = self.cas.write().await;
         cas.insert(name, ca_config.clone());
-        
+
         Ok(ca_config)
     }
-    
+
     /// Create certificate role
     pub async fn create_role(&self, role: CertificateRole) -> Result<(), PkiError> {
         if role.name.is_empty() {
-            return Err(PkiError::InvalidConfig("Role name cannot be empty".to_string()));
+            return Err(PkiError::InvalidConfig(
+                "Role name cannot be empty".to_string(),
+            ));
         }
-        
+
         // Verify CA exists
         let cas = self.cas.read().await;
         if !cas.contains_key(&role.ca_name) {
             return Err(PkiError::CaNotFound(role.ca_name.clone()));
         }
         drop(cas);
-        
+
         let mut roles = self.roles.write().await;
         roles.insert(role.name.clone(), role);
-        
+
         Ok(())
     }
-    
+
     /// Issue certificate
     pub async fn issue_certificate(
         &self,
@@ -497,48 +516,56 @@ impl PkiEngine {
     ) -> Result<IssuedCertificate, PkiError> {
         // Get role
         let roles = self.roles.read().await;
-        let role = roles.get(role_name)
+        let role = roles
+            .get(role_name)
             .ok_or_else(|| PkiError::InvalidConfig(format!("Role {} not found", role_name)))?
             .clone();
         drop(roles);
-        
+
         // Get CA
         let cas = self.cas.read().await;
-        let ca = cas.get(&role.ca_name)
+        let ca = cas
+            .get(&role.ca_name)
             .ok_or_else(|| PkiError::CaNotFound(role.ca_name.clone()))?
             .clone();
         drop(cas);
-        
+
         // Validate common name against role
         if role.require_cn && common_name.is_empty() {
             return Err(PkiError::InvalidConfig("Common name required".to_string()));
         }
-        
+
         // Determine TTL
         let cert_ttl = ttl.unwrap_or(role.ttl).min(role.max_ttl).min(ca.max_ttl);
-        
+
         // Generate private key
         let private_key = match role.key_type.as_str() {
             "RSA" => PrivateKey::generate_rsa(role.key_bits),
             "EC" => PrivateKey::generate_ec(role.key_bits),
             "Ed25519" => PrivateKey::generate_ed25519(),
-            _ => return Err(PkiError::InvalidConfig(format!("Unsupported key type: {}", role.key_type))),
+            _ => {
+                return Err(PkiError::InvalidConfig(format!(
+                    "Unsupported key type: {}",
+                    role.key_type
+                )));
+            }
         }
         .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         // Build certificate
         let mut builder = CertificateBuilder::new();
         builder.common_name(&common_name);
         for alt_name in &alt_names {
             builder.add_alt_name(alt_name);
         }
-        
+
         let serial_number = uuid::Uuid::new_v4().to_string();
         builder.serial_number(&serial_number);
-        
-        let certificate = builder.build(&private_key)
+
+        let certificate = builder
+            .build(&private_key)
             .map_err(|e| PkiError::GenerationFailed(e.to_string()))?;
-        
+
         let now = Utc::now();
         let issued_cert = IssuedCertificate {
             serial_number: serial_number.clone(),
@@ -556,14 +583,14 @@ impl PkiEngine {
             revoked_at: None,
             revocation_reason: None,
         };
-        
+
         // Store certificate
         let mut certificates = self.certificates.write().await;
         certificates.insert(serial_number, issued_cert.clone());
-        
+
         Ok(issued_cert)
     }
-    
+
     /// Revoke certificate
     pub async fn revoke_certificate(
         &self,
@@ -571,17 +598,18 @@ impl PkiEngine {
         reason: String,
     ) -> Result<(), PkiError> {
         let mut certificates = self.certificates.write().await;
-        let cert = certificates.get_mut(serial_number)
+        let cert = certificates
+            .get_mut(serial_number)
             .ok_or_else(|| PkiError::CertNotFound(serial_number.to_string()))?;
-        
+
         cert.revoked = true;
         cert.revoked_at = Some(Utc::now());
         cert.revocation_reason = Some(reason.clone());
-        
+
         // Add to CRL
         let ca_name = cert.ca_name.clone();
         drop(certificates);
-        
+
         let mut crl = self.crl.write().await;
         let entries = crl.entry(ca_name).or_insert_with(Vec::new);
         entries.push(CrlEntry {
@@ -589,21 +617,21 @@ impl PkiEngine {
             revoked_at: Utc::now(),
             reason,
         });
-        
+
         Ok(())
     }
-    
+
     /// Generate CRL
     pub async fn generate_crl(&self, ca_name: &str) -> Result<String, PkiError> {
         let crl = self.crl.read().await;
         let entries = crl.get(ca_name).cloned().unwrap_or_default();
-        
+
         // In production, would generate proper X.509 CRL
         let mut crl_pem = format!("-----BEGIN X509 CRL-----\n");
         crl_pem.push_str(&format!("CA: {}\n", ca_name));
         crl_pem.push_str(&format!("Generated: {}\n", Utc::now().to_rfc3339()));
         crl_pem.push_str(&format!("Revoked Certificates: {}\n", entries.len()));
-        
+
         for entry in entries {
             crl_pem.push_str(&format!(
                 "Serial: {} | Revoked: {} | Reason: {}\n",
@@ -612,26 +640,30 @@ impl PkiEngine {
                 entry.reason
             ));
         }
-        
+
         crl_pem.push_str("-----END X509 CRL-----\n");
-        
+
         Ok(crl_pem)
     }
-    
+
     /// List certificates
     pub async fn list_certificates(&self) -> Vec<IssuedCertificate> {
         let certificates = self.certificates.read().await;
         certificates.values().cloned().collect()
     }
-    
+
     /// Get certificate by serial
-    pub async fn get_certificate(&self, serial_number: &str) -> Result<IssuedCertificate, PkiError> {
+    pub async fn get_certificate(
+        &self,
+        serial_number: &str,
+    ) -> Result<IssuedCertificate, PkiError> {
         let certificates = self.certificates.read().await;
-        certificates.get(serial_number)
+        certificates
+            .get(serial_number)
             .cloned()
             .ok_or_else(|| PkiError::CertNotFound(serial_number.to_string()))
     }
-    
+
     /// Delete CA
     pub async fn delete_ca(&self, ca_name: &str) -> Result<(), PkiError> {
         let mut cas = self.cas.write().await;
@@ -639,7 +671,7 @@ impl PkiEngine {
             .ok_or_else(|| PkiError::CaNotFound(ca_name.to_string()))?;
         Ok(())
     }
-    
+
     /// List CAs
     pub async fn list_cas(&self) -> Vec<String> {
         let cas = self.cas.read().await;
@@ -660,33 +692,39 @@ mod tests {
     #[tokio::test]
     async fn test_generate_root_ca() {
         let engine = PkiEngine::new();
-        
-        let ca = engine.generate_root_ca(
-            "root-ca".to_string(),
-            "Root CA".to_string(),
-            "RSA".to_string(),
-            2048,
-            315360000,
-        ).await.unwrap();
-        
+
+        let ca = engine
+            .generate_root_ca(
+                "root-ca".to_string(),
+                "Root CA".to_string(),
+                "RSA".to_string(),
+                2048,
+                315360000,
+            )
+            .await
+            .unwrap();
+
         assert_eq!(ca.name, "root-ca");
         assert!(!ca.is_intermediate);
         assert_eq!(engine.list_cas().await.len(), 1);
     }
-    
+
     #[tokio::test]
     async fn test_create_role() {
         let engine = PkiEngine::new();
-        
+
         // Create CA first
-        engine.generate_root_ca(
-            "root-ca".to_string(),
-            "Root CA".to_string(),
-            "RSA".to_string(),
-            2048,
-            315360000,
-        ).await.unwrap();
-        
+        engine
+            .generate_root_ca(
+                "root-ca".to_string(),
+                "Root CA".to_string(),
+                "RSA".to_string(),
+                2048,
+                315360000,
+            )
+            .await
+            .unwrap();
+
         // Create role
         let role = CertificateRole {
             name: "web-server".to_string(),
@@ -695,24 +733,27 @@ mod tests {
             server_flag: true,
             ..Default::default()
         };
-        
+
         let result = engine.create_role(role).await;
         assert!(result.is_ok());
     }
-    
+
     #[tokio::test]
     async fn test_issue_certificate() {
         let engine = PkiEngine::new();
-        
+
         // Setup CA and role
-        engine.generate_root_ca(
-            "root-ca".to_string(),
-            "Root CA".to_string(),
-            "RSA".to_string(),
-            2048,
-            315360000,
-        ).await.unwrap();
-        
+        engine
+            .generate_root_ca(
+                "root-ca".to_string(),
+                "Root CA".to_string(),
+                "RSA".to_string(),
+                2048,
+                315360000,
+            )
+            .await
+            .unwrap();
+
         let role = CertificateRole {
             name: "web-server".to_string(),
             ca_name: "root-ca".to_string(),
@@ -720,68 +761,77 @@ mod tests {
             ..Default::default()
         };
         engine.create_role(role).await.unwrap();
-        
+
         // Issue certificate
-        let cert = engine.issue_certificate(
-            "web-server",
-            "www.example.com".to_string(),
-            vec!["example.com".to_string()],
-            None,
-        ).await.unwrap();
-        
+        let cert = engine
+            .issue_certificate(
+                "web-server",
+                "www.example.com".to_string(),
+                vec!["example.com".to_string()],
+                None,
+            )
+            .await
+            .unwrap();
+
         assert_eq!(cert.common_name, "www.example.com");
         assert!(!cert.serial_number.is_empty());
         assert!(cert.private_key.is_some());
     }
-    
+
     #[tokio::test]
     async fn test_revoke_certificate() {
         let engine = PkiEngine::new();
-        
+
         // Setup and issue certificate
-        engine.generate_root_ca(
-            "root-ca".to_string(),
-            "Root CA".to_string(),
-            "RSA".to_string(),
-            2048,
-            315360000,
-        ).await.unwrap();
-        
+        engine
+            .generate_root_ca(
+                "root-ca".to_string(),
+                "Root CA".to_string(),
+                "RSA".to_string(),
+                2048,
+                315360000,
+            )
+            .await
+            .unwrap();
+
         let role = CertificateRole {
             name: "web-server".to_string(),
             ca_name: "root-ca".to_string(),
             ..Default::default()
         };
         engine.create_role(role).await.unwrap();
-        
-        let cert = engine.issue_certificate(
-            "web-server",
-            "test.example.com".to_string(),
-            vec![],
-            None,
-        ).await.unwrap();
-        
+
+        let cert = engine
+            .issue_certificate("web-server", "test.example.com".to_string(), vec![], None)
+            .await
+            .unwrap();
+
         // Revoke
-        let result = engine.revoke_certificate(&cert.serial_number, "Compromised".to_string()).await;
+        let result = engine
+            .revoke_certificate(&cert.serial_number, "Compromised".to_string())
+            .await;
         assert!(result.is_ok());
-        
+
         // Verify revoked
         let revoked_cert = engine.get_certificate(&cert.serial_number).await.unwrap();
         assert!(revoked_cert.revoked);
     }
-    
+
     #[tokio::test]
     async fn test_generate_crl() {
         let engine = PkiEngine::new();
-        
-        engine.generate_root_ca(
-            "root-ca".to_string(),
-            "Root CA".to_string(),
-            "RSA".to_string(),
-            2048,
-            315360000,
-        ).await.unwrap();
-        
+
+        engine
+            .generate_root_ca(
+                "root-ca".to_string(),
+                "Root CA".to_string(),
+                "RSA".to_string(),
+                2048,
+                315360000,
+            )
+            .await
+            .unwrap();
+
         let crl = engine.generate_crl("root-ca").await.unwrap();
         assert!(crl.contains("BEGIN X509 CRL"));
         assert!(crl.contains("root-ca"));

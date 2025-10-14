@@ -140,8 +140,7 @@ impl SecretUsageAnalytics {
         }
 
         let access_count = events.len() as u64;
-        let unique_accessors: HashSet<String> =
-            events.iter().map(|e| e.accessor.clone()).collect();
+        let unique_accessors: HashSet<String> = events.iter().map(|e| e.accessor.clone()).collect();
 
         let first_accessed = events.iter().map(|e| e.timestamp).min().unwrap();
         let last_accessed = events.iter().map(|e| e.timestamp).max().unwrap();
@@ -299,7 +298,11 @@ impl SecretUsageAnalytics {
                 for event in access_events.iter() {
                     csv.push_str(&format!(
                         "{},{},{},{:?},{}\n",
-                        event.event_id, event.secret_path, event.accessor, event.access_type, event.timestamp
+                        event.event_id,
+                        event.secret_path,
+                        event.accessor,
+                        event.access_type,
+                        event.timestamp
                     ));
                 }
                 Ok(csv)

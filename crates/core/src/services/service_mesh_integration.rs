@@ -130,7 +130,11 @@ impl ServiceMeshIntegration {
     }
 
     /// Issue certificate
-    pub async fn issue_certificate(&self, service_name: &str, namespace: &str) -> Result<MeshCertificate> {
+    pub async fn issue_certificate(
+        &self,
+        service_name: &str,
+        namespace: &str,
+    ) -> Result<MeshCertificate> {
         let key = format!("{}/{}", namespace, service_name);
         let service_identities = self.service_identities.read().await;
 
@@ -156,7 +160,10 @@ impl ServiceMeshIntegration {
         identity.expires_at = Some(expires_at);
 
         let cert_id = uuid::Uuid::new_v4().to_string();
-        let cert_serial = format!("CERT-{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase());
+        let cert_serial = format!(
+            "CERT-{}",
+            uuid::Uuid::new_v4().to_string()[..8].to_uppercase()
+        );
 
         let certificate = MeshCertificate {
             cert_id: cert_id.clone(),
@@ -250,7 +257,10 @@ impl ServiceMeshIntegration {
     }
 
     /// List certificates
-    pub async fn list_certificates(&self, status: Option<CertificateStatus>) -> Vec<MeshCertificate> {
+    pub async fn list_certificates(
+        &self,
+        status: Option<CertificateStatus>,
+    ) -> Vec<MeshCertificate> {
         let certificates = self.certificates.read().await;
 
         certificates
@@ -275,9 +285,9 @@ impl ServiceMeshIntegration {
     /// Revoke certificate
     pub async fn revoke_certificate(&self, cert_id: &str) -> Result<()> {
         let mut certificates = self.certificates.write().await;
-        let cert = certificates
-            .get_mut(cert_id)
-            .ok_or_else(|| ServiceMeshError::CertificateError("Certificate not found".to_string()))?;
+        let cert = certificates.get_mut(cert_id).ok_or_else(|| {
+            ServiceMeshError::CertificateError("Certificate not found".to_string())
+        })?;
 
         cert.status = CertificateStatus::Revoked;
 
@@ -369,7 +379,10 @@ mod tests {
     async fn test_register_service() {
         let mesh = ServiceMeshIntegration::new(create_test_config(), create_test_spiffe_config());
 
-        let identity = mesh.register_service("my-service", "production").await.unwrap();
+        let identity = mesh
+            .register_service("my-service", "production")
+            .await
+            .unwrap();
 
         assert_eq!(identity.service_name, "my-service");
         assert_eq!(identity.namespace, "production");
@@ -383,9 +396,14 @@ mod tests {
     async fn test_issue_certificate() {
         let mesh = ServiceMeshIntegration::new(create_test_config(), create_test_spiffe_config());
 
-        mesh.register_service("my-service", "production").await.unwrap();
+        mesh.register_service("my-service", "production")
+            .await
+            .unwrap();
 
-        let certificate = mesh.issue_certificate("my-service", "production").await.unwrap();
+        let certificate = mesh
+            .issue_certificate("my-service", "production")
+            .await
+            .unwrap();
 
         assert_eq!(certificate.status, CertificateStatus::Active);
         assert!(certificate.service_identity.certificate_pem.is_some());
@@ -397,9 +415,14 @@ mod tests {
     async fn test_rotate_certificate() {
         let mesh = ServiceMeshIntegration::new(create_test_config(), create_test_spiffe_config());
 
-        mesh.register_service("my-service", "production").await.unwrap();
+        mesh.register_service("my-service", "production")
+            .await
+            .unwrap();
 
-        let old_cert = mesh.issue_certificate("my-service", "production").await.unwrap();
+        let old_cert = mesh
+            .issue_certificate("my-service", "production")
+            .await
+            .unwrap();
 
         let new_cert = mesh.rotate_certificate(&old_cert.cert_id).await.unwrap();
 
@@ -408,7 +431,10 @@ mod tests {
 
         let old_cert_status = mesh.get_certificate(&old_cert.cert_id).await.unwrap();
         // Old cert should be revoked or still active (implementation dependent)
-        assert!(matches!(old_cert_status.status, CertificateStatus::Revoked | CertificateStatus::Active));
+        assert!(matches!(
+            old_cert_status.status,
+            CertificateStatus::Revoked | CertificateStatus::Active
+        ));
     }
 
     #[tokio::test]
@@ -432,8 +458,12 @@ mod tests {
     async fn test_list_by_namespace() {
         let mesh = ServiceMeshIntegration::new(create_test_config(), create_test_spiffe_config());
 
-        mesh.register_service("service1", "production").await.unwrap();
-        mesh.register_service("service2", "development").await.unwrap();
+        mesh.register_service("service1", "production")
+            .await
+            .unwrap();
+        mesh.register_service("service2", "development")
+            .await
+            .unwrap();
 
         let prod_services = mesh.list_service_identities(Some("production")).await;
         assert_eq!(prod_services.len(), 1);

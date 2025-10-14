@@ -175,7 +175,11 @@ impl GovernanceEngine {
     }
 
     /// Check compliance
-    pub async fn check_compliance(&self, resource_id: &str, context: &HashMap<String, String>) -> Result<()> {
+    pub async fn check_compliance(
+        &self,
+        resource_id: &str,
+        context: &HashMap<String, String>,
+    ) -> Result<()> {
         let policies = self.policies.read().await;
         let exceptions = self.exceptions.read().await;
 
@@ -217,11 +221,13 @@ impl GovernanceEngine {
             if all_conditions_met {
                 match policy.enforcement_level {
                     EnforcementLevel::Blocking => {
-                        self.record_violation(resource_id, &policy.policy_id).await?;
+                        self.record_violation(resource_id, &policy.policy_id)
+                            .await?;
                         return Err(GovernanceError::PolicyViolation(policy.name.clone()));
                     }
                     EnforcementLevel::Warning => {
-                        self.record_violation(resource_id, &policy.policy_id).await?;
+                        self.record_violation(resource_id, &policy.policy_id)
+                            .await?;
                     }
                     EnforcementLevel::Advisory => {
                         // Just log
@@ -235,7 +241,7 @@ impl GovernanceEngine {
 
     async fn record_violation(&self, resource_id: &str, policy_id: &str) -> Result<()> {
         let mut violations = self.violations.write().await;
-        
+
         let violation = GovernanceViolation {
             violation_id: Uuid::new_v4().to_string(),
             policy_id: policy_id.to_string(),
@@ -259,22 +265,34 @@ impl GovernanceEngine {
     }
 
     /// Submit approval
-    pub async fn submit_approval(&self, workflow_id: &str, approver: &str, decision: ApprovalDecision, comment: Option<String>) -> Result<()> {
+    pub async fn submit_approval(
+        &self,
+        workflow_id: &str,
+        approver: &str,
+        decision: ApprovalDecision,
+        comment: Option<String>,
+    ) -> Result<()> {
         let mut workflows = self.workflows.write().await;
-        
+
         let workflow = workflows
             .get_mut(workflow_id)
             .ok_or_else(|| GovernanceError::WorkflowNotFound(workflow_id.to_string()))?;
 
-        if workflow.status != WorkflowStatus::Pending && workflow.status != WorkflowStatus::InProgress {
-            return Err(GovernanceError::InvalidState("Workflow not pending approval".to_string()));
+        if workflow.status != WorkflowStatus::Pending
+            && workflow.status != WorkflowStatus::InProgress
+        {
+            return Err(GovernanceError::InvalidState(
+                "Workflow not pending approval".to_string(),
+            ));
         }
 
         let current_stage = &mut workflow.stages[workflow.current_stage];
-        
+
         // Check if approver is authorized
         if !current_stage.approvers.contains(&approver.to_string()) {
-            return Err(GovernanceError::ApprovalRequired("Not an authorized approver".to_string()));
+            return Err(GovernanceError::ApprovalRequired(
+                "Not an authorized approver".to_string(),
+            ));
         }
 
         // Add approval
@@ -305,7 +323,7 @@ impl GovernanceEngine {
         } else if approvals_count >= current_stage.required_approvals {
             // Move to next stage
             workflow.current_stage += 1;
-            
+
             if workflow.current_stage >= workflow.stages.len() {
                 workflow.status = WorkflowStatus::Approved;
             } else {
@@ -327,7 +345,7 @@ impl GovernanceEngine {
     /// Revoke exception
     pub async fn revoke_exception(&self, exception_id: &str) -> Result<()> {
         let mut exceptions = self.exceptions.write().await;
-        
+
         let exception = exceptions
             .get_mut(exception_id)
             .ok_or_else(|| GovernanceError::PolicyNotFound(exception_id.to_string()))?;
@@ -339,7 +357,7 @@ impl GovernanceEngine {
     /// Get violations
     pub async fn get_violations(&self, resource_id: Option<&str>) -> Vec<GovernanceViolation> {
         let violations = self.violations.read().await;
-        
+
         violations
             .values()
             .filter(|v| {
@@ -356,7 +374,7 @@ impl GovernanceEngine {
     /// Resolve violation
     pub async fn resolve_violation(&self, violation_id: &str, resolution: String) -> Result<()> {
         let mut violations = self.violations.write().await;
-        
+
         let violation = violations
             .get_mut(violation_id)
             .ok_or_else(|| GovernanceError::PolicyNotFound(violation_id.to_string()))?;
@@ -380,10 +398,15 @@ impl GovernanceEngine {
 
         let pending_approvals = workflows
             .values()
-            .filter(|w| w.status == WorkflowStatus::Pending || w.status == WorkflowStatus::InProgress)
+            .filter(|w| {
+                w.status == WorkflowStatus::Pending || w.status == WorkflowStatus::InProgress
+            })
             .count();
 
-        let approved = workflows.values().filter(|w| w.status == WorkflowStatus::Approved).count();
+        let approved = workflows
+            .values()
+            .filter(|w| w.status == WorkflowStatus::Approved)
+            .count();
         let total_workflows = workflows.len();
         let approval_rate = if total_workflows > 0 {
             approved as f64 / total_workflows as f64
@@ -427,7 +450,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_policy() {
         let engine = GovernanceEngine::new();
-        
+
         let policy = GovernancePolicy {
             policy_id: "pol1".to_string(),
             name: "Require Approval".to_string(),
@@ -445,7 +468,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_compliance() {
         let engine = GovernanceEngine::new();
-        
+
         let policy = GovernancePolicy {
             policy_id: "pol1".to_string(),
             name: "Environment Check".to_string(),
@@ -472,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn test_approval_workflow() {
         let engine = GovernanceEngine::new();
-        
+
         let workflow = ApprovalWorkflow {
             workflow_id: "wf1".to_string(),
             name: "Secret Approval".to_string(),
@@ -491,7 +514,10 @@ mod tests {
 
         engine.create_approval_workflow(workflow).await.unwrap();
 
-        engine.submit_approval("wf1", "alice", ApprovalDecision::Approved, None).await.unwrap();
+        engine
+            .submit_approval("wf1", "alice", ApprovalDecision::Approved, None)
+            .await
+            .unwrap();
 
         let workflows = engine.list_workflows().await;
         assert_eq!(workflows[0].status, WorkflowStatus::Approved);
@@ -500,7 +526,7 @@ mod tests {
     #[tokio::test]
     async fn test_grant_exception() {
         let engine = GovernanceEngine::new();
-        
+
         let exception = PolicyException {
             exception_id: "exc1".to_string(),
             policy_id: "pol1".to_string(),
@@ -519,7 +545,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_violation() {
         let engine = GovernanceEngine::new();
-        
+
         let policy = GovernancePolicy {
             policy_id: "pol1".to_string(),
             name: "Test Policy".to_string(),
@@ -545,7 +571,10 @@ mod tests {
         assert_eq!(violations.len(), 1);
 
         let violation_id = violations[0].violation_id.clone();
-        engine.resolve_violation(&violation_id, "Owner assigned".to_string()).await.unwrap();
+        engine
+            .resolve_violation(&violation_id, "Owner assigned".to_string())
+            .await
+            .unwrap();
 
         let violations = engine.get_violations(Some("res1")).await;
         assert!(violations[0].resolved);
@@ -554,7 +583,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_analytics() {
         let engine = GovernanceEngine::new();
-        
+
         let policy = GovernancePolicy {
             policy_id: "pol1".to_string(),
             name: "Test".to_string(),

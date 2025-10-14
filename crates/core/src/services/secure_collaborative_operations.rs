@@ -12,9 +12,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::secure_multi_party_computation::{
-    DKGResult, SMPCProtocol, SMPCSession, SecretShare, ThresholdSignature,
-};
+use super::secure_multi_party_computation::{DKGResult, SMPCProtocol, SMPCSession};
 
 #[derive(Debug, Error)]
 pub enum CollaborationError {
@@ -166,9 +164,9 @@ impl SecureCollaborativeOperations {
     ) -> Result<Vec<DistributedSecretShare>> {
         // 1. Validate policy
         let policies = self.policies.read().await;
-        let policy = policies.get(&request.policy_id).ok_or_else(|| {
-            CollaborationError::PermissionDenied("Policy not found".to_string())
-        })?;
+        let policy = policies
+            .get(&request.policy_id)
+            .ok_or_else(|| CollaborationError::PermissionDenied("Policy not found".to_string()))?;
 
         // Verify requester is allowed
         if !policy.allowed_tenants.contains(&request.requester_tenant) {
@@ -247,9 +245,9 @@ impl SecureCollaborativeOperations {
     ) -> Result<CollaborativeComputeResult> {
         // 1. Validate policy
         let policies = self.policies.read().await;
-        let policy = policies.get(&request.policy_id).ok_or_else(|| {
-            CollaborationError::PermissionDenied("Policy not found".to_string())
-        })?;
+        let policy = policies
+            .get(&request.policy_id)
+            .ok_or_else(|| CollaborationError::PermissionDenied("Policy not found".to_string()))?;
 
         // Verify all participants are allowed
         for participant in &request.participants {
@@ -303,9 +301,9 @@ impl SecureCollaborativeOperations {
     ) -> Result<String> {
         // Validate policy
         let policies = self.policies.read().await;
-        let policy = policies.get(&policy_id).ok_or_else(|| {
-            CollaborationError::PermissionDenied("Policy not found".to_string())
-        })?;
+        let policy = policies
+            .get(&policy_id)
+            .ok_or_else(|| CollaborationError::PermissionDenied("Policy not found".to_string()))?;
 
         for approver in &approvers {
             if !policy.allowed_tenants.contains(approver) {
@@ -382,7 +380,10 @@ impl SecureCollaborativeOperations {
     }
 
     /// Get workflow status
-    pub async fn get_workflow_status(&self, workflow_id: &str) -> Result<ThresholdApprovalWorkflow> {
+    pub async fn get_workflow_status(
+        &self,
+        workflow_id: &str,
+    ) -> Result<ThresholdApprovalWorkflow> {
         self.approval_workflows
             .read()
             .await
@@ -394,7 +395,11 @@ impl SecureCollaborativeOperations {
     }
 
     /// Mock SMPC computation
-    fn mock_smpc_computation(&self, function_name: &str, participants: &[ParticipantInput]) -> Vec<u8> {
+    fn mock_smpc_computation(
+        &self,
+        function_name: &str,
+        participants: &[ParticipantInput],
+    ) -> Vec<u8> {
         // Mock: sum all inputs
         match function_name {
             "sum" => {
@@ -412,7 +417,10 @@ impl SecureCollaborativeOperations {
     /// Get collaboration statistics
     pub async fn get_collaboration_stats(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();
-        stats.insert("active_sessions".to_string(), self.smpc_sessions.read().await.len());
+        stats.insert(
+            "active_sessions".to_string(),
+            self.smpc_sessions.read().await.len(),
+        );
         stats.insert("policies".to_string(), self.policies.read().await.len());
         stats.insert(
             "distributed_shares".to_string(),
@@ -565,7 +573,10 @@ mod tests {
             signed_at: Utc::now(),
         };
 
-        let status = ops.add_approval_signature(&workflow_id, sig1).await.unwrap();
+        let status = ops
+            .add_approval_signature(&workflow_id, sig1)
+            .await
+            .unwrap();
         assert_eq!(status, WorkflowStatus::InProgress);
 
         // Add second approval
@@ -576,7 +587,10 @@ mod tests {
             signed_at: Utc::now(),
         };
 
-        let status = ops.add_approval_signature(&workflow_id, sig2).await.unwrap();
+        let status = ops
+            .add_approval_signature(&workflow_id, sig2)
+            .await
+            .unwrap();
         assert_eq!(status, WorkflowStatus::Approved);
     }
 

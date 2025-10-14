@@ -229,7 +229,8 @@ impl MultiTenantEngine {
             }
             QuotaOperation::DeleteSecret { size_bytes } => {
                 usage.current_secrets = usage.current_secrets.saturating_sub(1);
-                usage.current_storage_bytes = usage.current_storage_bytes.saturating_sub(size_bytes);
+                usage.current_storage_bytes =
+                    usage.current_storage_bytes.saturating_sub(size_bytes);
             }
             QuotaOperation::ApiCall => {
                 if usage.api_calls_last_minute >= tenant.quotas.api_rate_limit_per_minute {
@@ -453,19 +454,28 @@ mod tests {
 
         // Should succeed
         engine
-            .enforce_quota(&tenant.tenant_id, QuotaOperation::CreateSecret { size_bytes: 400 })
+            .enforce_quota(
+                &tenant.tenant_id,
+                QuotaOperation::CreateSecret { size_bytes: 400 },
+            )
             .await
             .unwrap();
 
         // Should succeed
         engine
-            .enforce_quota(&tenant.tenant_id, QuotaOperation::CreateSecret { size_bytes: 400 })
+            .enforce_quota(
+                &tenant.tenant_id,
+                QuotaOperation::CreateSecret { size_bytes: 400 },
+            )
             .await
             .unwrap();
 
         // Should fail - max secrets reached
         let result = engine
-            .enforce_quota(&tenant.tenant_id, QuotaOperation::CreateSecret { size_bytes: 400 })
+            .enforce_quota(
+                &tenant.tenant_id,
+                QuotaOperation::CreateSecret { size_bytes: 400 },
+            )
             .await;
         assert!(result.is_err());
     }
@@ -484,7 +494,12 @@ mod tests {
 
         // No policy exists, should deny
         let result = engine
-            .check_cross_tenant_access(&tenant1.tenant_id, &tenant2.tenant_id, "read", "/secret/path")
+            .check_cross_tenant_access(
+                &tenant1.tenant_id,
+                &tenant2.tenant_id,
+                "read",
+                "/secret/path",
+            )
             .await;
         assert!(result.is_err());
     }
@@ -514,14 +529,24 @@ mod tests {
 
         // Should allow with matching path
         let allowed = engine
-            .check_cross_tenant_access(&tenant1.tenant_id, &tenant2.tenant_id, "read", "/shared/secret")
+            .check_cross_tenant_access(
+                &tenant1.tenant_id,
+                &tenant2.tenant_id,
+                "read",
+                "/shared/secret",
+            )
             .await
             .unwrap();
         assert!(allowed);
 
         // Should deny with non-matching path
         let result = engine
-            .check_cross_tenant_access(&tenant1.tenant_id, &tenant2.tenant_id, "read", "/private/secret")
+            .check_cross_tenant_access(
+                &tenant1.tenant_id,
+                &tenant2.tenant_id,
+                "read",
+                "/private/secret",
+            )
             .await;
         assert!(result.is_err());
     }
@@ -535,7 +560,10 @@ mod tests {
             .unwrap();
 
         engine
-            .enforce_quota(&tenant.tenant_id, QuotaOperation::CreateSecret { size_bytes: 500 })
+            .enforce_quota(
+                &tenant.tenant_id,
+                QuotaOperation::CreateSecret { size_bytes: 500 },
+            )
             .await
             .unwrap();
 

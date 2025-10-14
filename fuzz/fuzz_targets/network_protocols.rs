@@ -1,11 +1,15 @@
 #![no_main]
 
+use chrono::Utc;
 use libfuzzer_sys::fuzz_target;
-use secreton_core::services::api_gateway::{ApiRequest, ApiResponse, Route, RateLimit, RateLimitAlgorithm};
-use secreton_core::services::request_forwarding::{ForwardRequest, ForwardResponse, ClusterNode, NodeRole};
+use secreton_core::services::api_gateway::{
+    ApiRequest, ApiResponse, RateLimit, RateLimitAlgorithm, Route,
+};
+use secreton_core::services::request_forwarding::{
+    ClusterNode, ForwardRequest, ForwardResponse, NodeRole,
+};
 use serde_json;
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 
 fuzz_target!(|data: &[u8]| {
     // Test network protocol structures and serialization

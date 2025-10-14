@@ -4,15 +4,15 @@
 //! and integration with external identity providers.
 
 use axum::{
+    Json,
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{
-    decode, encode, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation,
-};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -24,8 +24,8 @@ pub struct Claims {
     pub email: String,            // User email
     pub roles: Vec<String>,       // User roles
     pub permissions: Vec<String>, // Specific permissions
-    pub exp: usize,               // Expiration time
-    pub iat: usize,               // Issued at
+    pub iat: u64,                 // Issued at
+    pub exp: u64,                 // Expires at
     pub iss: String,              // Issuer
     pub aud: String,              // Audience
     pub jti: String,              // JWT ID
@@ -139,24 +139,14 @@ impl Permission {
     }
 }
 
-/// Authentication service
-#[derive(Clone)]
+/// Authentication service for JWT handling
 pub struct AuthService {
     config: AuthConfig,
-    encoding_key: EncodingKey,
-    decoding_key: DecodingKey,
 }
 
 impl AuthService {
     pub fn new(config: AuthConfig) -> Self {
-        let encoding_key = EncodingKey::from_secret(config.jwt_secret.as_bytes());
-        let decoding_key = DecodingKey::from_secret(config.jwt_secret.as_bytes());
-
-        Self {
-            config,
-            encoding_key,
-            decoding_key,
-        }
+        Self { config }
     }
 
     /// Generate JWT token for a user
@@ -179,25 +169,37 @@ impl AuthService {
             email: email.to_string(),
             roles,
             permissions,
-            exp: exp.timestamp() as usize,
-            iat: now.timestamp() as usize,
+            iat: now.timestamp() as u64,
+            exp: exp.timestamp() as u64,
             iss: self.config.issuer.clone(),
             aud: self.config.audience.clone(),
             jti: Uuid::new_v4().to_string(),
         };
 
-        encode(&Header::default(), &claims, &self.encoding_key)
-            .map_err(|e| AuthError::TokenGeneration(e.to_string()))
+        self.create_jwt(&claims)
     }
 
     /// Validate and decode JWT token
-    pub fn validate_token(&self, token: &str) -> Result<TokenData<Claims>, AuthError> {
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.set_issuer(&[&self.config.issuer]);
-        validation.set_audience(&[&self.config.audience]);
+    pub fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
+        let claims = self.verify_jwt(token)?;
 
-        decode::<Claims>(token, &self.decoding_key, &validation)
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))
+        // Check issuer
+        if claims.iss != self.config.issuer {
+            return Err(AuthError::TokenValidation("Invalid issuer".to_string()));
+        }
+
+        // Check audience
+        if claims.aud != self.config.audience {
+            return Err(AuthError::TokenValidation("Invalid audience".to_string()));
+        }
+
+        // Check expiration
+        let now = Utc::now().timestamp() as u64;
+        if claims.exp < now {
+            return Err(AuthError::TokenValidation("Token expired".to_string()));
+        }
+
+        Ok(claims)
     }
 
     /// Check if user has required permission
@@ -302,6 +304,62 @@ impl AuthService {
         permissions.dedup();
         permissions
     }
+
+    /// Create JWT token
+    fn create_jwt(&self, claims: &Claims) -> Result<String, AuthError> {
+        let header = r#"{"alg":"HS256","typ":"JWT"}"#;
+        let header_b64 = general_purpose::URL_SAFE_NO_PAD.encode(header);
+
+        let payload =
+            serde_json::to_string(claims).map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+        let payload_b64 = general_purpose::URL_SAFE_NO_PAD.encode(payload);
+
+        let message = format!("{}.{}", header_b64, payload_b64);
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
+            .map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+        mac.update(message.as_bytes());
+        let signature = mac.finalize().into_bytes();
+        let signature_b64 = general_purpose::URL_SAFE_NO_PAD.encode(signature);
+
+        Ok(format!("{}.{}.{}", header_b64, payload_b64, signature_b64))
+    }
+
+    /// Verify JWT token
+    fn verify_jwt(&self, token: &str) -> Result<Claims, AuthError> {
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 {
+            return Err(AuthError::TokenValidation(
+                "Invalid token format".to_string(),
+            ));
+        }
+
+        let header_b64 = parts[0];
+        let payload_b64 = parts[1];
+        let signature_b64 = parts[2];
+
+        let message = format!("{}.{}", header_b64, payload_b64);
+
+        let signature = general_purpose::URL_SAFE_NO_PAD
+            .decode(signature_b64)
+            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
+            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+        mac.update(message.as_bytes());
+
+        mac.verify_slice(&signature)
+            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+
+        let payload = general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+
+        let claims: Claims = serde_json::from_slice(&payload)
+            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+
+        Ok(claims)
+    }
 }
 
 /// Extract bearer token from Authorization header
@@ -385,10 +443,10 @@ mod tests {
 
         let token_data = auth_service.validate_token(&token).unwrap();
 
-        assert_eq!(token_data.claims.sub, "user123");
-        assert_eq!(token_data.claims.name, "Test User");
-        assert_eq!(token_data.claims.email, "test@example.com");
-        assert!(token_data.claims.roles.contains(&"crypto-user".to_string()));
+        assert_eq!(token_data.sub, "user123");
+        assert_eq!(token_data.name, "Test User");
+        assert_eq!(token_data.email, "test@example.com");
+        assert!(token_data.roles.contains(&"crypto-user".to_string()));
     }
 
     #[test]
@@ -405,8 +463,8 @@ mod tests {
                 Permission::Encrypt.as_string(),
                 Permission::Decrypt.as_string(),
             ],
-            exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
-            iat: Utc::now().timestamp() as usize,
+            exp: (Utc::now() + Duration::hours(24)).timestamp() as u64,
+            iat: Utc::now().timestamp() as u64,
             iss: "secreton-vault".to_string(),
             aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
@@ -428,8 +486,8 @@ mod tests {
             email: "admin@example.com".to_string(),
             roles: vec!["admin".to_string()],
             permissions: vec![],
-            exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
-            iat: Utc::now().timestamp() as usize,
+            exp: (Utc::now() + Duration::hours(24)).timestamp() as u64,
+            iat: Utc::now().timestamp() as u64,
             iss: "secreton-vault".to_string(),
             aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
@@ -456,7 +514,7 @@ mod tests {
         let data = auth_service
             .validate_token(&token)
             .expect("token validation");
-        let permissions = data.claims.permissions;
+        let permissions = data.permissions;
 
         assert!(permissions.contains(&Permission::AccessAuditLogs.as_string()));
         assert!(permissions.contains(&Permission::Encrypt.as_string()));

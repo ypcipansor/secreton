@@ -184,7 +184,7 @@ impl KeyRotationConfig {
 impl ManagedKey {
     pub fn new(name: String, key_type: KeyType, config: KeyRotationConfig) -> Self {
         let initial_version = KeyVersion::new(1, vec![0; 32]); // Placeholder key data
-        
+
         Self {
             name,
             key_type,
@@ -209,10 +209,7 @@ impl ManagedKey {
     }
 
     pub fn get_active_versions(&self) -> Vec<&KeyVersion> {
-        self.versions
-            .iter()
-            .filter(|v| v.is_available())
-            .collect()
+        self.versions.iter().filter(|v| v.is_available()).collect()
     }
 
     pub fn should_rotate(&self) -> bool {
@@ -260,7 +257,7 @@ impl KeyRotationService {
     /// Register a key for rotation management
     pub async fn register_key(&self, config: KeyRotationConfig) -> Result<ManagedKey> {
         let mut keys = self.keys.write().await;
-        
+
         if keys.contains_key(&config.key_name) {
             return Err(KeyRotationError::AlreadyExists(config.key_name.clone()));
         }
@@ -280,11 +277,7 @@ impl KeyRotationService {
     }
 
     /// Rotate a key to a new version
-    pub async fn rotate_key(
-        &self,
-        key_name: &str,
-        trigger: RotationTrigger,
-    ) -> Result<u64> {
+    pub async fn rotate_key(&self, key_name: &str, trigger: RotationTrigger) -> Result<u64> {
         // Check if rotation is already in progress
         {
             let status = self.status.read().await;
@@ -333,7 +326,8 @@ impl KeyRotationService {
 
         // Calculate next rotation time if periodic
         if let RotationStrategy::Periodic { period_seconds } = &managed_key.config.strategy {
-            managed_key.next_rotation = Some(Utc::now() + Duration::seconds(*period_seconds as i64));
+            managed_key.next_rotation =
+                Some(Utc::now() + Duration::seconds(*period_seconds as i64));
         }
 
         // Optionally deprecate old version
@@ -384,7 +378,9 @@ impl KeyRotationService {
         drop(keys);
 
         if should_rotate {
-            let new_version = self.rotate_key(key_name, RotationTrigger::Automatic).await?;
+            let new_version = self
+                .rotate_key(key_name, RotationTrigger::Automatic)
+                .await?;
             Ok(Some(new_version))
         } else {
             Ok(None)
@@ -411,7 +407,7 @@ impl KeyRotationService {
     /// Get rotation history
     pub async fn get_history(&self, key_name: Option<&str>, limit: usize) -> Vec<RotationHistory> {
         let history = self.history.read().await;
-        
+
         history
             .iter()
             .filter(|h| key_name.map_or(true, |name| h.key_name == name))
@@ -518,11 +514,13 @@ mod tests {
     #[tokio::test]
     async fn test_register_key() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "transit-key-1".to_string(),
             KeyType::Transit,
-            RotationStrategy::Periodic { period_seconds: 86400 },
+            RotationStrategy::Periodic {
+                period_seconds: 86400,
+            },
         )
         .with_auto_rotate();
 
@@ -535,7 +533,7 @@ mod tests {
     #[tokio::test]
     async fn test_manual_rotation() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "test-key".to_string(),
             KeyType::Transit,
@@ -560,7 +558,7 @@ mod tests {
     #[tokio::test]
     async fn test_usage_based_rotation() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "usage-key".to_string(),
             KeyType::Transit,
@@ -584,7 +582,7 @@ mod tests {
     #[tokio::test]
     async fn test_deprecate_version() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "test-key".to_string(),
             KeyType::Transit,
@@ -592,7 +590,10 @@ mod tests {
         );
 
         service.register_key(config).await.unwrap();
-        service.rotate_key("test-key", RotationTrigger::Manual).await.unwrap();
+        service
+            .rotate_key("test-key", RotationTrigger::Manual)
+            .await
+            .unwrap();
 
         // Deprecate old version
         service.deprecate_version("test-key", 1).await.unwrap();
@@ -606,7 +607,7 @@ mod tests {
     #[tokio::test]
     async fn test_rotation_history() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "test-key".to_string(),
             KeyType::Transit,
@@ -614,10 +615,16 @@ mod tests {
         );
 
         service.register_key(config).await.unwrap();
-        
+
         // Perform two rotations
-        service.rotate_key("test-key", RotationTrigger::Manual).await.unwrap();
-        service.rotate_key("test-key", RotationTrigger::Emergency).await.unwrap();
+        service
+            .rotate_key("test-key", RotationTrigger::Manual)
+            .await
+            .unwrap();
+        service
+            .rotate_key("test-key", RotationTrigger::Emergency)
+            .await
+            .unwrap();
 
         let history = service.get_history(Some("test-key"), 10).await;
         assert_eq!(history.len(), 2);
@@ -630,7 +637,7 @@ mod tests {
     #[tokio::test]
     async fn test_destroy_version() {
         let service = KeyRotationService::new();
-        
+
         let config = KeyRotationConfig::new(
             "test-key".to_string(),
             KeyType::Transit,
@@ -639,7 +646,10 @@ mod tests {
         .with_deletion_allowed();
 
         service.register_key(config).await.unwrap();
-        service.rotate_key("test-key", RotationTrigger::Manual).await.unwrap();
+        service
+            .rotate_key("test-key", RotationTrigger::Manual)
+            .await
+            .unwrap();
 
         // Destroy old version
         service.destroy_version("test-key", 1).await.unwrap();

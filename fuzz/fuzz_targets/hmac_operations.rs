@@ -41,7 +41,7 @@ fuzz_target!(|data: &[u8]| {
         // Verify that MACs are different
         if let (Ok(original_mac), Ok(modified_mac)) = (
             hashing::compute_hmac_sha256(key, message),
-            hashing::compute_hmac_sha256(key, &modified_message)
+            hashing::compute_hmac_sha256(key, &modified_message),
         ) {
             let _macs_different = original_mac != modified_mac;
         }

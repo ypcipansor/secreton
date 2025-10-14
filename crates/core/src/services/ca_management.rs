@@ -60,8 +60,8 @@ pub struct CertificateTemplate {
     pub max_ttl_seconds: i64,
     pub key_type: KeyType,
     pub key_bits: u32,
-    pub key_usage: Vec<String>,      // digitalSignature, keyEncipherment, etc.
-    pub ext_key_usage: Vec<String>,  // serverAuth, clientAuth, etc.
+    pub key_usage: Vec<String>, // digitalSignature, keyEncipherment, etc.
+    pub ext_key_usage: Vec<String>, // serverAuth, clientAuth, etc.
     pub require_cn: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -167,11 +167,9 @@ impl CAManagement {
                 .ok_or_else(|| CAError::CAError("Root CA not found".to_string()))?;
 
             if root_ca.ca_type != CAType::Root {
-                return Err(CAError::CAError(
-                    "Parent CA must be a root CA".to_string(),
-                ));
+                return Err(CAError::CAError("Parent CA must be a root CA".to_string()));
             }
-            
+
             let issuer = root_ca.subject.clone();
             let cert = self.mock_generate_cert(&subject, &root_ca.subject);
             (issuer, cert)
@@ -226,7 +224,11 @@ impl CAManagement {
             .ok_or_else(|| CAError::TemplateError("Template not found".to_string()))?;
 
         // Validate domain
-        if !self.validate_domain(&request.common_name, &template.allowed_domains, template.allow_subdomains) {
+        if !self.validate_domain(
+            &request.common_name,
+            &template.allowed_domains,
+            template.allow_subdomains,
+        ) {
             return Err(CAError::CertificateError(
                 "Domain not allowed by template".to_string(),
             ));
@@ -469,7 +471,10 @@ mod tests {
             max_ttl_seconds: 2592000, // 30 days
             key_type: KeyType::RSA,
             key_bits: 2048,
-            key_usage: vec!["digitalSignature".to_string(), "keyEncipherment".to_string()],
+            key_usage: vec![
+                "digitalSignature".to_string(),
+                "keyEncipherment".to_string(),
+            ],
             ext_key_usage: vec!["serverAuth".to_string()],
             require_cn: true,
             created_at: Utc::now(),
@@ -523,10 +528,7 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        let cert = ca_mgmt
-            .sign_certificate(&ca.ca_id, request)
-            .await
-            .unwrap();
+        let cert = ca_mgmt.sign_certificate(&ca.ca_id, request).await.unwrap();
 
         assert_eq!(cert.common_name, "www.example.com");
         assert!(!cert.revoked);
@@ -574,10 +576,7 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        let cert = ca_mgmt
-            .sign_certificate(&ca.ca_id, request)
-            .await
-            .unwrap();
+        let cert = ca_mgmt.sign_certificate(&ca.ca_id, request).await.unwrap();
 
         ca_mgmt
             .revoke_certificate(&cert.certificate_id, "Key compromised".to_string())
@@ -630,10 +629,7 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        let cert = ca_mgmt
-            .sign_certificate(&ca.ca_id, request)
-            .await
-            .unwrap();
+        let cert = ca_mgmt.sign_certificate(&ca.ca_id, request).await.unwrap();
 
         ca_mgmt
             .revoke_certificate(&cert.certificate_id, "Superseded".to_string())

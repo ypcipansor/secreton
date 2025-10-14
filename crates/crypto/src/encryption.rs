@@ -1,6 +1,6 @@
 //! Symmetric encryption implementations
 
-use crate::{generate_random_bytes, AlgorithmId, CryptoError, CryptoResult};
+use crate::{AlgorithmId, CryptoError, CryptoResult, generate_random_bytes};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use chacha20poly1305::ChaCha20Poly1305;
@@ -33,8 +33,10 @@ impl SymmetricCipher for Aes256GcmCipher {
             });
         }
 
-        let key = Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::InvalidKeyLength {
+            expected: 32,
+            actual: key.len(),
+        })?;
 
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
@@ -64,8 +66,10 @@ impl SymmetricCipher for Aes256GcmCipher {
             return Err(CryptoError::InvalidNonceLength);
         }
 
-        let key = Key::<Aes256Gcm>::from_slice(key);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::InvalidKeyLength {
+            expected: 32,
+            actual: key.len(),
+        })?;
         let nonce = Nonce::from_slice(&encrypted.nonce);
 
         cipher
@@ -86,8 +90,11 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
             });
         }
 
-        let key = chacha20poly1305::Key::from_slice(key);
-        let cipher = ChaCha20Poly1305::new(key);
+        let cipher =
+            ChaCha20Poly1305::new_from_slice(key).map_err(|_| CryptoError::InvalidKeyLength {
+                expected: 32,
+                actual: key.len(),
+            })?;
 
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
@@ -117,8 +124,11 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
             return Err(CryptoError::InvalidNonceLength);
         }
 
-        let key = chacha20poly1305::Key::from_slice(key);
-        let cipher = ChaCha20Poly1305::new(key);
+        let cipher =
+            ChaCha20Poly1305::new_from_slice(key).map_err(|_| CryptoError::InvalidKeyLength {
+                expected: 32,
+                actual: key.len(),
+            })?;
         let nonce = chacha20poly1305::Nonce::from_slice(&encrypted.nonce);
 
         cipher

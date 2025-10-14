@@ -7,7 +7,8 @@
 mod comprehensive_tests {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
+    use serde_json::Value;
 
     /// Test all secrets engines are properly registered and functional
     #[tokio::test]
@@ -16,10 +17,10 @@ mod comprehensive_tests {
 
         // Test KV Engine
         let kv_engine = Kvv2Engine::new();
-        let kv_data = serde_json::json!({"key": "value", "number": 42}).as_object().unwrap().clone();
-        let kv_result = kv_engine
-            .write("test/kv", kv_data, None)
-            .await;
+        let mut kv_data = HashMap::new();
+        kv_data.insert("key".to_string(), Value::String("value".to_string()));
+        kv_data.insert("number".to_string(), Value::Number(42.into()));
+        let kv_result = kv_engine.write("test/kv", kv_data, None).await;
         assert!(kv_result.is_ok());
 
         // Test Transit Engine
@@ -67,7 +68,6 @@ mod comprehensive_tests {
     /// Test all storage backends are properly implemented
     #[tokio::test]
     async fn test_all_storage_backends() {
-        use secreton_storage::backends::*;
 
         // Test that all storage backends exist
         let backends = vec![
@@ -134,7 +134,6 @@ mod comprehensive_tests {
     /// Test clustering and high availability features
     #[tokio::test]
     async fn test_clustering_features() {
-        use secreton_core::services::integrated_storage::*;
 
         // Test Raft consensus
         println!("Testing Raft consensus components");
@@ -154,7 +153,6 @@ mod comprehensive_tests {
     /// Test enterprise features
     #[tokio::test]
     async fn test_enterprise_features() {
-        use secreton_core::services::namespaces::*;
 
         // Test namespace functionality
         println!("Testing namespace functionality");
@@ -174,7 +172,6 @@ mod comprehensive_tests {
     /// Test monitoring and telemetry features
     #[tokio::test]
     async fn test_monitoring_features() {
-        use secreton_core::services::monitoring::*;
 
         // Test metrics collection
         println!("Testing metrics collection");
@@ -232,7 +229,6 @@ mod comprehensive_tests {
     /// Test error handling and edge cases
     #[tokio::test]
     async fn test_error_handling() {
-        use secreton_core::error::*;
 
         // Test that error types are properly defined
         println!("Testing error handling structures");
@@ -247,7 +243,6 @@ mod comprehensive_tests {
     /// Test security features
     #[tokio::test]
     async fn test_security_features() {
-        use secreton_core::services::seal::*;
 
         // Test seal/unseal functionality
         println!("Testing seal/unseal functionality");
@@ -319,28 +314,28 @@ mod comprehensive_tests {
 
         println!("✅ Concurrent operations verified");
     }
-}
 
-// Summary test that runs all major feature tests
-#[tokio::test]
-async fn test_comprehensive_feature_coverage() {
-    println!("🧪 Running comprehensive feature coverage test");
+    // Summary test that runs all major feature tests
+    #[tokio::test]
+    async fn test_comprehensive_feature_coverage() {
+        println!("🧪 Running comprehensive feature coverage test");
 
-    // Run all major feature tests
-    test_all_secrets_engines_functional().await;
-    test_all_authentication_methods().await;
-    test_all_storage_backends().await;
-    // test_shamir_secret_sharing().await; // Commented out - uses non-existent ShamirMath API
-    test_clustering_features().await;
-    test_enterprise_features().await;
-    test_monitoring_features().await;
-    test_api_features().await;
-    test_performance_characteristics().await;
-    test_error_handling().await;
-    test_security_features().await;
-    test_full_integration_workflow().await;
-    test_concurrent_operations().await;
+        // Run all major feature tests
+        test_all_secrets_engines_functional();
+        test_all_authentication_methods();
+        test_all_storage_backends();
+        // test_shamir_secret_sharing(); // Commented out - uses non-existent ShamirMath API
+        test_clustering_features();
+        test_enterprise_features();
+        test_monitoring_features();
+        test_api_features();
+        test_performance_characteristics();
+        test_error_handling();
+        test_security_features();
+        test_full_integration_workflow();
+        test_concurrent_operations();
 
-    println!("🎉 ALL COMPREHENSIVE TESTS PASSED!");
-    println!("✅ Secreton is production-ready with full feature coverage");
+        println!("🎉 ALL COMPREHENSIVE TESTS PASSED!");
+        println!("✅ Secreton is production-ready with full feature coverage");
+    }
 }

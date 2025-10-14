@@ -9,49 +9,61 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Test PQC provider creation
-    let _mldsa_provider = pqc::create_mldsa_provider();
-    let _mlkem_provider = pqc::create_mlkem_provider();
-    let _falcon_provider = pqc::create_falcon_provider();
+    let _mldsa_provider =
+        pqc::PQCRegistry::create_mldsa_provider(crate::pqc::mldsa::MLDsaVariant::MLDsa65);
+    let _mlkem_provider =
+        pqc::PQCRegistry::create_mlkem_provider(crate::pqc::mlkem::MLKemVariant::MLKem768);
+    let _falcon_provider =
+        pqc::PQCRegistry::create_falcon_provider(crate::pqc::falcon::FalconVariant::Falcon512);
 
     // Test available algorithms
-    let _algorithms = pqc::get_available_algorithms();
+    let _algorithms = pqc::PQCRegistry::get_available_algorithms();
 
     // Test algorithm characteristics
-    let _characteristics = pqc::get_algorithm_characteristics();
+    let _characteristics = pqc::PQCRegistry::get_algorithm_characteristics();
 
     // Test provider creation by name
-    let algorithm_names = ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87", "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024", "Falcon-512", "Falcon-1024"];
+    let algorithm_names = [
+        "ML-DSA-44",
+        "ML-DSA-65",
+        "ML-DSA-87",
+        "ML-KEM-512",
+        "ML-KEM-768",
+        "ML-KEM-1024",
+        "Falcon-512",
+        "Falcon-1024",
+    ];
     for name in &algorithm_names {
-        let _provider = pqc::create_provider_by_name(name);
+        let _provider = pqc::PQCRegistry::create_provider_by_name(name);
     }
 
     // Test with actual data if we can create providers
-    if let Ok(provider) = pqc::create_mldsa_provider() {
-        // Test key generation
-        let _keypair = provider.generate_keypair();
+    let mldsa_provider =
+        pqc::PQCRegistry::create_mldsa_provider(crate::pqc::mldsa::MLDsaVariant::MLDsa65);
+    // Test key generation
+    let _keypair = mldsa_provider.keypair_generate();
 
-        // Test signing if keypair generation succeeds
-        if let Ok(keypair) = provider.generate_keypair() {
-            let _signature = provider.sign(&keypair, data);
+    // Test signing if keypair generation succeeds
+    if let Ok((public_key, private_key)) = mldsa_provider.keypair_generate() {
+        let _signature = mldsa_provider.sign(data, &private_key);
 
-            // Test verification
-            if let Ok(signature) = provider.sign(&keypair, data) {
-                let _verify = provider.verify(&keypair, data, &signature);
-            }
+        // Test verification
+        if let Ok(signature) = mldsa_provider.sign(data, &private_key) {
+            let _verify = mldsa_provider.verify(data, &signature, &public_key);
         }
     }
 
-    if let Ok(provider) = pqc::create_mlkem_provider() {
-        // Test key encapsulation
-        let _keypair = provider.generate_keypair();
+    let mlkem_provider =
+        pqc::PQCRegistry::create_mlkem_provider(crate::pqc::mlkem::MLKemVariant::MLKem768);
+    // Test key encapsulation
+    let _keypair = mlkem_provider.keypair_generate();
 
-        if let Ok(keypair) = provider.generate_keypair() {
-            let _encapsulated = provider.encapsulate(&keypair);
+    if let Ok((public_key, private_key)) = mlkem_provider.keypair_generate() {
+        let _encapsulated = mlkem_provider.encapsulate(&public_key);
 
-            // Test decapsulation
-            if let Ok((shared_secret, ciphertext)) = provider.encapsulate(&keypair) {
-                let _decapsulated = provider.decapsulate(&keypair, &ciphertext);
-            }
+        // Test decapsulation
+        if let Ok((shared_secret, ciphertext)) = mlkem_provider.encapsulate(&public_key) {
+            let _decapsulated = mlkem_provider.decapsulate(&private_key, &ciphertext);
         }
     }
 });

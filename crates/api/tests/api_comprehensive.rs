@@ -2,20 +2,22 @@
 //!
 //! Tests for HTTP API handlers, middleware, services, and integration
 
-use secreton_api::{create_api_router, ApiState};
+use secreton_api::{ApiState, create_api_router, KVApiState, TransitApiState, KVEngine};
+use secreton_crypto::transit::TransitEngine;
 
-async fn create_test_app() -> axum::Router {
+async fn create_test_app() -> axum::Router<ApiState> {
     // Create a simple test state for basic API testing
-    use secreton_api::{KVApiState, TransitApiState};
-    use secreton_core::services::secrets::{Kvv2SecretsEngine, TransitEngine};
-    let api_state = ApiState {
-        transit: TransitApiState {
+    let api_state = ApiState::new(
+        TransitApiState {
             engine: std::sync::Arc::new(TransitEngine::new()),
         },
-        kv: KVApiState {
-            engine: std::sync::Arc::new(Kvv2SecretsEngine::new()),
+        KVApiState {
+            engine: std::sync::Arc::new(KVEngine::new()),
         },
-    };
+        secreton_api::performance_optimizer::OptimizationLevel::Balanced,
+    )
+    .await
+    .unwrap();
 
     // Create basic API router for testing
     create_api_router(api_state)
@@ -63,16 +65,19 @@ mod api_tests {
     #[tokio::test]
     async fn test_router_creation() {
         // Test that API server can be initialized without errors
-        use secreton_api::{KVApiState, TransitApiState};
-        use secreton_core::services::secrets::{Kvv2SecretsEngine, TransitEngine};
-        let api_state = ApiState {
-            transit: TransitApiState {
+        use secreton_core::services::secrets::Kvv2Engine;
+        use secreton_crypto::transit::TransitEngine;
+        let api_state = ApiState::new(
+            TransitApiState {
                 engine: std::sync::Arc::new(TransitEngine::new()),
             },
-            kv: KVApiState {
-                engine: std::sync::Arc::new(Kvv2SecretsEngine::new()),
+            KVApiState {
+                engine: std::sync::Arc::new(KVEngine::new()),
             },
-        };
+            secreton_api::performance_optimizer::OptimizationLevel::Balanced,
+        )
+        .await
+        .unwrap();
 
         let _app = create_api_router(api_state);
         // Router should be created successfully

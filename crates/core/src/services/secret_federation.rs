@@ -3,7 +3,7 @@
 //! Provides cross-region secret replication with conflict resolution,
 //! federation topology management, and sync status tracking.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -390,7 +390,11 @@ impl SecretFederation {
             .map(|(region, replica)| (region.clone(), replica.version))
             .collect();
 
-        let unique_versions: Vec<_> = versions.values().collect::<std::collections::HashSet<_>>().into_iter().collect();
+        let unique_versions: Vec<_> = versions
+            .values()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
 
         if unique_versions.len() > 1 {
             let conflict = ConflictRecord {

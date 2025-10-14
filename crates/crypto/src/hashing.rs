@@ -172,8 +172,8 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], expected_mac: &[u8]) -> Crypt
 pub mod password {
     use super::*;
     use argon2::{
-        password_hash::{rand_core::OsRng, SaltString},
         Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+        password_hash::{SaltString, rand_core::OsRng},
     };
     use pbkdf2::pbkdf2_hmac;
     use sha2::Sha256;

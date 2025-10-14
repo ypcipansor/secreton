@@ -23,9 +23,9 @@ pub type Result<T> = std::result::Result<T, CacheError>;
 /// Eviction policy
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EvictionPolicy {
-    LRU,  // Least Recently Used
-    LFU,  // Least Frequently Used
-    TTL,  // Time To Live based
+    LRU, // Least Recently Used
+    LFU, // Least Frequently Used
+    TTL, // Time To Live based
 }
 
 /// Cache configuration
@@ -42,8 +42,8 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             max_size_mb: 100,
-            default_ttl_secs: 300,  // 5 minutes
-            max_ttl_secs: 3600,     // 1 hour
+            default_ttl_secs: 300, // 5 minutes
+            max_ttl_secs: 3600,    // 1 hour
             eviction_policy: EvictionPolicy::LRU,
             enable_metrics: true,
         }

@@ -21,10 +21,9 @@ fuzz_target!(|data: &[u8]| {
     let metadata = &data[token_end..];
 
     // Test username/password authentication
-    if let (Ok(username_str), Ok(password_str)) = (
-        std::str::from_utf8(username),
-        std::str::from_utf8(password)
-    ) {
+    if let (Ok(username_str), Ok(password_str)) =
+        (std::str::from_utf8(username), std::str::from_utf8(password))
+    {
         let mut credentials = HashMap::new();
         credentials.insert("username".to_string(), username_str.to_string());
         credentials.insert("password".to_string(), password_str.to_string());

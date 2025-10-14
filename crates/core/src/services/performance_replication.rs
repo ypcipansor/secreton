@@ -263,7 +263,7 @@ impl PerformanceReplication {
                     "Only active replicas can be promoted".to_string(),
                 ));
             }
-            
+
             replica.endpoint.clone()
         };
 
@@ -365,12 +365,20 @@ mod tests {
 
         // Record operations
         replication
-            .record_operation(OperationType::Write, "/secret/data/app1".to_string(), Some(vec![1, 2, 3]))
+            .record_operation(
+                OperationType::Write,
+                "/secret/data/app1".to_string(),
+                Some(vec![1, 2, 3]),
+            )
             .await
             .unwrap();
 
         replication
-            .record_operation(OperationType::Write, "/secret/data/app2".to_string(), Some(vec![4, 5, 6]))
+            .record_operation(
+                OperationType::Write,
+                "/secret/data/app2".to_string(),
+                Some(vec![4, 5, 6]),
+            )
             .await
             .unwrap();
 

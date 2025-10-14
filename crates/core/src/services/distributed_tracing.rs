@@ -333,12 +333,12 @@ impl DistributedTracing {
         let total_spans = spans.len() + active_spans.len();
         let completed_spans = spans.len();
         let active_spans_count = active_spans.len();
-        let error_spans = spans.iter().filter(|s| s.status == SpanStatus::Error).count();
-
-        let total_duration_ms: u64 = spans
+        let error_spans = spans
             .iter()
-            .filter_map(|s| s.duration_ms)
-            .sum();
+            .filter(|s| s.status == SpanStatus::Error)
+            .count();
+
+        let total_duration_ms: u64 = spans.iter().filter_map(|s| s.duration_ms).sum();
 
         let avg_duration_ms = if completed_spans > 0 {
             total_duration_ms as f64 / completed_spans as f64

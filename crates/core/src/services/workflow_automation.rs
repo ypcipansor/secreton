@@ -131,26 +131,36 @@ impl WorkflowAutomation {
 
     fn validate_dag(&self, dag: &WorkflowDAG) -> Result<()> {
         if dag.nodes.is_empty() {
-            return Err(WorkflowError::InvalidWorkflow("No nodes defined".to_string()));
+            return Err(WorkflowError::InvalidWorkflow(
+                "No nodes defined".to_string(),
+            ));
         }
 
         let node_ids: Vec<_> = dag.nodes.iter().map(|n| n.node_id.as_str()).collect();
         if !node_ids.contains(&dag.start_node.as_str()) {
-            return Err(WorkflowError::InvalidWorkflow("Start node not found".to_string()));
+            return Err(WorkflowError::InvalidWorkflow(
+                "Start node not found".to_string(),
+            ));
         }
 
         Ok(())
     }
 
     /// Execute workflow
-    pub async fn execute_workflow(&self, workflow_id: &str, context: HashMap<String, String>) -> Result<WorkflowExecution> {
+    pub async fn execute_workflow(
+        &self,
+        workflow_id: &str,
+        context: HashMap<String, String>,
+    ) -> Result<WorkflowExecution> {
         let workflows = self.workflows.read().await;
         let workflow = workflows
             .get(workflow_id)
             .ok_or_else(|| WorkflowError::WorkflowNotFound(workflow_id.to_string()))?;
 
         if !workflow.enabled {
-            return Err(WorkflowError::ExecutionFailed("Workflow is disabled".to_string()));
+            return Err(WorkflowError::ExecutionFailed(
+                "Workflow is disabled".to_string(),
+            ));
         }
 
         let execution_id = Uuid::new_v4().to_string();
@@ -177,7 +187,11 @@ impl WorkflowAutomation {
         Ok(execution)
     }
 
-    async fn execute_dag(&self, dag: &WorkflowDAG, execution: &mut WorkflowExecution) -> Result<()> {
+    async fn execute_dag(
+        &self,
+        dag: &WorkflowDAG,
+        execution: &mut WorkflowExecution,
+    ) -> Result<()> {
         let mut current_node_id = dag.start_node.clone();
 
         loop {
@@ -204,7 +218,11 @@ impl WorkflowAutomation {
         Ok(())
     }
 
-    async fn execute_action(&self, action: &WorkflowAction, _execution: &mut WorkflowExecution) -> Result<()> {
+    async fn execute_action(
+        &self,
+        action: &WorkflowAction,
+        _execution: &mut WorkflowExecution,
+    ) -> Result<()> {
         // Mock action execution
         match action {
             WorkflowAction::CreateSecret(path) => {
@@ -283,20 +301,18 @@ mod tests {
     #[tokio::test]
     async fn test_create_workflow() {
         let automation = WorkflowAutomation::new();
-        
+
         let workflow = Workflow {
             workflow_id: "wf1".to_string(),
             name: "Test Workflow".to_string(),
             description: "Test".to_string(),
             dag: WorkflowDAG {
-                nodes: vec![
-                    WorkflowNode {
-                        node_id: "node1".to_string(),
-                        action: WorkflowAction::CreateSecret("/secret/test".to_string()),
-                        conditions: vec![],
-                        timeout_seconds: Some(30),
-                    },
-                ],
+                nodes: vec![WorkflowNode {
+                    node_id: "node1".to_string(),
+                    action: WorkflowAction::CreateSecret("/secret/test".to_string()),
+                    conditions: vec![],
+                    timeout_seconds: Some(30),
+                }],
                 edges: vec![],
                 start_node: "node1".to_string(),
             },
@@ -312,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_workflow() {
         let automation = WorkflowAutomation::new();
-        
+
         let workflow = Workflow {
             workflow_id: "wf1".to_string(),
             name: "Test Workflow".to_string(),
@@ -332,13 +348,11 @@ mod tests {
                         timeout_seconds: Some(10),
                     },
                 ],
-                edges: vec![
-                    WorkflowEdge {
-                        from_node: "node1".to_string(),
-                        to_node: "node2".to_string(),
-                        condition: None,
-                    },
-                ],
+                edges: vec![WorkflowEdge {
+                    from_node: "node1".to_string(),
+                    to_node: "node2".to_string(),
+                    condition: None,
+                }],
                 start_node: "node1".to_string(),
             },
             triggers: vec![WorkflowTrigger::ManualTrigger],
@@ -348,8 +362,11 @@ mod tests {
 
         automation.create_workflow(workflow).await.unwrap();
 
-        let execution = automation.execute_workflow("wf1", HashMap::new()).await.unwrap();
-        
+        let execution = automation
+            .execute_workflow("wf1", HashMap::new())
+            .await
+            .unwrap();
+
         assert_eq!(execution.status, ExecutionStatus::Completed);
         assert_eq!(execution.completed_nodes.len(), 2);
     }
@@ -357,20 +374,18 @@ mod tests {
     #[tokio::test]
     async fn test_pause_resume_workflow() {
         let automation = WorkflowAutomation::new();
-        
+
         let workflow = Workflow {
             workflow_id: "wf1".to_string(),
             name: "Test".to_string(),
             description: "Test".to_string(),
             dag: WorkflowDAG {
-                nodes: vec![
-                    WorkflowNode {
-                        node_id: "node1".to_string(),
-                        action: WorkflowAction::CreateSecret("/secret/test".to_string()),
-                        conditions: vec![],
-                        timeout_seconds: None,
-                    },
-                ],
+                nodes: vec![WorkflowNode {
+                    node_id: "node1".to_string(),
+                    action: WorkflowAction::CreateSecret("/secret/test".to_string()),
+                    conditions: vec![],
+                    timeout_seconds: None,
+                }],
                 edges: vec![],
                 start_node: "node1".to_string(),
             },
@@ -380,34 +395,47 @@ mod tests {
         };
 
         automation.create_workflow(workflow).await.unwrap();
-        let execution = automation.execute_workflow("wf1", HashMap::new()).await.unwrap();
+        let execution = automation
+            .execute_workflow("wf1", HashMap::new())
+            .await
+            .unwrap();
 
-        automation.pause_workflow(&execution.execution_id).await.unwrap();
-        let status = automation.get_workflow_status(&execution.execution_id).await.unwrap();
+        automation
+            .pause_workflow(&execution.execution_id)
+            .await
+            .unwrap();
+        let status = automation
+            .get_workflow_status(&execution.execution_id)
+            .await
+            .unwrap();
         assert_eq!(status.status, ExecutionStatus::Paused);
 
-        automation.resume_workflow(&execution.execution_id).await.unwrap();
-        let status = automation.get_workflow_status(&execution.execution_id).await.unwrap();
+        automation
+            .resume_workflow(&execution.execution_id)
+            .await
+            .unwrap();
+        let status = automation
+            .get_workflow_status(&execution.execution_id)
+            .await
+            .unwrap();
         assert_eq!(status.status, ExecutionStatus::Running);
     }
 
     #[tokio::test]
     async fn test_get_execution_history() {
         let automation = WorkflowAutomation::new();
-        
+
         let workflow = Workflow {
             workflow_id: "wf1".to_string(),
             name: "Test".to_string(),
             description: "Test".to_string(),
             dag: WorkflowDAG {
-                nodes: vec![
-                    WorkflowNode {
-                        node_id: "node1".to_string(),
-                        action: WorkflowAction::CreateSecret("/test".to_string()),
-                        conditions: vec![],
-                        timeout_seconds: None,
-                    },
-                ],
+                nodes: vec![WorkflowNode {
+                    node_id: "node1".to_string(),
+                    action: WorkflowAction::CreateSecret("/test".to_string()),
+                    conditions: vec![],
+                    timeout_seconds: None,
+                }],
                 edges: vec![],
                 start_node: "node1".to_string(),
             },
@@ -417,8 +445,14 @@ mod tests {
         };
 
         automation.create_workflow(workflow).await.unwrap();
-        automation.execute_workflow("wf1", HashMap::new()).await.unwrap();
-        automation.execute_workflow("wf1", HashMap::new()).await.unwrap();
+        automation
+            .execute_workflow("wf1", HashMap::new())
+            .await
+            .unwrap();
+        automation
+            .execute_workflow("wf1", HashMap::new())
+            .await
+            .unwrap();
 
         let history = automation.get_execution_history("wf1").await;
         assert_eq!(history.len(), 2);
@@ -427,20 +461,18 @@ mod tests {
     #[tokio::test]
     async fn test_list_workflows() {
         let automation = WorkflowAutomation::new();
-        
+
         let workflow = Workflow {
             workflow_id: "wf1".to_string(),
             name: "Test".to_string(),
             description: "Test".to_string(),
             dag: WorkflowDAG {
-                nodes: vec![
-                    WorkflowNode {
-                        node_id: "node1".to_string(),
-                        action: WorkflowAction::CreateSecret("/test".to_string()),
-                        conditions: vec![],
-                        timeout_seconds: None,
-                    },
-                ],
+                nodes: vec![WorkflowNode {
+                    node_id: "node1".to_string(),
+                    action: WorkflowAction::CreateSecret("/test".to_string()),
+                    conditions: vec![],
+                    timeout_seconds: None,
+                }],
                 edges: vec![],
                 start_node: "node1".to_string(),
             },

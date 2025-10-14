@@ -165,7 +165,9 @@ impl PluginSystem {
     pub async fn load_plugin(&self, plugin: Plugin) -> Result<String> {
         // Validate plugin
         if plugin.name.is_empty() {
-            return Err(PluginError::InvalidPlugin("Name cannot be empty".to_string()));
+            return Err(PluginError::InvalidPlugin(
+                "Name cannot be empty".to_string(),
+            ));
         }
 
         // Check dependencies
@@ -285,9 +287,9 @@ impl PluginSystem {
                 // Update average execution time
                 let total_time = plugin_stats.average_execution_time_ms
                     * (plugin_stats.total_executions - 1) as f64;
-                plugin_stats.average_execution_time_ms =
-                    (total_time + result.execution_time_ms as f64)
-                        / plugin_stats.total_executions as f64;
+                plugin_stats.average_execution_time_ms = (total_time
+                    + result.execution_time_ms as f64)
+                    / plugin_stats.total_executions as f64;
             }
         }
 
@@ -400,9 +402,7 @@ impl PluginSystem {
         let registry = self.registry.read().await;
         registry
             .values()
-            .filter(|entry| {
-                entry.name.contains(query) || entry.plugin_id.contains(query)
-            })
+            .filter(|entry| entry.name.contains(query) || entry.plugin_id.contains(query))
             .cloned()
             .collect()
     }
@@ -503,7 +503,10 @@ mod tests {
             timestamp: Utc::now(),
         };
 
-        let results = system.execute_hook(HookType::PreRead, context).await.unwrap();
+        let results = system
+            .execute_hook(HookType::PreRead, context)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].success);
     }
@@ -511,7 +514,7 @@ mod tests {
     #[tokio::test]
     async fn test_plugin_dependencies() {
         let system = PluginSystem::new();
-        
+
         // Load base plugin
         let base_plugin = Plugin {
             plugin_id: String::new(),
@@ -579,7 +582,10 @@ mod tests {
             timestamp: Utc::now(),
         };
 
-        system.execute_hook(HookType::PreRead, context).await.unwrap();
+        system
+            .execute_hook(HookType::PreRead, context)
+            .await
+            .unwrap();
 
         let stats = system.get_plugin_stats(&plugin_id).await.unwrap();
         assert_eq!(stats.total_executions, 1);

@@ -11,17 +11,17 @@ members = [
     "crates/core/audit_log",
     "crates/core/granular_revocation",
     "crates/core/secret_versioning",
-    "fuzz"
+    # "fuzz"
 ]
 
 [workspace.package]
 version = "1.0.0"
 edition = "2024"
-authors = ["Cipherce Security Team <security@cipherce.io>"]
+authors = ["SIMPelv2 Team <security@kejaksaan.go.id>"]
 license = "Apache-2.0"
-repository = "https://github.com/analisaperlengkapan/secreton"
-homepage = "https://cipherce.io/secreton"
-description = "Advanced Security Vault System with Quantum-Safe Cryptography by Cipherce"
+repository = "https://github.com/analisaperlengkapan/simpel2"
+homepage = "https://simpel.kejaksaan.go.id"
+description = "Advanced Security Vault System with Quantum-Safe Cryptography for SIMPelv2"
 keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
 rust-version = "1.90"
@@ -36,18 +36,18 @@ audit-log = { path = "crates/core/audit_log" }
 granular-revocation = { path = "crates/core/granular_revocation" }
 secret-versioning = { path = "crates/core/secret_versioning" }
 # Core dependencies
-tokio = { version = "1.40", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-anyhow = "1.0"
-thiserror = "2.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }  # Updated to fix ANSI escape vulnerability
-uuid = { version = "1.10", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-bincode = "2.0"
-zeroize = { version = "1.8.1", features = ["zeroize_derive", "aarch64"] }  # Secure memory zeroing (audited)
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+tokio = { version = "1.47.1", features = ["full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.140"
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+uuid = { version = "1.11.1", features = ["v4", "serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
+bincode = "1.3.3"
+zeroize = { version = "1.8.1", features = ["zeroize_derive", "aarch64"] }
+redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
 
 # Testing dependencies
 criterion = { version = "0.7", features = ["html_reports"] }
@@ -56,17 +56,17 @@ wiremock = { version = "0.6.5", default-features = false }
 proptest = { version = "1.5", default-features = false, features = ["std"] }
 
 # Async runtime
-async-trait = "0.1"
-futures = "0.3"
-futures-util = "0.3"
+async-trait = "0.1.89"
+futures = "0.3.31"
+futures-util = "0.3.31"
 
 # Cryptography - Pure Rust, Audited by Security Experts
 # Using RustCrypto suite - audited, memory-safe, zero C dependencies
 ring = "0.17.14"  # Audited cryptography library (latest stable)
-rustls = "0.23.22"   # Pure Rust TLS 1.2/1.3 (audited, no OpenSSL)
-rustls-webpki = "0.102"  # Pure Rust X.509 certificate validation
-rustls-pemfile = "2.2"  # PEM file handling
-webpki-roots = "0.26"  # Mozilla CA certificates bundle
+rustls = "0.23.32"   # Pure Rust TLS 1.2/1.3 (audited, no OpenSSL)
+rustls-webpki = "0.103.7"  # Pure Rust X.509 certificate validation
+rustls-pemfile = "2.2.0"  # PEM file handling
+webpki-roots = "1.0.2"  # Mozilla CA certificates bundle
 
 # RustCrypto Symmetric Encryption (audited)
 aes-gcm = "0.10.3"  # AES-GCM AEAD
@@ -79,12 +79,12 @@ chacha20poly1305 = "0.10.1"  # ChaCha20-Poly1305 AEAD
 argon2 = "0.5.3"  # Argon2 (winner of Password Hashing Competition)
 pbkdf2 = "0.12.2"  # PBKDF2
 scrypt = "0.11.0"  # scrypt
-bcrypt = "0.15.1"  # bcrypt
+bcrypt = "0.17.1"  # bcrypt
 
 # RustCrypto Hashing (audited)
-sha2 = "0.10.8"  # SHA-2 family
+sha2 = "0.10.9"  # SHA-2 family
 sha3 = "0.10.8"  # SHA-3 family
-blake3 = "1.5.4"  # BLAKE3 (fastest secure hash)
+blake3 = "1.8.2"  # BLAKE3 (fastest secure hash)
 blake2 = "0.10.6"  # BLAKE2
 hmac = "0.12.1"  # HMAC
 hkdf = "0.12.4"  # HKDF key derivation
@@ -99,7 +99,7 @@ data-encoding = "2.6.0"
 rand = "0.8.5"  # Cryptographically secure RNG
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 rand_chacha = "0.3.1"  # ChaCha RNG
-getrandom = "0.2.15"  # OS randomness
+getrandom = "0.3.3"  # OS randomness
 
 # Regex (pure Rust)
 regex = "1.12.1"
@@ -185,8 +185,8 @@ sentry = "0.32"
 sentry-tracing = "0.32"
 
 # Runtime security validation
-bollard = "0.16"  # Docker API for container security
-kube = { version = "0.87", features = ["client", "derive"] }  # Kubernetes integration
+# bollard = "0.16"  # Docker API for container security - temporarily disabled
+# kube = { version = "0.87", features = ["client", "derive"] }  # Kubernetes integration - temporarily disabled
 
 # Health checks and monitoring
 axum-health = "0.1"
@@ -212,16 +212,16 @@ libloading = "0.8.5"  # Dynamic library loading
 flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
 
 # Authentication and crypto utilities (audited)
-jsonwebtoken = "10.0.0"  # JWT (uses RustCrypto)
+# jwt-simple = "0.12"  # JWT (pure Rust, no RSA dependency) - removed due to rsa dependency
 totp-rs = { version = "5.6.0", default-features = false, features = ["otpauth", "qr"] }  # TOTP
 qrcode = "0.14.1"  # QR code generation
 oauth2 = "5.0.0"  # OAuth2 (pure Rust)
 
 # LDAP (with rustls for TLS)
-ldap3 = { version = "0.11.5", default-features = false, features = ["tls-rustls"] }  # Pure Rust TLS
+ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls", "tls-rustls-ring"] }  # Pure Rust TLS
 
 # WebAssembly (pure Rust, audited)
-wasmtime = "28.0.0"  # WASM runtime (pinned for stability)
+wasmtime = "34.0.2"  # WASM runtime (pinned for stability)
 wasmi = "0.32.5"  # Alternative WASM interpreter (lighter)
 
 # HTTP frameworks
@@ -271,26 +271,41 @@ tokio-test = "0.4.4"
 pretty_assertions = "1.4.1"
 criterion-cycles-per-byte = "0.7.0"  # Benchmarking constant-time operations
 
-[profile.release]
-opt-level = 3
-lto = "fat"  # Fat LTO for maximum optimization and security
-codegen-units = 1  # Single codegen unit for better optimization
-strip = true  # Strip symbols
-panic = "abort"  # Abort on panic (smaller binary, no unwinding)
-overflow-checks = true  # Keep overflow checks in release
+# Performance optimization profiles
+[profile.dev]
+# Faster compile times for development
+opt-level = 1                # Light optimization for better dev experience
+debug = true                 # Keep debug info for development
+incremental = true           # Enable incremental compilation
+codegen-units = 256          # Parallel compilation for faster builds
+lto = false                  # Disable LTO in dev for faster incremental builds
+split-debuginfo = "unpacked" # Faster debug builds on Linux/macOS
 
-[profile.release.package."*"]
-opt-level = 3
-overflow-checks = true
+[profile.release]
+# Maximum optimization for production
+opt-level = 3                # Maximum optimization level
+lto = "fat"                  # Full LTO for maximum optimization
+codegen-units = 1            # Single codegen unit for best optimization
+panic = "abort"              # Smaller binary, faster panics
+strip = true                 # Strip symbols for smaller binary
+overflow-checks = true       # Keep overflow checks for security
+debug = false                # No debug info in release
+incremental = false          # Disable incremental for clean release builds
 
 [profile.bench]
 inherits = "release"
 debug = true
 
-[profile.dev]
-opt-level = 0
-debug = true
-incremental = true
+# Optimize dependencies in dev mode for faster runtime
+[profile.dev.package."*"]
+opt-level = 2           # Optimize dependencies while keeping fast compile times
+
+# Optimize specific heavy dependencies
+[profile.dev.package.tokio]
+opt-level = 3           # Tokio benefits from optimization
+
+[profile.dev.package.ring]
+opt-level = 3           # Crypto benefits from optimization
 
 # Security-hardened profile for production deployment
 [profile.security]

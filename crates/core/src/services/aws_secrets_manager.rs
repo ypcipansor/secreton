@@ -139,7 +139,11 @@ impl AWSSecretsManager {
     }
 
     /// Sync secret from AWS
-    pub async fn sync_from_aws(&self, secret_name: &str, vault_path: &str) -> Result<SyncOperation> {
+    pub async fn sync_from_aws(
+        &self,
+        secret_name: &str,
+        vault_path: &str,
+    ) -> Result<SyncOperation> {
         let config = self.config.read().await;
 
         if config.sync_direction == SyncDirection::VaultToAWS {
@@ -386,7 +390,9 @@ mod tests {
             region: "us-east-1".to_string(),
             cross_account_role_arn: None,
             sync_direction: SyncDirection::Bidirectional,
-            rotation_lambda_arn: Some("arn:aws:lambda:us-east-1:123456789012:function:rotate".to_string()),
+            rotation_lambda_arn: Some(
+                "arn:aws:lambda:us-east-1:123456789012:function:rotate".to_string(),
+            ),
             enable_versioning: true,
         }
     }

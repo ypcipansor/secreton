@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
-use warp::{reject, Filter, Rejection, Reply};
+use warp::{Filter, Rejection, Reply, reject};
 
 use crate::error::CoreError;
 // TODO: Re-enable when security modules are implemented

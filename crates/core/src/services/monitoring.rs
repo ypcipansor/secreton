@@ -23,10 +23,10 @@ pub type Result<T> = std::result::Result<T, MonitoringError>;
 /// Metric type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MetricType {
-    Counter,      // Monotonically increasing counter
-    Gauge,        // Value that can go up or down
-    Histogram,    // Distribution of observations
-    Summary,      // Similar to histogram with quantiles
+    Counter,   // Monotonically increasing counter
+    Gauge,     // Value that can go up or down
+    Histogram, // Distribution of observations
+    Summary,   // Similar to histogram with quantiles
 }
 
 /// Health status
@@ -112,10 +112,7 @@ impl MonitoringEngine {
         };
 
         let mut metrics = self.metrics.write().await;
-        metrics
-            .entry(name)
-            .or_insert_with(Vec::new)
-            .push(metric);
+        metrics.entry(name).or_insert_with(Vec::new).push(metric);
 
         Ok(())
     }
@@ -208,9 +205,9 @@ impl MonitoringEngine {
         message: String,
     ) -> Result<()> {
         let mut checks = self.health_checks.write().await;
-        let check = checks.get_mut(name).ok_or_else(|| {
-            MonitoringError::HealthCheckNotFound(name.to_string())
-        })?;
+        let check = checks
+            .get_mut(name)
+            .ok_or_else(|| MonitoringError::HealthCheckNotFound(name.to_string()))?;
 
         check.status = status;
         check.message = message;
@@ -231,14 +228,17 @@ impl MonitoringEngine {
     /// Get overall health status
     pub async fn get_overall_health(&self) -> HealthStatus {
         let checks = self.health_checks.read().await;
-        
+
         if checks.is_empty() {
             return HealthStatus::Healthy;
         }
 
         let statuses: Vec<HealthStatus> = checks.values().map(|c| c.status.clone()).collect();
 
-        if statuses.iter().any(|s| matches!(s, HealthStatus::Unhealthy)) {
+        if statuses
+            .iter()
+            .any(|s| matches!(s, HealthStatus::Unhealthy))
+        {
             HealthStatus::Unhealthy
         } else if statuses.iter().any(|s| matches!(s, HealthStatus::Degraded)) {
             HealthStatus::Degraded
@@ -258,10 +258,10 @@ impl MonitoringEngine {
             }
 
             let first_metric = &metric_series[0];
-            
+
             // Write help
             output.push_str(&format!("# HELP {} {}\n", name, first_metric.help));
-            
+
             // Write type
             let type_str = match first_metric.metric_type {
                 MetricType::Counter => "counter",
@@ -326,15 +326,15 @@ impl MonitoringEngine {
         label_filter: Option<HashMap<String, String>>,
     ) -> Vec<Metric> {
         let metrics = self.metrics.read().await;
-        
+
         if let Some(metric_series) = metrics.get(name) {
             if let Some(filter) = label_filter {
                 metric_series
                     .iter()
                     .filter(|m| {
-                        filter.iter().all(|(k, v)| {
-                            m.labels.get(k).map(|val| val == v).unwrap_or(false)
-                        })
+                        filter
+                            .iter()
+                            .all(|(k, v)| m.labels.get(k).map(|val| val == v).unwrap_or(false))
                     })
                     .cloned()
                     .collect()

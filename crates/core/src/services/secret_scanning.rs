@@ -1,7 +1,6 @@
 // Secret Scanning - Git commit scanning and leak detection
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -150,11 +149,7 @@ impl SecretScanner {
     }
 
     /// Scan commit
-    pub async fn scan_commit(
-        &self,
-        repository: String,
-        commit_hash: String,
-    ) -> Result<ScanResult> {
+    pub async fn scan_commit(&self, repository: String, commit_hash: String) -> Result<ScanResult> {
         let start_time = std::time::Instant::now();
         let config = self.config.read().await;
 
@@ -266,7 +261,9 @@ impl SecretScanner {
 
     /// Check if path is excluded
     fn is_excluded(&self, path: &str, excluded_paths: &[String]) -> bool {
-        excluded_paths.iter().any(|excluded| path.contains(excluded))
+        excluded_paths
+            .iter()
+            .any(|excluded| path.contains(excluded))
     }
 
     /// Mock commit scanning
@@ -441,7 +438,10 @@ mod tests {
             .unwrap();
 
         // Should have findings with different severities
-        let has_critical = result.findings.iter().any(|f| f.severity == Severity::Critical);
+        let has_critical = result
+            .findings
+            .iter()
+            .any(|f| f.severity == Severity::Critical);
         let has_high = result.findings.iter().any(|f| f.severity == Severity::High);
 
         assert!(has_critical || has_high);

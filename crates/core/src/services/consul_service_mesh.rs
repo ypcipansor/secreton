@@ -23,8 +23,8 @@ pub type Result<T> = std::result::Result<T, ConsulError>;
 /// Consul configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsulConfig {
-    pub address: String,        // http://localhost:8500
-    pub token: Option<String>,  // ACL token
+    pub address: String,       // http://localhost:8500
+    pub token: Option<String>, // ACL token
     pub datacenter: String,
     pub enable_connect: bool,
     pub tls_enabled: bool,
@@ -47,11 +47,11 @@ pub struct ServiceRegistration {
 /// Health check configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthCheck {
-    pub interval: String,      // e.g., "10s"
-    pub timeout: String,       // e.g., "5s"
-    pub http: Option<String>,  // HTTP endpoint
-    pub tcp: Option<String>,   // TCP address
-    pub grpc: Option<String>,  // gRPC endpoint
+    pub interval: String,     // e.g., "10s"
+    pub timeout: String,      // e.g., "5s"
+    pub http: Option<String>, // HTTP endpoint
+    pub tcp: Option<String>,  // TCP address
+    pub grpc: Option<String>, // gRPC endpoint
 }
 
 /// Service intention (authorization policy)
@@ -487,14 +487,9 @@ mod tests {
         let reg = create_test_service_registration();
         mesh.register_service(reg).await.unwrap();
 
-        mesh.create_intention(
-            "web",
-            "api",
-            IntentionAction::Allow,
-            "Test".to_string(),
-        )
-        .await
-        .unwrap();
+        mesh.create_intention("web", "api", IntentionAction::Allow, "Test".to_string())
+            .await
+            .unwrap();
 
         let services = mesh.list_services().await;
         assert_eq!(services.len(), 1);

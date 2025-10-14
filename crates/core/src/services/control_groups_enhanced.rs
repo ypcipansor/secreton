@@ -159,8 +159,7 @@ impl EnhancedControlGroups {
 
         // Validate authorizer is allowed
         let config = self.config.read().await;
-        if !config.allowed_authorizers.is_empty()
-            && !config.allowed_authorizers.contains(&user_id)
+        if !config.allowed_authorizers.is_empty() && !config.allowed_authorizers.contains(&user_id)
         {
             return Err(ControlGroupError::AuthorizationError(
                 "User not allowed to authorize".to_string(),

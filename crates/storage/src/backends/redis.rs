@@ -5,7 +5,7 @@ use crate::{
     StorageTransaction, VaultEntry,
 };
 use async_trait::async_trait;
-use redis::{aio::ConnectionManager, AsyncCommands, Client};
+use redis::{AsyncCommands, Client, aio::ConnectionManager};
 use std::collections::HashMap;
 use uuid::Uuid;
 

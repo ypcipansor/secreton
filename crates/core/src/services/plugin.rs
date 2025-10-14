@@ -16,22 +16,22 @@ use tokio::sync::RwLock;
 pub enum PluginError {
     #[error("Plugin not found: {0}")]
     PluginNotFound(String),
-    
+
     #[error("Plugin already loaded: {0}")]
     AlreadyLoaded(String),
-    
+
     #[error("Plugin load failed: {0}")]
     LoadFailed(String),
-    
+
     #[error("Plugin initialization failed: {0}")]
     InitFailed(String),
-    
+
     #[error("Plugin operation failed: {0}")]
     OperationFailed(String),
-    
+
     #[error("Invalid plugin configuration: {0}")]
     InvalidConfig(String),
-    
+
     #[error("Incompatible plugin version: {0}")]
     IncompatibleVersion(String),
 }
@@ -86,7 +86,9 @@ pub trait EnhancedPlugin: Send + Sync {
     async fn initialize(&mut self, config: &PluginConfig) -> Result<(), PluginError>;
     async fn start(&mut self) -> Result<(), PluginError>;
     async fn stop(&mut self) -> Result<(), PluginError>;
-    async fn health(&self) -> Result<bool, PluginError> { Ok(true) }
+    async fn health(&self) -> Result<bool, PluginError> {
+        Ok(true)
+    }
     async fn reload(&mut self, config: &PluginConfig) -> Result<(), PluginError> {
         self.stop().await?;
         self.initialize(config).await?;
@@ -98,7 +100,11 @@ pub trait EnhancedPlugin: Send + Sync {
 #[async_trait]
 pub trait EnhancedSecretsEngine: EnhancedPlugin {
     async fn read(&self, path: &str) -> Result<HashMap<String, serde_json::Value>, PluginError>;
-    async fn write(&self, path: &str, data: HashMap<String, serde_json::Value>) -> Result<(), PluginError>;
+    async fn write(
+        &self,
+        path: &str,
+        data: HashMap<String, serde_json::Value>,
+    ) -> Result<(), PluginError>;
     async fn delete(&self, path: &str) -> Result<(), PluginError>;
     async fn list(&self, path: &str) -> Result<Vec<String>, PluginError>;
 }
@@ -116,27 +122,36 @@ impl EnhancedPluginRegistry {
             secrets_engines: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
-    pub async fn register_secrets_engine(&self, name: String, engine: Arc<dyn EnhancedSecretsEngine>) -> Result<(), PluginError> {
+
+    pub async fn register_secrets_engine(
+        &self,
+        name: String,
+        engine: Arc<dyn EnhancedSecretsEngine>,
+    ) -> Result<(), PluginError> {
         let mut engines = self.secrets_engines.write().await;
         engines.insert(name.clone(), engine);
-        
+
         let mut plugins = self.plugins.write().await;
         plugins.insert(name, PluginState::Loaded);
         Ok(())
     }
-    
-    pub async fn get_secrets_engine(&self, name: &str) -> Result<Arc<dyn EnhancedSecretsEngine>, PluginError> {
+
+    pub async fn get_secrets_engine(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn EnhancedSecretsEngine>, PluginError> {
         let engines = self.secrets_engines.read().await;
-        engines.get(name).cloned()
+        engines
+            .get(name)
+            .cloned()
             .ok_or_else(|| PluginError::PluginNotFound(name.to_string()))
     }
-    
+
     pub async fn list_plugins(&self) -> Vec<String> {
         let plugins = self.plugins.read().await;
         plugins.keys().cloned().collect()
     }
-    
+
     pub async fn update_state(&self, name: &str, state: PluginState) -> Result<(), PluginError> {
         let mut plugins = self.plugins.write().await;
         plugins.insert(name.to_string(), state);
@@ -220,9 +235,8 @@ impl PluginRegistry {
     pub unsafe fn load_dynamic_library(&mut self, path: &str) -> Result<(), String> {
         let lib = unsafe { Library::new(path) }.map_err(|e| format!("load error: {}", e))?;
         // Konvensi: plugin expose fn plugin_entry() -> Box<dyn VaultPlugin>
-        let func: Symbol<unsafe extern "C" fn() -> Box<dyn VaultPlugin>> = unsafe { lib
-            .get(b"plugin_entry") }
-            .map_err(|e| format!("symbol error: {}", e))?;
+        let func: Symbol<unsafe extern "C" fn() -> Box<dyn VaultPlugin>> =
+            unsafe { lib.get(b"plugin_entry") }.map_err(|e| format!("symbol error: {}", e))?;
         let mut plugin = unsafe { func() };
         let name = plugin.name().to_string();
         plugin.init();

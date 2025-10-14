@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
 use uuid::Uuid;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Error)]
 pub enum GatewayError {
@@ -162,7 +162,7 @@ impl ApiGateway {
 
     async fn find_route(&self, path: &str) -> Result<Route> {
         let routes = self.routes.read().await;
-        
+
         for route in routes.values() {
             if self.matches_pattern(&route.path_pattern, path) {
                 return Ok(route.clone());
@@ -185,36 +185,31 @@ impl ApiGateway {
     /// Apply rate limiting
     async fn apply_rate_limit(&self, route_id: &str, config: &RateLimit) -> Result<()> {
         match config.algorithm {
-            RateLimitAlgorithm::TokenBucket => {
-                self.apply_token_bucket(route_id, config).await
-            }
-            RateLimitAlgorithm::SlidingWindow => {
-                self.apply_sliding_window(route_id, config).await
-            }
-            RateLimitAlgorithm::FixedWindow => {
-                self.apply_fixed_window(route_id, config).await
-            }
-            RateLimitAlgorithm::LeakyBucket => {
-                self.apply_leaky_bucket(route_id, config).await
-            }
+            RateLimitAlgorithm::TokenBucket => self.apply_token_bucket(route_id, config).await,
+            RateLimitAlgorithm::SlidingWindow => self.apply_sliding_window(route_id, config).await,
+            RateLimitAlgorithm::FixedWindow => self.apply_fixed_window(route_id, config).await,
+            RateLimitAlgorithm::LeakyBucket => self.apply_leaky_bucket(route_id, config).await,
         }
     }
 
     async fn apply_token_bucket(&self, route_id: &str, config: &RateLimit) -> Result<()> {
         let mut buckets = self.token_buckets.write().await;
-        
-        let bucket = buckets.entry(route_id.to_string()).or_insert_with(|| {
-            TokenBucket {
+
+        let bucket = buckets
+            .entry(route_id.to_string())
+            .or_insert_with(|| TokenBucket {
                 tokens: config.burst_size as f64,
                 capacity: config.burst_size as f64,
                 refill_rate: config.requests_per_second as f64,
                 last_refill: Utc::now(),
-            }
-        });
+            });
 
         // Refill tokens
         let now = Utc::now();
-        let elapsed = now.signed_duration_since(bucket.last_refill).num_milliseconds() as f64 / 1000.0;
+        let elapsed = now
+            .signed_duration_since(bucket.last_refill)
+            .num_milliseconds() as f64
+            / 1000.0;
         let new_tokens = elapsed * bucket.refill_rate;
         bucket.tokens = (bucket.tokens + new_tokens).min(bucket.capacity);
         bucket.last_refill = now;
@@ -224,20 +219,22 @@ impl ApiGateway {
             bucket.tokens -= 1.0;
             Ok(())
         } else {
-            Err(GatewayError::RateLimitExceeded("Token bucket exhausted".to_string()))
+            Err(GatewayError::RateLimitExceeded(
+                "Token bucket exhausted".to_string(),
+            ))
         }
     }
 
     async fn apply_sliding_window(&self, route_id: &str, config: &RateLimit) -> Result<()> {
         let mut windows = self.sliding_windows.write().await;
-        
-        let window = windows.entry(route_id.to_string()).or_insert_with(|| {
-            SlidingWindow {
+
+        let window = windows
+            .entry(route_id.to_string())
+            .or_insert_with(|| SlidingWindow {
                 requests: VecDeque::new(),
                 window_size: Duration::seconds(1),
                 max_requests: config.requests_per_second,
-            }
-        });
+            });
 
         let now = Utc::now();
         let window_start = now - window.window_size;
@@ -253,7 +250,9 @@ impl ApiGateway {
 
         // Check limit
         if window.requests.len() >= window.max_requests {
-            return Err(GatewayError::RateLimitExceeded("Sliding window limit reached".to_string()));
+            return Err(GatewayError::RateLimitExceeded(
+                "Sliding window limit reached".to_string(),
+            ));
         }
 
         window.requests.push_back(now);
@@ -286,7 +285,7 @@ impl ApiGateway {
     /// Check quota
     async fn check_quota(&self, tenant_id: &str) -> Result<()> {
         let quotas = self.quotas.read().await;
-        
+
         if let Some(quota) = quotas.get(tenant_id) {
             if Utc::now() > quota.reset_at {
                 // Quota reset needed
@@ -306,16 +305,16 @@ impl ApiGateway {
 
     async fn increment_quota(&self, tenant_id: &str) -> Result<()> {
         let mut quotas = self.quotas.write().await;
-        
-        let quota = quotas.entry(tenant_id.to_string()).or_insert_with(|| {
-            Quota {
+
+        let quota = quotas
+            .entry(tenant_id.to_string())
+            .or_insert_with(|| Quota {
                 tenant_id: tenant_id.to_string(),
                 limit: 10000,
                 used: 0,
                 reset_at: Utc::now() + Duration::days(1),
                 quota_type: QuotaType::Daily,
-            }
-        });
+            });
 
         // Reset if needed
         if Utc::now() > quota.reset_at {
@@ -380,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_request() {
         let gateway = ApiGateway::new();
-        
+
         let route = Route {
             route_id: "route1".to_string(),
             path_pattern: "/api/v1/secrets/*".to_string(),
@@ -407,7 +406,7 @@ mod tests {
     #[tokio::test]
     async fn test_token_bucket_rate_limit() {
         let gateway = ApiGateway::new();
-        
+
         let route = Route {
             route_id: "route1".to_string(),
             path_pattern: "/api/test".to_string(),
@@ -443,7 +442,7 @@ mod tests {
     #[tokio::test]
     async fn test_quota_enforcement() {
         let gateway = ApiGateway::new();
-        
+
         let quota = Quota {
             tenant_id: "tenant1".to_string(),
             limit: 2,
@@ -484,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn test_sliding_window_rate_limit() {
         let gateway = ApiGateway::new();
-        
+
         let route = Route {
             route_id: "route1".to_string(),
             path_pattern: "/api/test".to_string(),
@@ -521,7 +520,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_routes() {
         let gateway = ApiGateway::new();
-        
+
         let route = Route {
             route_id: "route1".to_string(),
             path_pattern: "/api/test".to_string(),

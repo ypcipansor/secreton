@@ -180,7 +180,7 @@ impl SecretDiscovery {
     /// Scan repository for secrets
     pub async fn scan_repository(&self, config: ScanConfig) -> Result<ScanResult> {
         let scan_id = config.scan_id.clone();
-        
+
         let mut result = ScanResult {
             scan_id: scan_id.clone(),
             started_at: Utc::now(),
@@ -193,7 +193,7 @@ impl SecretDiscovery {
 
         // Mock scanning
         let rules = self.rules.read().await;
-        
+
         // Simulate finding secrets
         for rule in rules.values().filter(|r| r.enabled) {
             if self.should_scan_with_rule(rule, &config) {
@@ -269,7 +269,11 @@ impl SecretDiscovery {
             (SecretType::PrivateKey, SensitivityLevel::Restricted, 0.98)
         } else if secret_value.len() > 32 && secret_value.chars().all(|c| c.is_alphanumeric()) {
             (SecretType::Token, SensitivityLevel::Confidential, 0.85)
-        } else if context.as_ref().map(|c| c.contains("password")).unwrap_or(false) {
+        } else if context
+            .as_ref()
+            .map(|c| c.contains("password"))
+            .unwrap_or(false)
+        {
             (SecretType::Password, SensitivityLevel::Confidential, 0.80)
         } else {
             (SecretType::Unknown, SensitivityLevel::Internal, 0.50)
@@ -285,7 +289,7 @@ impl SecretDiscovery {
         enrichment: EnrichmentData,
     ) -> Result<()> {
         let mut discoveries = self.discoveries.write().await;
-        
+
         if let Some(discovery) = discoveries.get_mut(discovery_id) {
             if let Some(owner) = enrichment.owner {
                 discovery.metadata.insert("owner".to_string(), owner);
@@ -299,7 +303,7 @@ impl SecretDiscovery {
             if let Some(cc) = enrichment.cost_center {
                 discovery.metadata.insert("cost_center".to_string(), cc);
             }
-            
+
             for (key, value) in enrichment.custom_fields {
                 discovery.metadata.insert(key, value);
             }
@@ -315,7 +319,7 @@ impl SecretDiscovery {
         status: RemediationStatus,
     ) -> Result<()> {
         let mut discoveries = self.discoveries.write().await;
-        
+
         if let Some(discovery) = discoveries.get_mut(discovery_id) {
             discovery.remediation_status = status;
         }
@@ -372,7 +376,7 @@ impl SecretDiscovery {
         let mut stats = HashMap::new();
 
         stats.insert("total".to_string(), discoveries.len());
-        
+
         for level in [
             SensitivityLevel::Public,
             SensitivityLevel::Internal,
@@ -380,7 +384,10 @@ impl SecretDiscovery {
             SensitivityLevel::Restricted,
             SensitivityLevel::TopSecret,
         ] {
-            let count = discoveries.values().filter(|d| d.classification == level).count();
+            let count = discoveries
+                .values()
+                .filter(|d| d.classification == level)
+                .count();
             stats.insert(format!("{:?}", level).to_lowercase(), count);
         }
 
@@ -418,7 +425,7 @@ mod tests {
     #[tokio::test]
     async fn test_scan_repository() {
         let discovery = SecretDiscovery::new();
-        
+
         // Add a rule first
         let rule = DiscoveryRule {
             rule_id: "rule1".to_string(),
@@ -441,7 +448,7 @@ mod tests {
         };
 
         let result = discovery.scan_repository(config).await.unwrap();
-        
+
         assert_eq!(result.status, ScanStatus::Completed);
         assert!(result.secrets_found > 0);
     }
@@ -449,12 +456,12 @@ mod tests {
     #[tokio::test]
     async fn test_classify_secret() {
         let discovery = SecretDiscovery::new();
-        
+
         let (secret_type, sensitivity, confidence) = discovery
             .classify_secret("sk-1234567890abcdef1234567890abcdef", None)
             .await
             .unwrap();
-        
+
         assert_eq!(secret_type, SecretType::APIKey);
         assert_eq!(sensitivity, SensitivityLevel::Confidential);
         assert!(confidence > 0.9);
@@ -463,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_enrich_metadata() {
         let discovery = SecretDiscovery::new();
-        
+
         // Create a discovery first
         let rule = DiscoveryRule {
             rule_id: "rule1".to_string(),
@@ -497,18 +504,24 @@ mod tests {
             custom_fields: HashMap::new(),
         };
 
-        discovery.enrich_metadata(&discovery_id, enrichment).await.unwrap();
+        discovery
+            .enrich_metadata(&discovery_id, enrichment)
+            .await
+            .unwrap();
 
         let discoveries = discovery.list_discoveries().await;
-        let enriched = discoveries.iter().find(|d| d.discovery_id == discovery_id).unwrap();
-        
+        let enriched = discoveries
+            .iter()
+            .find(|d| d.discovery_id == discovery_id)
+            .unwrap();
+
         assert_eq!(enriched.metadata.get("owner").unwrap(), "team-security");
     }
 
     #[tokio::test]
     async fn test_get_discoveries_by_sensitivity() {
         let discovery = SecretDiscovery::new();
-        
+
         let rule = DiscoveryRule {
             rule_id: "rule1".to_string(),
             name: "Test".to_string(),
@@ -534,14 +547,14 @@ mod tests {
         let top_secret = discovery
             .get_discoveries_by_sensitivity(SensitivityLevel::TopSecret)
             .await;
-        
+
         assert!(!top_secret.is_empty());
     }
 
     #[tokio::test]
     async fn test_get_statistics() {
         let discovery = SecretDiscovery::new();
-        
+
         let rule = DiscoveryRule {
             rule_id: "rule1".to_string(),
             name: "Test".to_string(),
@@ -565,7 +578,7 @@ mod tests {
         discovery.scan_repository(config).await.unwrap();
 
         let stats = discovery.get_statistics().await;
-        
+
         assert!(stats.get("total").unwrap() > &0);
     }
 }

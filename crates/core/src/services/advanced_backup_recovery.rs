@@ -243,7 +243,10 @@ impl AdvancedBackupRecovery {
             encrypted,
             created_at: Utc::now(),
             metadata: HashMap::from([
-                ("secrets_count".to_string(), changed_secrets.len().to_string()),
+                (
+                    "secrets_count".to_string(),
+                    changed_secrets.len().to_string(),
+                ),
                 ("incremental".to_string(), "true".to_string()),
             ]),
             checksum,
@@ -561,7 +564,10 @@ mod tests {
             .await
             .unwrap();
 
-        let is_valid = backup_recovery.verify_backup(&backup.backup_id).await.unwrap();
+        let is_valid = backup_recovery
+            .verify_backup(&backup.backup_id)
+            .await
+            .unwrap();
         assert!(is_valid);
     }
 }

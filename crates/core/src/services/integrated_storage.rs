@@ -231,7 +231,7 @@ impl IntegratedRaftStorage {
     pub async fn start_election(&self) -> Result<bool> {
         let mut local = self.local_node.write().await;
         local.become_candidate();
-        
+
         let term = local.term;
         let candidate_id = local.node_id.clone();
         drop(local);
@@ -268,11 +268,11 @@ impl IntegratedRaftStorage {
         if votes >= majority {
             let mut local = self.local_node.write().await;
             local.become_leader();
-            
+
             // Append no-op entry to commit previous entries
             drop(local);
             self.append_log_entry(LogOperation::Noop).await?;
-            
+
             Ok(true)
         } else {
             Ok(false)
@@ -286,7 +286,7 @@ impl IntegratedRaftStorage {
         node: &RaftNode,
     ) -> VoteResponse {
         // Simplified vote logic
-        let vote_granted = request.term >= node.term 
+        let vote_granted = request.term >= node.term
             && (node.voted_for.is_none() || node.voted_for.as_ref() == Some(&request.candidate_id));
 
         VoteResponse {
@@ -301,13 +301,13 @@ impl IntegratedRaftStorage {
         if !local.is_leader() {
             return Err(RaftError::NotLeader);
         }
-        
+
         let term = local.term;
         drop(local);
 
         let mut log = self.log.write().await;
         let index = log.len() as u64 + 1;
-        
+
         let entry = LogEntry::new(index, term, operation);
         log.push(entry);
 
@@ -406,7 +406,7 @@ impl IntegratedRaftStorage {
         drop(log);
 
         let replicated = self.replicate_log(vec![entry]).await?;
-        
+
         if replicated {
             // Update commit index
             let mut commit_index = self.commit_index.write().await;
@@ -441,7 +441,7 @@ impl IntegratedRaftStorage {
         drop(log);
 
         let replicated = self.replicate_log(vec![entry]).await?;
-        
+
         if replicated {
             let mut commit_index = self.commit_index.write().await;
             *commit_index = index;
@@ -457,7 +457,7 @@ impl IntegratedRaftStorage {
     pub async fn create_snapshot(&self) -> Result<RaftSnapshot> {
         let last_applied = *self.last_applied.read().await;
         let log = self.log.read().await;
-        
+
         let last_included_term = if last_applied > 0 {
             log.get((last_applied - 1) as usize)
                 .map(|e| e.term)
@@ -521,7 +521,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_raft_node() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
+
         let state = raft.get_local_state().await;
         assert_eq!(state, RaftState::Follower);
     }
@@ -529,14 +529,20 @@ mod tests {
     #[tokio::test]
     async fn test_leader_election() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
+
         // Add follower nodes
-        raft.add_node(RaftNode::new("node2".to_string(), "127.0.0.1:8201".to_string()))
-            .await
-            .unwrap();
-        raft.add_node(RaftNode::new("node3".to_string(), "127.0.0.1:8202".to_string()))
-            .await
-            .unwrap();
+        raft.add_node(RaftNode::new(
+            "node2".to_string(),
+            "127.0.0.1:8201".to_string(),
+        ))
+        .await
+        .unwrap();
+        raft.add_node(RaftNode::new(
+            "node3".to_string(),
+            "127.0.0.1:8202".to_string(),
+        ))
+        .await
+        .unwrap();
 
         // Start election
         let won = raft.start_election().await.unwrap();
@@ -549,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_and_read() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
+
         // Become leader
         raft.start_election().await.unwrap();
 
@@ -566,7 +572,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
+
         raft.start_election().await.unwrap();
 
         // Write then delete
@@ -582,7 +588,7 @@ mod tests {
     #[tokio::test]
     async fn test_snapshot() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
+
         raft.start_election().await.unwrap();
 
         // Write multiple entries
@@ -602,10 +608,13 @@ mod tests {
     #[tokio::test]
     async fn test_raft_stats() {
         let raft = IntegratedRaftStorage::new("node1".to_string(), "127.0.0.1:8200".to_string());
-        
-        raft.add_node(RaftNode::new("node2".to_string(), "127.0.0.1:8201".to_string()))
-            .await
-            .unwrap();
+
+        raft.add_node(RaftNode::new(
+            "node2".to_string(),
+            "127.0.0.1:8201".to_string(),
+        ))
+        .await
+        .unwrap();
 
         raft.start_election().await.unwrap();
 

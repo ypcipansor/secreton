@@ -251,14 +251,12 @@ impl BarrierEncryption {
         }
 
         let master_key = self.master_key.read().await;
-        let mk = master_key
-            .as_ref()
-            .ok_or(BarrierError::BarrierSealed)?;
+        let mk = master_key.as_ref().ok_or(BarrierError::BarrierSealed)?;
 
         // Simple derivation (production would use HKDF or similar)
         let mut derived = mk.clone();
         derived.extend_from_slice(context.as_bytes());
-        
+
         Ok(derived)
     }
 
@@ -288,14 +286,14 @@ impl BarrierEncryption {
 
     fn generate_key_bytes(&self, algorithm: &EncryptionAlgorithm) -> Vec<u8> {
         match algorithm {
-            EncryptionAlgorithm::AES256GCM => vec![0; 32],      // 256 bits
+            EncryptionAlgorithm::AES256GCM => vec![0; 32], // 256 bits
             EncryptionAlgorithm::ChaCha20Poly1305 => vec![0; 32], // 256 bits
         }
     }
 
     fn generate_nonce(&self, algorithm: &EncryptionAlgorithm) -> Vec<u8> {
         match algorithm {
-            EncryptionAlgorithm::AES256GCM => vec![0; 12],      // 96 bits
+            EncryptionAlgorithm::AES256GCM => vec![0; 12], // 96 bits
             EncryptionAlgorithm::ChaCha20Poly1305 => vec![0; 12], // 96 bits
         }
     }
@@ -336,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn test_seal_unseal() {
         let barrier = BarrierEncryption::new();
-        
+
         assert!(!barrier.is_unsealed().await);
 
         barrier.unseal(vec![1, 2, 3, 4]).await.unwrap();
@@ -365,7 +363,7 @@ mod tests {
 
         let plaintext = b"secret data";
         let encrypted = barrier.encrypt("test-key", plaintext).await.unwrap();
-        
+
         assert_eq!(encrypted.key_id, "test-key");
         assert_eq!(encrypted.algorithm, EncryptionAlgorithm::AES256GCM);
 
@@ -377,7 +375,7 @@ mod tests {
     async fn test_key_rotation() {
         let barrier = BarrierEncryption::new();
         barrier.unseal(vec![1, 2, 3, 4]).await.unwrap();
-        
+
         let key1 = barrier.generate_key("test-key".to_string()).await.unwrap();
         assert_eq!(key1.version, 1);
 
@@ -389,12 +387,12 @@ mod tests {
     #[tokio::test]
     async fn test_barrier_sealed_error() {
         let barrier = BarrierEncryption::new();
-        
+
         let result = barrier.generate_key("test".to_string()).await;
         assert!(result.is_err());
-        
+
         match result.unwrap_err() {
-            BarrierError::BarrierSealed => {},
+            BarrierError::BarrierSealed => {}
             _ => panic!("Expected BarrierSealed error"),
         }
     }
@@ -409,7 +407,7 @@ mod tests {
 
         // Different contexts should produce different keys
         assert_ne!(derived1, derived2);
-        
+
         // Same context should produce same key
         let derived1_again = barrier.derive_key("context1").await.unwrap();
         assert_eq!(derived1, derived1_again);
@@ -419,13 +417,13 @@ mod tests {
     async fn test_reencrypt() {
         let barrier = BarrierEncryption::new();
         barrier.unseal(vec![1, 2, 3, 4]).await.unwrap();
-        
+
         barrier.generate_key("key1".to_string()).await.unwrap();
         barrier.generate_key("key2".to_string()).await.unwrap();
 
         let plaintext = b"secret data";
         let encrypted1 = barrier.encrypt("key1", plaintext).await.unwrap();
-        
+
         let encrypted2 = barrier.reencrypt(&encrypted1, "key2").await.unwrap();
         assert_eq!(encrypted2.key_id, "key2");
 

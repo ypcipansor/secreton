@@ -183,9 +183,11 @@ mod tests {
         let key = vec![0x42; 100];
         let result = validate_key_size(&key, 2560);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Invalid key size: expected 2560 bytes, got 100 bytes"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Invalid key size: expected 2560 bytes, got 100 bytes")
+        );
     }
 
     #[test]

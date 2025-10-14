@@ -13,9 +13,8 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::advanced_key_manager::{
-    AdvancedKeyManager, KeyManagerError, KeyPurpose, KeyShare, KeyType, ManagedKey, RecoveryPolicy,
+    AdvancedKeyManager, KeyManagerError, KeyPurpose, KeyShare, KeyType,
 };
-use super::audit::AuditEvent;
 use super::metrics::MetricType;
 
 // Mock token claims for integration (would use actual token service)
@@ -203,12 +202,8 @@ impl AuthenticatedKeyOperations {
             .await;
 
         // 4. Record metrics
-        self.record_metrics(
-            &request.operation,
-            success,
-            duration_ms,
-        )
-        .await;
+        self.record_metrics(&request.operation, success, duration_ms)
+            .await;
 
         // 5. Return result
         result.map(|key_id| KeyOperationResult {
@@ -299,7 +294,9 @@ impl AuthenticatedKeyOperations {
                     parent_key_id: None,
                     derivation_path: None,
                 };
-                manager.generate_key(key_type.clone(), purpose.clone(), metadata).await?
+                manager
+                    .generate_key(key_type.clone(), purpose.clone(), metadata)
+                    .await?
             }
             KeyOperation::Rotate { key_id } => {
                 manager.rotate_key(key_id).await?;
@@ -489,7 +486,7 @@ impl AuthenticatedKeyOperations {
         metadata: &HashMap<String, String>,
     ) -> String {
         let audit_id = Uuid::new_v4().to_string();
-        
+
         let audit_record = KeyAuditRecord {
             audit_id: audit_id.clone(),
             operation_id: operation_id.to_string(),

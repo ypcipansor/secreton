@@ -177,7 +177,7 @@ pub fn derive_key(
             Ok(key)
         }
         KdfAlgorithm::Scrypt => {
-            use scrypt::{scrypt, Params};
+            use scrypt::{Params, scrypt};
             let params = Params::new(
                 14, // log_n (2^14 = 16384)
                 8,  // r

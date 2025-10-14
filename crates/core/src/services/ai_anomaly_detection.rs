@@ -164,10 +164,14 @@ impl AnomalyDetectionSystem {
     }
 
     /// Train model
-    pub async fn train_model(&self, model: AnomalyModel, training_data: Vec<AccessEvent>) -> Result<String> {
+    pub async fn train_model(
+        &self,
+        model: AnomalyModel,
+        training_data: Vec<AccessEvent>,
+    ) -> Result<String> {
         if training_data.len() < 100 {
             return Err(AnomalyError::InsufficientData(
-                "Need at least 100 events for training".to_string()
+                "Need at least 100 events for training".to_string(),
             ));
         }
 
@@ -202,7 +206,7 @@ impl AnomalyDetectionSystem {
                 let patterns = self.patterns.read().await;
                 patterns.get(&event.user_id).cloned()
             };
-            
+
             if let Some(pattern) = pattern_clone {
                 let anomaly_detected = self.check_pattern_deviation(&event, &pattern).await;
                 if anomaly_detected {
@@ -215,10 +219,14 @@ impl AnomalyDetectionSystem {
 
         Ok(())
     }
-    async fn check_pattern_deviation(&self, event: &AccessEvent, pattern: &BehaviorPattern) -> bool {
+    async fn check_pattern_deviation(
+        &self,
+        event: &AccessEvent,
+        pattern: &BehaviorPattern,
+    ) -> bool {
         // Mock deviation detection
         let hour = event.timestamp.hour() as f64;
-        
+
         if let Some(baseline_hour) = pattern.baseline_metrics.get("typical_hour") {
             let deviation = (hour - baseline_hour).abs();
             return deviation > pattern.deviation_threshold;
@@ -254,7 +262,8 @@ impl AnomalyDetectionSystem {
             action_id: Uuid::new_v4().to_string(),
             anomaly_id: anomaly.anomaly_id.clone(),
             action_type: ActionType::RequireReAuthentication,
-            description: "Require user to re-authenticate due to unusual access pattern".to_string(),
+            description: "Require user to re-authenticate due to unusual access pattern"
+                .to_string(),
             auto_apply: false,
             confidence: anomaly.confidence,
         };
@@ -270,7 +279,8 @@ impl AnomalyDetectionSystem {
         // Clone events to avoid holding read lock
         let user_events: Vec<AccessEvent> = {
             let events = self.events.read().await;
-            events.iter()
+            events
+                .iter()
                 .filter(|e| e.user_id == user_id)
                 .cloned()
                 .collect()
@@ -282,9 +292,12 @@ impl AnomalyDetectionSystem {
 
         // Calculate baseline metrics
         let mut baseline_metrics = HashMap::new();
-        let avg_hour: f64 = user_events.iter().map(|e| e.timestamp.hour() as f64).sum::<f64>()
+        let avg_hour: f64 = user_events
+            .iter()
+            .map(|e| e.timestamp.hour() as f64)
+            .sum::<f64>()
             / user_events.len() as f64;
-        
+
         baseline_metrics.insert("typical_hour".to_string(), avg_hour);
         baseline_metrics.insert("avg_daily_accesses".to_string(), user_events.len() as f64);
 
@@ -311,7 +324,9 @@ impl AnomalyDetectionSystem {
             .values()
             .filter(|a| {
                 if let Some(uid) = user_id {
-                    events.iter().any(|e| e.event_id == a.event_id && e.user_id == uid)
+                    events
+                        .iter()
+                        .any(|e| e.event_id == a.event_id && e.user_id == uid)
                 } else {
                     true
                 }
@@ -323,7 +338,7 @@ impl AnomalyDetectionSystem {
     /// Get remediation actions
     pub async fn get_remediations(&self, anomaly_id: &str) -> Vec<RemediationAction> {
         let remediations = self.remediations.read().await;
-        
+
         remediations
             .values()
             .filter(|r| r.anomaly_id == anomaly_id)
@@ -334,7 +349,7 @@ impl AnomalyDetectionSystem {
     /// Apply remediation
     pub async fn apply_remediation(&self, action_id: &str) -> Result<()> {
         let remediations = self.remediations.read().await;
-        
+
         let action = remediations
             .get(action_id)
             .ok_or_else(|| AnomalyError::ModelNotFound(action_id.to_string()))?;
@@ -348,7 +363,7 @@ impl AnomalyDetectionSystem {
     /// Update anomaly state
     pub async fn update_anomaly_state(&self, anomaly_id: &str, state: AnomalyState) -> Result<()> {
         let mut anomalies = self.anomalies.write().await;
-        
+
         let anomaly = anomalies
             .get_mut(anomaly_id)
             .ok_or_else(|| AnomalyError::ModelNotFound(anomaly_id.to_string()))?;
@@ -368,7 +383,7 @@ impl AnomalyDetectionSystem {
     /// Get threat intelligence
     pub async fn get_threats(&self, severity: Option<ThreatSeverity>) -> Vec<ThreatIntelligence> {
         let threats = self.threats.read().await;
-        
+
         threats
             .values()
             .filter(|t| severity.is_none() || severity.as_ref() == Some(&t.severity))
@@ -405,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn test_train_model() {
         let system = AnomalyDetectionSystem::new();
-        
+
         let model = AnomalyModel {
             model_id: "model1".to_string(),
             name: "Access Pattern Detector".to_string(),
@@ -438,7 +453,7 @@ mod tests {
     #[tokio::test]
     async fn test_establish_baseline() {
         let system = AnomalyDetectionSystem::new();
-        
+
         let event = AccessEvent {
             event_id: "event1".to_string(),
             user_id: "bob".to_string(),
@@ -460,7 +475,7 @@ mod tests {
     #[tokio::test]
     async fn test_anomaly_detection() {
         let system = AnomalyDetectionSystem::new();
-        
+
         // Establish baseline with normal events
         for i in 0..10 {
             let event = AccessEvent {
@@ -499,7 +514,7 @@ mod tests {
     #[tokio::test]
     async fn test_remediation_generation() {
         let system = AnomalyDetectionSystem::new();
-        
+
         let event = AccessEvent {
             event_id: "event1".to_string(),
             user_id: "bob".to_string(),
@@ -523,7 +538,7 @@ mod tests {
     #[tokio::test]
     async fn test_threat_intelligence() {
         let system = AnomalyDetectionSystem::new();
-        
+
         let threat = ThreatIntelligence {
             threat_id: "threat1".to_string(),
             threat_type: "Brute Force".to_string(),
@@ -544,7 +559,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_anomaly_state() {
         let system = AnomalyDetectionSystem::new();
-        
+
         let event = AccessEvent {
             event_id: "event1".to_string(),
             user_id: "charlie".to_string(),
@@ -561,7 +576,10 @@ mod tests {
         let anomalies = system.get_anomalies(Some("charlie")).await;
         if !anomalies.is_empty() {
             let anomaly_id = anomalies[0].anomaly_id.clone();
-            system.update_anomaly_state(&anomaly_id, AnomalyState::FalsePositive).await.unwrap();
+            system
+                .update_anomaly_state(&anomaly_id, AnomalyState::FalsePositive)
+                .await
+                .unwrap();
 
             let updated = system.get_anomalies(Some("charlie")).await;
             assert_eq!(updated[0].state, AnomalyState::FalsePositive);

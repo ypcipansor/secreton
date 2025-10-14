@@ -28,8 +28,8 @@ pub struct DRConfig {
     pub backup_interval_hours: u64,
     pub retention_days: u64,
     pub enable_auto_failover: bool,
-    pub rpo_minutes: u64,  // Recovery Point Objective
-    pub rto_minutes: u64,  // Recovery Time Objective
+    pub rpo_minutes: u64, // Recovery Point Objective
+    pub rto_minutes: u64, // Recovery Time Objective
 }
 
 /// Backup type
@@ -339,8 +339,8 @@ impl DisasterRecovery {
     // Mock methods
     async fn mock_create_backup(&self, backup_type: &BackupType) -> Result<(u64, String)> {
         let size = match backup_type {
-            BackupType::Full => 1024 * 1024 * 100, // 100 MB
-            BackupType::Incremental => 1024 * 1024 * 10, // 10 MB
+            BackupType::Full => 1024 * 1024 * 100,        // 100 MB
+            BackupType::Incremental => 1024 * 1024 * 10,  // 10 MB
             BackupType::Differential => 1024 * 1024 * 50, // 50 MB
         };
 
@@ -475,7 +475,10 @@ mod tests {
         // Mock old backup by modifying the incremental backup (not the full one)
         {
             let mut backups = dr.backups.write().await;
-            if let Some(backup) = backups.values_mut().find(|b| b.backup_type == BackupType::Incremental) {
+            if let Some(backup) = backups
+                .values_mut()
+                .find(|b| b.backup_type == BackupType::Incremental)
+            {
                 backup.started_at = Utc::now() - Duration::days(2);
             }
         }

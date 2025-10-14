@@ -3,7 +3,7 @@
 //! Comprehensive HTTP API for the Brankas transit engine with enterprise-grade
 //! security monitoring, compliance, and zero-trust architecture.
 
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -35,7 +35,10 @@ pub enum AppError {
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
-            AppError::Internal(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AppError::Internal(_) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                self.to_string(),
+            ),
             AppError::BadRequest(_) => (axum::http::StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Unauthorized(_) => (axum::http::StatusCode::UNAUTHORIZED, self.to_string()),
             AppError::Forbidden(_) => (axum::http::StatusCode::FORBIDDEN, self.to_string()),
@@ -43,8 +46,12 @@ impl axum::response::IntoResponse for AppError {
             AppError::Conflict(_) => (axum::http::StatusCode::CONFLICT, self.to_string()),
             AppError::Validation(_) => (axum::http::StatusCode::BAD_REQUEST, self.to_string()),
             AppError::SecurityViolation(_) => (axum::http::StatusCode::FORBIDDEN, self.to_string()),
-            AppError::ComplianceViolation(_) => (axum::http::StatusCode::FORBIDDEN, self.to_string()),
-            AppError::PerformanceLimit(_) => (axum::http::StatusCode::TOO_MANY_REQUESTS, self.to_string()),
+            AppError::ComplianceViolation(_) => {
+                (axum::http::StatusCode::FORBIDDEN, self.to_string())
+            }
+            AppError::PerformanceLimit(_) => {
+                (axum::http::StatusCode::TOO_MANY_REQUESTS, self.to_string())
+            }
         };
 
         let body = Json(serde_json::json!({
@@ -68,12 +75,12 @@ pub mod security_monitoring;
 // pub mod tls_optimization;
 pub mod transit;
 
-pub use kv::{create_kv_router, KVApiState, KVEngine};
-pub use transit::{create_transit_router, TransitApiState};
+pub use kv::{KVApiState, KVEngine, create_kv_router};
+pub use transit::{TransitApiState, create_transit_router};
 
 // Import security modules
-use compliance_audit::{ComplianceManager, ComplianceFramework};
-use performance_optimizer::{PerformanceConfig, SecurityPerformanceOptimizer, OptimizationLevel};
+use compliance_audit::ComplianceManager;
+use performance_optimizer::{OptimizationLevel, PerformanceConfig, SecurityPerformanceOptimizer};
 use runtime_security::RuntimeSecurityValidator;
 use security_monitoring::{SecurityAlertConfig, SecurityMetrics};
 
@@ -101,7 +108,8 @@ impl ApiState {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize security monitoring
         let alert_config = SecurityAlertConfig::default();
-        let security_metrics = security_monitoring::init_security_monitoring(alert_config.clone()).await;
+        let security_metrics =
+            security_monitoring::init_security_monitoring(alert_config.clone()).await;
 
         // Initialize compliance management
         let compliance_manager = compliance_audit::init_compliance_manager().await;
@@ -117,7 +125,7 @@ impl ApiState {
             cpu_limit_percent: None,
         };
         let performance_optimizer = Arc::new(std::sync::RwLock::new(
-            SecurityPerformanceOptimizer::new(performance_config)
+            SecurityPerformanceOptimizer::new(performance_config),
         ));
 
         // Initialize runtime security validation
@@ -186,12 +194,10 @@ pub fn create_api_router(state: ApiState) -> Router<ApiState> {
         // System endpoints
         .route("/health", get(health_check))
         .route("/version", get(get_version))
-
         // Security monitoring endpoints
         .nest("/security", security_monitoring::security_routes())
         .nest("/runtime", runtime_security::runtime_security_routes())
         .nest("/performance", performance_optimizer::performance_routes())
-
         // Transit engine endpoints
         .nest(
             "/v1/transit",
@@ -202,7 +208,9 @@ pub fn create_api_router(state: ApiState) -> Router<ApiState> {
 }
 
 /// Enhanced health check with security status
-pub async fn health_check(axum::extract::State(state): axum::extract::State<ApiState>) -> Json<HealthResponse> {
+pub async fn health_check(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+) -> Json<HealthResponse> {
     let security_status = if let Some(validator) = &state.security_validator {
         match validator.validate_runtime_security().await.overall_status {
             runtime_security::SecurityStatus::Healthy => "healthy",

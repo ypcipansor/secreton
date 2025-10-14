@@ -13,19 +13,19 @@ use tokio::sync::RwLock;
 pub enum ReplicationError {
     #[error("Replication not configured")]
     NotConfigured,
-    
+
     #[error("Already replicating")]
     AlreadyReplicating,
-    
+
     #[error("Not replicating")]
     NotReplicating,
-    
+
     #[error("Invalid cluster configuration: {0}")]
     InvalidConfiguration(String),
-    
+
     #[error("Sync failed: {0}")]
     SyncFailed(String),
-    
+
     #[error("Connection error: {0}")]
     ConnectionError(String),
 }
@@ -35,7 +35,7 @@ pub enum ReplicationError {
 pub enum ReplicationMode {
     /// Disaster Recovery: all data replicated, secondary sealed
     DR,
-    
+
     /// Performance: secrets replicated, secondary can serve requests
     Performance,
 }
@@ -45,13 +45,13 @@ pub enum ReplicationMode {
 pub enum ReplicationState {
     /// Not replicating
     Idle,
-    
+
     /// Initial synchronization
     Syncing,
-    
+
     /// Active replication
     Active,
-    
+
     /// Error state
     Error(String),
 }
@@ -61,16 +61,16 @@ pub enum ReplicationState {
 pub struct ClusterNode {
     /// Node ID
     pub node_id: String,
-    
+
     /// Node address
     pub address: String,
-    
+
     /// Is primary node
     pub is_primary: bool,
-    
+
     /// Last heartbeat
     pub last_heartbeat: DateTime<Utc>,
-    
+
     /// Replication lag (seconds)
     pub replication_lag: Option<u64>,
 }
@@ -80,16 +80,16 @@ pub struct ClusterNode {
 pub struct ReplicationConfig {
     /// Replication mode
     pub mode: ReplicationMode,
-    
+
     /// Cluster ID
     pub cluster_id: String,
-    
+
     /// Primary cluster address
     pub primary_cluster_addr: Option<String>,
-    
+
     /// Secondary token for authentication
     pub secondary_token: Option<String>,
-    
+
     /// Enabled
     pub enabled: bool,
 }
@@ -99,10 +99,10 @@ pub struct ReplicationConfig {
 pub struct MerkleNode {
     /// Path
     pub path: String,
-    
+
     /// Hash of data
     pub hash: String,
-    
+
     /// Version
     pub version: u64,
 }
@@ -112,16 +112,16 @@ pub struct MerkleNode {
 pub struct WALEntry {
     /// Entry ID (sequence number)
     pub id: u64,
-    
+
     /// Operation (write, delete)
     pub operation: String,
-    
+
     /// Path
     pub path: String,
-    
+
     /// Data (for write operations)
     pub data: Option<Vec<u8>>,
-    
+
     /// Timestamp
     pub timestamp: DateTime<Utc>,
 }
@@ -131,22 +131,22 @@ pub struct WALEntry {
 pub struct ReplicationStatus {
     /// Current state
     pub state: ReplicationState,
-    
+
     /// Mode
     pub mode: Option<ReplicationMode>,
-    
+
     /// Cluster ID
     pub cluster_id: Option<String>,
-    
+
     /// Is primary
     pub is_primary: bool,
-    
+
     /// Last sync time
     pub last_sync: Option<DateTime<Utc>>,
-    
+
     /// WAL index (last replicated)
     pub wal_index: u64,
-    
+
     /// Connected secondaries
     pub connected_secondaries: Vec<ClusterNode>,
 }
@@ -175,20 +175,20 @@ impl ReplicationService {
             wal_index: Arc::new(RwLock::new(0)),
         }
     }
-    
+
     /// Configure replication
     pub async fn configure(&self, config: ReplicationConfig) -> Result<(), ReplicationError> {
         if config.cluster_id.is_empty() {
             return Err(ReplicationError::InvalidConfiguration(
-                "Cluster ID cannot be empty".to_string()
+                "Cluster ID cannot be empty".to_string(),
             ));
         }
-        
+
         let mut current_config = self.config.write().await;
         *current_config = Some(config);
         Ok(())
     }
-    
+
     /// Start replication as primary
     pub async fn start_as_primary(&self) -> Result<(), ReplicationError> {
         let config = self.config.read().await;
@@ -196,49 +196,48 @@ impl ReplicationService {
             return Err(ReplicationError::NotConfigured);
         }
         drop(config);
-        
+
         let state = self.state.read().await;
         if *state != ReplicationState::Idle {
             return Err(ReplicationError::AlreadyReplicating);
         }
         drop(state);
-        
+
         let mut is_primary = self.is_primary.write().await;
         *is_primary = true;
-        
+
         let mut state = self.state.write().await;
         *state = ReplicationState::Active;
-        
+
         Ok(())
     }
-    
+
     /// Start replication as secondary
     pub async fn start_as_secondary(&self) -> Result<(), ReplicationError> {
         let config = self.config.read().await;
-        let config = config.as_ref()
-            .ok_or(ReplicationError::NotConfigured)?;
-        
+        let config = config.as_ref().ok_or(ReplicationError::NotConfigured)?;
+
         if config.primary_cluster_addr.is_none() {
             return Err(ReplicationError::InvalidConfiguration(
-                "Primary cluster address required for secondary".to_string()
+                "Primary cluster address required for secondary".to_string(),
             ));
         }
         drop(config);
-        
+
         let mut is_primary = self.is_primary.write().await;
         *is_primary = false;
-        
+
         let mut state = self.state.write().await;
         *state = ReplicationState::Syncing;
-        
+
         // Simulate initial sync
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         *state = ReplicationState::Active;
-        
+
         Ok(())
     }
-    
+
     /// Stop replication
     pub async fn stop(&self) -> Result<(), ReplicationError> {
         let state = self.state.read().await;
@@ -246,20 +245,20 @@ impl ReplicationService {
             return Err(ReplicationError::NotReplicating);
         }
         drop(state);
-        
+
         let mut state = self.state.write().await;
         *state = ReplicationState::Idle;
-        
+
         Ok(())
     }
-    
+
     /// Append to WAL (Write-Ahead Log)
     pub async fn append_wal(&self, operation: String, path: String, data: Option<Vec<u8>>) -> u64 {
         let mut wal = self.wal.write().await;
         let mut wal_index = self.wal_index.write().await;
-        
+
         *wal_index += 1;
-        
+
         let entry = WALEntry {
             id: *wal_index,
             operation,
@@ -267,20 +266,23 @@ impl ReplicationService {
             data,
             timestamp: Utc::now(),
         };
-        
+
         wal.push(entry);
-        
+
         // Update merkle tree
         let mut merkle = self.merkle_tree.write().await;
-        merkle.insert(path.clone(), MerkleNode {
-            path,
-            hash: format!("hash-{}", *wal_index),
-            version: *wal_index,
-        });
-        
+        merkle.insert(
+            path.clone(),
+            MerkleNode {
+                path,
+                hash: format!("hash-{}", *wal_index),
+                version: *wal_index,
+            },
+        );
+
         *wal_index
     }
-    
+
     /// Get WAL entries since index
     pub async fn get_wal_since(&self, since_index: u64) -> Vec<WALEntry> {
         let wal = self.wal.read().await;
@@ -289,36 +291,39 @@ impl ReplicationService {
             .cloned()
             .collect()
     }
-    
+
     /// Sync state from primary
     pub async fn sync_state(&self, entries: Vec<WALEntry>) -> Result<(), ReplicationError> {
         let is_primary = self.is_primary.read().await;
         if *is_primary {
             return Err(ReplicationError::InvalidConfiguration(
-                "Cannot sync state on primary".to_string()
+                "Cannot sync state on primary".to_string(),
             ));
         }
         drop(is_primary);
-        
+
         let mut wal = self.wal.write().await;
         let mut merkle = self.merkle_tree.write().await;
         let mut wal_index = self.wal_index.write().await;
-        
+
         for entry in entries {
             wal.push(entry.clone());
-            
-            merkle.insert(entry.path.clone(), MerkleNode {
-                path: entry.path,
-                hash: format!("hash-{}", entry.id),
-                version: entry.id,
-            });
-            
+
+            merkle.insert(
+                entry.path.clone(),
+                MerkleNode {
+                    path: entry.path,
+                    hash: format!("hash-{}", entry.id),
+                    version: entry.id,
+                },
+            );
+
             *wal_index = entry.id.max(*wal_index);
         }
-        
+
         Ok(())
     }
-    
+
     /// Get replication status
     pub async fn get_status(&self) -> ReplicationStatus {
         let config = self.config.read().await;
@@ -326,13 +331,13 @@ impl ReplicationService {
         let is_primary = self.is_primary.read().await;
         let wal_index = self.wal_index.read().await;
         let nodes = self.cluster_nodes.read().await;
-        
+
         let last_sync = if *state == ReplicationState::Active {
             Some(Utc::now())
         } else {
             None
         };
-        
+
         ReplicationStatus {
             state: state.clone(),
             mode: config.as_ref().map(|c| c.mode.clone()),
@@ -343,32 +348,32 @@ impl ReplicationService {
             connected_secondaries: nodes.clone(),
         }
     }
-    
+
     /// Register secondary node
     pub async fn register_secondary(&self, node: ClusterNode) {
         let mut nodes = self.cluster_nodes.write().await;
-        
+
         // Remove old entry if exists
         nodes.retain(|n| n.node_id != node.node_id);
-        
+
         // Add new entry
         nodes.push(node);
     }
-    
+
     /// Get merkle tree for verification
     pub async fn get_merkle_tree(&self) -> HashMap<String, MerkleNode> {
         let merkle = self.merkle_tree.read().await;
         merkle.clone()
     }
-    
+
     /// Verify merkle tree matches
     pub async fn verify_merkle(&self, remote_merkle: HashMap<String, MerkleNode>) -> bool {
         let local_merkle = self.merkle_tree.read().await;
-        
+
         if local_merkle.len() != remote_merkle.len() {
             return false;
         }
-        
+
         for (path, local_node) in local_merkle.iter() {
             if let Some(remote_node) = remote_merkle.get(path) {
                 if local_node.hash != remote_node.hash {
@@ -378,7 +383,7 @@ impl ReplicationService {
                 return false;
             }
         }
-        
+
         true
     }
 }
@@ -392,11 +397,11 @@ impl Default for ReplicationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_start_dr_replication() {
         let service = ReplicationService::new();
-        
+
         let config = ReplicationConfig {
             mode: ReplicationMode::DR,
             cluster_id: "cluster-1".to_string(),
@@ -404,20 +409,20 @@ mod tests {
             secondary_token: None,
             enabled: true,
         };
-        
+
         service.configure(config).await.unwrap();
         service.start_as_primary().await.unwrap();
-        
+
         let status = service.get_status().await;
         assert_eq!(status.state, ReplicationState::Active);
         assert_eq!(status.mode.unwrap(), ReplicationMode::DR);
         assert!(status.is_primary);
     }
-    
+
     #[tokio::test]
     async fn test_performance_replication() {
         let service = ReplicationService::new();
-        
+
         let config = ReplicationConfig {
             mode: ReplicationMode::Performance,
             cluster_id: "cluster-2".to_string(),
@@ -425,19 +430,19 @@ mod tests {
             secondary_token: None,
             enabled: true,
         };
-        
+
         service.configure(config).await.unwrap();
         service.start_as_primary().await.unwrap();
-        
+
         let status = service.get_status().await;
         assert_eq!(status.mode.unwrap(), ReplicationMode::Performance);
     }
-    
+
     #[tokio::test]
     async fn test_wal_sync() {
         let primary = ReplicationService::new();
         let secondary = ReplicationService::new();
-        
+
         let config = ReplicationConfig {
             mode: ReplicationMode::DR,
             cluster_id: "cluster-3".to_string(),
@@ -445,48 +450,66 @@ mod tests {
             secondary_token: None,
             enabled: true,
         };
-        
+
         primary.configure(config.clone()).await.unwrap();
         primary.start_as_primary().await.unwrap();
-        
+
         // Write to primary
-        primary.append_wal("write".to_string(), "secret/data".to_string(), Some(vec![1, 2, 3])).await;
-        primary.append_wal("write".to_string(), "secret/data2".to_string(), Some(vec![4, 5, 6])).await;
-        
+        primary
+            .append_wal(
+                "write".to_string(),
+                "secret/data".to_string(),
+                Some(vec![1, 2, 3]),
+            )
+            .await;
+        primary
+            .append_wal(
+                "write".to_string(),
+                "secret/data2".to_string(),
+                Some(vec![4, 5, 6]),
+            )
+            .await;
+
         // Get WAL entries
         let entries = primary.get_wal_since(0).await;
         assert_eq!(entries.len(), 2);
-        
+
         // Configure secondary
         let mut secondary_config = config;
         secondary_config.primary_cluster_addr = Some("https://primary:8200".to_string());
         secondary.configure(secondary_config).await.unwrap();
         secondary.start_as_secondary().await.unwrap();
-        
+
         // Sync to secondary
         secondary.sync_state(entries).await.unwrap();
-        
+
         let secondary_status = secondary.get_status().await;
         assert_eq!(secondary_status.wal_index, 2);
     }
-    
+
     #[tokio::test]
     async fn test_merkle_verification() {
         let service = ReplicationService::new();
-        
-        service.append_wal("write".to_string(), "secret/test".to_string(), Some(vec![1, 2, 3])).await;
-        
+
+        service
+            .append_wal(
+                "write".to_string(),
+                "secret/test".to_string(),
+                Some(vec![1, 2, 3]),
+            )
+            .await;
+
         let merkle = service.get_merkle_tree().await;
-        
+
         // Verify with itself
         assert!(service.verify_merkle(merkle.clone()).await);
-        
+
         // Verify with modified merkle
         let mut modified_merkle = merkle;
         if let Some(node) = modified_merkle.get_mut("secret/test") {
             node.hash = "different-hash".to_string();
         }
-        
+
         assert!(!service.verify_merkle(modified_merkle).await);
     }
 }

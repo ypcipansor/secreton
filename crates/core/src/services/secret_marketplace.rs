@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
 use uuid::Uuid;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Error)]
 pub enum MarketplaceError {
@@ -137,13 +137,13 @@ impl SecretMarketplace {
     /// Publish template
     pub async fn publish_template(&self, template: SecretTemplate) -> Result<String> {
         let mut templates = self.templates.write().await;
-        
+
         if templates.contains_key(&template.template_id) {
             return Err(MarketplaceError::AlreadyExists(template.template_id));
         }
 
         let template_id = template.template_id.clone();
-        
+
         // Create initial version
         let version = TemplateVersion {
             version: template.version.clone(),
@@ -196,9 +196,13 @@ impl SecretMarketplace {
     }
 
     /// Search templates
-    pub async fn search_templates(&self, query: &str, filters: SearchFilters) -> Vec<SecretTemplate> {
+    pub async fn search_templates(
+        &self,
+        query: &str,
+        filters: SearchFilters,
+    ) -> Vec<SecretTemplate> {
         let templates = self.templates.read().await;
-        
+
         templates
             .values()
             .filter(|t| {
@@ -206,19 +210,23 @@ impl SecretMarketplace {
                     || t.name.to_lowercase().contains(&query.to_lowercase())
                     || t.description.to_lowercase().contains(&query.to_lowercase());
 
-                let matches_category = filters.category.is_none()
-                    || filters.category.as_ref() == Some(&t.category);
+                let matches_category =
+                    filters.category.is_none() || filters.category.as_ref() == Some(&t.category);
 
-                let matches_tags = filters.tags.is_empty()
-                    || filters.tags.iter().any(|tag| t.tags.contains(tag));
+                let matches_tags =
+                    filters.tags.is_empty() || filters.tags.iter().any(|tag| t.tags.contains(tag));
 
-                let matches_rating = filters.min_rating.is_none()
-                    || t.rating >= filters.min_rating.unwrap();
+                let matches_rating =
+                    filters.min_rating.is_none() || t.rating >= filters.min_rating.unwrap();
 
-                let matches_author = filters.author.is_none()
-                    || filters.author.as_ref() == Some(&t.author);
+                let matches_author =
+                    filters.author.is_none() || filters.author.as_ref() == Some(&t.author);
 
-                matches_query && matches_category && matches_tags && matches_rating && matches_author
+                matches_query
+                    && matches_category
+                    && matches_tags
+                    && matches_rating
+                    && matches_author
             })
             .cloned()
             .collect()
@@ -249,20 +257,24 @@ impl SecretMarketplace {
     /// Get shared secret
     pub async fn get_shared_secret(&self, share_id: &str, user: &str) -> Result<SharedSecret> {
         let shares = self.shared_secrets.read().await;
-        
+
         let shared = shares
             .get(share_id)
             .ok_or_else(|| MarketplaceError::TemplateNotFound(share_id.to_string()))?;
 
         // Check permissions
         if shared.owner != user && !shared.shared_with.contains(&user.to_string()) {
-            return Err(MarketplaceError::PermissionDenied("Not authorized".to_string()));
+            return Err(MarketplaceError::PermissionDenied(
+                "Not authorized".to_string(),
+            ));
         }
 
         // Check expiry
         if let Some(expires_at) = shared.expires_at {
             if Utc::now() > expires_at {
-                return Err(MarketplaceError::PermissionDenied("Share expired".to_string()));
+                return Err(MarketplaceError::PermissionDenied(
+                    "Share expired".to_string(),
+                ));
             }
         }
 
@@ -272,13 +284,15 @@ impl SecretMarketplace {
     /// Revoke share
     pub async fn revoke_share(&self, share_id: &str, user: &str) -> Result<()> {
         let mut shares = self.shared_secrets.write().await;
-        
+
         let shared = shares
             .get(share_id)
             .ok_or_else(|| MarketplaceError::TemplateNotFound(share_id.to_string()))?;
 
         if shared.owner != user {
-            return Err(MarketplaceError::PermissionDenied("Not the owner".to_string()));
+            return Err(MarketplaceError::PermissionDenied(
+                "Not the owner".to_string(),
+            ));
         }
 
         shares.remove(share_id);
@@ -288,7 +302,7 @@ impl SecretMarketplace {
     /// Rate template
     pub async fn rate_template(&self, rating: TemplateRating) -> Result<()> {
         let mut ratings = self.ratings.write().await;
-        
+
         ratings
             .entry(rating.template_id.clone())
             .or_default()
@@ -331,7 +345,7 @@ impl SecretMarketplace {
     /// List popular templates
     pub async fn get_popular_templates(&self, limit: usize) -> Vec<SecretTemplate> {
         let templates = self.templates.read().await;
-        
+
         let mut sorted: Vec<SecretTemplate> = templates.values().cloned().collect();
         sorted.sort_by(|a, b| b.downloads.cmp(&a.downloads));
         sorted.truncate(limit);
@@ -362,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_publish_template() {
         let marketplace = SecretMarketplace::new();
-        
+
         let template = SecretTemplate {
             template_id: "tmpl1".to_string(),
             name: "Database Secret".to_string(),
@@ -384,7 +398,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_template() {
         let marketplace = SecretMarketplace::new();
-        
+
         let template = SecretTemplate {
             template_id: "tmpl1".to_string(),
             name: "Test".to_string(),
@@ -408,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn test_share_secret() {
         let marketplace = SecretMarketplace::new();
-        
+
         let shared = SharedSecret {
             share_id: "share1".to_string(),
             secret_id: "secret1".to_string(),
@@ -427,14 +441,17 @@ mod tests {
         let share_id = marketplace.share_secret(shared).await.unwrap();
         assert_eq!(share_id, "share1");
 
-        let retrieved = marketplace.get_shared_secret(&share_id, "bob").await.unwrap();
+        let retrieved = marketplace
+            .get_shared_secret(&share_id, "bob")
+            .await
+            .unwrap();
         assert_eq!(retrieved.owner, "alice");
     }
 
     #[tokio::test]
     async fn test_rate_template() {
         let marketplace = SecretMarketplace::new();
-        
+
         let template = SecretTemplate {
             template_id: "tmpl1".to_string(),
             name: "Test".to_string(),
@@ -469,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn test_search_templates() {
         let marketplace = SecretMarketplace::new();
-        
+
         let template = SecretTemplate {
             template_id: "tmpl1".to_string(),
             name: "AWS Secret".to_string(),
@@ -501,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_analytics() {
         let marketplace = SecretMarketplace::new();
-        
+
         let template = SecretTemplate {
             template_id: "tmpl1".to_string(),
             name: "Test".to_string(),

@@ -126,7 +126,8 @@ impl ReadStats {
         }
 
         // Update average latency
-        self.average_latency_ms = ((self.average_latency_ms * (self.total_reads - 1)) + latency_ms) / self.total_reads;
+        self.average_latency_ms =
+            ((self.average_latency_ms * (self.total_reads - 1)) + latency_ms) / self.total_reads;
     }
 
     pub fn cache_hit_rate(&self) -> f64 {
@@ -197,7 +198,8 @@ impl StandbyNode {
 
     pub fn update_sync_success(&mut self, items: u64, bytes: u64, duration_ms: u64) {
         self.last_sync = Some(Utc::now());
-        self.next_sync = Some(Utc::now() + chrono::Duration::seconds(self.config.sync_interval_seconds as i64));
+        self.next_sync =
+            Some(Utc::now() + chrono::Duration::seconds(self.config.sync_interval_seconds as i64));
         self.sync_count += 1;
         self.sync_lag_ms = duration_ms;
         self.state = StandbyState::Active;
@@ -276,7 +278,7 @@ impl PerformanceStandbyService {
 
         let result = if success {
             standby.update_sync_success(items, bytes, duration_ms);
-            
+
             SyncResult {
                 node_id: node_id.to_string(),
                 started_at: start_time,
@@ -289,7 +291,7 @@ impl PerformanceStandbyService {
         } else {
             let error_msg = "Simulated sync failure".to_string();
             standby.update_sync_failure(error_msg.clone());
-            
+
             SyncResult {
                 node_id: node_id.to_string(),
                 started_at: start_time,
@@ -364,7 +366,7 @@ impl PerformanceStandbyService {
     /// Write to cache (called after reading from primary)
     pub async fn cache_write(&self, key: String, value: Vec<u8>, ttl_seconds: u64) -> Result<()> {
         let mut cache = self.cache.write().await;
-        
+
         cache.insert(
             key.clone(),
             CacheEntry {
@@ -419,7 +421,7 @@ impl PerformanceStandbyService {
     /// Get sync history
     pub async fn get_sync_history(&self, node_id: Option<&str>, limit: usize) -> Vec<SyncResult> {
         let history = self.sync_history.read().await;
-        
+
         history
             .iter()
             .filter(|h| node_id.map_or(true, |id| h.node_id == id))
@@ -465,9 +467,9 @@ impl PerformanceStandbyService {
     pub async fn cleanup_cache(&self) -> u64 {
         let mut cache = self.cache.write().await;
         let initial_count = cache.len();
-        
+
         cache.retain(|_, entry| !entry.is_expired());
-        
+
         (initial_count - cache.len()) as u64
     }
 }
@@ -485,11 +487,8 @@ mod tests {
     #[tokio::test]
     async fn test_register_standby() {
         let service = PerformanceStandbyService::new();
-        
-        let config = StandbyConfig::new(
-            "standby-1".to_string(),
-            "http://primary:8200".to_string(),
-        );
+
+        let config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         let standby = service.register_standby(config).await.unwrap();
         assert_eq!(standby.node_id, "standby-1");
@@ -499,11 +498,8 @@ mod tests {
     #[tokio::test]
     async fn test_standby_sync() {
         let service = PerformanceStandbyService::new();
-        
-        let config = StandbyConfig::new(
-            "standby-1".to_string(),
-            "http://primary:8200".to_string(),
-        );
+
+        let config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         service.register_standby(config).await.unwrap();
         service.start_standby("standby-1").await.unwrap();
@@ -520,11 +516,8 @@ mod tests {
     #[tokio::test]
     async fn test_read_with_caching() {
         let service = PerformanceStandbyService::new();
-        
-        let config = StandbyConfig::new(
-            "standby-1".to_string(),
-            "http://primary:8200".to_string(),
-        );
+
+        let config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         service.register_standby(config).await.unwrap();
         service.start_standby("standby-1").await.unwrap();
@@ -565,14 +558,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_lag_detection() {
-        let config = StandbyConfig::new(
-            "standby-1".to_string(),
-            "http://primary:8200".to_string(),
-        )
-        .with_max_lag(10);
+        let config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string())
+            .with_max_lag(10);
 
         let mut standby = StandbyNode::new(config);
-        
+
         // Just synced - not lagging
         standby.last_sync = Some(Utc::now());
         assert!(!standby.is_sync_lagging());
@@ -585,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_stats() {
         let mut stats = ReadStats::new("standby-1".to_string());
-        
+
         stats.record_read(true, 10);
         stats.record_read(true, 20);
         stats.record_read(false, 30);

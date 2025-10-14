@@ -1,12 +1,13 @@
-use axum::Router;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tracing::info;
+use axum::Router;
+use tower::ServiceExt;
 
 // Use proper imports from secreton_api
 use secreton_api::{
-    create_api_router, ApiConfig, ApiState, KVApiState, KVEngine, TransitApiState,
+    ApiConfig, ApiState, KVApiState, KVEngine, TransitApiState, create_api_router,
     performance_optimizer::OptimizationLevel,
 };
 use secreton_crypto::transit::TransitEngine;
@@ -39,7 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         KVApiState { engine: kv_engine },
         OptimizationLevel::Balanced,
-    ).await?;
+    )
+    .await?;
 
     info!("Creating router...");
     // Create router
@@ -52,14 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Secreton API server on http://{}", addr);
     let listener = TcpListener::bind(addr).await?;
-    let service = tower::make::Shared::new(app.into_service());
-    hyper::server::Server::builder(listener)
-        .serve(service)
-        .await
-        .map_err(|e| {
-            error!("Server error: {}", e);
-            e
-        })?;
+    axum::serve(listener, app.into_make_service()).await?;
 
     Ok(())
 }

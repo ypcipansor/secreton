@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::zero_knowledge_proof::{AuthChallenge, AuthResponse, ZKProof, ZKPProtocol, ZKPSystem};
+use super::zero_knowledge_proof::{AuthResponse, ZKPProtocol, ZKPSystem, ZKProof};
 
 #[derive(Debug, Error)]
 pub enum PrivacyAuthError {
@@ -125,7 +125,7 @@ impl PrivacyPreservingAuthFlow {
         password: &str,
         protocol: ZKPProtocol,
     ) -> Result<ZKIdentity> {
-        let mut zkp = self.zkp_system.write().await;
+        let zkp = self.zkp_system.write().await;
 
         // Create commitment to password (never store plaintext)
         let password_bytes = format!("password:{}", password).into_bytes();
@@ -156,10 +156,7 @@ impl PrivacyPreservingAuthFlow {
     }
 
     /// Initiate authentication challenge
-    pub async fn create_auth_challenge(
-        &self,
-        username: String,
-    ) -> Result<PrivacyAuthChallenge> {
+    pub async fn create_auth_challenge(&self, username: String) -> Result<PrivacyAuthChallenge> {
         // Verify identity exists
         let identities = self.identities.read().await;
         let identity = identities
@@ -492,11 +489,7 @@ mod tests {
 
         // Register user
         auth_flow
-            .register_identity(
-                "bob".to_string(),
-                "bob_password",
-                ZKPProtocol::Schnorr,
-            )
+            .register_identity("bob".to_string(), "bob_password", ZKPProtocol::Schnorr)
             .await
             .unwrap();
 
@@ -519,11 +512,7 @@ mod tests {
 
         // Register user
         auth_flow
-            .register_identity(
-                "charlie".to_string(),
-                "charlie_pass",
-                ZKPProtocol::Schnorr,
-            )
+            .register_identity("charlie".to_string(), "charlie_pass", ZKPProtocol::Schnorr)
             .await
             .unwrap();
 
@@ -539,7 +528,11 @@ mod tests {
         // Respond to challenge
         let response_proof = vec![5, 6, 7, 8]; // Mock response
         let token = auth_flow
-            .challenge_response_auth(challenge.challenge_id, "charlie".to_string(), response_proof)
+            .challenge_response_auth(
+                challenge.challenge_id,
+                "charlie".to_string(),
+                response_proof,
+            )
             .await
             .unwrap();
 

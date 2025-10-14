@@ -3,7 +3,7 @@
 //! Tests for command-line interface, argument parsing, output formatting, and error handling
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 mod cli_parsing_tests {

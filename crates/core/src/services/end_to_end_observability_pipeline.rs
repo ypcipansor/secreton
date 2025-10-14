@@ -13,8 +13,6 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::distributed_tracing::TraceSpan;
-use super::advanced_observability::MetricType as ObsMetricType;
-use super::ai_anomaly_detection::AnomalyType;
 
 #[derive(Debug, Error)]
 pub enum ObservabilityError {
@@ -335,10 +333,7 @@ impl EndToEndObservabilityPipeline {
                     .filter(|t| !t.success)
                     .map(|t| t.trace_id.clone())
                     .collect(),
-                correlated_metrics: recent_metrics
-                    .iter()
-                    .map(|m| m.metric_id.clone())
-                    .collect(),
+                correlated_metrics: recent_metrics.iter().map(|m| m.metric_id.clone()).collect(),
                 correlated_anomalies: Vec::new(),
                 affected_services: self.get_affected_services(&recent_traces),
                 root_cause_hypothesis: Some("Potential service degradation".to_string()),
@@ -366,7 +361,9 @@ impl EndToEndObservabilityPipeline {
                 correlated_metrics: Vec::new(),
                 correlated_anomalies: Vec::new(),
                 affected_services: self.get_affected_services(&recent_traces),
-                root_cause_hypothesis: Some("Resource contention or external dependency issue".to_string()),
+                root_cause_hypothesis: Some(
+                    "Resource contention or external dependency issue".to_string(),
+                ),
                 status: IncidentStatus::Detected,
             };
 
@@ -429,9 +426,7 @@ impl EndToEndObservabilityPipeline {
         let triggered = match rule.condition {
             AlertCondition::ErrorRateAbove => latest_metric.error_rate > rule.threshold,
             AlertCondition::LatencyAbove => latest_metric.p99_latency_ms > rule.threshold,
-            AlertCondition::ThroughputBelow => {
-                latest_metric.throughput_per_second < rule.threshold
-            }
+            AlertCondition::ThroughputBelow => latest_metric.throughput_per_second < rule.threshold,
             _ => false,
         };
 
@@ -441,7 +436,10 @@ impl EndToEndObservabilityPipeline {
                 rule_id: rule.rule_id.clone(),
                 severity: rule.severity.clone(),
                 title: rule.name.clone(),
-                message: format!("Alert triggered: {} exceeded threshold {}", rule.name, rule.threshold),
+                message: format!(
+                    "Alert triggered: {} exceeded threshold {}",
+                    rule.name, rule.threshold
+                ),
                 triggered_at: Utc::now(),
                 resolved_at: None,
                 acknowledged: false,
@@ -544,10 +542,7 @@ impl EndToEndObservabilityPipeline {
 
     /// Get affected services
     fn get_affected_services(&self, traces: &[OperationTrace]) -> Vec<String> {
-        let mut services: Vec<String> = traces
-            .iter()
-            .map(|t| t.service_name.clone())
-            .collect();
+        let mut services: Vec<String> = traces.iter().map(|t| t.service_name.clone()).collect();
         services.sort();
         services.dedup();
         services
@@ -603,11 +598,9 @@ mod tests {
         // Add some failing traces
         for _ in 0..10 {
             pipeline
-                .trace_operation(
-                    "failing_op".to_string(),
-                    "service".to_string(),
-                    async { Err("error".to_string()) },
-                )
+                .trace_operation("failing_op".to_string(), "service".to_string(), async {
+                    Err("error".to_string())
+                })
                 .await
                 .unwrap();
         }

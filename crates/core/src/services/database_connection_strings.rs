@@ -116,7 +116,10 @@ impl DatabaseConnectionStrings {
 
         let mut metadata = HashMap::new();
         metadata.insert("template_name".to_string(), template.name.clone());
-        metadata.insert("database_type".to_string(), format!("{:?}", template.database_type));
+        metadata.insert(
+            "database_type".to_string(),
+            format!("{:?}", template.database_type),
+        );
 
         let connection = GeneratedConnection {
             connection_id: connection_id.clone(),
@@ -308,8 +311,7 @@ mod tests {
             name: "PostgreSQL Standard".to_string(),
             database_type: DatabaseType::PostgreSQL,
             template_string:
-                "postgresql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}"
-                    .to_string(),
+                "postgresql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}".to_string(),
             default_port: 5432,
             ssl_enabled: true,
             connection_options: HashMap::new(),
@@ -357,9 +359,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(connection.database_type, DatabaseType::MySQL);
-        assert!(connection
-            .connection_string
-            .contains("mysql://appuser:secret123@localhost:3306/myapp"));
+        assert!(
+            connection
+                .connection_string
+                .contains("mysql://appuser:secret123@localhost:3306/myapp")
+        );
         assert_eq!(connection.host, "localhost");
         assert_eq!(connection.port, 3306);
     }

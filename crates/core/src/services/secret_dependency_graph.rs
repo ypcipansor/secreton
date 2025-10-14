@@ -2,8 +2,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -251,7 +251,10 @@ impl SecretDependencyGraph {
             "dot" => {
                 let mut dot = String::from("digraph Dependencies {\n");
                 for node in nodes.values() {
-                    dot.push_str(&format!("  \"{}\" [label=\"{}\"];\n", node.node_id, node.secret_path));
+                    dot.push_str(&format!(
+                        "  \"{}\" [label=\"{}\"];\n",
+                        node.node_id, node.secret_path
+                    ));
                 }
                 for dep in dependencies.iter() {
                     dot.push_str(&format!(
@@ -441,7 +444,10 @@ impl SecretDependencyGraph {
         let dependencies = self.dependencies.read().await;
 
         let total_nodes = nodes.len();
-        let secret_nodes = nodes.values().filter(|n| n.node_type == NodeType::Secret).count();
+        let secret_nodes = nodes
+            .values()
+            .filter(|n| n.node_type == NodeType::Secret)
+            .count();
         let service_nodes = nodes
             .values()
             .filter(|n| n.node_type == NodeType::Service || n.node_type == NodeType::Application)

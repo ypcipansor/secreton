@@ -13,13 +13,13 @@ use tokio::sync::RwLock;
 pub enum SentinelError {
     #[error("Policy not found: {0}")]
     PolicyNotFound(String),
-    
+
     #[error("Policy evaluation failed: {0}")]
     EvaluationFailed(String),
-    
+
     #[error("Policy denied: {0}")]
     PolicyDenied(String),
-    
+
     #[error("Invalid policy syntax: {0}")]
     InvalidSyntax(String),
 }
@@ -29,10 +29,10 @@ pub enum SentinelError {
 pub enum EnforcementLevel {
     /// Advisory: logged but always passes
     Advisory,
-    
+
     /// Soft-mandatory: fails by default but can be overridden
     SoftMandatory,
-    
+
     /// Hard-mandatory: always fails if policy fails
     HardMandatory,
 }
@@ -42,19 +42,19 @@ pub enum EnforcementLevel {
 pub struct SentinelPolicy {
     /// Policy name
     pub name: String,
-    
+
     /// Enforcement level
     pub enforcement_level: EnforcementLevel,
-    
+
     /// Policy code (simple rule language)
     pub policy_code: String,
-    
+
     /// Description
     pub description: Option<String>,
-    
+
     /// Created timestamp
     pub created_at: DateTime<Utc>,
-    
+
     /// Modified timestamp
     pub modified_at: DateTime<Utc>,
 }
@@ -64,19 +64,19 @@ pub struct SentinelPolicy {
 pub struct EvaluationContext {
     /// Request path
     pub path: String,
-    
+
     /// Operation (read, write, delete, list)
     pub operation: String,
-    
+
     /// Identity information
     pub identity: HashMap<String, String>,
-    
+
     /// Request data
     pub request_data: HashMap<String, serde_json::Value>,
-    
+
     /// Current time
     pub time: DateTime<Utc>,
-    
+
     /// Custom metadata
     pub metadata: HashMap<String, String>,
 }
@@ -86,19 +86,19 @@ pub struct EvaluationContext {
 pub struct EvaluationResult {
     /// Policy name
     pub policy_name: String,
-    
+
     /// Pass or fail
     pub passed: bool,
-    
+
     /// Enforcement level
     pub enforcement_level: EnforcementLevel,
-    
+
     /// Advisory message
     pub message: Option<String>,
-    
+
     /// Can be overridden (for soft-mandatory)
     pub can_override: bool,
-    
+
     /// Evaluation duration (ms)
     pub duration_ms: u64,
 }
@@ -109,7 +109,7 @@ impl EvaluationResult {
         if self.passed {
             return false;
         }
-        
+
         match self.enforcement_level {
             EnforcementLevel::Advisory => false,
             EnforcementLevel::SoftMandatory => !self.can_override,
@@ -123,16 +123,16 @@ impl EvaluationResult {
 enum PolicyRule {
     /// Path must match pattern
     PathMatch(String),
-    
+
     /// Time must be within business hours
     BusinessHours,
-    
+
     /// Identity must have attribute
     IdentityHasAttribute(String, String),
-    
+
     /// Request data must contain key
     RequestDataHasKey(String),
-    
+
     /// Custom condition
     Custom(String),
 }
@@ -149,50 +149,51 @@ impl SentinelEngine {
             policies: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Create policy
     pub async fn create_policy(&self, policy: SentinelPolicy) -> Result<(), SentinelError> {
         // Validate policy syntax
         self.validate_policy_code(&policy.policy_code)?;
-        
+
         let mut policies = self.policies.write().await;
         policies.insert(policy.name.clone(), policy);
         Ok(())
     }
-    
+
     /// Get policy
     pub async fn get_policy(&self, name: &str) -> Option<SentinelPolicy> {
         let policies = self.policies.read().await;
         policies.get(name).cloned()
     }
-    
+
     /// Update policy
     pub async fn update_policy(&self, policy: SentinelPolicy) -> Result<(), SentinelError> {
         self.validate_policy_code(&policy.policy_code)?;
-        
+
         let mut policies = self.policies.write().await;
         if !policies.contains_key(&policy.name) {
             return Err(SentinelError::PolicyNotFound(policy.name.clone()));
         }
-        
+
         policies.insert(policy.name.clone(), policy);
         Ok(())
     }
-    
+
     /// Delete policy
     pub async fn delete_policy(&self, name: &str) -> Result<(), SentinelError> {
         let mut policies = self.policies.write().await;
-        policies.remove(name)
+        policies
+            .remove(name)
             .ok_or_else(|| SentinelError::PolicyNotFound(name.to_string()))?;
         Ok(())
     }
-    
+
     /// List all policies
     pub async fn list_policies(&self) -> Vec<String> {
         let policies = self.policies.read().await;
         policies.keys().cloned().collect()
     }
-    
+
     /// Evaluate policy
     pub async fn evaluate(
         &self,
@@ -200,22 +201,23 @@ impl SentinelEngine {
         context: &EvaluationContext,
     ) -> Result<EvaluationResult, SentinelError> {
         let policies = self.policies.read().await;
-        let policy = policies.get(policy_name)
+        let policy = policies
+            .get(policy_name)
             .ok_or_else(|| SentinelError::PolicyNotFound(policy_name.to_string()))?;
-        
+
         let start = std::time::Instant::now();
-        
+
         // Parse and evaluate policy
         let passed = self.evaluate_policy_code(&policy.policy_code, context)?;
-        
+
         let duration_ms = start.elapsed().as_millis() as u64;
-        
+
         let message = if !passed {
             Some(format!("Policy '{}' denied the request", policy_name))
         } else {
             None
         };
-        
+
         Ok(EvaluationResult {
             policy_name: policy_name.to_string(),
             passed,
@@ -225,7 +227,7 @@ impl SentinelEngine {
             duration_ms,
         })
     }
-    
+
     /// Evaluate multiple policies
     pub async fn evaluate_policies(
         &self,
@@ -233,7 +235,7 @@ impl SentinelEngine {
         context: &EvaluationContext,
     ) -> Vec<EvaluationResult> {
         let mut results = Vec::new();
-        
+
         for policy_name in policy_names {
             match self.evaluate(policy_name, context).await {
                 Ok(result) => results.push(result),
@@ -243,10 +245,10 @@ impl SentinelEngine {
                 }
             }
         }
-        
+
         results
     }
-    
+
     /// Check if request should be allowed
     pub async fn check_allowed(
         &self,
@@ -254,38 +256,42 @@ impl SentinelEngine {
         context: &EvaluationContext,
     ) -> Result<bool, SentinelError> {
         let results = self.evaluate_policies(policy_names, context).await;
-        
+
         // Check if any hard-mandatory or soft-mandatory policy failed
         for result in results {
             if result.should_block() {
                 return Err(SentinelError::PolicyDenied(
-                    result.message.unwrap_or_else(|| "Policy denied".to_string())
+                    result
+                        .message
+                        .unwrap_or_else(|| "Policy denied".to_string()),
                 ));
             }
         }
-        
+
         Ok(true)
     }
-    
+
     /// Validate policy code syntax
     fn validate_policy_code(&self, code: &str) -> Result<(), SentinelError> {
         if code.is_empty() {
-            return Err(SentinelError::InvalidSyntax("Policy code cannot be empty".to_string()));
+            return Err(SentinelError::InvalidSyntax(
+                "Policy code cannot be empty".to_string(),
+            ));
         }
-        
+
         // Simple validation (production would use a proper parser)
         let valid_keywords = ["allow", "deny", "path", "time", "identity", "request"];
         let has_keyword = valid_keywords.iter().any(|kw| code.contains(kw));
-        
+
         if !has_keyword {
             return Err(SentinelError::InvalidSyntax(
-                "Policy must contain at least one valid keyword".to_string()
+                "Policy must contain at least one valid keyword".to_string(),
             ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Evaluate policy code
     fn evaluate_policy_code(
         &self,
@@ -293,7 +299,7 @@ impl SentinelEngine {
         context: &EvaluationContext,
     ) -> Result<bool, SentinelError> {
         // Simple rule evaluation (production would use a proper interpreter)
-        
+
         // Rule: "allow if path matches secret/*"
         if code.contains("path matches") {
             if let Some(pattern) = code.split("path matches").nth(1) {
@@ -301,7 +307,7 @@ impl SentinelEngine {
                 return Ok(self.path_matches(&context.path, pattern));
             }
         }
-        
+
         // Rule: "deny if not business_hours"
         if code.contains("business_hours") {
             let is_business_hours = self.is_business_hours(&context.time);
@@ -309,7 +315,7 @@ impl SentinelEngine {
                 return Ok(is_business_hours);
             }
         }
-        
+
         // Rule: "allow if identity has role:admin"
         if code.contains("identity has") {
             if let Some(attr_part) = code.split("identity has").nth(1) {
@@ -322,11 +328,11 @@ impl SentinelEngine {
                 }
             }
         }
-        
+
         // Default: allow
         Ok(true)
     }
-    
+
     /// Check if path matches pattern (simple wildcard)
     fn path_matches(&self, path: &str, pattern: &str) -> bool {
         if pattern.ends_with('*') {
@@ -336,12 +342,12 @@ impl SentinelEngine {
             path == pattern
         }
     }
-    
+
     /// Check if time is within business hours (9 AM - 5 PM weekdays)
     fn is_business_hours(&self, time: &DateTime<Utc>) -> bool {
         let weekday = time.weekday().number_from_monday();
         let hour = time.hour();
-        
+
         weekday <= 5 && hour >= 9 && hour < 17
     }
 }
@@ -355,11 +361,11 @@ impl Default for SentinelEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_advisory_policy() {
         let engine = SentinelEngine::new();
-        
+
         let policy = SentinelPolicy {
             name: "test-advisory".to_string(),
             enforcement_level: EnforcementLevel::Advisory,
@@ -368,9 +374,9 @@ mod tests {
             created_at: Utc::now(),
             modified_at: Utc::now(),
         };
-        
+
         engine.create_policy(policy).await.unwrap();
-        
+
         let context = EvaluationContext {
             path: "secret/foo".to_string(),
             operation: "read".to_string(),
@@ -379,16 +385,16 @@ mod tests {
             time: Utc::now(),
             metadata: HashMap::new(),
         };
-        
+
         let result = engine.evaluate("test-advisory", &context).await.unwrap();
         assert!(result.passed);
         assert!(!result.should_block());
     }
-    
+
     #[tokio::test]
     async fn test_hard_mandatory_policy() {
         let engine = SentinelEngine::new();
-        
+
         let policy = SentinelPolicy {
             name: "require-admin".to_string(),
             enforcement_level: EnforcementLevel::HardMandatory,
@@ -397,13 +403,13 @@ mod tests {
             created_at: Utc::now(),
             modified_at: Utc::now(),
         };
-        
+
         engine.create_policy(policy).await.unwrap();
-        
+
         // Context without admin role
         let mut identity = HashMap::new();
         identity.insert("role".to_string(), "user".to_string());
-        
+
         let context = EvaluationContext {
             path: "secret/sensitive".to_string(),
             operation: "write".to_string(),
@@ -412,16 +418,16 @@ mod tests {
             time: Utc::now(),
             metadata: HashMap::new(),
         };
-        
+
         let result = engine.evaluate("require-admin", &context).await.unwrap();
         assert!(!result.passed);
         assert!(result.should_block());
     }
-    
+
     #[tokio::test]
     async fn test_business_hours_policy() {
         let engine = SentinelEngine::new();
-        
+
         let policy = SentinelPolicy {
             name: "business-hours".to_string(),
             enforcement_level: EnforcementLevel::SoftMandatory,
@@ -430,9 +436,9 @@ mod tests {
             created_at: Utc::now(),
             modified_at: Utc::now(),
         };
-        
+
         engine.create_policy(policy).await.unwrap();
-        
+
         let context = EvaluationContext {
             path: "secret/data".to_string(),
             operation: "read".to_string(),
@@ -441,16 +447,16 @@ mod tests {
             time: Utc::now(),
             metadata: HashMap::new(),
         };
-        
+
         let result = engine.evaluate("business-hours", &context).await.unwrap();
         // Result depends on current time
         assert_eq!(result.enforcement_level, EnforcementLevel::SoftMandatory);
     }
-    
+
     #[tokio::test]
     async fn test_multiple_policies() {
         let engine = SentinelEngine::new();
-        
+
         let policy1 = SentinelPolicy {
             name: "path-check".to_string(),
             enforcement_level: EnforcementLevel::Advisory,
@@ -459,7 +465,7 @@ mod tests {
             created_at: Utc::now(),
             modified_at: Utc::now(),
         };
-        
+
         let policy2 = SentinelPolicy {
             name: "identity-check".to_string(),
             enforcement_level: EnforcementLevel::HardMandatory,
@@ -468,13 +474,13 @@ mod tests {
             created_at: Utc::now(),
             modified_at: Utc::now(),
         };
-        
+
         engine.create_policy(policy1).await.unwrap();
         engine.create_policy(policy2).await.unwrap();
-        
+
         let mut identity = HashMap::new();
         identity.insert("role".to_string(), "admin".to_string());
-        
+
         let context = EvaluationContext {
             path: "secret/test".to_string(),
             operation: "read".to_string(),
@@ -483,7 +489,7 @@ mod tests {
             time: Utc::now(),
             metadata: HashMap::new(),
         };
-        
+
         let policies = vec!["path-check".to_string(), "identity-check".to_string()];
         let allowed = engine.check_allowed(&policies, &context).await.unwrap();
         assert!(allowed);
