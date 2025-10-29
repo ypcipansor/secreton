@@ -87,23 +87,14 @@ pub struct AlertingConfig {
     /// Processing interval in seconds
     pub processing_interval_seconds: u64,
 
-    /// Enable email alerts
-    pub email_enabled: bool,
-
-    /// Enable webhook alerts
-    pub webhook_enabled: bool,
-
-    /// Enable Slack alerts
-    pub slack_enabled: bool,
-
-    /// Maximum alerts per minute
-    pub rate_limit: u32,
-
-    /// Alert severity thresholds
-    pub severity_thresholds: SeverityThresholds,
+    /// Enable SMS alerts
+    pub sms_enabled: bool,
 
     /// Email settings
     pub email: EmailConfig,
+
+    /// SMS settings
+    pub sms: SmsConfig,
 
     /// Webhook settings
     pub webhook: WebhookConfig,
@@ -116,12 +107,9 @@ impl Default for AlertingConfig {
     fn default() -> Self {
         Self {
             processing_interval_seconds: 10,
-            email_enabled: false,
-            webhook_enabled: false,
-            slack_enabled: false,
-            rate_limit: 60,
-            severity_thresholds: SeverityThresholds::default(),
+            sms_enabled: false,
             email: EmailConfig::default(),
+            sms: SmsConfig::default(),
             webhook: WebhookConfig::default(),
             slack: SlackConfig::default(),
         }
@@ -206,6 +194,37 @@ impl Default for EmailConfig {
             from_address: "secreton-agent@localhost".to_string(),
             to_addresses: Vec::new(),
             use_tls: true,
+        }
+    }
+}
+
+/// SMS alert configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmsConfig {
+    /// SMS provider (twilio, aws-sns, etc.)
+    pub provider: String,
+
+    /// Account SID (for Twilio)
+    pub account_sid: String,
+
+    /// Auth token (for Twilio)
+    pub auth_token: String,
+
+    /// From phone number
+    pub from_number: String,
+
+    /// To phone numbers
+    pub to_numbers: Vec<String>,
+}
+
+impl Default for SmsConfig {
+    fn default() -> Self {
+        Self {
+            provider: "twilio".to_string(),
+            account_sid: "".to_string(),
+            auth_token: "".to_string(),
+            from_number: "".to_string(),
+            to_numbers: Vec::new(),
         }
     }
 }
@@ -476,53 +495,12 @@ impl AgentConfig {
         let content = std::fs::read_to_string(path).map_err(secreton_core::CoreError::Io)?;
 
         let config: AgentConfig = toml::from_str(&content).map_err(|e| {
-            secreton_core::CoreError::configuration(format!("Failed to parse config: {}", e))
+            secreton_core::CoreError::Configuration {
+                message: format!("Failed to parse config: {}", e),
+            }
         })?;
 
         Ok(config)
-    }
-
-    /// Save configuration to file
-    #[allow(dead_code)]
-    pub fn save_to_file(&self, path: &str) -> CoreResult<()> {
-        let content = toml::to_string_pretty(self).map_err(|e| {
-            secreton_core::CoreError::configuration(format!("Failed to serialize config: {}", e))
-        })?;
-
-        std::fs::write(path, content).map_err(secreton_core::CoreError::Io)?;
-
-        tracing::info!("Configuration saved to {}", path);
-        Ok(())
-    }
-
-    /// Validate configuration
-    #[allow(dead_code)]
-    pub fn validate(&self) -> CoreResult<()> {
-        if self.agent_id.is_empty() {
-            return Err(secreton_core::CoreError::configuration(
-                "Agent ID cannot be empty",
-            ));
-        }
-
-        if self.monitoring.check_interval_seconds == 0 {
-            return Err(secreton_core::CoreError::configuration(
-                "Monitoring interval must be greater than 0",
-            ));
-        }
-
-        if self.alerting.processing_interval_seconds == 0 {
-            return Err(secreton_core::CoreError::configuration(
-                "Alerting interval must be greater than 0",
-            ));
-        }
-
-        if self.security.scan_interval_seconds == 0 {
-            return Err(secreton_core::CoreError::configuration(
-                "Security scan interval must be greater than 0",
-            ));
-        }
-
-        Ok(())
     }
 
     /// Convenience method to load config - tries file first, then env

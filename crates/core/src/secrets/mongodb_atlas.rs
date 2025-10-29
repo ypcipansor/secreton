@@ -195,16 +195,8 @@ impl MongoDBAtlasEngine {
 
     /// Generate secure password
     fn generate_password(&self, length: usize) -> String {
-        use rand::Rng;
-        const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
-        let mut rng = rand::thread_rng();
-
-        (0..length)
-            .map(|_| {
-                let idx = rng.gen_range(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect()
+        use secreton_common::utils::password::generate_password;
+        generate_password(length)
     }
 
     /// Create user in Atlas

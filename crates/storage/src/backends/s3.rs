@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_vault_entry_to_bytes() {
-        let config = S3StorageConfig::default();
+        let _config = S3StorageConfig::default();
 
         let entry = VaultEntry::new(
             "test/path".to_string(),

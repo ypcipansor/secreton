@@ -1,4 +1,4 @@
-//! Performance benchmark tests for Brankas Enterprise Vault
+//! Performance benchmark tests for Secreton Enterprise
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

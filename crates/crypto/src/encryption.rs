@@ -2,7 +2,7 @@
 
 use crate::{AlgorithmId, CryptoError, CryptoResult, generate_random_bytes};
 use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use chacha20poly1305::ChaCha20Poly1305;
 use serde::{Deserialize, Serialize};
 
@@ -40,9 +40,9 @@ impl SymmetricCipher for Aes256GcmCipher {
 
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = *Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
+        let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("AES-GCM encryption failed: {}", e))
         })?;
 
@@ -70,10 +70,10 @@ impl SymmetricCipher for Aes256GcmCipher {
             expected: 32,
             actual: key.len(),
         })?;
-        let nonce = Nonce::from_slice(&encrypted.nonce);
+        let nonce = Nonce::clone_from_slice(&encrypted.nonce);
 
         cipher
-            .decrypt(nonce, encrypted.ciphertext.as_ref())
+            .decrypt(&nonce, encrypted.ciphertext.as_ref())
             .map_err(|e| CryptoError::DecryptionFailed(format!("AES-GCM decryption failed: {}", e)))
     }
 }
@@ -98,9 +98,9 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
 
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
-        let nonce = chacha20poly1305::Nonce::from_slice(&nonce_bytes);
+        let nonce = chacha20poly1305::Nonce::clone_from_slice(&nonce_bytes);
 
-        let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| {
+        let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("ChaCha20-Poly1305 encryption failed: {}", e))
         })?;
 
@@ -129,10 +129,10 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
                 expected: 32,
                 actual: key.len(),
             })?;
-        let nonce = chacha20poly1305::Nonce::from_slice(&encrypted.nonce);
+        let nonce = chacha20poly1305::Nonce::clone_from_slice(&encrypted.nonce);
 
         cipher
-            .decrypt(nonce, encrypted.ciphertext.as_ref())
+            .decrypt(&nonce, encrypted.ciphertext.as_ref())
             .map_err(|e| {
                 CryptoError::DecryptionFailed(format!("ChaCha20-Poly1305 decryption failed: {}", e))
             })

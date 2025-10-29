@@ -5,7 +5,7 @@
 
 use axum::{
     Json,
-    extract::{Request, State},
+    extract::{Extension, Request},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -19,7 +19,7 @@ use uuid::Uuid;
 use x509_parser::prelude::*;
 
 use crate::ApiState;
-use crate::auth::{AuthError, AuthService, extract_bearer_token};
+use crate::auth::{AuthError, JwtAuthService, extract_bearer_token};
 
 /// Certificate cache for performance optimization
 #[derive(Debug)]
@@ -61,12 +61,6 @@ static CERT_CACHE: Mutex<Option<Arc<CertificateCache>>> = Mutex::new(None);
 pub fn init_certificate_cache(ttl_seconds: u64) {
     let mut cache = CERT_CACHE.lock().unwrap();
     *cache = Some(Arc::new(CertificateCache::new(ttl_seconds)));
-}
-
-/// Get certificate cache instance
-#[allow(dead_code)]
-fn get_cert_cache() -> Option<Arc<CertificateCache>> {
-    CERT_CACHE.lock().unwrap().as_ref().cloned()
 }
 
 /// Certificate validation result
@@ -183,7 +177,7 @@ pub fn extract_client_certificate_from_tls(request: &Request) -> Option<Vec<u8>>
 
 /// Enhanced mTLS authentication middleware with proper TLS integration
 pub async fn mtls_auth_middleware(
-    State(_state): State<ApiState>,
+    Extension(_state): Extension<ApiState>,
     _headers: HeaderMap,
     mut request: Request,
     next: Next,
@@ -324,7 +318,7 @@ pub async fn request_id(mut request: Request, next: Next) -> Response {
 
 /// Authentication middleware
 pub async fn auth_middleware(
-    State(_state): State<ApiState>,
+    Extension(_state): Extension<ApiState>,
     headers: HeaderMap,
     mut request: Request,
     next: Next,
@@ -353,7 +347,7 @@ pub async fn auth_middleware(
 
     // Create auth service (in real implementation, this would be injected)
     let auth_config = crate::auth::AuthConfig::default();
-    let auth_service = AuthService::new(auth_config);
+    let auth_service = JwtAuthService::new(auth_config);
 
     // Validate token
     let claims = auth_service.validate_token(&token)?;

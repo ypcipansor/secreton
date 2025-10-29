@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{Extension, Path},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -11,6 +11,9 @@ use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
 use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions};
+
+// Import ApiState from the parent module
+use crate::ApiState;
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -63,7 +66,7 @@ pub struct DecryptResponse {
     pub plaintext: String, // base64 encoded
 }
 
-pub fn create_transit_router() -> Router<TransitApiState> {
+pub fn create_transit_router() -> Router<()> {
     Router::new()
         .route("/keys", get(list_keys))
         .route("/keys/:key_name", post(create_key))
@@ -71,14 +74,14 @@ pub fn create_transit_router() -> Router<TransitApiState> {
         .route("/decrypt/:key_name", post(decrypt_data))
 }
 
-pub async fn list_keys(State(state): State<TransitApiState>) -> Json<ListKeysResponse> {
-    let keys = state.engine.list_keys().await;
+pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ListKeysResponse> {
+    let keys = state.transit.engine.list_keys().await;
     Json(ListKeysResponse { keys })
 }
 
 pub async fn create_key(
     Path(key_name): Path<String>,
-    State(state): State<TransitApiState>,
+    Extension(state): Extension<ApiState>,
     Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<CreateKeyResponse>, StatusCode> {
     // Parse key type from string to KeyType enum
@@ -99,6 +102,7 @@ pub async fn create_key(
     let options = KeyOptions::default();
 
     match state
+        .transit
         .engine
         .create_key(key_name.clone(), key_type, Some(options))
         .await
@@ -119,7 +123,7 @@ pub async fn create_key(
 
 #[axum::debug_handler]
 pub async fn encrypt_data(
-    State(state): State<TransitApiState>,
+    Extension(state): Extension<ApiState>,
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, StatusCode> {
@@ -142,6 +146,7 @@ pub async fn encrypt_data(
     };
 
     match state
+        .transit
         .engine
         .encrypt(&key_name, &plaintext_bytes, context.as_deref(), None)
         .await
@@ -159,7 +164,7 @@ pub async fn encrypt_data(
 
 #[axum::debug_handler]
 pub async fn decrypt_data(
-    State(state): State<TransitApiState>,
+    Extension(state): Extension<ApiState>,
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<DecryptResponse>, StatusCode> {
@@ -176,6 +181,7 @@ pub async fn decrypt_data(
     };
 
     match state
+        .transit
         .engine
         .decrypt(&key_name, &request.ciphertext, context.as_deref())
         .await

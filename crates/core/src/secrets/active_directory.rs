@@ -1,10 +1,11 @@
 // Active Directory Secrets Engine - Dynamic AD credential management
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use ldap3;
 
 #[derive(Debug, Error)]
 pub enum ADError {
@@ -131,15 +132,55 @@ impl ActiveDirectoryEngine {
 
     /// Test Active Directory connection
     pub async fn test_connection(&self, config: &ADConfig) -> Result<()> {
-        // Mock connection test
-        if config.bind_password.is_empty() {
-            return Err(ADError::AuthError("Invalid credentials".to_string()));
+        use ldap3::{LdapConnAsync, Scope, SearchEntry};
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| ADError::ADError(format!("Failed to connect to AD: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| ADError::ADError(format!("Failed to start TLS: {}", e)))?;
         }
 
-        // In real implementation, this would:
-        // 1. Connect to LDAP server
-        // 2. Bind with credentials
-        // 3. Verify domain access
+        // Bind with credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| ADError::AuthError(format!("AD bind failed: {}", e)))?;
+
+        // Verify bind was successful by searching for the domain
+        let search_result = ldap.search(
+            &config.bind_dn,
+            Scope::Base,
+            "(objectClass=*)",
+            vec!["dn"]
+        ).await
+        .map_err(|e| ADError::ADError(format!("AD search failed: {}", e)))?;
+
+        if search_result.0.is_empty() {
+            return Err(ADError::ADError(
+                "Bind DN verification failed - no results returned".to_string()
+            ));
+        }
+
+        // Test access to user and service account OUs
+        for ou in &[&config.user_ou, &config.service_account_ou] {
+            let ou_search = ldap.search(
+                ou,
+                Scope::Base,
+                "(objectClass=organizationalUnit)",
+                vec!["dn"]
+            ).await
+            .map_err(|e| ADError::ConfigError(format!("OU '{}' not accessible: {}", ou, e)))?;
+
+            if ou_search.0.is_empty() {
+                return Err(ADError::ConfigError(format!("OU '{}' does not exist", ou)));
+            }
+        }
+
+        // Unbind and close connection
+        ldap.unbind().await
+            .map_err(|e| ADError::ADError(format!("AD unbind failed: {}", e)))?;
 
         Ok(())
     }
@@ -244,39 +285,60 @@ impl ActiveDirectoryEngine {
 
     /// Generate secure password
     fn generate_password(&self) -> String {
-        // Generate 24-character password with mixed chars
-        use rand::Rng;
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-                                 abcdefghijklmnopqrstuvwxyz\
-                                 0123456789\
-                                 !@#$%^&*";
-        let mut rng = rand::thread_rng();
-
-        (0..24)
-            .map(|_| {
-                let idx = rng.gen_range(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect()
+        use secreton_common::utils::password::generate_password;
+        generate_password(24)
     }
 
-    /// Create account in Active Directory (mock)
+    /// Create account in Active Directory
     async fn create_ad_account(
         &self,
         username: &str,
         password: &str,
         distinguished_name: &str,
     ) -> Result<()> {
-        // Mock account creation
-        // In real implementation, this would use LDAP operations:
-        // 1. Create user object
-        // 2. Set password
-        // 3. Set account attributes
-        // 4. Enable account
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            ADError::ConfigError("Active Directory not configured".to_string())
+        })?;
 
-        if username.is_empty() || password.is_empty() {
-            return Err(ADError::ADError("Invalid account data".to_string()));
+        use ldap3::{LdapConnAsync, Mod};
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| ADError::ADError(format!("Failed to connect to AD: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| ADError::ADError(format!("Failed to start TLS: {}", e)))?;
         }
+
+        // Bind with admin credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| ADError::AuthError(format!("AD bind failed: {}", e)))?;
+
+        // Create user account with required attributes
+        let user_attrs = vec![
+            ("objectClass", HashSet::from(["top".to_string(), "person".to_string(), "organizationalPerson".to_string(), "user".to_string()])),
+            ("cn", HashSet::from([username.to_string()])),
+            ("sn", HashSet::from([username.to_string()])),
+            ("userPrincipalName", HashSet::from([format!("{}@{}", username, config.domain)])),
+            ("sAMAccountName", HashSet::from([username.to_string()])),
+            ("userAccountControl", HashSet::from(["512".to_string()])), // Normal account, enabled
+        ];
+
+        // Add user object
+        ldap.add(distinguished_name, user_attrs).await
+            .map_err(|e| ADError::ADError(format!("Failed to create user {}: {}", distinguished_name, e)))?;
+
+        // Set password using modify operation
+        let password_mod = Mod::Replace("unicodePwd", HashSet::from([format!("\"{}\"", password).into_bytes()]));
+        ldap.modify(distinguished_name, vec![password_mod]).await
+            .map_err(|e| ADError::ADError(format!("Failed to set password for {}: {}", distinguished_name, e)))?;
+
+        // Unbind
+        ldap.unbind().await
+            .map_err(|e| ADError::ADError(format!("AD unbind failed: {}", e)))?;
 
         Ok(())
     }
@@ -310,10 +372,42 @@ impl ActiveDirectoryEngine {
         })
     }
 
-    /// Update password in Active Directory (mock)
+    /// Update password in Active Directory
     async fn update_ad_password(&self, username: &str, new_password: &str) -> Result<()> {
-        // Mock password update
-        // In real implementation, this would update password in AD
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            ADError::ConfigError("Active Directory not configured".to_string())
+        })?;
+
+        let accounts = self.accounts.read().await;
+        let account = accounts.get(username)
+            .ok_or_else(|| ADError::NotFound(username.to_string()))?;
+
+        use ldap3::{LdapConnAsync, Mod};
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| ADError::ADError(format!("Failed to connect to AD: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| ADError::ADError(format!("Failed to start TLS: {}", e)))?;
+        }
+
+        // Bind with admin credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| ADError::AuthError(format!("AD bind failed: {}", e)))?;
+
+        // Update password
+        let password_mod = Mod::Replace("unicodePwd", HashSet::from([format!("\"{}\"", new_password).into_bytes()]));
+        ldap.modify(&account.distinguished_name, vec![password_mod]).await
+            .map_err(|e| ADError::ADError(format!("Failed to update password for {}: {}", username, e)))?;
+
+        // Unbind
+        ldap.unbind().await
+            .map_err(|e| ADError::ADError(format!("AD unbind failed: {}", e)))?;
+
         Ok(())
     }
 
@@ -324,16 +418,43 @@ impl ActiveDirectoryEngine {
             .remove(username)
             .ok_or_else(|| ADError::NotFound(username.to_string()))?;
 
-        // Delete account from AD (mock)
+        // Delete account from AD
         self.delete_ad_account(&account.distinguished_name).await?;
 
         Ok(())
     }
 
-    /// Delete account from Active Directory (mock)
+    /// Delete account from Active Directory
     async fn delete_ad_account(&self, distinguished_name: &str) -> Result<()> {
-        // Mock account deletion
-        // In real implementation, this would delete the user object from AD
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            ADError::ConfigError("Active Directory not configured".to_string())
+        })?;
+
+        use ldap3::LdapConnAsync;
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| ADError::ADError(format!("Failed to connect to AD: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| ADError::ADError(format!("Failed to start TLS: {}", e)))?;
+        }
+
+        // Bind with admin credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| ADError::AuthError(format!("AD bind failed: {}", e)))?;
+
+        // Delete user object
+        ldap.delete(distinguished_name).await
+            .map_err(|e| ADError::ADError(format!("Failed to delete account {}: {}", distinguished_name, e)))?;
+
+        // Unbind
+        ldap.unbind().await
+            .map_err(|e| ADError::ADError(format!("AD unbind failed: {}", e)))?;
+
         Ok(())
     }
 

@@ -51,12 +51,12 @@ impl MetricsServer {
         tracing::info!("Starting metrics server on {}", addr);
 
         let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-            CoreError::Internal(anyhow::anyhow!("Failed to bind to address: {}", e))
+            CoreError::Internal { message: format!("Failed to bind to address: {}", e) }
         })?;
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| CoreError::Internal(anyhow::anyhow!("Server error: {}", e)))?;
+            .map_err(|e| CoreError::Internal { message: format!("Server error: {}", e) })?;
 
         Ok(())
     }
@@ -156,33 +156,6 @@ impl MetricSeries {
         // Maintain max points limit
         while self.points.len() > self.max_points {
             self.points.pop_front();
-        }
-    }
-
-    /// Get latest value
-    pub fn latest_value(&self) -> Option<f64> {
-        self.points.back().map(|p| p.value)
-    }
-
-    /// Get average value over time period
-    pub fn average_value(&self, duration: Duration) -> Option<f64> {
-        let cutoff_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - duration.as_secs();
-
-        let recent_points: Vec<&MetricPoint> = self
-            .points
-            .iter()
-            .filter(|p| p.timestamp >= cutoff_time)
-            .collect();
-
-        if recent_points.is_empty() {
-            None
-        } else {
-            let sum: f64 = recent_points.iter().map(|p| p.value).sum();
-            Some(sum / recent_points.len() as f64)
         }
     }
 }
@@ -799,8 +772,8 @@ impl MetricsCollector {
         let mut custom = HashMap::new();
         for (key, series) in metrics.iter() {
             if key.starts_with("custom_") {
-                if let Some(value) = series.latest_value() {
-                    custom.insert(series.name.clone(), value);
+                if let Some(point) = series.points.back() {
+                    custom.insert(series.name.clone(), point.value);
                 }
             }
         }
@@ -823,7 +796,7 @@ impl MetricsCollector {
         // Try to find the metric with any type
         for (_, series) in metrics.iter() {
             if series.name == name {
-                return series.latest_value();
+                return series.points.back().map(|p| p.value);
             }
         }
         None

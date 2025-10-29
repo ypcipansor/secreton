@@ -16,8 +16,9 @@ use std::collections::HashMap;
 
 use crate::{
     handlers::{AppState, ListQuery},
-    ApiResponse, ApiResult, ApiError,
+    ApiResponse, ApiResult,
 };
+use secreton_errors::SecretonError;
 
 /// Create administrative routes
 pub fn create_routes() -> Router<AppState> {

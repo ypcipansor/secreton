@@ -186,10 +186,6 @@ pub enum ViolationStatus {
 pub struct ComplianceManager {
     enabled_frameworks: Vec<ComplianceFramework>,
     audit_log: Arc<RwLock<Vec<AuditLogEntry>>>,
-    #[allow(dead_code)]
-    retention_policies: HashMap<ComplianceFramework, u32>,
-    #[allow(dead_code)]
-    max_log_size: usize,
 }
 
 impl ComplianceManager {
@@ -202,8 +198,6 @@ impl ComplianceManager {
         Self {
             enabled_frameworks: frameworks,
             audit_log: Arc::new(RwLock::new(Vec::new())),
-            retention_policies,
-            max_log_size: 100000, // Keep last 100k events in memory
         }
     }
 

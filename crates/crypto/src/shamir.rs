@@ -67,7 +67,10 @@ impl GF256 {
         let mut i = 0;
         while i < 256 {
             table[i] = x as u8;
-            x = (x << 1) ^ (if x & 0x80 != 0 { 0x1B } else { 0 });
+            x = (x << 1) ^ x; // Multiply by 3
+            if x & 0x100 != 0 {
+                x ^= 0x11B;
+            }
             i += 1;
         }
         table

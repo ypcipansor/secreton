@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Agent for Secreton vault system"
+description = "Agent for Secreton system"
 
 [dependencies]
 # Core dependencies

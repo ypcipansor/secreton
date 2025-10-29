@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - Brankas Vault</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Brankas Vault</h1>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/secrets">Secrets</a>
+                <a href="/policies">Policies</a>
+                <a href="/logout">Logout</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="policies-page">
+                <h2>Access Policies</h2>
+
+                <div class="actions">
+                    <a href="/policies/new" class="btn btn-primary">Create New Policy</a>
+                </div>
+
+                <div class="policies-list">
+                    <h3>Your Policies</h3>
+
+                    {% if policies %}
+                    <table class="policies-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Version</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for policy in policies %}
+                            <tr>
+                                <td>{{ policy.name }}</td>
+                                <td>{{ policy.version }}</td>
+                                <td>{{ policy.created_at }}</td>
+                                <td>
+                                    <a href="/policies/{{ policy.name }}" class="btn btn-small">View</a>
+                                    <a href="/policies/{{ policy.name }}/edit" class="btn btn-small btn-secondary">Edit</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p>No policies found. <a href="/policies/new">Create your first policy</a>.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 Brankas Vault. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -3,10 +3,10 @@
 //! Provides comprehensive runtime security validation, health monitoring,
 //! and self-healing capabilities for production deployments.
 
-use axum::{Router, extract::State, response::Json, routing::get};
+use axum::{Router, extract::{Extension, State}, response::Json, routing::get};
 use bollard::Docker;
 use chrono::{DateTime, Utc};
-use kube::{Client, Config};
+// use kube::{Client, Config}; // Temporarily disabled due to kube compatibility issues
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
@@ -46,28 +46,25 @@ pub enum SecurityStatus {
 /// Runtime security validator
 pub struct RuntimeSecurityValidator {
     docker_client: Option<Docker>,
-    k8s_client: Option<Client>,
+    // k8s_client: Option<Client>, // Temporarily disabled
     start_time: Instant,
-    #[allow(dead_code)]
-    check_interval: Duration,
 }
 
 impl RuntimeSecurityValidator {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let docker_client = Docker::connect_with_local_defaults().ok();
 
-        let k8s_config = Config::infer().await.ok();
-        let k8s_client = if let Some(config) = k8s_config {
-            Client::try_from(config).ok()
-        } else {
-            None
-        };
+        // let k8s_config = Config::infer().await.ok(); // Temporarily disabled
+        // let k8s_client = if let Some(config) = k8s_config {
+        //     Client::try_from(config).ok()
+        // } else {
+        //     None
+        // };
 
         Ok(Self {
             docker_client,
-            k8s_client,
+            // k8s_client, // Temporarily disabled
             start_time: Instant::now(),
-            check_interval: Duration::from_secs(60),
         })
     }
 
@@ -125,15 +122,15 @@ impl RuntimeSecurityValidator {
         }
 
         // Check Kubernetes security (if running in K8s)
-        if let Some(k8s) = &self.k8s_client {
-            let k8s_check = self.check_kubernetes_security(k8s).await;
-            if k8s_check.status == SecurityStatus::Critical {
-                critical_issues += 1;
-            } else if k8s_check.status == SecurityStatus::Warning {
-                warning_issues += 1;
-            }
-            checks.insert("kubernetes_security".to_string(), k8s_check);
-        }
+        // if let Some(k8s) = &self.k8s_client { // Temporarily disabled
+        //     let k8s_check = self.check_kubernetes_security(k8s).await;
+        //     if k8s_check.status == SecurityStatus::Critical {
+        //         critical_issues += 1;
+        //     } else if k8s_check.status == SecurityStatus::Warning {
+        //         warning_issues += 1;
+        //     }
+        //     checks.insert("kubernetes_security".to_string(), k8s_check);
+        // }
 
         // Check system resource usage
         let resource_check = self.check_system_resources().await;
@@ -318,15 +315,15 @@ impl RuntimeSecurityValidator {
     }
 
     /// Check Kubernetes security (if running in K8s)
-    async fn check_kubernetes_security(&self, _k8s: &Client) -> SecurityCheckResult {
-        // Basic K8s connectivity check
-        SecurityCheckResult {
-            status: SecurityStatus::Healthy,
-            message: "Kubernetes integration is available".to_string(),
-            last_checked: Utc::now(),
-            remediation: None,
-        }
-    }
+    // async fn check_kubernetes_security(&self, _k8s: &Client) -> SecurityCheckResult { // Temporarily disabled
+    //     // Basic K8s connectivity check
+    //     SecurityCheckResult {
+    //         status: SecurityStatus::Healthy,
+    //         message: "Kubernetes integration is available".to_string(),
+    //         last_checked: Utc::now(),
+    //         remediation: None,
+    //     }
+    // }
 
     /// Check system resource usage
     async fn check_system_resources(&self) -> SecurityCheckResult {
@@ -415,13 +412,13 @@ pub async fn init_runtime_security()
 }
 
 /// Create runtime security routes
-pub fn runtime_security_routes() -> Router<ApiState> {
+pub fn runtime_security_routes() -> Router<()> {
     Router::new().route("/health/runtime", get(runtime_security_health_check))
 }
 
 /// Runtime security health check endpoint
 pub async fn runtime_security_health_check(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
 ) -> Result<Json<RuntimeSecurityStatus>, AppError> {
     if let Some(validator) = &state.security_validator {
         let status = validator.validate_runtime_security().await;

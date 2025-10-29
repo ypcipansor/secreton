@@ -28,6 +28,15 @@ futures.workspace = true
 
 # Storage
 secreton-storage.workspace = true
+secreton-crypto.workspace = true
+secreton-security.workspace = true
+secreton-policies.workspace = true
+
+# Shared crates
+secreton-common.workspace = true
+secreton-errors.workspace = true
+secreton-config.workspace = true
+secreton-replication.workspace = true
 
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
@@ -102,10 +111,10 @@ pem.workspace = true
 # HTTP API
 warp.workspace = true
 
-# Secret Versioning
-secret_versioning = { path = "./secret_versioning" }
-granular_revocation = { path = "./granular_revocation" }
-audit_log = { path = "./audit_log" }
+# Secret Versioning - now in enterprise crate
+# secret_versioning = { path = "./secret_versioning" }
+# granular_revocation = { path = "./granular_revocation" }
+# audit_log = { path = "./audit_log" }
 flate2.workspace = true
 
 # Azure SDK Dependencies - Temporarily disabled for build

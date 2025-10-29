@@ -2,103 +2,79 @@
 
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{Extension, Path},
     http::StatusCode,
     response::Json,
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
+use secreton_core::storage::secret::SecretStorage;
+use serde_json::Value;
 
 use crate::ApiState;
 
-// TODO: Replace with actual KV engine implementation
-// use brankas_crypto::{KVEngine, SecretMetadata};
-
-// Placeholder types until brankas_crypto is available
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretMetadata {
-    pub created_time: chrono::DateTime<chrono::Utc>,
-    pub updated_time: chrono::DateTime<chrono::Utc>,
-    pub version: u64,
-}
-
-impl std::fmt::Display for SecretMetadata {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v{}", self.version)
-    }
-}
-
+// Simple in-memory implementation of SecretStorage for KV operations
 #[derive(Debug, Clone)]
-pub struct KVEngine {
-    // Placeholder implementation
+pub struct InMemorySecretStorage {
+    secrets: Arc<RwLock<HashMap<String, (Value, u32)>>>,
 }
 
-impl Default for KVEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl KVEngine {
+impl InMemorySecretStorage {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            secrets: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SecretStorage for InMemorySecretStorage {
+    async fn store_secret_versioned(
+        &self,
+        path: &str,
+        data: &Value,
+    ) -> Result<u32> {
+        let mut secrets = self.secrets.write().await;
+        let version = secrets.get(path).map(|(_, v)| v + 1).unwrap_or(1);
+        secrets.insert(path.to_string(), (data.clone(), version));
+        Ok(version)
     }
 
-    pub async fn put_secret(
+    async fn get_latest_secret(
         &self,
-        _path: &str,
-        _data: serde_json::Value,
-    ) -> Result<SecretMetadata, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(SecretMetadata {
-            created_time: chrono::Utc::now(),
-            updated_time: chrono::Utc::now(),
-            version: 1,
-        })
+        path: &str,
+    ) -> Result<Option<(Value, u32)>> {
+        let secrets = self.secrets.read().await;
+        Ok(secrets.get(path).cloned())
     }
 
-    pub async fn get_secret(
-        &self,
-        _path: &str,
-        _version: Option<u64>,
-    ) -> Result<Option<(serde_json::Value, SecretMetadata)>, Box<dyn std::error::Error + Send + Sync>>
-    {
-        // Placeholder implementation
-        Ok(None)
+    async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
+        let secrets = self.secrets.read().await;
+        let prefix = if path.ends_with('/') { path } else { &format!("{}/", path) };
+        let keys: Vec<String> = secrets.keys()
+            .filter(|k| k.starts_with(prefix))
+            .map(|k| k[prefix.len()..].split('/').next().unwrap_or("").to_string())
+            .collect();
+        Ok(keys)
     }
 
-    pub async fn delete_secret(
-        &self,
-        _path: &str,
-        _version: Option<u64>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+    async fn delete_secret(&self, path: &str) -> Result<()> {
+        let mut secrets = self.secrets.write().await;
+        secrets.remove(path);
         Ok(())
     }
 
-    pub async fn list_secrets(
-        &self,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(vec![])
-    }
-
-    pub async fn get_metadata(
-        &self,
-        _path: &str,
-    ) -> Result<Option<SecretMetadata>, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
-        Ok(None)
-    }
-
-    pub async fn destroy_secret(
-        &self,
-        _path: &str,
-        _version: u64,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+    async fn delete_secret_version(&self, path: &str, version: u32) -> Result<()> {
+        let mut secrets = self.secrets.write().await;
+        if let Some((_, current_version)) = secrets.get(path) {
+            if *current_version == version {
+                secrets.remove(path);
+            }
+        }
         Ok(())
     }
 }
@@ -106,13 +82,13 @@ impl KVEngine {
 /// API state for KV engine
 #[derive(Clone)]
 pub struct KVApiState {
-    pub engine: std::sync::Arc<KVEngine>,
+    pub storage: std::sync::Arc<dyn SecretStorage>,
 }
 
 impl Default for KVApiState {
     fn default() -> Self {
         Self {
-            engine: std::sync::Arc::new(KVEngine::default()),
+            storage: std::sync::Arc::new(InMemorySecretStorage::new()),
         }
     }
 }
@@ -126,15 +102,15 @@ pub struct CreateSecretRequest {
 /// Response for secret creation
 #[derive(Debug, Serialize)]
 pub struct CreateSecretResponse {
-    pub version: SecretMetadata,
+    pub version: u32,
     pub created_time: String,
 }
 
 /// Response for secret retrieval
 #[derive(Debug, Serialize)]
 pub struct GetSecretResponse {
-    pub data: HashMap<String, String>,
-    pub metadata: SecretMetadata,
+    pub data: serde_json::Value,
+    pub version: u32,
 }
 
 /// Response for listing secrets
@@ -146,7 +122,7 @@ pub struct ListSecretsResponse {
 /// Response for metadata
 #[derive(Debug, Serialize)]
 pub struct MetadataResponse {
-    pub versions: HashMap<u32, SecretMetadata>,
+    pub version: u32,
 }
 
 /// Response for delete operations
@@ -157,7 +133,7 @@ pub struct DeleteResponse {
 }
 
 /// Create the KV router with all endpoints
-pub fn create_kv_router() -> Router<ApiState> {
+pub fn create_kv_router() -> Router<()> {
     Router::new()
         .route("/secrets", get(list_secrets))
         .route("/secret/data/:path", post(put_secret))
@@ -170,30 +146,30 @@ pub fn create_kv_router() -> Router<ApiState> {
 /// List all secret paths
 #[axum::debug_handler]
 pub async fn list_secrets(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    let keys = match state.kv.engine.list_secrets().await {
-        Ok(keys) => keys,
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-
-    info!("Listed {} secret paths", keys.len());
-
-    Ok(Json(ListSecretsResponse { keys }))
+    // For now, list all secrets from root
+    match state.kv.storage.list_secrets("").await {
+        Ok(keys) => {
+            info!("Listed {} secret paths", keys.len());
+            Ok(Json(ListSecretsResponse { keys }))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 /// Create or update a secret
 #[axum::debug_handler]
 pub async fn put_secret(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> Result<Json<CreateSecretResponse>, StatusCode> {
-    match state.kv.engine.put_secret(&path, request.data).await {
+    match state.kv.storage.store_secret_versioned(&path, &request.data).await {
         Ok(version) => {
             info!(
                 "Created secret at path '{}' version {}",
-                path, version.version
+                path, version
             );
             Ok(Json(CreateSecretResponse {
                 version,
@@ -210,21 +186,15 @@ pub async fn put_secret(
 /// Get a secret
 #[axum::debug_handler]
 pub async fn get_secret(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<GetSecretResponse>, StatusCode> {
-    match state.kv.engine.get_secret(&path, None).await {
-        Ok(Some((data, metadata))) => {
+    match state.kv.storage.get_latest_secret(&path).await {
+        Ok(Some((data, version))) => {
             info!("Retrieved secret at path '{}'", path);
-            let data_map = match data {
-                serde_json::Value::Object(map) => {
-                    map.into_iter().map(|(k, v)| (k, v.to_string())).collect()
-                }
-                _ => HashMap::new(),
-            };
             Ok(Json(GetSecretResponse {
-                data: data_map,
-                metadata,
+                data,
+                version,
             }))
         }
         Ok(None) => {
@@ -241,10 +211,10 @@ pub async fn get_secret(
 /// Delete a secret (soft delete)
 #[axum::debug_handler]
 pub async fn delete_secret(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.kv.engine.delete_secret(&path, None).await {
+    match state.kv.storage.delete_secret(&path).await {
         Ok(_) => {
             info!("Deleted secret at path '{}'", path);
             Ok(Json(DeleteResponse {
@@ -262,15 +232,13 @@ pub async fn delete_secret(
 /// Get secret metadata
 #[axum::debug_handler]
 pub async fn get_metadata(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<MetadataResponse>, StatusCode> {
-    match state.kv.engine.get_metadata(&path).await {
-        Ok(Some(metadata)) => {
+    match state.kv.storage.get_latest_secret(&path).await {
+        Ok(Some((_, version))) => {
             info!("Retrieved metadata for path '{}'", path);
-            let mut versions = HashMap::new();
-            versions.insert(metadata.version as u32, metadata);
-            Ok(Json(MetadataResponse { versions }))
+            Ok(Json(MetadataResponse { version }))
         }
         Ok(None) => {
             warn!("Secret metadata not found at path '{}'", path);
@@ -286,10 +254,10 @@ pub async fn get_metadata(
 /// Permanently destroy a secret version
 #[axum::debug_handler]
 pub async fn destroy_secret(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
     Path((path, version)): Path<(String, u32)>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.kv.engine.destroy_secret(&path, version as u64).await {
+    match state.kv.storage.delete_secret_version(&path, version).await {
         Ok(_) => {
             info!(
                 "Permanently destroyed secret '{}' version {}",

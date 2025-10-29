@@ -113,20 +113,6 @@ impl Server {
 
         Ok(app)
     }
-
-    // Helper function to create a response
-    #[allow(dead_code)]
-    fn json_response<T: serde::Serialize>(
-        &self,
-        status: StatusCode,
-        data: T,
-    ) -> Result<Response<Body>, AppError> {
-        let body = serde_json::to_string(&data)?;
-        Ok(Response::builder()
-            .status(status)
-            .header("Content-Type", "application/json")
-            .body(Body::from(body))?)
-    }
 }
 
 // Helper function to extract the request body as a string

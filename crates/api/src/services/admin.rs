@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use brankas_core::audit::AuditLogger;
 use brankas_storage::StorageBackend;
-use crate::services::auth::AuthService;
+use crate::services::auth::AuthenticationService;
 
 /// Admin service errors
 #[derive(Error, Debug)]
@@ -72,7 +72,7 @@ pub struct MaintenanceResult {
 /// Admin service for system management
 pub struct AdminService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
-    auth: Arc<AuthService>,
+    auth: Arc<AuthenticationService>,
     audit: Arc<AuditLogger>,
 }
 
@@ -305,7 +305,7 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
-        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
 
         let admin_service = AdminService::new(storage, auth, audit).await;
@@ -317,7 +317,7 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
-        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let service = AdminService::new(storage, auth, audit).await.unwrap();
 
@@ -332,7 +332,7 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
-        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let service = AdminService::new(storage, auth, audit).await.unwrap();
 
@@ -346,7 +346,7 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
-        let auth = Arc::new(AuthService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let service = AdminService::new(storage, auth, audit).await.unwrap();
 

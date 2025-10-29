@@ -1,6 +1,6 @@
 //! Raft Integrated Storage Backend
 //!
-//! This module provides a Raft consensus-based storage backend for Brankas vault,
+//! This module provides a Raft consensus-based storage backend for Secreton,
 //! compatible with HashiCorp Vault's integrated storage approach.
 
 use async_trait::async_trait;

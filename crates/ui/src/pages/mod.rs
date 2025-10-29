@@ -1,6 +1,6 @@
 //! UI Pages
 //!
-//! Web interface pages for Secreton vault
+//! Web interface pages for Secreton
 
 pub mod admin;
 pub mod audit;

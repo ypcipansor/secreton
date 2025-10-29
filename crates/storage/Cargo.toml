@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Secure storage backend for Secreton vault system"
-keywords = ["storage", "database", "vault", "security"]
+description = "Secure storage backend for Secreton system"
+keywords = ["storage", "database", "security"]
 
 [dependencies]
 # Core dependencies
@@ -48,6 +48,13 @@ azure_core.workspace = true
 # Cryptography
 secreton-crypto = { path = "../crypto" }
 zeroize.workspace = true
+
+# Random number generation
+rand.workspace = true
+hex.workspace = true
+
+# Common utilities
+secreton-common.workspace = true
 
 # Configuration
 toml.workspace = true

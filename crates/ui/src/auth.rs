@@ -8,11 +8,8 @@
 //! - Password policy enforcement
 //! - Account lockout after failed attempts
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
 use chrono::{DateTime, Duration, Utc};
+use secreton_crypto::hashing::password::{hash_password_argon2, verify_password_argon2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +17,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 // Re-export core User - use top-level re-export
-pub use secreton_core::models::User;
+pub use secreton_auth_methods::model::User;
 
 /// Authentication error types
 #[derive(Debug, Clone)]
@@ -196,8 +193,8 @@ impl RateLimiter {
     }
 }
 
-/// Secure Authentication Service
-pub struct AuthService {
+/// Secure Session Management Service
+pub struct SessionService {
     users: Arc<RwLock<HashMap<String, User>>>,
     sessions: Arc<RwLock<HashMap<String, Session>>>,
     rate_limiter: Arc<RwLock<RateLimiter>>,
@@ -207,8 +204,8 @@ pub struct AuthService {
     lockout_duration: Duration,
 }
 
-impl AuthService {
-    /// Create new authentication service
+impl SessionService {
+    /// Create new session management service
     pub fn new() -> Self {
         Self {
             users: Arc::new(RwLock::new(HashMap::new())),
@@ -226,24 +223,15 @@ impl AuthService {
         // Validate password policy first
         self.password_policy.validate(password)?;
 
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-
-        argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map(|hash| hash.to_string())
+        hash_password_argon2(password)
+            .map(|result| result.hash)
             .map_err(|e| AuthError::HashingError(e.to_string()))
     }
 
     /// Verify password using constant-time comparison
     fn verify_password(&self, password: &str, password_hash: &str) -> Result<bool, AuthError> {
-        let parsed_hash =
-            PasswordHash::new(password_hash).map_err(|e| AuthError::HashingError(e.to_string()))?;
-
-        // Argon2 uses constant-time comparison internally
-        Ok(Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok())
+        verify_password_argon2(password, password_hash)
+            .map_err(|e| AuthError::HashingError(e.to_string()))
     }
 
     /// Register new user
@@ -420,7 +408,7 @@ impl AuthService {
     }
 }
 
-impl Default for AuthService {
+impl Default for SessionService {
     fn default() -> Self {
         Self::new()
     }
@@ -432,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_hashing() {
-        let auth = AuthService::new();
+        let auth = SessionService::new();
         let password = "SecureP@ssw0rd123";
 
         let hash = auth.hash_password(password).unwrap();
@@ -442,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_policy() {
-        let auth = AuthService::new();
+        let auth = SessionService::new();
 
         // Too short
         assert!(auth.hash_password("Short1!").is_err());
@@ -459,7 +447,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_registration_and_login() {
-        let auth = AuthService::new();
+        let auth = SessionService::new();
 
         // Register user
         let result = auth
@@ -484,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_account_lockout() {
-        let auth = AuthService::new();
+        let auth = SessionService::new();
 
         // Register user
         auth.register_user(
@@ -509,7 +497,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_validation() {
-        let auth = AuthService::new();
+        let auth = SessionService::new();
 
         // Register and login
         auth.register_user(

@@ -569,16 +569,28 @@ impl OperationStats {
         }
     }
 
-    pub fn record_key_creation(&mut self, _duration: std::time::Duration) {
-        // TODO: Use duration for timing statistics
+    pub fn record_key_creation(&mut self, duration: std::time::Duration) {
         self.key_creations += 1;
         self.last_operation = Some(Utc::now());
+        // Update average timing (simple moving average)
+        let duration_ms = duration.as_millis() as f64;
+        if self.key_creations == 1 {
+            self.average_encryption_time_ms = duration_ms; // Reuse field for key creation timing
+        } else {
+            self.average_encryption_time_ms = (self.average_encryption_time_ms + duration_ms) / 2.0;
+        }
     }
 
-    pub fn record_key_rotation(&mut self, _duration: std::time::Duration) {
-        // TODO: Use duration for timing statistics
+    pub fn record_key_rotation(&mut self, duration: std::time::Duration) {
         self.key_rotations += 1;
         self.last_operation = Some(Utc::now());
+        // Update average timing for key operations
+        let duration_ms = duration.as_millis() as f64;
+        if self.key_rotations == 1 {
+            self.average_signing_time_ms = duration_ms; // Reuse field for rotation timing
+        } else {
+            self.average_signing_time_ms = (self.average_signing_time_ms + duration_ms) / 2.0;
+        }
     }
 
     pub fn record_encryption(&mut self, duration: std::time::Duration, bytes: usize) {
@@ -607,15 +619,17 @@ impl OperationStats {
 
     pub fn record_verification(
         &mut self,
-        _duration: std::time::Duration,
+        duration: std::time::Duration,
         _bytes: usize,
         valid: bool,
     ) {
-        // TODO: Use duration and bytes for detailed statistics
         self.verifications += 1;
         if valid {
             self.successful_verifications += 1;
         }
+        // Update timing statistics (reuse decryption time field for verification)
+        let count = self.verifications;
+        Self::update_average_time(&mut self.average_decryption_time_ms, duration, count);
         self.last_operation = Some(Utc::now());
     }
 

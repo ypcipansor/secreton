@@ -256,8 +256,7 @@ mod security_validation_tests {
         if tampered_data.len() > 10 {
             // Modify a byte in the middle
             let tamper_pos = tampered_data.len() / 2;
-            let bytes = unsafe { tampered_data.as_bytes_mut() };
-            bytes[tamper_pos] = bytes[tamper_pos].wrapping_add(1);
+            tampered_data[tamper_pos] = tampered_data[tamper_pos].wrapping_add(1);
             
             let tamper_result = orchestrator.decrypt_and_verify_integrity(&tampered_data).await;
             assert!(tamper_result.is_err(), "Tampered data should fail integrity verification");

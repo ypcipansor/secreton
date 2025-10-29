@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use reqwest;
 
 #[derive(Debug, Error)]
 pub enum RabbitMQError {
@@ -116,13 +117,47 @@ impl RabbitMQEngine {
     }
 
     /// Verify RabbitMQ connection
-    async fn verify_connection(&self, _config: &RabbitMQConfig) -> Result<()> {
-        // Mock verification
-        // Real implementation would:
-        // 1. Connect to RabbitMQ Management API
-        // 2. Verify admin credentials
-        // 3. Check API version
+    async fn verify_connection(&self, config: &RabbitMQConfig) -> Result<()> {
+        // Extract management API URL from connection URI
+        // Assume management API is available at the same host:port with /api/overview endpoint
+        let management_url = self.get_management_url(&config.connection_uri)?;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&format!("{}/api/overview", management_url))
+            .basic_auth(&config.username, Some(&config.password))
+            .send()
+            .await
+            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to connect to RabbitMQ Management API: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(RabbitMQError::RabbitMQError(format!(
+                "RabbitMQ Management API returned status: {}",
+                response.status()
+            )));
+        }
+
+        // Parse response to verify it's valid JSON
+        let _overview: serde_json::Value = response.json().await
+            .map_err(|e| RabbitMQError::RabbitMQError(format!("Invalid JSON response from RabbitMQ: {}", e)))?;
+
         Ok(())
+    }
+
+    /// Extract management API URL from connection URI
+    fn get_management_url(&self, connection_uri: &str) -> Result<String> {
+        // Parse AMQP URI: amqp://user:pass@host:port/vhost
+        let url = url::Url::parse(connection_uri)
+            .map_err(|e| RabbitMQError::ConfigError(format!("Invalid connection URI: {}", e)))?;
+
+        let host = url.host_str()
+            .ok_or_else(|| RabbitMQError::ConfigError("Missing host in connection URI".to_string()))?;
+        let port = url.port().unwrap_or(5672); // Default AMQP port
+
+        // Management API typically runs on port 15672 (AMQP port + 10000)
+        let management_port = port + 10000;
+
+        Ok(format!("http://{}:{}", host, management_port))
     }
 
     /// Create a role
@@ -209,58 +244,104 @@ impl RabbitMQEngine {
 
     /// Generate password based on policy
     fn generate_password(&self, policy: &PasswordPolicy) -> String {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let mut charset = String::new();
+        use secreton_common::utils::password::{generate_password_with_policy, PasswordPolicy as CommonPolicy};
 
-        if policy.use_lowercase {
-            charset.push_str("abcdefghijklmnopqrstuvwxyz");
-        }
-        if policy.use_uppercase {
-            charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-        }
-        if policy.use_numbers {
-            charset.push_str("0123456789");
-        }
-        if policy.use_symbols {
-            charset.push_str("!@#$%^&*");
-        }
+        // Convert local policy to common policy
+        let common_policy = CommonPolicy {
+            min_length: policy.length as usize,
+            max_length: None,
+            require_uppercase: policy.use_uppercase,
+            require_lowercase: policy.use_lowercase,
+            require_numbers: policy.use_numbers,
+            require_special: policy.use_symbols,
+            allowed_special_chars: Some("!@#$%^&*".to_string()),
+        };
 
-        if charset.is_empty() {
-            charset = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
-        }
-
-        let chars: Vec<char> = charset.chars().collect();
-        (0..policy.length)
-            .map(|_| chars[rng.gen_range(0..chars.len())])
-            .collect()
+        generate_password_with_policy(&common_policy)
     }
 
     /// Create user in RabbitMQ
     async fn create_rabbitmq_user(
         &self,
-        _username: &str,
-        _password: &str,
-        _tags: &[String],
+        username: &str,
+        password: &str,
+        tags: &[String],
     ) -> Result<()> {
-        // Mock implementation
-        // Real implementation would call RabbitMQ Management API:
-        // PUT /api/users/{username}
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
+        })?;
+
+        let management_url = self.get_management_url(&config.connection_uri)?;
+        let client = reqwest::Client::new();
+
+        // Create user payload
+        let user_payload = serde_json::json!({
+            "password": password,
+            "tags": tags.join(",")
+        });
+
+        let response = client
+            .put(&format!("{}/api/users/{}", management_url, username))
+            .basic_auth(&config.username, Some(&config.password))
+            .json(&user_payload)
+            .send()
+            .await
+            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to create user: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(RabbitMQError::RabbitMQError(format!(
+                "Failed to create user {}: {} - {}",
+                username, status, error_text
+            )));
+        }
+
         Ok(())
     }
 
     /// Set permissions for user on vhost
     async fn set_permissions(
         &self,
-        _username: &str,
-        _vhost: &str,
-        _configure: &str,
-        _write: &str,
-        _read: &str,
+        username: &str,
+        vhost: &str,
+        configure: &str,
+        write: &str,
+        read: &str,
     ) -> Result<()> {
-        // Mock implementation
-        // Real implementation would call:
-        // PUT /api/permissions/{vhost}/{username}
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
+        })?;
+
+        let management_url = self.get_management_url(&config.connection_uri)?;
+        let client = reqwest::Client::new();
+
+        // Set permissions payload
+        let permissions_payload = serde_json::json!({
+            "configure": configure,
+            "write": write,
+            "read": read
+        });
+
+        let response = client
+            .put(&format!("{}/api/permissions/{}/{}", management_url, urlencoding::encode(vhost), username))
+            .basic_auth(&config.username, Some(&config.password))
+            .json(&permissions_payload)
+            .send()
+            .await
+            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to set permissions: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(RabbitMQError::RabbitMQError(format!(
+                "Failed to set permissions for user {} on vhost {}: {} - {}",
+                username, vhost, status, error_text
+            )));
+        }
+
         Ok(())
     }
 
@@ -288,7 +369,7 @@ impl RabbitMQEngine {
             ));
         }
 
-        // Delete user from RabbitMQ (mock)
+        // Delete user from RabbitMQ
         self.delete_rabbitmq_user(username).await?;
 
         // Remove from local storage
@@ -301,10 +382,31 @@ impl RabbitMQEngine {
     }
 
     /// Delete user from RabbitMQ
-    async fn delete_rabbitmq_user(&self, _username: &str) -> Result<()> {
-        // Mock implementation
-        // Real implementation would call:
-        // DELETE /api/users/{username}
+    async fn delete_rabbitmq_user(&self, username: &str) -> Result<()> {
+        let config = self.config.read().await;
+        let config = config.as_ref().ok_or_else(|| {
+            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
+        })?;
+
+        let management_url = self.get_management_url(&config.connection_uri)?;
+        let client = reqwest::Client::new();
+
+        let response = client
+            .delete(&format!("{}/api/users/{}", management_url, username))
+            .basic_auth(&config.username, Some(&config.password))
+            .send()
+            .await
+            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to delete user: {}", e)))?;
+
+        if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(RabbitMQError::RabbitMQError(format!(
+                "Failed to delete user {}: {} - {}",
+                username, status, error_text
+            )));
+        }
+
         Ok(())
     }
 

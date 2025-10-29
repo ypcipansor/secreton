@@ -66,28 +66,18 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+// Module declarations
+pub mod types;
+pub mod keystore;
+pub mod storage;
 
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, Key, Nonce,
-};
-use anyhow::{anyhow, Result};
-use argon2::{Argon2, Params};
-use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::RwLock;
-use tracing::info;
-use uuid::Uuid;
+// Re-exports for public API
+pub use types::{KeyConfig, KeyEntry};
+pub use keystore::{KeyStore, MemoryKeyStore};
+pub use storage::{SecureStorage, SharedSecureStorage};
 
-const KEY_LENGTH: usize = 32; // 256 bits for AES-256
-const NONCE_LENGTH: usize = 12; // 96 bits for GCM
-const SALT_LENGTH: usize = 16;
-const KEY_VERSION_LENGTH: usize = 8; // First 8 bytes of key ID
+#[cfg(test)]
+mod tests {
 
 /// Represents a cryptographic key and its metadata in the key store
 ///
@@ -245,22 +235,40 @@ impl Default for KeyConfig {
 /// impl KeyStore for DatabaseKeyStore {
 ///     async fn load_keys(&self) -> Result<HashMap<String, KeyEntry>> {
 ///         // Implementation to load keys from database
-/// #       todo!()
+///         // This would typically involve:
+///         // 1. Connecting to the database
+///         // 2. Querying the keys table
+///         // 3. Deserializing the key data
+///         // 4. Returning the HashMap of keys
+///         Ok(HashMap::new()) // Placeholder implementation
 ///     }
 ///     
 ///     async fn save_keys(&self, keys: &HashMap<String, KeyEntry>) -> Result<()> {
 ///         // Implementation to save keys to database
-/// #       todo!()
+///         // This would typically involve:
+///         // 1. Connecting to the database
+///         // 2. Serializing the key data
+///         // 3. Inserting/updating records in the keys table
+///         // 4. Ensuring atomicity of the operation
+///         Ok(()) // Placeholder implementation
 ///     }
 ///     
 ///     async fn get_current_key_id(&self) -> Result<Option<String>> {
 ///         // Implementation to get current key ID from database
-/// #       todo!()
+///         // This would typically involve:
+///         // 1. Connecting to the database
+///         // 2. Querying a configuration or metadata table
+///         // 3. Returning the current key ID if set
+///         Ok(None) // Placeholder implementation
 ///     }
 ///     
 ///     async fn set_current_key_id(&self, key_id: &str) -> Result<()> {
 ///         // Implementation to set current key ID in database
-/// #       todo!()
+///         // This would typically involve:
+///         // 1. Connecting to the database
+///         // 2. Updating a configuration or metadata table
+///         // 3. Ensuring the key exists before setting it as current
+///         Ok(()) // Placeholder implementation
 ///     }
 /// }
 /// ```

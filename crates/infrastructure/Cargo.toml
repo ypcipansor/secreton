@@ -1,0 +1,42 @@
+[package]
+name = "secreton-infrastructure"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Infrastructure services and system components for Secreton"
+keywords = ["infrastructure", "observability", "monitoring", "api-gateway"]
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+# Async
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Random number generation
+rand.workspace = true
+
+# HTTP
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+
+# Metrics and monitoring
+prometheus.workspace = true
+opentelemetry.workspace = true
+
+# Database
+deadpool-postgres.workspace = true
+
+# Workspace dependencies
+secreton-core.workspace = true
+secreton-storage.workspace = true

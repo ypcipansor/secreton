@@ -47,7 +47,7 @@ impl Default for AuthConfig {
         Self {
             jwt_secret: "your-super-secret-key".to_string(),
             jwt_expiration_hours: 24,
-            issuer: "secreton-vault".to_string(),
+            issuer: "secreton".to_string(),
             audience: "secreton-api".to_string(),
             require_auth: true,
             admin_roles: vec!["admin".to_string(), "vault-admin".to_string()],
@@ -140,11 +140,11 @@ impl Permission {
 }
 
 /// Authentication service for JWT handling
-pub struct AuthService {
+pub struct JwtAuthService {
     config: AuthConfig,
 }
 
-impl AuthService {
+impl JwtAuthService {
     pub fn new(config: AuthConfig) -> Self {
         Self { config }
     }
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn test_token_generation_and_validation() {
         let config = AuthConfig::default();
-        let auth_service = AuthService::new(config);
+        let auth_service = JwtAuthService::new(config);
 
         let token = auth_service
             .generate_token(
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn test_permission_checking() {
         let config = AuthConfig::default();
-        let auth_service = AuthService::new(config);
+        let auth_service = JwtAuthService::new(config);
 
         let claims = Claims {
             sub: "user123".to_string(),
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn test_admin_role_grants_all_permissions() {
         let config = AuthConfig::default();
-        let auth_service = AuthService::new(config);
+        let auth_service = JwtAuthService::new(config);
 
         let claims = Claims {
             sub: "admin-user".to_string(),
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn test_generate_token_includes_role_permissions() {
         let config = AuthConfig::default();
-        let auth_service = AuthService::new(config);
+        let auth_service = JwtAuthService::new(config);
 
         let token = auth_service
             .generate_token(

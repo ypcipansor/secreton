@@ -12,17 +12,17 @@ use tracing::{info, warn};
 use crate::ApiState;
 
 /// Create performance monitoring routes
-pub fn performance_routes() -> Router<ApiState> {
-    use axum::{Router, extract::State, response::Json, routing::get};
+pub fn performance_routes() -> Router<()> {
+    use axum::{Router, extract::Extension, response::Json, routing::get};
 
     async fn get_performance_metrics(
-        State(state): State<ApiState>,
+        Extension(state): Extension<ApiState>,
     ) -> Json<HashMap<String, OperationMetrics>> {
         let optimizer = state.performance_optimizer.read().unwrap();
         Json(optimizer.get_metrics().clone())
     }
 
-    async fn get_optimization_recommendations(State(state): State<ApiState>) -> Json<Vec<String>> {
+    async fn get_optimization_recommendations(Extension(state): Extension<ApiState>) -> Json<Vec<String>> {
         let optimizer = state
             .performance_optimizer
             .write()

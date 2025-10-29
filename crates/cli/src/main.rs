@@ -5,14 +5,13 @@ use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod config;
-mod output;
 
 use config::CliConfig;
 
 #[derive(Parser)]
 #[command(
     name = "secreton-cli",
-    about = "Command line interface for Brankas vault system",
+    about = "Command line interface for Secreton system",
     version = "1.0.0",
     author = "Brankas Team"
 )]
@@ -126,7 +125,7 @@ async fn status_command(config: &CliConfig) -> Result<()> {
 
     if health_response.status().is_success() {
         let health: serde_json::Value = health_response.json().await?;
-        println!("🟢 Brankas Vault Status: HEALTHY");
+        println!("🟢 Secreton Status: HEALTHY");
         println!("   Server: {}", config.server_url);
         println!(
             "   Version: {}",
@@ -141,7 +140,7 @@ async fn status_command(config: &CliConfig) -> Result<()> {
                 .unwrap_or(&serde_json::Value::String("unknown".to_string()))
         );
     } else {
-        println!("🔴 Brankas Vault Status: UNHEALTHY");
+        println!("🔴 Secreton Status: UNHEALTHY");
         println!("   HTTP Status: {}", health_response.status());
     }
 

@@ -1,0 +1,54 @@
+[package]
+name = "secreton-enterprise"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Advanced enterprise features for Secreton including HSM, AI, and quantum-safe capabilities"
+keywords = ["enterprise", "hsm", "ai", "quantum", "advanced"]
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
+# Cryptography
+secreton-crypto.workspace = true
+md5.workspace = true
+
+# Security
+secreton-security.workspace = true
+
+# PQC (Post-Quantum Cryptography)
+pqcrypto-traits.workspace = true
+pqcrypto-mldsa = { workspace = true, optional = true }
+pqcrypto-mlkem = { workspace = true, optional = true }
+pqcrypto-falcon = { workspace = true, optional = true }
+
+# HSM support
+#[cfg(feature = "hsm")]
+#pkcs11.workspace = true
+
+# AI/ML
+#[cfg(feature = "ai")]
+#tensorflow.workspace = true
+
+# Database support
+tokio-postgres = { workspace = true, optional = true }
+deadpool-postgres = { workspace = true, optional = true }
+redis = { workspace = true, features = ["aio", "tokio-comp"], optional = true }
+
+[features]
+default = []
+postgres = ["tokio-postgres", "deadpool-postgres"]
+redis = ["dep:redis"]
+hsm = []
+ai = []
+quantum = ["pqcrypto-mldsa", "pqcrypto-mlkem", "pqcrypto-falcon"]

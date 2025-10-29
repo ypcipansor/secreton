@@ -1,10 +1,11 @@
 // LDAP Secrets Engine - OpenLDAP/FreeIPA dynamic credential rotation
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use base64;
 
 #[derive(Debug, Error)]
 pub enum LDAPSecretsError {
@@ -16,11 +17,23 @@ pub enum LDAPSecretsError {
     UserNotFound(String),
     #[error("Configuration error: {0}")]
     ConfigError(String),
-    #[error("LDIF error: {0}")]
-    LDIFError(String),
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+    #[error("Authentication error: {0}")]
+    AuthError(String),
+    #[error("Operation error: {0}")]
+    OperationError(String),
 }
 
 pub type Result<T> = std::result::Result<T, LDAPSecretsError>;
+
+/// LDIF operation types
+#[derive(Debug)]
+enum LDIFOperation {
+    Add { dn: String, attributes: Vec<(String, HashSet<String>)> },
+    Modify { dn: String, modifications: Vec<ldap3::Mod<String>> },
+    Delete { dn: String },
+}
 
 /// LDAP schema type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -122,13 +135,57 @@ impl LDAPSecretsEngine {
     }
 
     /// Validate LDAP connection and schema
-    async fn validate_connection(&self, _config: &LDAPSecretsConfig) -> Result<()> {
-        // Mock validation
-        // Real implementation would:
-        // 1. Connect to LDAP server
-        // 2. Verify bind credentials
-        // 3. Check schema type
-        // 4. Verify user_dn exists
+    async fn validate_connection(&self, config: &LDAPSecretsConfig) -> Result<()> {
+        use ldap3::{LdapConnAsync, Scope, SearchEntry};
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| LDAPSecretsError::ConnectionError(format!("Failed to connect to LDAP: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| LDAPSecretsError::ConnectionError(format!("Failed to start TLS: {}", e)))?;
+        }
+
+        // Bind with credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| LDAPSecretsError::AuthError(format!("LDAP bind failed: {}", e)))?;
+
+        // Verify bind was successful
+        let search_result = ldap.search(
+            &config.bind_dn,
+            Scope::Base,
+            "(objectClass=*)",
+            vec!["dn"]
+        ).await
+        .map_err(|e| LDAPSecretsError::ConnectionError(format!("LDAP search failed: {}", e)))?;
+
+        if search_result.0.is_empty() {
+            return Err(LDAPSecretsError::ConnectionError(
+                "Bind DN verification failed - no results returned".to_string()
+            ));
+        }
+
+        // Verify user DN exists
+        let user_search = ldap.search(
+            &config.user_dn,
+            Scope::Base,
+            "(objectClass=*)",
+            vec!["dn"]
+        ).await
+        .map_err(|e| LDAPSecretsError::ConfigError(format!("User DN '{}' does not exist: {}", config.user_dn, e)))?;
+
+        if user_search.0.is_empty() {
+            return Err(LDAPSecretsError::ConfigError(
+                format!("User DN '{}' does not exist", config.user_dn)
+            ));
+        }
+
+        // Unbind and close connection
+        ldap.unbind().await
+            .map_err(|e| LDAPSecretsError::ConnectionError(format!("LDAP unbind failed: {}", e)))?;
+
         Ok(())
     }
 
@@ -219,41 +276,225 @@ impl LDAPSecretsEngine {
 
     /// Generate password based on policy
     fn generate_password(&self, policy: &PasswordPolicy) -> String {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let mut charset = String::new();
+        use secreton_common::utils::password::{generate_password_with_policy, PasswordPolicy as CommonPolicy};
 
-        if policy.use_lowercase {
-            charset.push_str("abcdefghijklmnopqrstuvwxyz");
-        }
-        if policy.use_uppercase {
-            charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-        }
-        if policy.use_numbers {
-            charset.push_str("0123456789");
-        }
-        if policy.use_symbols {
-            charset.push_str("!@#$%^&*");
-        }
+        // Convert local policy to common policy
+        let common_policy = CommonPolicy {
+            min_length: policy.length as usize,
+            max_length: None,
+            require_uppercase: policy.use_uppercase,
+            require_lowercase: policy.use_lowercase,
+            require_numbers: policy.use_numbers,
+            require_special: policy.use_symbols,
+            allowed_special_chars: Some("!@#$%^&*".to_string()),
+        };
 
-        if charset.is_empty() {
-            charset = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
-        }
-
-        let chars: Vec<char> = charset.chars().collect();
-        (0..policy.length)
-            .map(|_| chars[rng.gen_range(0..chars.len())])
-            .collect()
+        generate_password_with_policy(&common_policy)
     }
 
     /// Execute LDIF operations
-    async fn execute_ldif(&self, _config: &LDAPSecretsConfig, _ldif: &str) -> Result<()> {
-        // Mock implementation
-        // Real implementation would:
-        // 1. Parse LDIF
-        // 2. Execute LDAP operations (add, modify, delete)
-        // 3. Handle errors with rollback
+    async fn execute_ldif(&self, config: &LDAPSecretsConfig, ldif: &str) -> Result<()> {
+        use ldap3::{LdapConnAsync, Mod};
+
+        // Create LDAP connection
+        let (conn, mut ldap) = LdapConnAsync::new(&config.url).await
+            .map_err(|e| LDAPSecretsError::ConnectionError(format!("Failed to connect to LDAP: {}", e)))?;
+
+        // Start TLS if enabled
+        if config.tls_enabled {
+            ldap.start_tls().await
+                .map_err(|e| LDAPSecretsError::ConnectionError(format!("Failed to start TLS: {}", e)))?;
+        }
+
+        // Bind with credentials
+        ldap.simple_bind(&config.bind_dn, &config.bind_password).await
+            .map_err(|e| LDAPSecretsError::AuthError(format!("LDAP bind failed: {}", e)))?;
+
+        // Parse and execute LDIF operations
+        let operations = self.parse_ldif(ldif)?;
+
+        for operation in operations {
+            match operation {
+                LDIFOperation::Add { dn, attributes } => {
+                    ldap.add(&dn, attributes).await
+                        .map_err(|e| LDAPSecretsError::OperationError(format!("LDAP add failed for {}: {}", dn, e)))?;
+                }
+                LDIFOperation::Modify { dn, modifications } => {
+                    ldap.modify(&dn, modifications).await
+                        .map_err(|e| LDAPSecretsError::OperationError(format!("LDAP modify failed for {}: {}", dn, e)))?;
+                }
+                LDIFOperation::Delete { dn } => {
+                    ldap.delete(&dn).await
+                        .map_err(|e| LDAPSecretsError::OperationError(format!("LDAP delete failed for {}: {}", dn, e)))?;
+                }
+            }
+        }
+
+        // Unbind and close connection
+        ldap.unbind().await
+            .map_err(|e| LDAPSecretsError::ConnectionError(format!("LDAP unbind failed: {}", e)))?;
+
         Ok(())
+    }
+
+    /// Parse LDIF content into operations
+    fn parse_ldif(&self, ldif: &str) -> Result<Vec<LDIFOperation>> {
+        use ldap3::Mod;
+
+        let mut operations = Vec::new();
+        let lines: Vec<&str> = ldif.lines().collect();
+
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i].trim();
+
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with('#') {
+                i += 1;
+                continue;
+            }
+
+            // Parse DN
+            if line.starts_with("dn:") {
+                let dn = line[3..].trim().to_string();
+
+                // Check next line for changetype
+                i += 1;
+                if i >= lines.len() {
+                    return Err(LDAPSecretsError::LDIFError("Incomplete LDIF entry".to_string()));
+                }
+
+                let changetype_line = lines[i].trim();
+                if changetype_line.starts_with("changetype:") {
+                    let changetype = changetype_line[12..].trim();
+
+                    match changetype {
+                        "add" => {
+                            let attributes = self.parse_ldif_attributes(&lines, &mut i)?;
+                            operations.push(LDIFOperation::Add { dn, attributes });
+                        }
+                        "modify" => {
+                            let modifications = self.parse_ldif_modifications(&lines, &mut i)?;
+                            operations.push(LDIFOperation::Modify { dn, modifications });
+                        }
+                        "delete" => {
+                            operations.push(LDIFOperation::Delete { dn });
+                        }
+                        _ => {
+                            return Err(LDAPSecretsError::LDIFError(
+                                format!("Unsupported changetype: {}", changetype)
+                            ));
+                        }
+                    }
+                } else {
+                    // Default to add operation
+                    let attributes = self.parse_ldif_attributes(&lines, &mut i)?;
+                    operations.push(LDIFOperation::Add { dn, attributes });
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        Ok(operations)
+    }
+
+    /// Parse LDIF attributes for add operations
+    fn parse_ldif_attributes(&self, lines: &[&str], i: &mut usize) -> Result<Vec<(String, HashSet<String>)>> {
+        let mut attributes: HashMap<String, HashSet<String>> = HashMap::new();
+
+        while *i < lines.len() {
+            let line = lines[*i].trim();
+
+            if line.is_empty() {
+                *i += 1;
+                break;
+            }
+
+            if line.starts_with('-') || line.contains("changetype:") {
+                // End of attributes or start of modifications
+                break;
+            }
+
+            if let Some(colon_pos) = line.find(':') {
+                let attr_name = line[..colon_pos].trim().to_string();
+                let attr_value = if colon_pos + 1 < line.len() && line.chars().nth(colon_pos + 1) == Some(':') {
+                    // Base64 encoded value
+                    base64::decode(&line[colon_pos + 2..].trim())
+                        .map_err(|e| LDAPSecretsError::LDIFError(format!("Invalid base64: {}", e)))?
+                        .iter()
+                        .map(|&b| b as char)
+                        .collect::<String>()
+                } else {
+                    line[colon_pos + 1..].trim().to_string()
+                };
+
+                attributes.entry(attr_name)
+                    .or_insert_with(HashSet::new)
+                    .insert(attr_value);
+            }
+
+            *i += 1;
+        }
+
+        Ok(attributes.into_iter().collect())
+    }
+
+    /// Parse LDIF modifications for modify operations
+    fn parse_ldif_modifications(&self, lines: &[&str], i: &mut usize) -> Result<Vec<Mod<String>>> {
+        let mut modifications = Vec::new();
+
+        while *i < lines.len() {
+            let line = lines[*i].trim();
+
+            if line.is_empty() {
+                *i += 1;
+                continue;
+            }
+
+            if line == "-" {
+                // End of this modification
+                *i += 1;
+                continue;
+            }
+
+            if line.starts_with("add:") || line.starts_with("replace:") || line.starts_with("delete:") {
+                let mod_type = &line[..line.find(':').unwrap()];
+                let attr_name = line[line.find(':').unwrap() + 1..].trim().to_string();
+
+                // Parse attribute values
+                let mut values = Vec::new();
+                *i += 1;
+
+                while *i < lines.len() {
+                    let value_line = lines[*i].trim();
+
+                    if value_line.is_empty() || value_line == "-" {
+                        break;
+                    }
+
+                    if let Some(colon_pos) = value_line.find(':') {
+                        let value = value_line[colon_pos + 1..].trim().to_string();
+                        values.push(value);
+                    }
+
+                    *i += 1;
+                }
+
+                let mod_op = match mod_type {
+                    "add" => Mod::Add(attr_name, HashSet::from_iter(values)),
+                    "replace" => Mod::Replace(attr_name, HashSet::from_iter(values)),
+                    "delete" => Mod::Delete(attr_name, HashSet::from_iter(values)),
+                    _ => return Err(LDAPSecretsError::LDIFError(format!("Unknown modification type: {}", mod_type))),
+                };
+
+                modifications.push(mod_op);
+            } else {
+                *i += 1;
+            }
+        }
+
+        Ok(modifications)
     }
 
     /// Rotate password for user
@@ -277,7 +518,7 @@ impl LDAPSecretsEngine {
             user.dn, new_password
         );
 
-        // Execute modification (mock)
+        // Execute modification
         self.execute_ldif(config, &modify_ldif).await?;
 
         // Update user
@@ -309,7 +550,7 @@ impl LDAPSecretsEngine {
                 &user.dn,
             )?;
 
-            // Execute deletion (mock)
+            // Execute deletion
             self.execute_ldif(config, &deletion_ldif).await?;
         }
 
@@ -343,7 +584,7 @@ impl LDAPSecretsEngine {
 
             let ldif = self.process_ldif(rollback_ldif, username, "", &user.dn)?;
             
-            // Execute rollback (mock)
+            // Execute rollback
             self.execute_ldif(config, &ldif).await?;
         }
 

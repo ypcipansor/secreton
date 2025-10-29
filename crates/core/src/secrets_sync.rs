@@ -183,25 +183,25 @@ pub struct SyncResult {
 #[async_trait]
 pub trait ExternalSystemClient: Send + Sync {
     /// Test connection to the external system
-    async fn test_connection(&self) -> Result<bool, SyncError>;
+    async fn test_connection(&self) -> Result<bool>;
 
     /// Create a secret in the external system
-    async fn create_secret(&self, path: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<String, SyncError>;
+    async fn create_secret(&self, path: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<String>;
 
     /// Read a secret from the external system
-    async fn read_secret(&self, external_id: &str) -> Result<(Vec<u8>, HashMap<String, String>), SyncError>;
+    async fn read_secret(&self, external_id: &str) -> Result<(Vec<u8>, HashMap<String, String>)>;
 
     /// Update a secret in the external system
-    async fn update_secret(&self, external_id: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<(), SyncError>;
+    async fn update_secret(&self, external_id: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<()>;
 
     /// Delete a secret from the external system
-    async fn delete_secret(&self, external_id: &str) -> Result<(), SyncError>;
+    async fn delete_secret(&self, external_id: &str) -> Result<()>;
 
     /// List secrets in the external system
-    async fn list_secrets(&self, path_prefix: Option<&str>) -> Result<Vec<String>, SyncError>;
+    async fn list_secrets(&self, path_prefix: Option<&str>) -> Result<Vec<String>>;
 
     /// Get secret metadata
-    async fn get_secret_metadata(&self, external_id: &str) -> Result<HashMap<String, String>, SyncError>;
+    async fn get_secret_metadata(&self, external_id: &str) -> Result<HashMap<String, String>>;
 }
 
 /// Secrets sync manager
@@ -237,10 +237,12 @@ impl SecretsSyncManager {
     }
 
     /// Register an external system client
-    pub async fn register_client(&self, system_id: String, client: Box<dyn ExternalSystemClient>) -> Result<(), SyncError> {
+    pub async fn register_client(&self, system_id: String, client: Box<dyn ExternalSystemClient>) -> Result<()> {
         // Test the connection
         if !client.test_connection().await? {
-            return Err(SyncError::ConnectionFailed("Failed to connect to external system".to_string()));
+            return Err(SecretonError::ServiceUnavailable {
+                service: "Failed to connect to external system".to_string(),
+            });
         }
 
         self.clients.write().await.insert(system_id, client);
@@ -248,13 +250,13 @@ impl SecretsSyncManager {
     }
 
     /// Configure sync for a path pattern
-    pub async fn configure_sync(&self, path_pattern: String, config: SyncConfig) -> Result<(), SyncError> {
+    pub async fn configure_sync(&self, path_pattern: String, config: SyncConfig) -> Result<()> {
         self.sync_configs.write().await.insert(path_pattern, config);
         Ok(())
     }
 
     /// Sync a specific secret
-    pub async fn sync_secret(&self, secreton_path: &str, operation: SyncOperation) -> Result<SyncResult, SyncError> {
+    pub async fn sync_secret(&self, secreton_path: &str, operation: SyncOperation) -> Result<SyncResult> {
         // Find applicable sync configuration
         let config = self.find_sync_config(secreton_path).await?;
 
@@ -273,7 +275,7 @@ impl SecretsSyncManager {
     }
 
     /// Sync all secrets matching a pattern
-    pub async fn sync_by_pattern(&self, pattern: &str) -> Result<Vec<SyncResult>, SyncError> {
+    pub async fn sync_by_pattern(&self, pattern: &str) -> Result<Vec<SyncResult>> {
         let mut results = Vec::new();
 
         // This would typically query the storage backend for matching secrets
@@ -300,13 +302,15 @@ impl SecretsSyncManager {
     }
 
     /// Find sync configuration for a path
-    async fn find_sync_config(&self, path: &str) -> Result<SyncConfig, SyncError> {
+    async fn find_sync_config(&self, path: &str) -> Result<SyncConfig> {
         for (pattern, config) in self.sync_configs.read().await.iter() {
             if self.path_matches_pattern(path, pattern) {
                 return Ok(config.clone());
             }
         }
-        Err(SyncError::NoSyncConfig(format!("No sync configuration found for path: {}", path)))
+        Err(SecretonError::Configuration {
+            message: format!("No sync configuration found for path: {}", path),
+        })
     }
 
     /// Check if a path matches a pattern
@@ -318,11 +322,13 @@ impl SecretsSyncManager {
     }
 
     /// Get client for an external system
-    async fn get_client(&self, system: &ExternalSystem) -> Result<Arc<dyn ExternalSystemClient>, SyncError> {
+    async fn get_client(&self, system: &ExternalSystem) -> Result<Arc<dyn ExternalSystemClient>> {
         let system_id = format!("{:?}", system);
         self.clients.read().await.get(&system_id)
             .cloned()
-            .ok_or_else(|| SyncError::NoClient(format!("No client registered for system: {:?}", system)))
+            .ok_or_else(|| SecretonError::Configuration {
+                message: format!("No client registered for system: {:?}", system),
+            })
     }
 
     /// Perform the actual sync operation
@@ -332,7 +338,7 @@ impl SecretsSyncManager {
         secreton_path: &str,
         operation: &SyncOperation,
         config: &SyncConfig,
-    ) -> Result<SyncResult, SyncError> {
+    ) -> Result<SyncResult> {
         match operation {
             SyncOperation::Create => {
                 // This would read the secret from Secreton storage
@@ -352,10 +358,14 @@ impl SecretsSyncManager {
             SyncOperation::Update => {
                 // Get the external ID from sync status
                 let status = self.get_sync_status(secreton_path).await
-                    .ok_or_else(|| SyncError::SyncStatusNotFound(secreton_path.to_string()))?;
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: format!("sync status for {}", secreton_path),
+                    })?;
 
                 if status.status == SyncStatusType::Deleted {
-                    return Err(SyncError::SecretDeleted(secreton_path.to_string()));
+                    return Err(SecretonError::NotFound {
+                        resource: format!("secret {} (deleted)", secreton_path),
+                    });
                 }
 
                 let data = b"updated_secret_data";
@@ -372,7 +382,9 @@ impl SecretsSyncManager {
             }
             SyncOperation::Delete => {
                 let status = self.get_sync_status(secreton_path).await
-                    .ok_or_else(|| SyncError::SyncStatusNotFound(secreton_path.to_string()))?;
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: format!("sync status for {}", secreton_path),
+                    })?;
 
                 client.delete_secret(&status.external_id).await?;
                 Ok(SyncResult {
@@ -397,7 +409,7 @@ impl SecretsSyncManager {
     }
 
     /// Update sync status
-    async fn update_sync_status(&self, secreton_path: &str, result: &SyncResult) -> Result<(), SyncError> {
+    async fn update_sync_status(&self, secreton_path: &str, result: &SyncResult) -> Result<()> {
         let mut status = self.sync_status.write().await;
 
         let sync_status = SyncStatus {
@@ -486,6 +498,31 @@ pub enum SyncError {
 
     #[error("Client error: {0}")]
     ClientError(String),
+}
+
+impl From<SyncError> for SecretonError {
+    fn from(err: SyncError) -> Self {
+        match err {
+            SyncError::ConnectionFailed(msg) => SecretonError::ServiceUnavailable {
+                service: format!("Sync connection: {}", msg),
+            },
+            SyncError::NoSyncConfig(msg) => SecretonError::Configuration { message: msg },
+            SyncError::NoClient(msg) => SecretonError::Configuration { message: msg },
+            SyncError::SyncStatusNotFound(path) => SecretonError::NotFound {
+                resource: format!("sync status for {}", path),
+            },
+            SyncError::SecretDeleted(path) => SecretonError::NotFound {
+                resource: format!("secret {} (deleted)", path),
+            },
+            SyncError::OperationFailed(msg) => SecretonError::Internal { message: msg },
+            SyncError::ConfigurationError(msg) => SecretonError::Configuration { message: msg },
+            SyncError::IoError(io_err) => SecretonError::Io(io_err),
+            SyncError::JsonError(json_err) => SecretonError::Serialization(json_err),
+            SyncError::ClientError(msg) => SecretonError::ServiceUnavailable {
+                service: format!("External client: {}", msg),
+            },
+        }
+    }
 }
 
 // Helper type for boxed futures

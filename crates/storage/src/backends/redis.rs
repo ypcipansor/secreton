@@ -12,8 +12,6 @@ use uuid::Uuid;
 /// Modern Redis storage backend with connection pooling
 pub struct RedisBackend {
     manager: ConnectionManager,
-    #[allow(dead_code)]
-    connection_url: String,
 }
 
 impl RedisBackend {
@@ -32,7 +30,6 @@ impl RedisBackend {
 
         Ok(Self {
             manager,
-            connection_url: connection_url.to_string(),
         })
     }
 }

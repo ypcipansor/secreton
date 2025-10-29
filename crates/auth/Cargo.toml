@@ -1,0 +1,62 @@
+[package]
+name = "secreton-auth"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Authentication and identity management services for Secreton"
+keywords = ["authentication", "identity", "security", "mfa", "rbac"]
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
+# Cryptography
+secreton-crypto.workspace = true
+
+# Storage
+secreton-storage.workspace = true
+
+# Security utilities
+secrecy.workspace = true
+totp-rs.workspace = true
+qrcode.workspace = true
+oauth2.workspace = true
+
+# Shared crates
+secreton-common.workspace = true
+secreton-errors.workspace = true
+secreton-config.workspace = true
+
+# Additional dependencies for auth services
+rand.workspace = true
+argon2.workspace = true
+md5.workspace = true
+base64.workspace = true
+glob.workspace = true
+urlencoding.workspace = true
+
+# Security policies
+secreton-security.workspace = true
+
+# LDAP support
+ldap3 = { workspace = true, optional = true }
+
+# Database (optional features)
+tokio-postgres = { workspace = true, optional = true }
+deadpool-postgres = { workspace = true, optional = true }
+redis = { workspace = true, features = ["aio", "tokio-comp"], optional = true }
+
+[features]
+default = []
+postgres = ["tokio-postgres", "deadpool-postgres"]
+redis = ["dep:redis"]
+ldap = ["ldap3"]

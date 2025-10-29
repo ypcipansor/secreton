@@ -1,16 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/common",
+    "crates/errors",
+    "crates/config",
     "crates/core",
     "crates/agent",
     "crates/ui",
     "crates/crypto",
     "crates/storage",
+    "crates/replication",
     "crates/api",
     "crates/cli",
-    "crates/core/audit_log",
-    "crates/core/granular_revocation",
-    "crates/core/secret_versioning",
+    "crates/security",
+    "crates/integrations",
+    "crates/infrastructure",
+    "crates/enterprise",
+    "crates/secrets",
+    "crates/auth-methods",
+    "crates/policies",
     # "fuzz"
 ]
 
@@ -28,13 +36,24 @@ rust-version = "1.90"
 
 [workspace.dependencies]
 # Core crate dependencies
+secreton-common = { path = "crates/common" }
+secreton-errors = { path = "crates/errors" }
+secreton-config = { path = "crates/config" }
 secreton-core = { path = "crates/core" }
 secreton-crypto = { path = "crates/crypto" }
 secreton-storage = { path = "crates/storage" }
+secreton-replication = { path = "crates/replication" }
 secreton-api = { path = "crates/api" }
-audit-log = { path = "crates/core/audit_log" }
-granular-revocation = { path = "crates/core/granular_revocation" }
-secret-versioning = { path = "crates/core/secret_versioning" }
+secreton-security = { path = "crates/security" }
+secreton-integrations = { path = "crates/integrations" }
+secreton-infrastructure = { path = "crates/infrastructure" }
+secreton-enterprise = { path = "crates/enterprise" }
+secreton-secrets = { path = "crates/secrets" }
+secreton-auth-methods = { path = "crates/auth-methods" }
+secreton-policies = { path = "crates/policies" }
+audit-log = { path = "crates/security", package = "secreton-security" }
+# granular-revocation now part of auth-methods crate
+# secret-versioning now part of enterprise crate
 # Core dependencies
 tokio = { version = "1.47.1", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -104,6 +123,10 @@ getrandom = "0.3.3"  # OS randomness
 # Regex (pure Rust)
 regex = "1.12.1"
 
+# Parser (pure Rust)
+pest = "2.7"
+pest_derive = "2.7"
+
 # RustCrypto Elliptic Curves (audited, pure Rust, NO RSA)
 # Ed25519/X25519 - fastest, most secure, audited by multiple teams
 ed25519-dalek = "2.1.1"  # Ed25519 signatures (primary algorithm)
@@ -137,7 +160,7 @@ subtle = "2.6.1"  # Constant-time operations
 # sphincs-plus = "0.2"
 
 # Network and HTTP
-axum = { version = "0.7", features = ["macros", "multipart", "json", "tracing"] }
+axum = { version = "0.8", features = ["macros", "multipart", "json", "tracing"] }
 hyper = { version = "1.7.0", features = ["full"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 tonic = { version = "0.10", features = ["tls"] }
@@ -149,6 +172,26 @@ prost = "0.12"
 aws-config = "1.8.8"
 aws-sdk-iam = "1.91.0"
 aws-sdk-sts = "1.88.0"
+aws-sdk-ec2 = "1.95.0"
+
+# Authentication protocols
+jsonwebtoken = "9.3"
+oauth2 = "4.4"
+openidconnect = "3.5"
+saml = "0.4"
+
+# LDAP
+ldap3 = "0.11"
+
+# RADIUS
+radius-rust = "0.4.4"
+
+# XML parsing for SAML
+xml = "0.8"
+
+# Kubernetes client
+kube = { version = "0.95", features = ["client", "rustls-tls"] }
+k8s-openapi = { version = "0.23", features = ["v1_30"] }
 
 # Threading and concurrency
 parking_lot = "0.12"
@@ -173,12 +216,12 @@ clap = { version = "4.4", features = ["derive"] }
 
 # Metrics and monitoring
 prometheus = "0.14.0"  # Updated to address protobuf vulnerability
-opentelemetry = { version = "0.21", features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.20", features = ["rt-tokio"] }
+opentelemetry = "0.21"
+opentelemetry-jaeger = "0.20"
 tracing-opentelemetry = "0.22"
 metrics = "0.23"
 metrics-exporter-prometheus = "0.15"
-axum-tracing-opentelemetry = "0.18"
+axum-tracing-opentelemetry = "0.32"
 
 # Security monitoring and alerting
 sentry = "0.32"
@@ -192,7 +235,7 @@ sentry-tracing = "0.32"
 axum-health = "0.1"
 
 # Configuration security
-secrecy = { version = "0.10", features = ["serde", "alloc"] }
+secrecy = { version = "0.10", features = ["serde"] }
 
 # Serialization formats
 cbor4ii = "1.1.1"  # Pinned to resolve version conflict
@@ -215,10 +258,8 @@ flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
 # jwt-simple = "0.12"  # JWT (pure Rust, no RSA dependency) - removed due to rsa dependency
 totp-rs = { version = "5.6.0", default-features = false, features = ["otpauth", "qr"] }  # TOTP
 qrcode = "0.14.1"  # QR code generation
-oauth2 = "5.0.0"  # OAuth2 (pure Rust)
 
 # LDAP (with rustls for TLS)
-ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls", "tls-rustls-ring"] }  # Pure Rust TLS
 
 # WebAssembly (pure Rust, audited)
 wasmtime = "34.0.2"  # WASM runtime (pinned for stability)

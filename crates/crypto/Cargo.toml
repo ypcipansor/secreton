@@ -43,11 +43,10 @@ p384.workspace = true
 k256.workspace = true
 x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
+signature = "2.2"
 
-# Cryptographic traits and utilities
-digest.workspace = true
-signature.workspace = true
-elliptic-curve.workspace = true
+# Workspace dependencies
+# secreton-storage.workspace = true  # TODO: Resolve cyclic dependency
 generic-array.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
@@ -57,6 +56,11 @@ pqcrypto-mldsa = "0.1.2"
 pqcrypto-mlkem = "0.1.1"
 pqcrypto-falcon = "0.4.1"
 pqcrypto-traits = "0.3"
+
+# Homomorphic Encryption
+kzen-paillier = "0.4.3"
+bgv = "0.6.0"
+ckks-engine = "4.0.0"
 
 # Shamir Secret Sharing
 num-bigint = "0.4"

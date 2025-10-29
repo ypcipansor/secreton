@@ -15,6 +15,11 @@ pub mod backends;
 pub mod cache;
 pub mod factory;
 pub mod models;
+pub mod storage_backends;
+pub mod integrated_storage;
+pub mod secret_caching;
+pub mod secrets;
+pub mod lease;
 
 // Re-export common backends
 pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend, RedisBackend};

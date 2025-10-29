@@ -1,9 +1,9 @@
 use leptos::*;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use secreton_core::models::{LoginRequest, LoginResponse};
+use secreton_auth_methods::model::{LoginRequest, LoginResponse};
 
-// Using canonical LoginRequest and LoginResponse from secreton_core
+// Using canonical LoginRequest and LoginResponse from secreton_auth_methods
 // No need to redefine these structs
 
 #[component]

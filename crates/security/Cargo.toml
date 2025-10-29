@@ -1,0 +1,58 @@
+[package]
+name = "secreton-security"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Security policies, compliance, and audit services for Secreton"
+keywords = ["security", "compliance", "audit", "policies", "governance"]
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
+# Errors
+secreton-errors.workspace = true
+
+# Cryptography
+secreton-crypto.workspace = true
+
+# Storage
+secreton-storage.workspace = true
+
+# Authentication (optional - to avoid cyclic dependency)
+# secreton-auth.workspace = true
+
+# Database support
+tokio-postgres = { workspace = true, optional = true }
+deadpool-postgres = { workspace = true, optional = true }
+redis = { workspace = true, features = ["aio", "tokio-comp"], optional = true }
+
+# Security monitoring
+sentry = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+
+# Metrics
+prometheus = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+
+# Additional dependencies for security policies
+glob.workspace = true
+reqwest = { workspace = true, optional = true }
+axum.workspace = true
+parking_lot.workspace = true
+
+[features]
+default = []
+postgres = ["tokio-postgres", "deadpool-postgres"]
+redis = ["dep:redis"]
+monitoring = ["sentry", "opentelemetry"]
+prometheus-metrics = ["prometheus", "metrics-exporter-prometheus"]

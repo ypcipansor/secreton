@@ -1,4 +1,4 @@
-//! Brankas Enterprise Vault - Comprehensive Test Suite
+//! Secreton Enterprise - Comprehensive Test Suite
 //! 
 //! This module organizes and provides entry points for all test categories:
 //! - Unit Tests: Individual component testing

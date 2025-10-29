@@ -1,4 +1,4 @@
-//! Integration tests for Brankas Enterprise Vault
+//! Integration tests for Secreton Enterprise
 //! Tests end-to-end functionality and component integration
 
 use std::sync::Arc;

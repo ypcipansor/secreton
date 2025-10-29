@@ -207,46 +207,6 @@ pub struct AlertNotification {
     pub next_retry: Option<SystemTime>,
 }
 
-/// Rate limiter for alerts
-#[derive(Debug)]
-struct RateLimiter {
-    /// Maximum alerts per minute
-    max_alerts: u32,
-
-    /// Alert timestamps in the current window
-    alert_times: VecDeque<SystemTime>,
-}
-
-impl RateLimiter {
-    fn new(max_alerts: u32) -> Self {
-        Self {
-            max_alerts,
-            alert_times: VecDeque::new(),
-        }
-    }
-
-    fn can_send_alert(&mut self) -> bool {
-        let now = SystemTime::now();
-        let window_start = now - Duration::from_secs(60);
-
-        // Remove old entries
-        while let Some(&front) = self.alert_times.front() {
-            if front < window_start {
-                self.alert_times.pop_front();
-            } else {
-                break;
-            }
-        }
-
-        // Check if we can send another alert
-        if self.alert_times.len() < self.max_alerts as usize {
-            self.alert_times.push_back(now);
-            true
-        } else {
-            false
-        }
-    }
-}
 
 /// Alert manager
 #[derive(Debug)]
@@ -266,9 +226,6 @@ pub struct AlertManager {
     /// Notification queue
     notification_queue: VecDeque<AlertNotification>,
 
-    /// Rate limiter
-    rate_limiter: RateLimiter,
-
     /// Running flag
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 
@@ -283,7 +240,6 @@ impl AlertManager {
         event_receiver: mpsc::UnboundedReceiver<MonitoringEvent>,
     ) -> Self {
         Self {
-            rate_limiter: RateLimiter::new(config.rate_limit),
             config,
             event_receiver,
             active_alerts: HashMap::new(),
@@ -455,12 +411,6 @@ impl AlertManager {
             return Ok(());
         }
 
-        // Check rate limiting
-        if !self.rate_limiter.can_send_alert() {
-            tracing::warn!("Rate limit exceeded, dropping alert: {}", alert.title);
-            return Ok(());
-        }
-
         // Store the alert
         self.active_alerts.insert(alert_key.clone(), alert.clone());
 
@@ -486,37 +436,37 @@ impl AlertManager {
         // Determine notification channels based on severity and configuration
         match alert.severity {
             AlertSeverity::Emergency => {
-                if self.config.email_enabled {
+                if !self.config.email.to_addresses.is_empty() {
                     channels.push(NotificationChannel::Email);
                 }
-                if self.config.webhook_enabled {
+                if !self.config.webhook.url.is_empty() {
                     channels.push(NotificationChannel::Webhook);
                 }
-                if self.config.slack_enabled {
+                if !self.config.slack.webhook_url.is_empty() {
                     channels.push(NotificationChannel::Slack);
                 }
             }
             AlertSeverity::Critical => {
-                if self.config.email_enabled {
+                if !self.config.email.to_addresses.is_empty() {
                     channels.push(NotificationChannel::Email);
                 }
-                if self.config.webhook_enabled {
+                if !self.config.webhook.url.is_empty() {
                     channels.push(NotificationChannel::Webhook);
                 }
-                if self.config.slack_enabled {
+                if !self.config.slack.webhook_url.is_empty() {
                     channels.push(NotificationChannel::Slack);
                 }
             }
             AlertSeverity::Warning => {
-                if self.config.webhook_enabled {
+                if !self.config.webhook.url.is_empty() {
                     channels.push(NotificationChannel::Webhook);
                 }
-                if self.config.slack_enabled {
+                if !self.config.slack.webhook_url.is_empty() {
                     channels.push(NotificationChannel::Slack);
                 }
             }
             AlertSeverity::Info => {
-                if self.config.slack_enabled {
+                if !self.config.slack.webhook_url.is_empty() {
                     channels.push(NotificationChannel::Slack);
                 }
             }
@@ -608,23 +558,24 @@ impl AlertManager {
     ) -> CoreResult<()> {
         match channel {
             NotificationChannel::Email => {
-                if self.config.email_enabled {
+                if !self.config.email.to_addresses.is_empty() {
                     self.send_email_notification(alert).await?;
                 }
             }
             NotificationChannel::Webhook => {
-                if self.config.webhook_enabled {
+                if !self.config.webhook.url.is_empty() {
                     self.send_webhook_notification(alert).await?;
                 }
             }
             NotificationChannel::Slack => {
-                if self.config.slack_enabled {
+                if !self.config.slack.webhook_url.is_empty() {
                     self.send_slack_notification(alert).await?;
                 }
             }
             NotificationChannel::Sms => {
-                // SMS not implemented yet
-                tracing::warn!("SMS notifications not implemented");
+                if self.config.sms_enabled {
+                    self.send_sms_notification(alert).await?;
+                }
             }
         }
 
@@ -656,10 +607,47 @@ impl AlertManager {
         Ok(())
     }
 
+    /// Send SMS notification
+    async fn send_sms_notification(&self, alert: &Alert) -> CoreResult<()> {
+        if self.config.sms.account_sid.is_empty() || self.config.sms.auth_token.is_empty() {
+            return Err(Box::new(CoreError::Configuration { message: "SMS credentials not configured".to_string() }));
+        }
+
+        if self.config.sms.to_numbers.is_empty() {
+            return Err(Box::new(CoreError::Configuration { message: "No SMS recipients configured".to_string() }));
+        }
+
+        tracing::info!("Sending SMS notification for alert: {}", alert.id);
+
+        let message = format!(
+            "[{}] {}: {}",
+            alert.severity,
+            alert.title,
+            alert.description.chars().take(140).collect::<String>() // SMS length limit
+        );
+
+        // For each recipient, send SMS
+        for to_number in &self.config.sms.to_numbers {
+            match self.config.sms.provider.as_str() {
+                "twilio" => {
+                    self.send_twilio_sms(to_number, &message).await?;
+                }
+                "aws-sns" => {
+                    self.send_aws_sns_sms(to_number, &message).await?;
+                }
+                _ => {
+                    tracing::warn!("Unsupported SMS provider: {}", self.config.sms.provider);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Send webhook notification
     async fn send_webhook_notification(&self, alert: &Alert) -> CoreResult<()> {
         if self.config.webhook.url.is_empty() {
-            return Err(CoreError::configuration("Webhook URL not configured"));
+            return Err(Box::new(CoreError::Configuration { message: "Webhook URL not configured".to_string() }));
         }
 
         let payload = serde_json::json!({
@@ -688,13 +676,13 @@ impl AlertManager {
         let response = request
             .send()
             .await
-            .map_err(|e| CoreError::network(format!("Webhook request failed: {}", e)))?;
+            .map_err(|e| Box::new(CoreError::Network { message: format!("Webhook request failed: {}", e) }))?;
 
         if !response.status().is_success() {
-            return Err(CoreError::network(format!(
+            return Err(Box::new(CoreError::Network { message: format!(
                 "Webhook returned status: {}",
                 response.status()
-            )));
+            ) }));
         }
 
         tracing::info!("Webhook notification sent for alert: {}", alert.id);
@@ -704,7 +692,7 @@ impl AlertManager {
     /// Send Slack notification
     async fn send_slack_notification(&self, alert: &Alert) -> CoreResult<()> {
         if self.config.slack.webhook_url.is_empty() {
-            return Err(CoreError::configuration("Slack webhook URL not configured"));
+            return Err(Box::new(CoreError::Configuration { message: "Slack webhook URL not configured".to_string() }));
         }
 
         let color = match alert.severity {
@@ -758,13 +746,13 @@ impl AlertManager {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| CoreError::network(format!("Slack webhook request failed: {}", e)))?;
+            .map_err(|e| Box::new(CoreError::Network { message: format!("Slack webhook request failed: {}", e) }))?;
 
         if !response.status().is_success() {
-            return Err(CoreError::network(format!(
+            return Err(Box::new(CoreError::Network { message: format!(
                 "Slack webhook returned status: {}",
                 response.status()
-            )));
+            ) }));
         }
 
         tracing::info!("Slack notification sent for alert: {}", alert.id);
@@ -809,10 +797,9 @@ impl AlertManager {
             }
         }
 
-        Err(CoreError::not_found(format!(
-            "Alert not found: {}",
-            alert_id
-        )))
+        Err(Box::new(CoreError::NotFound {
+            resource: format!("alert:{}", alert_id),
+        }))
     }
 
     /// Resolve an alert
@@ -824,14 +811,52 @@ impl AlertManager {
             }
         }
 
-        Err(CoreError::not_found(format!(
-            "Alert not found: {}",
-            alert_id
-        )))
+        Err(Box::new(CoreError::NotFound {
+            resource: format!("alert:{}", alert_id),
+        }))
     }
 
     /// Check if alert manager is running
     pub fn is_running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Send SMS via Twilio
+    async fn send_twilio_sms(&self, to: &str, message: &str) -> CoreResult<()> {
+        let url = format!(
+            "https://api.twilio.com/2010-04-04/Accounts/{}/Messages.json",
+            self.config.sms.account_sid
+        );
+
+        let params = [
+            ("From", self.config.sms.from_number.clone()),
+            ("To", to.to_string()),
+            ("Body", message.to_string()),
+        ];
+
+        let response = self
+            .http_client
+            .post(&url)
+            .basic_auth(&self.config.sms.account_sid, Some(&self.config.sms.auth_token))
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| Box::new(CoreError::Network { message: format!("Twilio API request failed: {}", e) }))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(Box::new(CoreError::Network { message: format!("Twilio SMS send failed: {}", error_text) }));
+        }
+
+        tracing::debug!("SMS sent successfully to {}", to);
+        Ok(())
+    }
+
+    /// Send SMS via AWS SNS
+    async fn send_aws_sns_sms(&self, _to: &str, _message: &str) -> CoreResult<()> {
+        // This would require AWS SDK integration
+        // For now, just log that AWS SNS SMS is not implemented
+        tracing::warn!("AWS SNS SMS provider not yet implemented");
+        Ok(())
     }
 }

@@ -19,9 +19,10 @@ use secreton_core::models::{LoginRequest, LoginResponse, RefreshTokenRequest, Us
 
 use crate::{
     handlers::AppState,
-    ApiResponse, ApiResult, ApiError,
+    ApiResponse, ApiResult,
 };
 use brankas_core::audit::SecurityEventType;
+use secreton_errors::SecretonError;
 
 /// Create authentication routes
 pub fn create_routes() -> Router<AppState> {
@@ -327,7 +328,7 @@ pub async fn setup_mfa(
             ],
         },
         _ => {
-            return Err(ApiError::Validation("Unsupported MFA method".to_string()));
+            return Err(SecretonError::validation_error("Unsupported MFA method"));
         }
     };
 

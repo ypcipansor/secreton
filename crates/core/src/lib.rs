@@ -12,42 +12,23 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 pub mod api;
-pub mod audit;
-pub mod config;
-pub mod error;
 pub mod models;
 pub mod sdk_libraries;
+pub mod security;
 pub mod services;
+pub mod storage;
 pub mod types;
 
-// TODO: Fix missing dependencies (prometheus, etc)
-// pub mod metrics;
-// pub mod telemetry;
+// Re-export shared crates
+pub use secreton_common::*;
+pub use secreton_errors::*;
+pub use secreton_config::*;
+pub use secreton_replication::*;
+pub use secreton_storage::*;
 
-// TODO: Review and fix these modules
-// pub mod server;
-// pub mod control_groups;
-// pub mod disaster_recovery;
-// pub mod secrets;
-// pub mod secrets_sync;
-
-// Feature-gated modules (need dependencies)
-// #[cfg(feature = "graphql")]
-// pub mod graphql_api;
-
-// #[cfg(feature = "grpc")]
-// pub mod grpc_api;
-
-// #[cfg(feature = "postgres-audit")]
-// pub mod audit_postgres;
-
-// Disabled: missing storage dependencies
-// #[cfg(any(test, feature = "test-utils"))]
-// pub mod test_utils;
-
-pub use api::{SecurityAPI, start_security_server};
-pub use audit::{AuditLog, AuditLogger, AuditStatus};
-pub use error::CoreError;
+// Re-export for backward compatibility
+pub type CoreError = SecretonError;
+pub type CoreResult<T> = secreton_common::Result<T>;
 // Commented out imports that don't exist yet
 // pub use auth::mfa::MfaMethod;
 // pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
@@ -55,12 +36,15 @@ pub use error::CoreError;
 // pub use utils::error::AppError;
 
 // Re-export commonly used models
-pub use models::auth::{
-    AuthMethod, AuthMethodType, AuthRequest, AuthResponse, LoginRequest, LoginResponse,
-    RefreshTokenRequest, UserInfo,
-};
-pub use models::policy::{Policy, PolicyRule};
-pub use models::user::{Token, User};
+// Auth models now exported from auth-methods crate
+// pub use models::auth::{
+//     AuthMethod, AuthMethodType, AuthRequest, AuthResponse, LoginRequest, LoginResponse,
+//     RefreshTokenRequest, UserInfo,
+// };
+// Use security crate for policy types
+pub use secreton_security::policies::policy::{Policy, PolicyRule, ControlGroup};
+// User and Token models now exported from auth-methods crate
+// pub use models::user::{Token, User};
 
 // Include integration tests - Disabled: missing dependencies
 // #[cfg(test)]
@@ -119,7 +103,7 @@ impl SecurityLevel {
 impl FromStr for SecurityLevel {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "public" => Ok(SecurityLevel::Public),
             "internal" => Ok(SecurityLevel::Internal),
@@ -130,9 +114,6 @@ impl FromStr for SecurityLevel {
         }
     }
 }
-
-/// Result type for core operations
-pub type CoreResult<T> = Result<T, error::CoreError>;
 
 /// Metadata structure for extensible data
 #[derive(Debug, Clone, Serialize, Deserialize)]

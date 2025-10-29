@@ -1,0 +1,40 @@
+[package]
+name = "secreton-policies"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Policy management and evaluation engine for Secreton system"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+regex.workspace = true
+
+# Shared crates
+secreton-common.workspace = true
+secreton-errors.workspace = true
+secreton-config.workspace = true
+secreton-crypto.workspace = true
+
+# Policy evaluation
+pest.workspace = true
+pest_derive.workspace = true
+
+[features]
+default = []
+advanced = []

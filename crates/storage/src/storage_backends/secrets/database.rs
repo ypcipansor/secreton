@@ -1,0 +1,609 @@
+//! Database Secrets Engine
+//!
+//! Dynamically generates database credentials with automatic rotation.
+//! Supports MySQL, PostgreSQL, MongoDB and other databases.
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use thiserror::Error;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+/// Error types for database secrets engine
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Database role not found: {0}")]
+    RoleNotFound(String),
+
+    #[error("Credential generation failed: {0}")]
+    CredentialGenerationFailed(String),
+
+    #[error("Rotation failed: {0}")]
+    RotationFailed(String),
+
+    #[error("Revocation failed: {0}")]
+    RevocationFailed(String),
+
+    #[error("Unsupported database type: {0}")]
+    UnsupportedDatabase(String),
+}
+
+/// Database type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum DatabaseType {
+    MySQL,
+    PostgreSQL,
+    MongoDB,
+    Redis,
+    Cassandra,
+    MSSQL,
+}
+
+impl DatabaseType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            DatabaseType::MySQL => "mysql",
+            DatabaseType::PostgreSQL => "postgresql",
+            DatabaseType::MongoDB => "mongodb",
+            DatabaseType::Redis => "redis",
+            DatabaseType::Cassandra => "cassandra",
+            DatabaseType::MSSQL => "mssql",
+        }
+    }
+}
+
+/// Database _connection configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseConnection {
+    /// Connection _name
+    pub _name: String,
+
+    /// Database type
+    pub db_type: DatabaseType,
+
+    /// Connection URL
+    pub connection_url: String,
+
+    /// Maximum open connections
+    pub max_open_connections: u32,
+
+    /// Maximum idle connections
+    pub max_idle_connections: u32,
+
+    /// Connection max lifetime in seconds
+    pub max_connection_lifetime: u32,
+
+    /// Verify _connection on startup
+    pub verify_connection: bool,
+
+    /// Root rotation statements
+    pub root_rotation_statements: Vec<String>,
+
+    /// Root credentials
+    pub _username: Option<String>,
+    pub _password: Option<String>,
+}
+
+impl Default for DatabaseConnection {
+    fn default() -> Self {
+        Self {
+            _name: "default".to_string(),
+            db_type: DatabaseType::PostgreSQL,
+            connection_url: String::new(),
+            max_open_connections: 4,
+            max_idle_connections: 2,
+            max_connection_lifetime: 3600,
+            verify_connection: true,
+            root_rotation_statements: Vec::new(),
+            _username: None,
+            _password: None,
+        }
+    }
+}
+
+/// Database role configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseRole {
+    /// Role _name
+    pub _name: String,
+
+    /// Database _connection _name
+    pub db_name: String,
+
+    /// Default TTL for credentials
+    pub default_ttl: u32,
+
+    /// Maximum TTL for credentials
+    pub max_ttl: u32,
+
+    /// Creation statements (SQL/commands to create _user)
+    pub creation_statements: Vec<String>,
+
+    /// Revocation statements (SQL/commands to revoke/delete _user)
+    pub revocation_statements: Vec<String>,
+
+    /// Rotation statements (SQL/commands to rotate _password)
+    pub rotation_statements: Vec<String>,
+
+    /// Renew statements (SQL/commands executed on lease renewal)
+    pub renew_statements: Vec<String>,
+}
+
+impl Default for DatabaseRole {
+    fn default() -> Self {
+        Self {
+            _name: String::new(),
+            db_name: String::new(),
+            default_ttl: 3600,
+            max_ttl: 86400,
+            creation_statements: Vec::new(),
+            revocation_statements: Vec::new(),
+            rotation_statements: Vec::new(),
+            renew_statements: Vec::new(),
+        }
+    }
+}
+
+/// Generated database credentials
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseCredentials {
+    /// Unique credential ID
+    pub id: String,
+
+    /// Database _username
+    pub _username: String,
+
+    /// Database _password
+    pub _password: String,
+
+    /// Connection string (optional)
+    pub connection_url: Option<String>,
+
+    /// Creation time
+    pub created_at: DateTime<Utc>,
+
+    /// Expiration time
+    pub expires_at: DateTime<Utc>,
+
+    /// Role _name used
+    pub role_name: String,
+
+    /// Database _name
+    pub db_name: String,
+}
+
+/// Database secrets engine
+pub struct DatabaseSecretsEngine {
+    connections: Arc<RwLock<HashMap<String, DatabaseConnection>>>,
+    roles: Arc<RwLock<HashMap<String, DatabaseRole>>>,
+    active_credentials: Arc<RwLock<HashMap<String, DatabaseCredentials>>>,
+}
+
+impl DatabaseSecretsEngine {
+    /// Create new database secrets engine
+    pub fn new() -> Self {
+        Self {
+            connections: Arc::new(RwLock::new(HashMap::new())),
+            roles: Arc::new(RwLock::new(HashMap::new())),
+            active_credentials: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Configure database _connection
+    pub async fn configure_connection(
+        &self,
+        _config: DatabaseConnection,
+    ) -> Result<(), DatabaseError> {
+        // Validate configuration
+        if _config._name.is_empty() {
+            return Err(DatabaseError::InvalidConfig(
+                "Connection _name cannot be empty".to_string(),
+            ));
+        }
+        if _config.connection_url.is_empty() {
+            return Err(DatabaseError::InvalidConfig(
+                "Connection URL cannot be empty".to_string(),
+            ));
+        }
+
+        // Test _connection if requested
+        if _config.verify_connection {
+            self.test_connection(&_config).await?;
+        }
+
+        // Store _connection
+        let mut connections = self.connections.write().await;
+        connections.insert(_config._name.clone(), _config);
+
+        Ok(())
+    }
+
+    /// Test database _connection
+    async fn test_connection(&self, _config: &DatabaseConnection) -> Result<(), DatabaseError> {
+        // In production, this would actually test the _connection
+        // For now, just validate URL format
+        if !_config.connection_url.contains("://") {
+            return Err(DatabaseError::ConnectionError(
+                "Invalid _connection URL format".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Create database role
+    pub async fn create_role(&self, role: DatabaseRole) -> Result<(), DatabaseError> {
+        // Validate role
+        if role._name.is_empty() {
+            return Err(DatabaseError::InvalidConfig(
+                "Role _name cannot be empty".to_string(),
+            ));
+        }
+        if role.creation_statements.is_empty() {
+            return Err(DatabaseError::InvalidConfig(
+                "Creation statements required".to_string(),
+            ));
+        }
+
+        // Verify database _connection exists
+        let connections = self.connections.read().await;
+        if !connections.contains_key(&role.db_name) {
+            return Err(DatabaseError::InvalidConfig(format!(
+                "Database _connection '{}' not found",
+                role.db_name
+            )));
+        }
+        drop(connections);
+
+        // Store role
+        let mut roles = self.roles.write().await;
+        roles.insert(role._name.clone(), role);
+
+        Ok(())
+    }
+
+    /// Generate credentials for a role
+    pub async fn generate_credentials(
+        &self,
+        role_name: &str,
+        ttl: Option<u32>,
+    ) -> Result<DatabaseCredentials, DatabaseError> {
+        // Get role
+        let roles = self.roles.read().await;
+        let role = roles
+            .get(role_name)
+            .ok_or_else(|| DatabaseError::RoleNotFound(role_name.to_string()))?
+            .clone();
+        drop(roles);
+
+        // Get _connection
+        let connections = self.connections.read().await;
+        let _connection = connections
+            .get(&role.db_name)
+            .ok_or_else(|| {
+                DatabaseError::InvalidConfig(format!(
+                    "Database _connection '{}' not found",
+                    role.db_name
+                ))
+            })?
+            .clone();
+        drop(connections);
+
+        // Determine TTL
+        let ttl = ttl.unwrap_or(role.default_ttl);
+        if ttl > role.max_ttl {
+            return Err(DatabaseError::InvalidConfig(format!(
+                "TTL {} exceeds maximum {}",
+                ttl, role.max_ttl
+            )));
+        }
+
+        // Generate _username and _password
+        let _username = self.generate_username(&_connection.db_type, role_name);
+        let _password = self.generate_password(32);
+
+        // Execute creation statements
+        self.execute_creation_statements(
+            &_connection,
+            &role.creation_statements,
+            &_username,
+            &_password,
+        )
+        .await?;
+
+        // Create credentials record
+        let now = Utc::now();
+        let credentials = DatabaseCredentials {
+            id: Uuid::new_v4().to_string(),
+            _username: _username.clone(),
+            _password: _password.clone(),
+            connection_url: Some(self.build_connection_url(&_connection, &_username, &_password)),
+            created_at: now,
+            expires_at: now + Duration::seconds(ttl as i64),
+            role_name: role_name.to_string(),
+            db_name: role.db_name.clone(),
+        };
+
+        // Store active credentials
+        let mut active = self.active_credentials.write().await;
+        active.insert(credentials.id.clone(), credentials.clone());
+
+        Ok(credentials)
+    }
+
+    /// Generate database _username
+    fn generate_username(&self, db_type: &DatabaseType, role_name: &str) -> String {
+        let uuid = Uuid::new_v4().to_string();
+        let short_uuid = &uuid[..8];
+
+        match db_type {
+            DatabaseType::MySQL | DatabaseType::PostgreSQL => {
+                format!("v-{}-{}", role_name, short_uuid)
+            }
+            DatabaseType::MongoDB => {
+                format!("v_{}_{}", role_name.replace("-", "_"), short_uuid)
+            }
+            _ => format!("vault_{}_{}", role_name, short_uuid),
+        }
+    }
+
+    /// Generate secure random _password
+    fn generate_password(&self, length: usize) -> String {
+        use secreton_common::utils::password::generate_password;
+        generate_password(length)
+    }
+
+    /// Execute creation statements
+    async fn execute_creation_statements(
+        &self,
+        _connection: &DatabaseConnection,
+        statements: &[String],
+        _username: &str,
+        _password: &str,
+    ) -> Result<(), DatabaseError> {
+        // In production, this would execute actual SQL/commands
+        // For now, validate that placeholders exist
+        for stmt in statements {
+            if !stmt.contains("{{_username}}") && !stmt.contains("{{_password}}") {
+                return Err(DatabaseError::CredentialGenerationFailed(
+                    "Creation statements must contain {{_username}} or {{_password}} placeholders"
+                        .to_string(),
+                ));
+            }
+        }
+
+        // Simulate execution
+        Ok(())
+    }
+
+    /// Build _connection URL with credentials
+    fn build_connection_url(
+        &self,
+        _connection: &DatabaseConnection,
+        _username: &str,
+        _password: &str,
+    ) -> String {
+        // Simple URL building (production would be more sophisticated)
+        let url = &_connection.connection_url;
+
+        if url.contains("@") {
+            // Replace existing credentials
+            url.clone()
+        } else {
+            // Insert credentials
+            if let Some(pos) = url.find("://") {
+                format!(
+                    "{}://{}:{}@{}",
+                    &url[..pos],
+                    _username,
+                    _password,
+                    &url[pos + 3..]
+                )
+            } else {
+                url.clone()
+            }
+        }
+    }
+
+    /// Revoke credentials
+    pub async fn revoke_credentials(&self, credential_id: &str) -> Result<(), DatabaseError> {
+        // Get credentials
+        let mut active = self.active_credentials.write().await;
+        let credentials = active.remove(credential_id).ok_or_else(|| {
+            DatabaseError::RevocationFailed(format!("Credentials {} not found", credential_id))
+        })?;
+        drop(active);
+
+        // Get role and _connection
+        let roles = self.roles.read().await;
+        let role = roles
+            .get(&credentials.role_name)
+            .ok_or_else(|| DatabaseError::RoleNotFound(credentials.role_name.clone()))?
+            .clone();
+        drop(roles);
+
+        let connections = self.connections.read().await;
+        let _connection = connections
+            .get(&role.db_name)
+            .ok_or_else(|| {
+                DatabaseError::InvalidConfig(format!(
+                    "Database _connection '{}' not found",
+                    role.db_name
+                ))
+            })?
+            .clone();
+        drop(connections);
+
+        // Execute revocation statements
+        self.execute_revocation_statements(
+            &_connection,
+            &role.revocation_statements,
+            &credentials._username,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Execute revocation statements
+    async fn execute_revocation_statements(
+        &self,
+        _connection: &DatabaseConnection,
+        statements: &[String],
+        _username: &str,
+    ) -> Result<(), DatabaseError> {
+        // In production, this would execute actual revocation
+        // For now, just validate
+        if statements.is_empty() {
+            return Err(DatabaseError::RevocationFailed(
+                "No revocation statements configured".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// List active credentials
+    pub async fn list_credentials(&self) -> Vec<DatabaseCredentials> {
+        let active = self.active_credentials.read().await;
+        active.values().cloned().collect()
+    }
+
+    /// Rotate root credentials
+    pub async fn rotate_root(&self, connection_name: &str) -> Result<(), DatabaseError> {
+        let connections = self.connections.read().await;
+        let _connection = connections.get(connection_name).ok_or_else(|| {
+            DatabaseError::InvalidConfig(format!("Connection '{}' not found", connection_name))
+        })?;
+
+        if _connection.root_rotation_statements.is_empty() {
+            return Err(DatabaseError::RotationFailed(
+                "No root rotation statements configured".to_string(),
+            ));
+        }
+
+        // In production, would execute rotation and update stored credentials
+        Ok(())
+    }
+}
+
+impl Default for DatabaseSecretsEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_database_engine_creation() {
+        let engine = DatabaseSecretsEngine::new();
+        assert_eq!(engine.list_credentials().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_configure_connection() {
+        let engine = DatabaseSecretsEngine::new();
+
+        let _config = DatabaseConnection {
+            _name: "test-db".to_string(),
+            db_type: DatabaseType::PostgreSQL,
+            connection_url: "postgresql://localhost:5432/testdb".to_string(),
+            verify_connection: false,
+            ..Default::default()
+        };
+
+        let result = engine.configure_connection(_config).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_role() {
+        let engine = DatabaseSecretsEngine::new();
+
+        // First configure _connection
+        let _config = DatabaseConnection {
+            _name: "test-db".to_string(),
+            db_type: DatabaseType::PostgreSQL,
+            connection_url: "postgresql://localhost:5432/testdb".to_string(),
+            verify_connection: false,
+            ..Default::default()
+        };
+        engine.configure_connection(_config).await.unwrap();
+
+        // Create role
+        let role = DatabaseRole {
+            _name: "readonly".to_string(),
+            db_name: "test-db".to_string(),
+            default_ttl: 3600,
+            max_ttl: 86400,
+            creation_statements: vec![
+                "CREATE USER '{{_username}}'@'%' IDENTIFIED BY '{{_password}}'".to_string(),
+                "GRANT SELECT ON *.* TO '{{_username}}'@'%'".to_string(),
+            ],
+            revocation_statements: vec!["DROP USER '{{_username}}'@'%'".to_string()],
+            ..Default::default()
+        };
+
+        let result = engine.create_role(role).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_generate_credentials() {
+        let engine = DatabaseSecretsEngine::new();
+
+        // Setup _connection and role
+        let _config = DatabaseConnection {
+            _name: "test-db".to_string(),
+            db_type: DatabaseType::PostgreSQL,
+            connection_url: "postgresql://localhost:5432/testdb".to_string(),
+            verify_connection: false,
+            ..Default::default()
+        };
+        engine.configure_connection(_config).await.unwrap();
+
+        let role = DatabaseRole {
+            _name: "readonly".to_string(),
+            db_name: "test-db".to_string(),
+            default_ttl: 3600,
+            max_ttl: 86400,
+            creation_statements: vec![
+                "CREATE USER '{{_username}}'@'%' IDENTIFIED BY '{{_password}}'".to_string(),
+            ],
+            revocation_statements: vec!["DROP USER '{{_username}}'@'%'".to_string()],
+            ..Default::default()
+        };
+        engine.create_role(role).await.unwrap();
+
+        // Generate credentials
+        let result = engine.generate_credentials("readonly", Some(1800)).await;
+        assert!(result.is_ok());
+
+        let creds = result.unwrap();
+        assert!(creds._username.starts_with("v-readonly-"));
+        assert_eq!(creds._password.len(), 32);
+        assert_eq!(creds.role_name, "readonly");
+    }
+
+    #[tokio::test]
+    async fn test_password_generation() {
+        let engine = DatabaseSecretsEngine::new();
+
+        let password1 = engine.generate_password(32);
+        let password2 = engine.generate_password(32);
+
+        assert_eq!(password1.len(), 32);
+        assert_eq!(password2.len(), 32);
+        assert_ne!(password1, password2); // Should be different
+    }
+}

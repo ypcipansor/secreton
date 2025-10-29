@@ -1,4 +1,4 @@
-//! Unit tests for Brankas Enterprise Vault core components
+//! Unit tests for Secreton Enterprise core components
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

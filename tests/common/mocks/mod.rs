@@ -1,4 +1,4 @@
-//! Test mocks for Brankas Enterprise Vault System
+//! Test mocks for Secreton Enterprise System
 //! Provides mock implementations for testing various components
 
 pub mod mfa_storage;

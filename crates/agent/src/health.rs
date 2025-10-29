@@ -85,11 +85,9 @@ pub struct HealthChecker {
     config: HealthConfig,
 
     /// Channel for sending health results
-    #[allow(dead_code)]
     health_sender: mpsc::UnboundedSender<HealthCheckResult>,
 
     /// HTTP client for external checks
-    #[allow(dead_code)]
     http_client: reqwest::Client,
 
     /// Recent health check results
@@ -147,9 +145,155 @@ impl HealthChecker {
     async fn perform_health_checks(&self) -> CoreResult<()> {
         tracing::debug!("Performing health checks");
 
-        // For now, just log that we're performing checks
-        // In a full implementation, you would perform actual health checks
-        // but avoid the lifetime issues by using different patterns
+        // Perform basic health checks
+        self.check_memory_usage().await?;
+        self.check_disk_usage().await?;
+        self.check_network_connectivity().await?;
+
+        Ok(())
+    }
+
+    /// Check memory usage
+    async fn check_memory_usage(&self) -> CoreResult<()> {
+        let memory = sysinfo::System::new_all();
+        let total_memory = memory.total_memory() as f64;
+        let used_memory = memory.used_memory() as f64;
+
+        if total_memory > 0.0 {
+            let usage_percent = (used_memory / total_memory) * 100.0;
+            let status = if usage_percent > 90.0 {
+                HealthStatus::Unhealthy
+            } else if usage_percent > 80.0 {
+                HealthStatus::Degraded
+            } else {
+                HealthStatus::Healthy
+            };
+
+            let result = HealthCheckResult {
+                name: "memory_usage".to_string(),
+                status,
+                message: format!("Memory usage: {:.1}%", usage_percent),
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                response_time_ms: None,
+                details: {
+                    let mut map = HashMap::new();
+                    map.insert("total_mb".to_string(), format!("{:.1}", total_memory / 1024.0 / 1024.0));
+                    map.insert("used_mb".to_string(), format!("{:.1}", used_memory / 1024.0 / 1024.0));
+                    map.insert("usage_percent".to_string(), format!("{:.1}", usage_percent));
+                    map
+                },
+            };
+
+            let _ = self.health_sender.send(result);
+        }
+
+        Ok(())
+    }
+
+    /// Check disk usage
+    async fn check_disk_usage(&self) -> CoreResult<()> {
+        use sysinfo::Disks;
+        let disks = Disks::new_with_refreshed_list();
+
+        for disk in disks.iter() {
+            let total_space = disk.total_space() as f64;
+            let available_space = disk.available_space() as f64;
+
+            if total_space > 0.0 {
+                let used_space = total_space - available_space;
+                let usage_percent = (used_space / total_space) * 100.0;
+
+                let status = if usage_percent > 95.0 {
+                    HealthStatus::Unhealthy
+                } else if usage_percent > 90.0 {
+                    HealthStatus::Degraded
+                } else {
+                    HealthStatus::Healthy
+                };
+
+                let mount_point = disk.mount_point().to_string_lossy();
+
+                let result = HealthCheckResult {
+                    name: format!("disk_usage_{}", mount_point),
+                    status,
+                    message: format!("Disk usage ({}): {:.1}%", mount_point, usage_percent),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    response_time_ms: None,
+                    details: {
+                        let mut map = HashMap::new();
+                        map.insert("mount_point".to_string(), mount_point.to_string());
+                        map.insert("total_gb".to_string(), format!("{:.1}", total_space / 1024.0 / 1024.0 / 1024.0));
+                        map.insert("available_gb".to_string(), format!("{:.1}", available_space / 1024.0 / 1024.0 / 1024.0));
+                        map.insert("usage_percent".to_string(), format!("{:.1}", usage_percent));
+                        map
+                    },
+                };
+
+                let _ = self.health_sender.send(result);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check network connectivity
+    async fn check_network_connectivity(&self) -> CoreResult<()> {
+        // Simple connectivity check to a reliable endpoint
+        match self.http_client
+            .get("https://www.google.com")
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {
+                let result = HealthCheckResult {
+                    name: "network_connectivity".to_string(),
+                    status: HealthStatus::Healthy,
+                    message: "Network connectivity is healthy".to_string(),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    response_time_ms: None,
+                    details: HashMap::new(),
+                };
+                let _ = self.health_sender.send(result);
+            }
+            Ok(_) => {
+                let result = HealthCheckResult {
+                    name: "network_connectivity".to_string(),
+                    status: HealthStatus::Degraded,
+                    message: "Network connectivity has issues".to_string(),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    response_time_ms: None,
+                    details: HashMap::new(),
+                };
+                let _ = self.health_sender.send(result);
+            }
+            Err(e) => {
+                let result = HealthCheckResult {
+                    name: "network_connectivity".to_string(),
+                    status: HealthStatus::Unhealthy,
+                    message: format!("Network connectivity failed: {}", e),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    response_time_ms: None,
+                    details: HashMap::new(),
+                };
+                let _ = self.health_sender.send(result);
+            }
+        }
 
         Ok(())
     }

@@ -4,6 +4,7 @@
 //! integrating with the comprehensive security/ directory modules.
 
 use chrono::{DateTime, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,9 +12,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warp::{Filter, Rejection, Reply, reject};
 
-use crate::error::CoreError;
-// TODO: Re-enable when security modules are implemented
-// use crate::security::*;
+use crate::CoreError;
+use secreton_security::{audit, AuditLog, PolicySet, ComplianceProfile, QuotaConfig};
 
 /// API Response wrapper
 #[derive(Debug, Serialize)]
@@ -122,35 +122,45 @@ pub struct AuthenticationResponse {
 
 /// Security API main structure with integrated security components
 pub struct SecurityAPI {
-    // Integration with security modules for production use
-    #[allow(dead_code)]
-    security_manager: Option<Arc<AdvancedSecurityManager>>,
+    // Integration with security modules removed - use direct module access instead
 }
 
 /// Advanced security manager integrating all security modules
 /// TODO: Re-enable when security modules are implemented
 pub struct AdvancedSecurityManager {
     // Placeholder until security modules are implemented
-    _placeholder: (),
-    // pub entropy_engine: EntropyAugmentationEngine,
-    // pub hsm_manager: HsmManager,
-    // pub audit_system: AdvancedAuditSystem,
-    // pub zero_trust_engine: ZeroTrustEngine,
-    // pub mfa_engine: AdvancedMfaEngine,
-    // pub compliance_engine: ComplianceGovernanceEngine,
-    // pub quantum_crypto_engine: QuantumSafeCryptoEngine,
-    // pub threat_intel_engine: ThreatIntelligenceEngine,
+    // _placeholder: (),
+    pub audit_system: audit::AuditLogger,
+    pub policy_engine: PolicySet,
+    pub compliance_engine: ComplianceProfile,
+    pub rbac_policies: Vec<secreton_security::policies::policy::Policy>,
+    pub quota_engine: QuotaConfig,
 }
 
 impl AdvancedSecurityManager {
     pub async fn new() -> Result<Self, CoreError> {
-        info!("Initializing Advanced Security Manager (stub)");
+        info!("Initializing Advanced Security Manager");
 
-        // TODO: Re-enable when security module is implemented
         // Initialize concrete implementations for abstract interfaces
-        // use crate::security::concrete_implementations::*;
+        let audit_system = audit::AuditLogger::new(vec![Arc::new(audit::MemoryBackend::default())]);
+        let policy_engine = PolicySet { rules: Vec::new() };
+        let compliance_engine = ComplianceProfile {
+            profile_id: "default".to_string(),
+            name: "Default Compliance Profile".to_string(),
+            standard: secreton_security::policies::compliance_framework::ComplianceStandard::NIST,
+            requirements: Vec::new(),
+            enabled: true,
+        };
+        let rbac_policies = Vec::new();
+        let quota_engine = QuotaConfig::new("default".to_string(), secreton_security::policies::quotas::QuotaType::RateLimit, "/".to_string(), 1000);
 
-        Ok(Self { _placeholder: () })
+        Ok(Self {
+            audit_system,
+            policy_engine,
+            compliance_engine,
+            rbac_policies,
+            quota_engine,
+        })
     }
 
     pub async fn authenticate(
@@ -164,13 +174,27 @@ impl AdvancedSecurityManager {
         // Mock implementation - in production this would integrate with MFA engine
         let session = AuthSession {
             id: Uuid::new_v4().to_string(),
-            user_id,
+            user_id: user_id.clone(),
             expires_at: Utc::now() + chrono::Duration::hours(8),
             risk_score: 25.0, // Low risk
         };
 
         // Log authentication event
-        // self.audit_system.log_event(...).await?;
+        let audit_entry = AuditLog {
+            id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+            action: "authentication".to_string(),
+            actor: Some(user_id.clone()),
+            resource_type: "auth".to_string(),
+            resource_id: user_id.clone(),
+            status: audit::AuditStatus::Success,
+            ip: Some(_client_info.ip_address),
+            user_agent: _client_info.user_agent,
+            metadata: HashMap::from([
+                ("risk_score".to_string(), session.risk_score.to_string()),
+            ]),
+        };
+        self.audit_system.log(audit_entry).await.map_err(|e| SecretonError::Audit { message: format!("Audit logging failed: {}", e) })?;
 
         Ok(session)
     }
@@ -261,17 +285,13 @@ impl Default for SecurityAPI {
 impl SecurityAPI {
     pub fn new() -> Self {
         info!("Initializing Security API");
-        Self {
-            security_manager: None,
-        }
+        Self {}
     }
 
     pub async fn with_security_manager() -> Result<Self, CoreError> {
         info!("Initializing Security API with full security manager");
-        let security_manager = Arc::new(AdvancedSecurityManager::new().await?);
-        Ok(Self {
-            security_manager: Some(security_manager),
-        })
+        // Note: AdvancedSecurityManager is available through direct module access
+        Ok(Self {})
     }
 
     /// Create all API routes with enhanced security operations
@@ -321,12 +341,6 @@ impl SecurityAPI {
             .or(audit_operations)
             .or(security_metrics)
     }
-}
-
-/// Helper function for security manager
-#[allow(dead_code)]
-fn with_security_manager() -> impl Filter<Extract = (), Error = std::convert::Infallible> + Clone {
-    warp::any()
 }
 
 /// Health check handler
@@ -592,31 +606,17 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// Custom API error types
+/// Custom API error types - wrapper for centralized SecretonError
 #[derive(Debug)]
-pub enum ApiError {
-    SecurityError(String),
-    AuthenticationRequired,
-    InsufficientPermissions,
-    InvalidRequest(String),
-    InternalError(String),
-}
+pub struct ApiError(SecretonError);
 
-impl reject::Reject for ApiError {}
-
-impl std::fmt::Display for ApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ApiError::SecurityError(msg) => write!(f, "Security error: {}", msg),
-            ApiError::AuthenticationRequired => write!(f, "Authentication required"),
-            ApiError::InsufficientPermissions => write!(f, "Insufficient permissions"),
-            ApiError::InvalidRequest(msg) => write!(f, "Invalid request: {}", msg),
-            ApiError::InternalError(msg) => write!(f, "Internal error: {}", msg),
-        }
+impl From<SecretonError> for ApiError {
+    fn from(err: SecretonError) -> Self {
+        ApiError(err)
     }
 }
 
-impl std::error::Error for ApiError {}
+impl reject::Reject for ApiError {}
 
 /// Global error handler for API rejections
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
@@ -627,24 +627,28 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
         code = warp::http::StatusCode::NOT_FOUND;
         message = "Endpoint not found";
     } else if let Some(api_error) = err.find::<ApiError>() {
-        match api_error {
-            ApiError::SecurityError(_) => {
+        match api_error.0 {
+            SecretonError::SecurityViolation { .. } => {
                 code = warp::http::StatusCode::FORBIDDEN;
                 message = "Security validation failed";
             }
-            ApiError::AuthenticationRequired => {
+            SecretonError::Authentication { .. } => {
                 code = warp::http::StatusCode::UNAUTHORIZED;
                 message = "Authentication required";
             }
-            ApiError::InsufficientPermissions => {
+            SecretonError::Authorization { .. } | SecretonError::InsufficientPermissions { .. } => {
                 code = warp::http::StatusCode::FORBIDDEN;
                 message = "Insufficient permissions";
             }
-            ApiError::InvalidRequest(_) => {
+            SecretonError::Validation { .. } | SecretonError::InvalidInput { .. } => {
                 code = warp::http::StatusCode::BAD_REQUEST;
                 message = "Invalid request format";
             }
-            ApiError::InternalError(_) => {
+            SecretonError::Internal { .. } => {
+                code = warp::http::StatusCode::INTERNAL_SERVER_ERROR;
+                message = "Internal server error";
+            }
+            _ => {
                 code = warp::http::StatusCode::INTERNAL_SERVER_ERROR;
                 message = "Internal server error";
             }

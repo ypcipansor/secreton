@@ -1,4 +1,4 @@
-use crate::auth::mfa::MfaMethod;
+use secreton_auth_methods::model::MfaMethod;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

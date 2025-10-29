@@ -16,10 +16,11 @@ use std::collections::HashMap;
 
 use crate::{
     handlers::AppState,
-    ApiResponse, ApiResult, ApiError,
+    ApiResponse, ApiResult,
 };
 use brankas_core::audit::SecurityEventType;
 use brankas_core::audit::{AuditFilters, ExportFormat};
+use secreton_errors::SecretonError;
 
 /// Create vault operation routes
 pub fn create_routes() -> Router<AppState> {
@@ -94,7 +95,7 @@ pub async fn get_audit_logs(
         .audit
         .get_entries(filters)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| SecretonError::internal_error(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(entries)))
 }
@@ -138,7 +139,7 @@ pub async fn export_audit_logs(
         .audit
         .export_data(format, filters)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| SecretonError::internal_error(e.to_string()))?;
 
     let data = String::from_utf8_lossy(&bytes).to_string();
     Ok(Json(ApiResponse::success(data)))
@@ -419,7 +420,7 @@ pub async fn get_secret(
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // RBAC check (placeholder user)
     if let Ok(false) = state.storage.check_policy("unknown", &path, "read").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement secret retrieval
     let secret = SecretResponse {
@@ -452,7 +453,7 @@ pub async fn create_secret(
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // RBAC check (placeholder user)
     if let Ok(false) = state.storage.check_policy("unknown", &path, "create").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement secret creation
     let secret = SecretResponse {
@@ -490,7 +491,7 @@ pub async fn update_secret(
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // RBAC check (placeholder user)
     if let Ok(false) = state.storage.check_policy("unknown", &path, "update").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement secret update
     let secret = SecretResponse {
@@ -529,7 +530,7 @@ pub async fn delete_secret(
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // RBAC check (placeholder user)
     if let Ok(false) = state.storage.check_policy("unknown", &path, "delete").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement secret deletion
     let data = serde_json::json!({
@@ -561,7 +562,7 @@ pub async fn list_secrets(
 ) -> ApiResult<Json<ApiResponse<Vec<SecretListItem>>>> {
     // RBAC check could be resource-specific; allow listing with generic check
     if let Ok(false) = state.storage.check_policy("unknown", "secrets:list", "read").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement secret listing
     let secrets = vec![
@@ -589,7 +590,7 @@ pub async fn create_key(
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // RBAC check
     if let Ok(false) = state.storage.check_policy("unknown", "keys", "create").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement key creation
     let key = KeyResponse {
@@ -631,7 +632,7 @@ pub async fn get_key(
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // RBAC check
     if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}", key_id), "read").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement key retrieval
     let key = KeyResponse {
@@ -656,7 +657,7 @@ pub async fn list_keys(
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
     if let Ok(false) = state.storage.check_policy("unknown", "keys", "read").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement key listing
     let keys = vec![
@@ -684,7 +685,7 @@ pub async fn rotate_key(
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // RBAC check
     if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/rotate", key_id), "update").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement key rotation
     let key = KeyResponse {
@@ -727,7 +728,7 @@ pub async fn encrypt_data(
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
     // RBAC check
     if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/encrypt", request.key_id), "create").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement encryption
     let response = EncryptResponse {
@@ -761,7 +762,7 @@ pub async fn decrypt_data(
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
     // RBAC check
     if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/decrypt", request.key_id), "create").await {
-        return Err(ApiError::Unauthorized);
+        return Err(SecretonError::authz_error("Access denied"));
     }
     // TODO: Implement decryption
     let response = DecryptResponse {

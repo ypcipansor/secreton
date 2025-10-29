@@ -1,11 +1,11 @@
 //! Security monitoring and observability for production deployment
 //!
 //! Provides comprehensive security metrics, alerting, and health checks
-//! for production Secreton vault deployments.
+//! for production Secreton deployments.
 
 use axum::{
     Router,
-    extract::State,
+    extract::Extension,
     response::Json,
     routing::get,
 };
@@ -163,7 +163,7 @@ pub struct SecurityHealthResponse {
 
 /// Comprehensive security health check
 pub async fn security_health_check(
-    State(state): State<ApiState>,
+    Extension(state): Extension<ApiState>,
 ) -> Result<Json<SecurityHealthResponse>, AppError> {
     let mut security_checks = HashMap::new();
 
@@ -308,7 +308,7 @@ pub async fn security_monitor_task(metrics: Arc<SecurityMetrics>, config: Securi
 }
 
 /// Prometheus metrics endpoint
-pub async fn prometheus_metrics(State(state): State<ApiState>) -> Result<String, AppError> {
+pub async fn prometheus_metrics(Extension(state): Extension<ApiState>) -> Result<String, AppError> {
     let metrics = state.metrics.to_prometheus();
     let mut output = String::new();
 
@@ -320,7 +320,7 @@ pub async fn prometheus_metrics(State(state): State<ApiState>) -> Result<String,
 }
 
 /// Create security monitoring routes
-pub fn security_routes() -> Router<ApiState> {
+pub fn security_routes() -> Router<()> {
     Router::new()
         .route("/health/security", get(security_health_check))
         .route("/metrics", get(prometheus_metrics))

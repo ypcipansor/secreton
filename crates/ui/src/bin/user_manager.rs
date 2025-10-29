@@ -3,7 +3,7 @@
 //! Provides command-line interface for managing users in Secreton
 
 use clap::{Parser, Subcommand};
-use secreton_ui::auth::{AuthService, PasswordPolicy};
+use secreton_ui::auth::{SessionService, PasswordPolicy};
 use std::io::{self, Write};
 
 #[derive(Parser)]
@@ -59,7 +59,7 @@ fn read_password(prompt: &str) -> io::Result<String> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let auth = AuthService::new();
+    let auth = SessionService::new();
 
     match cli.command {
         Commands::Create {

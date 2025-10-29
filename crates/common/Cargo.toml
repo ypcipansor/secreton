@@ -1,0 +1,30 @@
+[package]
+name = "secreton-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Common types, traits, and utilities for Secreton"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core dependencies
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
+async-trait.workspace = true
+
+# Cryptography
+zeroize.workspace = true
+
+# HTTP types
+axum = { workspace = true, features = ["macros", "json"] }

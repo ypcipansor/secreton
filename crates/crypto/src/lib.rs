@@ -11,12 +11,20 @@ use std::fmt;
 pub mod encryption;
 pub mod error;
 pub mod hashing;
+pub mod homomorphic_encryption;
 pub mod key_derivation;
+pub mod key_manager;
 pub mod kmip;
 pub mod kv_engine;
 pub mod pqc;
+pub mod policy_enforced_crypto;
+pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod transit;
+pub mod advanced_key_manager;
+pub mod authenticated_key_operations;
+pub mod crypto_policy_engine;
+pub mod cryptography;
 
 // TODO: Fix compilation errors in these modules
 // pub mod integration;
@@ -24,12 +32,28 @@ pub mod transit;
 
 pub use encryption::*;
 pub use error::*;
-pub use key_derivation::*;
-pub use kmip::*;
+pub use homomorphic_encryption::{HESystem, Ciphertext, HEError};
+pub use key_derivation::{derive_key, KdfParams, DerivedKey};
+pub use key_manager::*;
+pub use kmip::{KmipClient, KeyState as KmipKeyState};
 pub use kv_engine::*;
 pub use pqc::*;
+pub use policy_enforced_crypto::{
+    PolicyEnforcementError, PolicyEnforcedEncryptionRequest, EncryptedSecret,
+    ComplianceViolation, ViolationType, RemediationStatus, MigrationPlan,
+    MigrationProgress, ComplianceScanResult, PolicyEnforcedCryptoOperations
+};
+pub use secure_multi_party_computation::*;
 pub use shamir::*;
-pub use transit::*;
+pub use transit::TransitEngine;
+pub use advanced_key_manager::{AdvancedKeyManager, KeyManagerError, KeyType as AdvancedKeyType, KeyState as AdvancedKeyState};
+pub use authenticated_key_operations::*;
+pub use crypto_policy_engine::{
+    PolicyError, CryptoAlgorithm, AlgorithmStatus, ComplianceStandard,
+    CryptoPolicy, AlgorithmMetadata, CryptoOperationRequest, CryptoAudit,
+    CryptoInventoryItem, ComplianceStatus, CryptoPolicyEngine
+};
+pub use cryptography::*;
 
 /// Supported cryptographic algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

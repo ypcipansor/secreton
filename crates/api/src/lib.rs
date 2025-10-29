@@ -3,7 +3,7 @@
 //! Comprehensive HTTP API for the Brankas transit engine with enterprise-grade
 //! security monitoring, compliance, and zero-trust architecture.
 
-use axum::{Json, Router, routing::get};
+use axum::{extract::Extension, Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -75,7 +75,7 @@ pub mod security_monitoring;
 // pub mod tls_optimization;
 pub mod transit;
 
-pub use kv::{KVApiState, KVEngine, create_kv_router};
+pub use kv::{KVApiState, create_kv_router};
 pub use transit::{TransitApiState, create_transit_router};
 
 // Import security modules
@@ -188,9 +188,9 @@ pub struct VersionResponse {
 }
 
 /// Create the main API router with all security features
-pub fn create_api_router(state: ApiState) -> Router<ApiState> {
+pub fn create_api_router(state: ApiState) -> Router<()> {
     Router::new()
-        .with_state(state.clone())
+        .layer(Extension(state.clone()))
         // System endpoints
         .route("/health", get(health_check))
         .route("/version", get(get_version))
@@ -201,15 +201,15 @@ pub fn create_api_router(state: ApiState) -> Router<ApiState> {
         // Transit engine endpoints
         .nest(
             "/v1/transit",
-            create_transit_router().with_state(state.transit.clone()),
+            create_transit_router().layer(Extension(state.clone())),
         )
         // KV secrets engine endpoints
-        .nest("/v1", create_kv_router().with_state(state.clone()))
+        .nest("/v1", create_kv_router().layer(Extension(state.clone())))
 }
 
 /// Enhanced health check with security status
 pub async fn health_check(
-    axum::extract::State(state): axum::extract::State<ApiState>,
+    Extension(state): Extension<ApiState>,
 ) -> Json<HealthResponse> {
     let security_status = if let Some(validator) = &state.security_validator {
         match validator.validate_runtime_security().await.overall_status {

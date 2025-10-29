@@ -1,11 +1,10 @@
-use anyhow::Result;
+use secreton_core::CoreResult;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-mod collector;
 mod config;
 mod metrics;
 mod monitor;
@@ -22,7 +21,7 @@ struct AgentStatus {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> CoreResult<()> {
     // Initialize logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)

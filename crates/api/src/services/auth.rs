@@ -12,7 +12,7 @@ use brankas_crypto::CryptoService;
 use brankas_storage::StorageBackend;
 
 // Use canonical User from core
-pub use secreton_core::models::User;
+pub use secreton_auth_methods::model::User;
 
 /// Authentication service errors
 #[derive(Error, Debug)]
@@ -89,13 +89,13 @@ pub struct AuthToken {
 }
 
 /// Authentication service
-pub struct AuthService {
+pub struct AuthenticationService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     config: AuthConfig,
 }
 
-impl AuthService {
+impl AuthenticationService {
     /// Create new authentication service
     pub async fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -449,7 +449,7 @@ mod tests {
         let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
 
-        let auth_service = AuthService::new(storage, crypto, &config).await;
+        let auth_service = AuthenticationService::new(storage, crypto, &config).await;
         assert!(auth_service.is_ok());
     }
 
@@ -458,7 +458,7 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
-        let auth_service = AuthService {
+        let auth_service = AuthenticationService {
             storage,
             crypto,
             config,
@@ -476,7 +476,7 @@ mod tests {
         let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
         let mut config = AuthConfig::default();
         config.jwt_secret = "secret".into();
-        let auth_service = AuthService::new(storage.clone(), crypto, &config)
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config)
             .await
             .expect("service");
 
@@ -520,7 +520,7 @@ mod tests {
     async fn test_has_permission_with_wildcard_role() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
-        let auth_service = AuthService::new(storage.clone(), crypto, &AuthConfig::default())
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &AuthConfig::default())
             .await
             .expect("service");
 
@@ -555,11 +555,11 @@ mod tests {
         let config = AuthConfig::default();
 
         // First creation initializes roles
-        let service = AuthService::new(storage.clone(), crypto.clone(), &config)
+        let service = AuthenticationService::new(storage.clone(), crypto.clone(), &config)
             .await
             .expect("service");
         // Second creation should not fail if roles already exist
-        let result = AuthService::new(storage, crypto, &config).await;
+        let result = AuthenticationService::new(storage, crypto, &config).await;
         assert!(result.is_ok());
         // Basic permission check still works
         let user = User {
