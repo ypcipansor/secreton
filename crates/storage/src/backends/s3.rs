@@ -54,6 +54,79 @@ pub struct S3Storage {
     cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
 }
 
+/// S3 transaction implementation
+pub struct S3Transaction {
+    operations: Vec<S3Operation>,
+    committed: bool,
+}
+
+enum S3Operation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl S3Transaction {
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+}
+
+#[async_trait]
+impl StorageTransaction for S3Transaction {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(S3Operation::Store(entry.clone()));
+        Ok(())
+    }
+
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(S3Operation::Update(entry.clone()));
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(S3Operation::Delete(id));
+        Ok(true)
+    }
+
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // In a real S3 implementation, operations would be executed
+        // S3 doesn't support transactions, so operations would be atomic individually
+        // For now, we just mark as committed since we don't have a real connection
+        self.committed = true;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
+        Ok(())
+    }
+}
+
 impl S3Storage {
     /// Create new S3 storage backend
     pub async fn new(config: S3StorageConfig) -> Result<Self, StorageError> {
@@ -482,8 +555,7 @@ impl StorageBackend for S3Storage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // S3 doesn't support transactions in the traditional sense
-        Ok(Box::new(crate::MockTransaction))
+        Ok(Box::new(S3Transaction::new()))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

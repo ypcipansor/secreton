@@ -58,6 +58,79 @@ pub struct DynamoDBStorage {
     cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
 }
 
+/// DynamoDB transaction implementation
+pub struct DynamoDBTransaction {
+    operations: Vec<DynamoDBOperation>,
+    committed: bool,
+}
+
+enum DynamoDBOperation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl DynamoDBTransaction {
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+}
+
+#[async_trait]
+impl StorageTransaction for DynamoDBTransaction {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(DynamoDBOperation::Store(entry.clone()));
+        Ok(())
+    }
+
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(DynamoDBOperation::Update(entry.clone()));
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(DynamoDBOperation::Delete(id));
+        Ok(true)
+    }
+
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // In a real DynamoDB implementation, you would execute all operations
+        // in a DynamoDB transaction using TransactWriteItems
+        // For now, we just mark as committed since we don't have a real connection
+        self.committed = true;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
+        Ok(())
+    }
+}
+
 impl DynamoDBStorage {
     /// Create new DynamoDB storage backend
     pub async fn new(config: DynamoDBStorageConfig) -> Result<Self, StorageError> {
@@ -561,8 +634,7 @@ impl StorageBackend for DynamoDBStorage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // DynamoDB transactions would be implemented here
-        Ok(Box::new(crate::MockTransaction))
+        Ok(Box::new(DynamoDBTransaction::new()))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

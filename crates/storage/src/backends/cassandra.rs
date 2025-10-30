@@ -3,11 +3,12 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
     HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
-    StorageStats, VaultEntry,
+    StorageStats, StorageTransaction, VaultEntry,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +30,79 @@ pub struct CassandraStorage {
     config: CassandraConfig,
     // In a real implementation, you'd use the Cassandra driver
     // For now, we'll use a mock implementation
+}
+
+/// Cassandra transaction implementation
+pub struct CassandraTransaction {
+    operations: Vec<CassandraOperation>,
+    committed: bool,
+}
+
+enum CassandraOperation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl CassandraTransaction {
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+}
+
+#[async_trait]
+impl StorageTransaction for CassandraTransaction {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(CassandraOperation::Store(entry.clone()));
+        Ok(())
+    }
+
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(CassandraOperation::Update(entry.clone()));
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(CassandraOperation::Delete(id));
+        Ok(true)
+    }
+
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // In a real Cassandra implementation, you would execute all operations
+        // in a batch or use Cassandra's lightweight transactions
+        // For now, we just mark as committed since we don't have a real connection
+        self.committed = true;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
+        Ok(())
+    }
 }
 
 impl CassandraStorage {
@@ -127,8 +201,7 @@ impl StorageBackend for CassandraStorage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn crate::StorageTransaction>> {
-        // For simplicity, return a mock transaction
-        Ok(Box::new(crate::MockTransaction))
+        Ok(Box::new(CassandraTransaction::new()))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

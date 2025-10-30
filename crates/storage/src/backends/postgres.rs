@@ -6,12 +6,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
-use tokio_postgres::{NoTls, Row, Transaction};
+use std::sync::Arc;
+use tokio_postgres::{NoTls, Row};
 use uuid::Uuid;
 
 /// PostgreSQL storage backend
 pub struct PostgresBackend {
-    pool: Pool,
+    pool: Arc<Pool>,
 }
 
 impl PostgresBackend {
@@ -25,11 +26,11 @@ impl PostgresBackend {
             }
         })?;
 
-        Ok(Self { pool })
+        Ok(Self { pool: Arc::new(pool) })
     }
 
     /// Get the connection pool
-    pub fn pool(&self) -> &Pool {
+    pub fn pool(&self) -> &Arc<Pool> {
         &self.pool
     }
 }
@@ -440,10 +441,8 @@ impl StorageBackend for PostgresBackend {
         })
     }
 
-    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // PostgreSQL transactions would be implemented here with proper lifetime management
-        // For now, use mock transaction to avoid unsafe lifetime transmute
-        Ok(Box::new(crate::MockTransaction))
+    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction + 'static>> {
+        Ok(Box::new(PostgresTransaction::new(Arc::clone(&self.pool))))
     }
 
     async fn migrate(&self) -> StorageResult<()> {
@@ -531,33 +530,177 @@ impl PostgresBackend {
 }
 
 /// PostgreSQL transaction implementation
-pub struct PostgresTransaction;
+pub struct PostgresTransaction {
+    pool: Arc<Pool>,
+    operations: Vec<PostgresOperation>,
+    committed: bool,
+}
+
+enum PostgresOperation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl PostgresTransaction {
+    pub fn new(pool: Arc<Pool>) -> Self {
+        Self {
+            pool,
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+
+    async fn execute_operation(&self, transaction: &deadpool_postgres::Transaction<'_>, op: &PostgresOperation) -> StorageResult<()> {
+        match op {
+            PostgresOperation::Store(entry) => {
+                let query = r#"
+                    INSERT INTO vault_entries
+                    (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (id) DO UPDATE SET
+                        path = EXCLUDED.path,
+                        encrypted_data = EXCLUDED.encrypted_data,
+                        encryption_metadata = EXCLUDED.encryption_metadata,
+                        security_level = EXCLUDED.security_level,
+                        metadata = EXCLUDED.metadata,
+                        tags = EXCLUDED.tags,
+                        version = EXCLUDED.version,
+                        owner_id = EXCLUDED.owner_id,
+                        updated_at = EXCLUDED.updated_at,
+                        expires_at = EXCLUDED.expires_at
+                "#;
+
+                let metadata_json = serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
+                let tags_json = serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
+                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata).unwrap_or(serde_json::Value::Null);
+
+                transaction.execute(query, &[
+                    &entry.id,
+                    &entry.path,
+                    &entry.encrypted_data,
+                    &encryption_metadata_json,
+                    &(entry.security_level as i32),
+                    &metadata_json,
+                    &tags_json,
+                    &(entry.version as i32),
+                    &entry.owner_id,
+                    &entry.created_at.naive_utc(),
+                    &entry.updated_at.naive_utc(),
+                    &entry.expires_at.map(|dt| dt.naive_utc()),
+                ]).await.map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to store entry: {}", e),
+                })?;
+            }
+            PostgresOperation::Update(entry) => {
+                let query = r#"
+                    UPDATE vault_entries SET
+                        path = $2,
+                        encrypted_data = $3,
+                        encryption_metadata = $4,
+                        security_level = $5,
+                        metadata = $6,
+                        tags = $7,
+                        version = $8,
+                        owner_id = $9,
+                        updated_at = $10,
+                        expires_at = $11
+                    WHERE id = $1
+                "#;
+
+                let metadata_json = serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
+                let tags_json = serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
+                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata).unwrap_or(serde_json::Value::Null);
+
+                transaction.execute(query, &[
+                    &entry.id,
+                    &entry.path,
+                    &entry.encrypted_data,
+                    &encryption_metadata_json,
+                    &(entry.security_level as i32),
+                    &metadata_json,
+                    &tags_json,
+                    &(entry.version as i32),
+                    &entry.owner_id,
+                    &entry.updated_at.naive_utc(),
+                    &entry.expires_at.map(|dt| dt.naive_utc()),
+                ]).await.map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to update entry: {}", e),
+                })?;
+            }
+            PostgresOperation::Delete(id) => {
+                let query = "DELETE FROM vault_entries WHERE id = $1";
+                transaction.execute(query, &[id]).await.map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete entry: {}", e),
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl StorageTransaction for PostgresTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
-        // PostgreSQL transaction implementation would go here
-        // For now, use mock implementation to avoid unsafe lifetime issues
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(PostgresOperation::Store(entry.clone()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
-        // PostgreSQL transaction implementation would go here
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(PostgresOperation::Update(entry.clone()));
         Ok(())
     }
 
-    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
-        // PostgreSQL transaction implementation would go here
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(PostgresOperation::Delete(id));
         Ok(true)
     }
 
-    async fn commit(self: Box<Self>) -> StorageResult<()> {
-        // PostgreSQL transaction commit would go here
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // Execute all operations in a database transaction
+        let mut client = self.pool.get().await.map_err(|e| StorageError::ConnectionFailed {
+            message: format!("Failed to get connection for transaction: {}", e),
+        })?;
+
+        let transaction = client.transaction().await.map_err(|e| StorageError::TransactionFailed {
+            message: format!("Failed to begin transaction: {}", e),
+        })?;
+
+        for op in &self.operations {
+            self.execute_operation(&transaction, op).await?;
+        }
+
+        transaction.commit().await.map_err(|e| StorageError::TransactionFailed {
+            message: format!("Failed to commit transaction: {}", e),
+        })?;
+
+        self.committed = true;
         Ok(())
     }
 
-    async fn rollback(self: Box<Self>) -> StorageResult<()> {
-        // PostgreSQL transaction rollback would go here
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
         Ok(())
     }
 }

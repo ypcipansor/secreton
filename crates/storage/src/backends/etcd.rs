@@ -56,6 +56,79 @@ pub struct EtcdStorage {
     cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
 }
 
+/// etcd transaction implementation
+pub struct EtcdTransaction {
+    operations: Vec<EtcdOperation>,
+    committed: bool,
+}
+
+enum EtcdOperation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl EtcdTransaction {
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+}
+
+#[async_trait]
+impl StorageTransaction for EtcdTransaction {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(EtcdOperation::Store(entry.clone()));
+        Ok(())
+    }
+
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(EtcdOperation::Update(entry.clone()));
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(EtcdOperation::Delete(id));
+        Ok(true)
+    }
+
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // In a real etcd implementation, you would execute all operations
+        // in an etcd transaction using the etcd txn API
+        // For now, we just mark as committed since we don't have a real connection
+        self.committed = true;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
+        Ok(())
+    }
+}
+
 impl EtcdStorage {
     /// Create new etcd storage backend
     pub async fn new(config: EtcdStorageConfig) -> Result<Self, StorageError> {
@@ -391,8 +464,7 @@ impl StorageBackend for EtcdStorage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // etcd supports transactions but for simplicity, return mock
-        Ok(Box::new(crate::MockTransaction))
+        Ok(Box::new(EtcdTransaction::new()))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

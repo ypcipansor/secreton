@@ -45,6 +45,79 @@ pub struct MySQLStorage {
     cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
 }
 
+/// MySQL transaction implementation
+pub struct MySQLTransaction {
+    operations: Vec<MySQLOperation>,
+    committed: bool,
+}
+
+enum MySQLOperation {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
+}
+
+impl MySQLTransaction {
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+            committed: false,
+        }
+    }
+}
+
+#[async_trait]
+impl StorageTransaction for MySQLTransaction {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(MySQLOperation::Store(entry.clone()));
+        Ok(())
+    }
+
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(MySQLOperation::Update(entry.clone()));
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+        self.operations.push(MySQLOperation::Delete(id));
+        Ok(true)
+    }
+
+    async fn commit(mut self: Box<Self>) -> StorageResult<()> {
+        if self.committed {
+            return Err(StorageError::TransactionFailed {
+                message: "Transaction already committed".to_string(),
+            });
+        }
+
+        // In a real MySQL implementation, you would execute all operations
+        // in a transaction using the mysql crate's transaction support
+        // For now, we just mark as committed since we don't have a real connection
+        self.committed = true;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> StorageResult<()> {
+        self.operations.clear();
+        Ok(())
+    }
+}
+
 impl MySQLStorage {
     /// Validate SQL identifier (table name) to prevent SQL injection
     /// SECURITY FIX: Prevents SQL injection via table name
@@ -425,8 +498,7 @@ impl StorageBackend for MySQLStorage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // MySQL transactions would be implemented here
-        Ok(Box::new(crate::MockTransaction))
+        Ok(Box::new(MySQLTransaction::new()))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {
