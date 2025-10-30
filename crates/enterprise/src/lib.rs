@@ -1,9 +1,7 @@
 //! # Secreton Enterprise Features
 //!
-//! Advanced enterprise capabilities for Secreton including Hardware Security Modules,
-//! AI-powered security analytics, quantum-safe cryptography, and advanced compliance features.
-
-#![allow(async_fn_in_trait)]
+//! Enterprise-grade security features for Secreton including
+//! advanced HSM integration, zero-knowledge proofs, and compliance frameworks.
 
 use serde::{Deserialize, Serialize};
 

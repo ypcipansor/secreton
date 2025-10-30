@@ -1,7 +1,7 @@
 //! Transit keys implementation with RustCrypto integration
 
 use aes_gcm::{
-    Aes256Gcm, KeyInit, Nonce,
+    Aes256Gcm, KeyInit,
     aead::{Aead, Key},
 };
 use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce, XChaCha20Poly1305};
@@ -215,12 +215,13 @@ impl TransitKey {
 
         let ciphertext = match &key_version.material {
             KeyMaterial::Aes256Gcm(key_bytes) => {
-                let key = *Key::<Aes256Gcm>::from_slice(&**key_bytes);
+                let key = Key::<Aes256Gcm>::from(**key_bytes);
                 let cipher = Aes256Gcm::new(&key);
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = *Nonce::from_slice(&nonce_bytes);
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce = ChaChaNonce::from(nonce_array);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -250,7 +251,8 @@ impl TransitKey {
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = *ChaChaNonce::from_slice(&nonce_bytes);
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce = ChaChaNonce::from(nonce_array);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -279,7 +281,7 @@ impl TransitKey {
 
                 let mut nonce_bytes = [0u8; 24]; // XChaCha20 uses 192-bit nonce
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce = *chacha20poly1305::XNonce::from_slice(&nonce_bytes);
+                let nonce = chacha20poly1305::XNonce::from(nonce_bytes);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -350,13 +352,14 @@ impl TransitKey {
                     ));
                 }
 
-                let key = *Key::<Aes256Gcm>::from_slice(key_bytes.as_slice());
+                let key = Key::<Aes256Gcm>::from(**key_bytes);
                 let cipher = Aes256Gcm::new(&key);
 
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce = *Nonce::from_slice(&nonce_bytes);
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce = ChaChaNonce::from(nonce_array);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())
@@ -394,7 +397,8 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce = *ChaChaNonce::from_slice(&nonce_bytes);
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce = ChaChaNonce::from(nonce_array);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())

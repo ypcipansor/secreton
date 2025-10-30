@@ -4,13 +4,12 @@
 //! access control and identity tracking.
 
 use chrono::{DateTime, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-
-use crate::AuthError;
 
 /// Entity represents a unique identity
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,7 +204,7 @@ impl IdentityService {
         entities
             .get(id)
             .cloned()
-            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string( }))
+            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string() })
     }
 
     /// Update entity
@@ -213,7 +212,7 @@ impl IdentityService {
         let mut entities = self.entities.write().await;
 
         if !entities.contains_key(id) {
-            return Err(SecretonError::EntityNotFound { entity: id.to_string( }));
+            return Err(SecretonError::EntityNotFound { entity: id.to_string() });
         }
 
         entities.insert(id.to_string(), entity);
@@ -229,7 +228,7 @@ impl IdentityService {
         // Remove entity
         entities
             .remove(id)
-            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string( }))?;
+            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string() })?;
 
         // Remove associated aliases
         let alias_ids: Vec<String> = aliases
@@ -266,7 +265,7 @@ impl IdentityService {
         let mut alias_index = self.alias_index.write().await;
 
         if alias_index.contains_key(&_key) {
-            return Err(AuthError::alias_exists(_key));
+            return Err(SecretonError::AliasExists { alias: _key });
         }
 
         let alias = Alias::new(entity_id.clone(), mount_accessor, _name);
@@ -291,7 +290,7 @@ impl IdentityService {
         aliases
             .get(id)
             .cloned()
-            .ok_or_else(|| SecretonError::AliasNotFound { alias: id.to_string( }))
+            .ok_or_else(|| SecretonError::AliasNotFound { alias: id.to_string() })
     }
 
     /// Lookup entity by alias
@@ -306,7 +305,7 @@ impl IdentityService {
             let alias_index = self.alias_index.read().await;
             alias_index
                 .get(&_key)
-                .ok_or_else(|| SecretonError::AliasNotFound { alias: _key.clone( }))?
+                .ok_or_else(|| SecretonError::AliasNotFound { alias: _key.clone() })?
                 .clone()
         };
 
@@ -314,7 +313,7 @@ impl IdentityService {
             let aliases = self.aliases.read().await;
             let alias = aliases
                 .get(&alias_id)
-                .ok_or_else(|| SecretonError::AliasNotFound { alias: alias_id.clone( }))?;
+                .ok_or_else(|| SecretonError::AliasNotFound { alias: alias_id.clone() })?;
             alias.entity_id.clone()
         };
 
@@ -324,19 +323,19 @@ impl IdentityService {
     /// Merge entities
     pub async fn merge_entities(&self, from_id: &str, to_id: &str) -> Result<(), SecretonError> {
         if from_id == to_id {
-            return Err(AuthError::entity_self_merge());
+            return Err(SecretonError::EntitySelfMerge);
         }
 
         let mut entities = self.entities.write().await;
 
         let from_entity = entities
             .get(from_id)
-            .ok_or_else(|| SecretonError::EntityNotFound { entity: from_id.to_string( }))?
+            .ok_or_else(|| SecretonError::EntityNotFound { entity: from_id.to_string() })?
             .clone();
 
         let to_entity = entities
             .get_mut(to_id)
-            .ok_or_else(|| SecretonError::EntityNotFound { entity: to_id.to_string( }))?;
+            .ok_or_else(|| SecretonError::EntityNotFound { entity: to_id.to_string() })?;
 
         // Merge policies
         for policy in from_entity.policies {
@@ -386,7 +385,7 @@ impl IdentityService {
         groups
             .get(id)
             .cloned()
-            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string( }))
+            .ok_or_else(|| SecretonError::EntityNotFound { entity: id.to_string() })
     }
 
     /// List all entities

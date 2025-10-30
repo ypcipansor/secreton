@@ -32,8 +32,13 @@ pub mod model;
 pub mod service;
 pub mod error;
 
-pub use engine::*;
-pub use backend::*;
+pub use engine::{
+    KvEngine, TransitEngine, DatabaseEngine, AwsEngine, OciEngine,
+    PkiEngine, SshEngine, TotpEngine, RabbitmqEngine, MongodbEngine, LdapEngine
+};
+pub use backend::{
+    AwsBackend, OciBackend, VaultBackend, PostgresBackend, MysqlBackend, MongodbBackend
+};
 pub use model::*;
 pub use service::*;
 pub use error::*;

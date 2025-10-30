@@ -3,10 +3,10 @@
 //! Tests cross-auth-method scenarios, error handling, and edge cases
 
 use super::*;
-use crate::services::auth::{
-    approle::AppRoleAuthService,
-    token::TokenAuthService,
-    userpass::UserPassAuthService,
+use crate::authentication::{
+    approle::AppRoleAuth,
+    token::TokenService,
+    userpass::UserPassAuth,
 };
 
 #[cfg(test)]
@@ -16,8 +16,8 @@ mod integration_tests {
     #[tokio::test]
     async fn test_multiple_auth_methods_sequential() {
         // Test that multiple auth methods can be used sequentially
-        let token_service = TokenAuthService::new();
-        let userpass_service = UserPassAuthService::new();
+        let token_service = TokenService::new();
+        let userpass_service = UserPassAuth::new();
         
         // Create token
         let token_result = token_service

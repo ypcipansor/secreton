@@ -3,8 +3,6 @@
 //! System infrastructure components including API gateways, observability,
 //! monitoring, plugin systems, and request forwarding services.
 
-#![allow(async_fn_in_trait)]
-
 
 pub mod advanced_observability;
 pub mod api_gateway;

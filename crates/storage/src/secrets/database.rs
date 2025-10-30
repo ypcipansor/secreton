@@ -337,22 +337,6 @@ impl DatabaseSecretsEngine {
         Ok(credentials)
     }
 
-    /// Generate database username
-    fn generate_username(&self, db_type: &DatabaseType, role_name: &str) -> String {
-        let uuid = Uuid::new_v4().to_string();
-        let short_uuid = &uuid[..8];
-
-        match db_type {
-            DatabaseType::MySQL | DatabaseType::PostgreSQL => {
-                format!("v-{}-{}", role_name, short_uuid)
-            }
-            DatabaseType::MongoDB => {
-                format!("v_{}_{}", role_name.replace("-", "_"), short_uuid)
-            }
-            _ => format!("vault_{}_{}", role_name, short_uuid),
-        }
-    }
-
     /// Generate secure random password
     fn generate_password(&self, length: usize) -> String {
         use secreton_common::utils::password::generate_password;
@@ -362,10 +346,10 @@ impl DatabaseSecretsEngine {
     /// Execute creation statements
     async fn execute_creation_statements(
         &self,
-        connection: &DatabaseConnection,
+        _connection: &DatabaseConnection,
         statements: &[String],
-        username: &str,
-        password: &str,
+        _username: &str,
+        _password: &str,
     ) -> Result<(), DatabaseError> {
         // In production, this would execute actual SQL/commands
         // For now, validate that placeholders exist
@@ -456,7 +440,7 @@ impl DatabaseSecretsEngine {
         &self,
         _connection: &DatabaseConnection,
         statements: &[String],
-        username: &str,
+        _username: &str,
     ) -> Result<(), DatabaseError> {
         // In production, this would execute actual revocation
         // For now, just validate

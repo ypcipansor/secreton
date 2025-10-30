@@ -267,7 +267,7 @@ impl SecretScanner {
     }
 
     /// Mock commit scanning
-    fn mock_scan_commit(&self, _commit_hash: &str, patterns: &[ScanPattern]) -> Vec<Finding> {
+    fn mock_scan_commit(&self, _commit_hash: &str, _patterns: &[ScanPattern]) -> Vec<Finding> {
         vec![Finding {
             finding_id: uuid::Uuid::new_v4().to_string(),
             file_path: "config/secrets.yaml".to_string(),

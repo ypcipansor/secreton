@@ -44,12 +44,6 @@ impl AppRoleAuthMethod {
         Ok(())
     }
 
-    /// Get role by name
-    async fn get_role(&self, role_name: &str) -> Option<AppRole> {
-        let roles = self.roles.read().await;
-        roles.get(role_name).cloned()
-    }
-
     /// Generate a secret ID for a role
     pub async fn generate_secret_id(&self, role_name: &str) -> AuthMethodResult<String> {
         let mut roles = self.roles.write().await;

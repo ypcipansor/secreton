@@ -3,13 +3,12 @@
 //! Comprehensive token lifecycle management for authentication and authorization.
 
 use chrono::{DateTime, Duration, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-
-use crate::AuthError;
 
 /// Token type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

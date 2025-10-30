@@ -136,7 +136,7 @@ pub struct MfaConfig {
 }
 
 /// MFA methods
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum MfaMethod {
     Totp,
     Sms,
@@ -145,6 +145,23 @@ pub enum MfaMethod {
     Hardware,
     WebAuthn,
     Recovery,
+}
+
+impl std::str::FromStr for MfaMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "totp" => Ok(MfaMethod::Totp),
+            "sms" => Ok(MfaMethod::Sms),
+            "email" => Ok(MfaMethod::Email),
+            "push" => Ok(MfaMethod::Push),
+            "hardware" => Ok(MfaMethod::Hardware),
+            "webauthn" => Ok(MfaMethod::WebAuthn),
+            "recovery" => Ok(MfaMethod::Recovery),
+            _ => Err(format!("Unknown MFA method: {}", s)),
+        }
+    }
 }
 
 /// MFA setup request

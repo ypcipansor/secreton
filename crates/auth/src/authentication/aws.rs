@@ -214,7 +214,7 @@ impl AwsAuth {
     /// Create role binding
     pub async fn create_role_binding(&self, _name: String, binding: AwsRoleBinding) -> Result<()> {
         if binding.role_arn.is_empty() {
-            return Err(SecretonError::Authentication { message: "Role ARN cannot be empty".to_string( }));
+            return Err(SecretonError::Authentication { message: "Role ARN cannot be empty".to_string() });
         }
         
         let mut bindings = self.role_bindings.write().await;
@@ -342,13 +342,13 @@ impl AwsAuth {
         
         // For now, simple validation
         if _request.iam_request_method.is_empty() {
-            return Err(SecretonError::Validation { message: "Empty _request method".to_string( }));
+            return Err(SecretonError::Validation { message: "Empty _request method".to_string() });
         }
         if _request.iam_request_url.is_empty() {
-            return Err(SecretonError::Validation { message: "Empty _request URL".to_string( }));
+            return Err(SecretonError::Validation { message: "Empty _request URL".to_string() });
         }
         if _request.iam_request_headers.is_empty() {
-            return Err(SecretonError::Validation { message: "Empty _request headers".to_string( }));
+            return Err(SecretonError::Validation { message: "Empty _request headers".to_string() });
         }
         
         Ok(())
@@ -413,7 +413,7 @@ impl AwsAuth {
     pub async fn delete_role(&self, _name: &str) -> Result<()> {
         let mut bindings = self.role_bindings.write().await;
         bindings.remove(_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string( }))?;
+            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })?;
         Ok(())
     }
 }

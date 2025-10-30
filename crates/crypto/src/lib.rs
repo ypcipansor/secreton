@@ -43,11 +43,18 @@ pub use policy_enforced_crypto::{
     ComplianceViolation, ViolationType, RemediationStatus, MigrationPlan,
     MigrationProgress, ComplianceScanResult, PolicyEnforcedCryptoOperations
 };
-pub use secure_multi_party_computation::*;
+pub use secure_multi_party_computation::{
+    SMPCError, SMPCProtocol, Participant, SMPCSession, SessionState, SecretShare,
+    DKGResult, ThresholdSignature, PartialSignature, ComputationRequest,
+    ComputationResult, SMPCSystem
+};
 pub use shamir::*;
 pub use transit::TransitEngine;
 pub use advanced_key_manager::{AdvancedKeyManager, KeyManagerError, KeyType as AdvancedKeyType, KeyState as AdvancedKeyState};
-pub use authenticated_key_operations::*;
+pub use authenticated_key_operations::{
+    MetricType, AuthenticatedKeyError, KeyOperationRequest, KeyOperation,
+    KeyOperationResult, KeyPermission, AuthenticatedKeyOperations
+};
 pub use crypto_policy_engine::{
     PolicyError, CryptoAlgorithm, AlgorithmStatus, ComplianceStandard,
     CryptoPolicy, AlgorithmMetadata, CryptoOperationRequest, CryptoAudit,

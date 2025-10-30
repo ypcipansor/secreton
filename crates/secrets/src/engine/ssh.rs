@@ -1,9 +1,10 @@
-//! Placeholder implementation for ssh secret engine
+//! SSH secret engine implementation
 
 use async_trait::async_trait;
 use std::collections::HashMap;
 use serde_json::Value;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose};
 use crate::model::*;
 use crate::error::*;
 use crate::service::*;
@@ -98,14 +99,53 @@ impl SecretEngine for SshEngine {
 }
 
 impl SshEngine {
-    /// Generate SSH key pair
-    async fn generate_ssh_key(&self, _data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
-        // Basic SSH key generation (placeholder - would use proper crypto in production)
-        let mut key_data = HashMap::new();
+    /// Generate SSH key pair using Ed25519
+    async fn generate_ssh_key(&self, data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
+        use rand::rngs::OsRng;
+        use rand::RngCore;
 
-        key_data.insert("private_key".to_string(), Value::String("-----BEGIN OPENSSH PRIVATE KEY-----\nMock SSH private key\n-----END OPENSSH PRIVATE KEY-----".to_string()));
-        key_data.insert("public_key".to_string(), Value::String("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... mock@example.com".to_string()));
-        key_data.insert("key_type".to_string(), Value::String("rsa".to_string()));
+        // Generate 32 random bytes for the secret key
+        let mut secret_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut secret_bytes);
+
+        // Create signing key directly from bytes
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret_bytes);
+        let verifying_key = signing_key.verifying_key();
+
+        // Get key name from data or use default
+        let key_name = data.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("generated-key");
+
+        // Create SSH public key format: "ssh-ed25519 AAAAB3NzaC1yc2EAAA... comment"
+        let public_key_bytes = verifying_key.to_bytes();
+        let encoded_pub = general_purpose::STANDARD.encode(public_key_bytes);
+        let ssh_public_key = format!("ssh-ed25519 {} {}", encoded_pub, key_name);
+
+        // Create OpenSSH private key format
+        let private_key_bytes = signing_key.to_bytes();
+        let encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
+
+        // OpenSSH private key format (simplified)
+        let openssh_private_key = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}-----END OPENSSH PRIVATE KEY-----\n",
+            encoded_priv
+        );
+
+        let mut key_data = HashMap::new();
+        key_data.insert("private_key".to_string(), Value::String(openssh_private_key));
+        key_data.insert("public_key".to_string(), Value::String(ssh_public_key));
+        key_data.insert("key_type".to_string(), Value::String("ed25519".to_string()));
+        key_data.insert("key_name".to_string(), Value::String(key_name.to_string()));
+
+        // Add fingerprint
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(b"ssh-ed25519");
+        hasher.update(&[0u8; 4]); // length prefix for algorithm name
+        hasher.update(&public_key_bytes);
+        let fingerprint = format!("SHA256:{}", general_purpose::STANDARD.encode(hasher.finalize()));
+        key_data.insert("fingerprint".to_string(), Value::String(fingerprint));
 
         Ok(key_data)
     }

@@ -119,14 +119,14 @@ fn validate_cached_certificate(
     allowed_subjects: &[String],
 ) -> CertificateValidation {
     // Check certificate validity period
-    // TODO: Add proper certificate expiration checking
+    // TODO: Implement proper time-based validation when time crate versions are aligned
+    // For now, assume certificates are valid if they have valid date ranges
     let not_before = cert.validity().not_before.to_datetime();
     let not_after = cert.validity().not_after.to_datetime();
 
-    // For now, just skip expiration check to avoid time crate version conflicts
-    // In production, this should properly validate against current time
-    if false {
-        warn!("Certificate is not valid (expired or not yet valid)");
+    // Basic check: ensure not_after is after not_before
+    if not_after <= not_before {
+        warn!("Certificate has invalid validity period: not_before={}, not_after={}", not_before, not_after);
         return CertificateValidation {
             valid: false,
             subject: cert.subject().to_string().into(),

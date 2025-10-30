@@ -129,15 +129,15 @@ impl RadiusAuthService {
     pub async fn configure(&self, _config: RadiusConfig) -> Result<(), RadiusError> {
         // Validate configuration
         if _config.host.is_empty() {
-            return Err(SecretonError::Validation { message: "Host is required".to_string( }));
+            return Err(SecretonError::Validation { message: "Host is required".to_string() });
         }
         
         if _config._secret.is_empty() {
-            return Err(SecretonError::Validation { message: "Shared _secret is required".to_string( }));
+            return Err(SecretonError::Validation { message: "Shared _secret is required".to_string() });
         }
         
         if _config.port == 0 {
-            return Err(SecretonError::Validation { message: "Invalid port".to_string( }));
+            return Err(SecretonError::Validation { message: "Invalid port".to_string() });
         }
         
         let mut configs = self.configs.write().await;
@@ -161,11 +161,11 @@ impl RadiusAuthService {
         
         // Validate _request
         if _request._username.is_empty() {
-            return Err(SecretonError::Authentication { message: "Username is required".to_string( }));
+            return Err(SecretonError::Authentication { message: "Username is required".to_string() });
         }
         
         if _request._password.is_empty() {
-            return Err(SecretonError::Authentication { message: "Password is required".to_string( }));
+            return Err(SecretonError::Authentication { message: "Password is required".to_string() });
         }
         
         // TODO: Implement actual RADIUS protocol

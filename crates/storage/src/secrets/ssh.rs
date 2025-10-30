@@ -1,17 +1,33 @@
 //! SSH Secrets Engine
 //!
 //! Manages SSH credentials with dynamic generation and automatic rotation.
-//! Supports one-time passwords (OTP), dynamic key generation, and certificate authority.
+//! Supports one-time passwords (OTP), dynamic _key generation, and certificate authority.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// OTP entry for tracking one-time passwords
+#[derive(Debug, Clone)]
+pub struct OtpEntry {
+    /// Username
+    pub _username: String,
+    /// IP address
+    pub ip: String,
+    /// OTP value
+    pub otp: String,
+    /// Creation time
+    pub created_at: DateTime<Utc>,
+    /// Expiration time
+    pub expires_at: DateTime<Utc>,
+}
+
 /// Error types for SSH engine
-#[derive(Debug, thiserror::Error)]
+#[derive(Error, Debug)]
 pub enum SshError {
     #[error("SSH role not found: {0}")]
     RoleNotFound(String),
@@ -28,24 +44,24 @@ pub enum SshError {
     #[error("Certificate signing failed: {0}")]
     SigningFailed(String),
 
-    #[error("Invalid key type: {0}")]
+    #[error("Invalid _key type: {0}")]
     InvalidKeyType(String),
 }
 
 /// SSH credential type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SshCredentialType {
-    /// One-time password
+    /// One-time _password
     OTP,
 
-    /// Dynamic SSH key pair
+    /// Dynamic SSH _key pair
     DynamicKey,
 
     /// SSH certificate signed by CA
     Certificate,
 }
 
-/// SSH key type
+/// SSH _key type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SshKeyType {
     RSA2048,
@@ -67,18 +83,19 @@ impl SshKeyType {
             SshKeyType::Ed25519 => "ed25519",
         }
     }
+
 }
 
 /// SSH role configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshRole {
-    /// Role name
-    pub name: String,
+    /// Role _name
+    pub _name: String,
 
     /// Credential type
     pub credential_type: SshCredentialType,
 
-    /// Default user for SSH connections
+    /// Default _user for SSH connections
     pub default_user: String,
 
     /// Allowed users
@@ -108,7 +125,7 @@ pub struct SshRole {
     /// Key bits (deprecated, use key_type)
     pub key_bits: u32,
 
-    /// Algorithm signer (CA name for certificates)
+    /// Algorithm signer (CA _name for certificates)
     pub algorithm_signer: Option<String>,
 
     /// Allowed extensions (for certificates)
@@ -127,7 +144,7 @@ pub struct SshRole {
 impl Default for SshRole {
     fn default() -> Self {
         Self {
-            name: String::new(),
+            _name: String::new(),
             credential_type: SshCredentialType::DynamicKey,
             default_user: "ubuntu".to_string(),
             allowed_users: vec!["*".to_string()],
@@ -141,23 +158,24 @@ impl Default for SshRole {
             key_bits: 2048,
             algorithm_signer: None,
             allowed_extensions: HashMap::new(),
-            default_extensions: HashMap::new(),
             allowed_critical_options: HashMap::new(),
             default_critical_options: HashMap::new(),
+            default_extensions: HashMap::new(),
         }
-    }
+
+}
 }
 
 /// SSH CA configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshCaConfig {
-    /// CA name
-    pub name: String,
+    /// CA _name
+    pub _name: String,
 
-    /// Public key
+    /// Public _key
     pub public_key: String,
 
-    /// Private key (encrypted)
+    /// Private _key (encrypted)
     pub private_key: String,
 
     /// Key type
@@ -174,7 +192,7 @@ pub struct SshCredentials {
     pub id: String,
 
     /// Username
-    pub username: String,
+    pub _username: String,
 
     /// IP address
     pub ip: String,
@@ -182,10 +200,10 @@ pub struct SshCredentials {
     /// Port
     pub port: u16,
 
-    /// SSH private key (for dynamic keys)
+    /// SSH private _key (for dynamic keys)
     pub private_key: Option<String>,
 
-    /// SSH public key
+    /// SSH public _key
     pub public_key: Option<String>,
 
     /// OTP (for OTP credentials)
@@ -206,17 +224,6 @@ pub struct SshCredentials {
     /// Role used
     pub role_name: String,
 }
-
-/// One-time password entry
-#[derive(Debug, Clone)]
-struct OtpEntry {
-    username: String,
-    ip: String,
-    otp: String,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
-}
-
 /// SSH secrets engine
 pub struct SshEngine {
     roles: Arc<RwLock<HashMap<String, SshRole>>>,
@@ -226,7 +233,6 @@ pub struct SshEngine {
 }
 
 impl SshEngine {
-    /// Create new SSH engine
     pub fn new() -> Self {
         Self {
             roles: Arc::new(RwLock::new(HashMap::new())),
@@ -238,28 +244,26 @@ impl SshEngine {
 
     /// Create SSH role
     pub async fn create_role(&self, role: SshRole) -> Result<(), SshError> {
-        if role.name.is_empty() {
+        if role._name.is_empty() {
             return Err(SshError::InvalidConfig(
-                "Role name cannot be empty".to_string(),
+                "Role _name cannot be empty".to_string(),
             ));
         }
 
         let mut roles = self.roles.write().await;
-        roles.insert(role.name.clone(), role);
+        roles.insert(role._name.clone(), role);
         Ok(())
     }
-
-    /// Generate SSH CA
-    pub async fn generate_ca(
+    pub async fn create_ca(
         &self,
-        name: String,
+        _name: String,
         key_type: SshKeyType,
     ) -> Result<SshCaConfig, SshError> {
-        // Generate key pair (simplified - production would use proper SSH key generation)
+        // Generate _key pair (simplified - production would use proper SSH _key generation)
         let (public_key, private_key) = self.generate_ssh_keypair(&key_type)?;
 
         let ca = SshCaConfig {
-            name: name.clone(),
+            _name: _name.clone(),
             public_key,
             private_key,
             key_type,
@@ -267,7 +271,7 @@ impl SshEngine {
         };
 
         let mut cas = self.cas.write().await;
-        cas.insert(name, ca.clone());
+        cas.insert(_name, ca.clone());
 
         Ok(ca)
     }
@@ -276,7 +280,7 @@ impl SshEngine {
     pub async fn generate_credentials(
         &self,
         role_name: &str,
-        username: &str,
+        _username: &str,
         ip: &str,
         ttl: Option<u32>,
     ) -> Result<SshCredentials, SshError> {
@@ -288,13 +292,13 @@ impl SshEngine {
             .clone();
         drop(roles);
 
-        // Validate username
+        // Validate _username
         if !role.allowed_users.contains(&"*".to_string())
-            && !role.allowed_users.contains(&username.to_string())
+            && !role.allowed_users.contains(&_username.to_string())
         {
             return Err(SshError::InvalidConfig(format!(
                 "User {} not allowed for role {}",
-                username, role_name
+                _username, role_name
             )));
         }
 
@@ -306,13 +310,13 @@ impl SshEngine {
 
         let credentials = match role.credential_type {
             SshCredentialType::OTP => {
-                self.generate_otp_credentials(role_name, username, ip, role.port, now, expires_at)
+                self.generate_otp_credentials(role_name, _username, ip, role.port, now, expires_at)
                     .await?
             }
             SshCredentialType::DynamicKey => {
                 self.generate_dynamic_key_credentials(
                     role_name,
-                    username,
+                    _username,
                     ip,
                     role.port,
                     &role.key_type,
@@ -322,7 +326,7 @@ impl SshEngine {
                 .await?
             }
             SshCredentialType::Certificate => {
-                self.generate_certificate_credentials(&role, username, ip, now, expires_at)
+                self.generate_certificate_credentials(&role, _username, ip, now, expires_at)
                     .await?
             }
         };
@@ -338,7 +342,7 @@ impl SshEngine {
     async fn generate_otp_credentials(
         &self,
         role_name: &str,
-        username: &str,
+        _username: &str,
         ip: &str,
         port: u16,
         created_at: DateTime<Utc>,
@@ -349,7 +353,7 @@ impl SshEngine {
 
         // Store OTP for verification
         let otp_entry = OtpEntry {
-            username: username.to_string(),
+            _username: _username.to_string(),
             ip: ip.to_string(),
             otp: otp.clone(),
             created_at,
@@ -361,7 +365,7 @@ impl SshEngine {
 
         Ok(SshCredentials {
             id: Uuid::new_v4().to_string(),
-            username: username.to_string(),
+            _username: _username.to_string(),
             ip: ip.to_string(),
             port,
             private_key: None,
@@ -375,23 +379,23 @@ impl SshEngine {
         })
     }
 
-    /// Generate dynamic key credentials
+    /// Generate dynamic _key credentials
     async fn generate_dynamic_key_credentials(
         &self,
         role_name: &str,
-        username: &str,
+        _username: &str,
         ip: &str,
         port: u16,
         key_type: &SshKeyType,
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
     ) -> Result<SshCredentials, SshError> {
-        // Generate SSH key pair
+        // Generate SSH _key pair
         let (public_key, private_key) = self.generate_ssh_keypair(key_type)?;
 
         Ok(SshCredentials {
             id: Uuid::new_v4().to_string(),
-            username: username.to_string(),
+            _username: _username.to_string(),
             ip: ip.to_string(),
             port,
             private_key: Some(private_key),
@@ -409,7 +413,7 @@ impl SshEngine {
     async fn generate_certificate_credentials(
         &self,
         role: &SshRole,
-        username: &str,
+        _username: &str,
         ip: &str,
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
@@ -427,14 +431,14 @@ impl SshEngine {
             .clone();
         drop(cas);
 
-        // Generate key pair for user
+        // Generate _key pair for _user
         let (public_key, private_key) = self.generate_ssh_keypair(&role.key_type)?;
 
-        // Sign public key with CA to create certificate
+        // Sign public _key with CA to create certificate
         let certificate = self.sign_ssh_certificate(
             &ca,
             &public_key,
-            username,
+            _username,
             &expires_at,
             &role.default_extensions,
             &role.default_critical_options,
@@ -442,7 +446,7 @@ impl SshEngine {
 
         Ok(SshCredentials {
             id: Uuid::new_v4().to_string(),
-            username: username.to_string(),
+            _username: _username.to_string(),
             ip: ip.to_string(),
             port: role.port,
             private_key: Some(private_key),
@@ -452,13 +456,13 @@ impl SshEngine {
             key_type: role.key_type.as_str().to_string(),
             created_at,
             expires_at,
-            role_name: role.name.clone(),
+            role_name: role._name.clone(),
         })
     }
 
-    /// Generate SSH key pair
+    /// Generate SSH _key pair
     fn generate_ssh_keypair(&self, key_type: &SshKeyType) -> Result<(String, String), SshError> {
-        // Simplified key generation (production would use proper SSH key libraries)
+        // Simplified _key generation (production would use proper SSH _key libraries)
         let key_id = Uuid::new_v4().to_string();
 
         let public_key = format!(
@@ -470,7 +474,7 @@ impl SshEngine {
 
         let private_key = format!(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n\
-             [Private key data for {}]\n\
+             [Private _key _data for {}]\n\
              -----END OPENSSH PRIVATE KEY-----",
             key_type.as_str()
         );
@@ -498,7 +502,7 @@ impl SshEngine {
         &self,
         _ca: &SshCaConfig,
         public_key: &str,
-        username: &str,
+        _username: &str,
         expires_at: &DateTime<Utc>,
         _extensions: &HashMap<String, String>,
         _critical_options: &HashMap<String, String>,
@@ -506,13 +510,13 @@ impl SshEngine {
         // Simplified certificate generation (production would use proper SSH cert signing)
         let cert = format!(
             "ssh-rsa-cert-v01@openssh.com AAAAB3...\n\
-             Type: ssh-rsa-cert-v01@openssh.com user certificate\n\
-             Public key: {}\n\
+             Type: ssh-rsa-cert-v01@openssh.com _user certificate\n\
+             Public _key: {}\n\
              Principals: {}\n\
              Valid: from now to {}\n\
              Signature: [CA signature]",
             public_key,
-            username,
+            _username,
             expires_at.to_rfc3339()
         );
 
@@ -520,7 +524,7 @@ impl SshEngine {
     }
 
     /// Verify OTP
-    pub async fn verify_otp(&self, otp: &str, username: &str, ip: &str) -> Result<bool, SshError> {
+    pub async fn verify_otp(&self, otp: &str, _username: &str, ip: &str) -> Result<bool, SshError> {
         let otps = self.otps.read().await;
 
         if let Some(entry) = otps.get(otp) {
@@ -530,7 +534,7 @@ impl SshEngine {
                 return Ok(false);
             }
 
-            if entry.username != username || entry.ip != ip {
+            if entry._username != _username || entry.ip != ip {
                 return Ok(false);
             }
 
@@ -553,7 +557,7 @@ impl SshEngine {
         roles.keys().cloned().collect()
     }
 
-    /// Get CA public key
+    /// Get CA public _key
     pub async fn get_ca_public_key(&self, ca_name: &str) -> Result<String, SshError> {
         let cas = self.cas.read().await;
         let ca = cas
@@ -613,7 +617,7 @@ mod tests {
         let engine = SshEngine::new();
 
         let role = SshRole {
-            name: "web-servers".to_string(),
+            _name: "web-servers".to_string(),
             credential_type: SshCredentialType::DynamicKey,
             default_user: "ubuntu".to_string(),
             ..Default::default()
@@ -633,7 +637,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(ca.name, "ssh-ca");
+        assert_eq!(ca._name, "ssh-ca");
         assert!(!ca.public_key.is_empty());
         assert!(!ca.private_key.is_empty());
     }
@@ -643,7 +647,7 @@ mod tests {
         let engine = SshEngine::new();
 
         let role = SshRole {
-            name: "otp-role".to_string(),
+            _name: "otp-role".to_string(),
             credential_type: SshCredentialType::OTP,
             default_user: "ubuntu".to_string(),
             ..Default::default()
@@ -664,7 +668,7 @@ mod tests {
         let engine = SshEngine::new();
 
         let role = SshRole {
-            name: "dynamic-role".to_string(),
+            _name: "dynamic-role".to_string(),
             credential_type: SshCredentialType::DynamicKey,
             key_type: SshKeyType::RSA2048,
             ..Default::default()
@@ -692,7 +696,7 @@ mod tests {
         let engine = SshEngine::new();
 
         let role = SshRole {
-            name: "otp-role".to_string(),
+            _name: "otp-role".to_string(),
             credential_type: SshCredentialType::OTP,
             ..Default::default()
         };
@@ -712,7 +716,7 @@ mod tests {
             .unwrap();
         assert!(valid);
 
-        // Wrong username should fail
+        // Wrong _username should fail
         let invalid = engine
             .verify_otp(otp, "wronguser", "192.168.1.1")
             .await

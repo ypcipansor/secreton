@@ -107,37 +107,6 @@ impl ConsulStorage {
             request
         }
     }
-
-    /// Retry logic for Consul operations
-    async fn retry_operation<F, T>(&self, operation: F) -> Result<T, StorageError>
-    where
-        F: Fn() -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<T, StorageError>> + Send>,
-        >,
-    {
-        let mut attempts = 0;
-        let mut last_error = None;
-
-        while attempts < self.config.max_retries {
-            match operation().await {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    last_error = Some(e);
-                    attempts += 1;
-                    if attempts < self.config.max_retries {
-                        tokio::time::sleep(std::time::Duration::from_millis(100 * attempts as u64))
-                            .await;
-                    }
-                }
-            }
-        }
-
-        Err(
-            last_error.unwrap_or_else(|| StorageError::ConnectionFailed {
-                message: "Max retries exceeded".to_string(),
-            }),
-        )
-    }
 }
 
 #[async_trait]

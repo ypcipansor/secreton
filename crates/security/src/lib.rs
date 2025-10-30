@@ -3,8 +3,6 @@
 //! Comprehensive security policy enforcement, compliance frameworks,
 //! audit logging, and governance services for the Secreton security system.
 
-#![allow(async_fn_in_trait)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

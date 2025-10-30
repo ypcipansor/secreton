@@ -94,34 +94,6 @@ impl DatabaseEngine {
             Err(SecretError::InvalidConfiguration(format!("Unsupported database type in URL: {}", connection_url)))
         }
     }
-
-    /// Revoke database credentials
-    async fn revoke_credentials(&self, username: &str) -> SecretResult<()> {
-        // Determine database type from connection URL
-        let db_type = self.detect_database_type(&self.config.connection_url)?;
-
-        // Create appropriate backend and revoke user
-        match db_type {
-            DatabaseType::PostgreSQL => {
-                let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.connection_url.clone()
-                );
-                backend.revoke_user(username).await
-            }
-            DatabaseType::MySQL => {
-                let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.connection_url.clone()
-                );
-                backend.revoke_user(username).await
-            }
-            DatabaseType::MongoDB => {
-                let backend = crate::backend::database::mongodb::MongodbBackend::new(
-                    self.config.connection_url.clone()
-                );
-                backend.revoke_user(username).await
-            }
-        }
-    }
 }
 
 #[async_trait]

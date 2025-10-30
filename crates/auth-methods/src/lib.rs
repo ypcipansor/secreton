@@ -51,12 +51,30 @@ pub mod model;
 pub mod service;
 pub mod error;
 
-pub use method::*;
+pub use method::{
+    CertAuth, UserPassAuthMethod, AppRoleAuthMethod,
+    GithubAuthMethod, OktaAuthMethod
+};
 pub use identity::*;
-pub use mfa::*;
-pub use token::*;
-pub use revocation::*;
+pub use mfa::{
+    TotpService, InMemoryTotpService, SmsService, InMemorySmsService,
+    EmailService, InMemoryEmailService, HardwareService, InMemoryHardwareService,
+    MfaService, CombinedMfaService
+};
+pub use token::{
+    TokenService, CombinedTokenService, TokenRenewalService, InMemoryTokenRenewalService,
+    TokenRevocationService, InMemoryTokenRevocationService
+};
+pub use revocation::{
+    RevocationService, CombinedRevocationService, RevocationRegistry, InMemoryRevocationRegistry
+};
 pub use agent::*;
-pub use model::*;
+pub use model::{
+    AuthMethod, AuthMethodType, AuthCredentials, AuthResult, UserInfo,
+    LoginRequest, LoginResponse, MfaConfig, MfaSetupRequest, MfaSetupResponse,
+    MfaVerifyRequest, MfaStatusResponse, MfaLoginRequest, MfaRecoveryCodesResponse,
+    MfaVerificationResult, RefreshTokenRequest, AuthRequest, AuthResponse, User,
+    LegacyToken
+};
 pub use service::*;
 pub use error::*;

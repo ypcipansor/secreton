@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 use secreton_core::storage::secret::SecretStorage;
 use serde_json::Value;
+use anyhow::Result;
 
 use crate::ApiState;
 

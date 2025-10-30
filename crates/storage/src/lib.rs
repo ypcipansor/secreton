@@ -266,6 +266,24 @@ pub enum StorageError {
     MigrationError { message: String },
 }
 
+impl From<azure_storage::Error> for StorageError {
+    fn from(error: azure_storage::Error) -> Self {
+        StorageError::BackendError {
+            backend: "Azure Blob Storage".to_string(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<google_cloud_storage::Error> for StorageError {
+    fn from(error: google_cloud_storage::Error) -> Self {
+        StorageError::BackendError {
+            backend: "Google Cloud Storage".to_string(),
+            message: error.to_string(),
+        }
+    }
+}
+
 /// Type alias for Results with StorageError
 pub type StorageResult<T> = Result<T, StorageError>;
 

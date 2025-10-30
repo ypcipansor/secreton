@@ -119,10 +119,6 @@ impl LogBuffer {
         Ok(())
     }
 
-    fn drain(&mut self, count: usize) -> Vec<LogEvent> {
-        self.events.drain(..count.min(self.events.len())).collect()
-    }
-
     fn len(&self) -> usize {
         self.events.len()
     }

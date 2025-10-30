@@ -5,6 +5,8 @@
 //! _key lifecycle operations with full observability and compliance tracking.
 
 use chrono::{DateTime, Utc};
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,9 +20,40 @@ use uuid::Uuid;
 use secreton_crypto::advanced_key_manager::{
     AdvancedKeyManager, KeyPurpose, KeyShare, KeyType,
 };
-// TODO: Import metrics from appropriate crate
-// use secreton_core::infrastructure::metrics::MetricType;
-use crate::AuthError;
+
+// Simple metrics registry for auth operations
+#[derive(Debug, Clone)]
+pub struct AuthMetricsRegistry {
+    metrics: Arc<RwLock<HashMap<String, u64>>>,
+}
+
+impl AuthMetricsRegistry {
+    pub fn new() -> Self {
+        Self {
+            metrics: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn increment(&self, key: &str) {
+        let mut metrics = self.metrics.write().await;
+        *metrics.entry(key.to_string()).or_insert(0) += 1;
+    }
+
+    pub async fn get(&self, key: &str) -> u64 {
+        let metrics = self.metrics.read().await;
+        *metrics.get(key).unwrap_or(&0)
+    }
+}
+
+// JWT claims structure
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,  // User ID
+    username: String,
+    roles: Vec<String>,
+    exp: usize,   // Expiration time
+    iat: usize,   // Issued at
+}
 
 /// Authenticated _key operation _request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,14 +125,14 @@ pub enum KeyPermission {
 #[derive(Debug, Clone)]
 struct UserContext {
     user_id: String,
-    _username: String,
+    username: String,
     roles: Vec<String>,
     permissions: Vec<KeyPermission>,
 }
 
 /// Audit record for _key operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct KeyAuditRecord {
+pub struct KeyAuditRecord {
     audit_id: String,
     operation_id: String,
     operation_type: String,
@@ -114,7 +147,7 @@ struct KeyAuditRecord {
 
 /// Metrics record for _key operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct KeyMetricsRecord {
+pub struct KeyMetricsRecord {
     metric_name: String,
     // metric_type: MetricType,
     value: f64,
@@ -128,26 +161,39 @@ pub struct AuthenticatedKeyOperations {
     audit_records: Arc<RwLock<Vec<KeyAuditRecord>>>,
     metrics_records: Arc<RwLock<Vec<KeyMetricsRecord>>>,
     permission_cache: Arc<RwLock<HashMap<String, Vec<KeyPermission>>>>,
+    metrics_registry: Arc<AuthMetricsRegistry>,
 }
 
 impl AuthenticatedKeyOperations {
     pub fn new() -> Self {
-        Self {
+        let instance = Self {
             key_manager: Arc::new(RwLock::new(AdvancedKeyManager::new())),
             audit_records: Arc::new(RwLock::new(Vec::new())),
             metrics_records: Arc::new(RwLock::new(Vec::new())),
             permission_cache: Arc::new(RwLock::new(HashMap::new())),
-        }
+            metrics_registry: Arc::new(AuthMetricsRegistry::new()),
+        };
+
+        // Initialize metrics
+        instance.initialize_metrics();
+
+        instance
+    }
+
+    /// Initialize metrics for tracking authentication and key operations
+    fn initialize_metrics(&self) {
+        // Metrics are initialized on-demand with AuthMetricsRegistry
+        // No upfront registration needed for simple counters
     }
 
     /// Perform authenticated _key operation
     pub async fn perform_operation(
         &self,
-        _request: KeyOperationRequest,
+        request: KeyOperationRequest,
     ) -> std::result::Result<KeyOperationResult, SecretonError> {
         // 1. Authenticate and authorize
-        let user_context = self.authenticate_token(&_request.token).await?;
-        self.authorize_operation(&user_context, &_request.operation)
+        let user_context = self.authenticate_token(&request.token).await?;
+        self.authorize_operation(&user_context, &request.operation)
             .await?;
 
         let operation_id = Uuid::new_v4().to_string();
@@ -155,7 +201,7 @@ impl AuthenticatedKeyOperations {
 
         // 2. Perform _key operation
         let result = self
-            .execute_key_operation(&user_context, &_request.operation)
+            .execute_key_operation(&user_context, &request.operation)
             .await;
 
         let end_time = Utc::now();
@@ -164,68 +210,81 @@ impl AuthenticatedKeyOperations {
             .num_milliseconds() as f64;
 
         let success = result.is_ok();
-        let key_id = if let Ok(ref key_id) = result {
-            key_id.clone()
-        } else {
-            "unknown".to_string()
-        };
 
         // 3. Audit the operation
         let audit_trail_id = self
             .audit_operation(
                 &operation_id,
-                &user_context._username,
-                &_request.operation,
+                &user_context.username,
+                &request.operation,
                 success,
                 result.as_ref().err().map(|_e| _e.to_string()),
-                &_request.metadata,
+                &request.metadata,
             )
             .await;
 
         // 4. Record metrics
-        self.record_metrics(&_request.operation, success, duration_ms)
+        self.record_metrics(&request.operation, success, duration_ms)
             .await;
 
         // 5. Return result
         result.map(|key_id| KeyOperationResult {
             operation_id,
             key_id,
-            operation: self.operation_name(&_request.operation),
+            operation: self.operation_name(&request.operation),
             success,
-            performed_by: user_context._username,
-            performed_at: start_time,
+            performed_by: user_context.username,
+            performed_at: end_time,
             audit_trail_id,
             metrics_recorded: true,
         })
     }
 
-    /// Authenticate token and extract _user _context
+    /// Authenticate token and extract user context
     async fn authenticate_token(&self, token: &str) -> std::result::Result<UserContext, SecretonError> {
-        // Mock token validation - in production, validate JWT signature
-        if token.is_empty() {
-            return Err(AuthError::authenticated_key_auth_error(
-                "Empty token".to_string(),
-            ));
-        }
+        // Get JWT secret from environment or configuration
+        // Use test secret for unit tests
+        let jwt_secret = if cfg!(test) {
+            "test-jwt-secret-for-testing-purposes-only".to_string()
+        } else {
+            std::env::var("JWT_SECRET")
+                .unwrap_or_else(|_| "default-jwt-secret-change-in-production".to_string())
+        };
 
-        // Extract _user info from token (mock)
-        let parts: Vec<&str> = token.split(':').collect();
-        if parts.len() < 2 {
-            return Err(AuthError::authenticated_key_auth_error(
-                "Invalid token format".to_string(),
-            ));
-        }
+        // Decode and validate JWT token
+        let decoding_key = DecodingKey::from_secret(jwt_secret.as_bytes());
+        let validation = Validation::new(Algorithm::HS256);
 
-        let user_id = parts[0].to_string();
-        let _username = parts[1].to_string();
+        let token_data = match decode::<Claims>(token, &decoding_key, &validation) {
+            Ok(data) => {
+                // Record successful JWT validation
+                let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+                tokio::spawn(async move {
+                    registry.increment("auth_jwt_validations_total").await;
+                });
+                data
+            }
+            Err(e) => {
+                // Record failed JWT validation
+                let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+                tokio::spawn(async move {
+                    registry.increment("auth_jwt_validation_failures_total").await;
+                });
+                return Err(SecretonError::AuthenticatedKeyAuthError {
+                    message: format!("Invalid JWT token: {}", e),
+                });
+            }
+        };
+
+        let claims = token_data.claims;
 
         // Load permissions from cache or database
-        let permissions = self.load_permissions(&user_id).await;
+        let permissions = self.load_permissions(&claims.roles).await;
 
         Ok(UserContext {
-            user_id,
-            _username,
-            roles: vec!["_key-admin".to_string()], // Mock roles
+            user_id: claims.sub,
+            username: claims.username,
+            roles: claims.roles,
             permissions,
         })
     }
@@ -236,6 +295,12 @@ impl AuthenticatedKeyOperations {
         user_context: &UserContext,
         operation: &KeyOperation,
     ) -> std::result::Result<(), SecretonError> {
+        // Record permission check
+        let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+        tokio::spawn(async move {
+            registry.increment("auth_permission_checks_total").await;
+        });
+
         let required_permission = match operation {
             KeyOperation::Generate { .. } => KeyPermission::GenerateKey,
             KeyOperation::Rotate { .. } => KeyPermission::RotateKey,
@@ -246,10 +311,15 @@ impl AuthenticatedKeyOperations {
         };
 
         if !user_context.permissions.contains(&required_permission) {
-            return Err(AuthError::authenticated_key_permission_error(format!(
+            // Record permission denial
+            let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+            tokio::spawn(async move {
+                registry.increment("auth_permission_denials_total").await;
+            });
+
+            return Err(SecretonError::AuthenticatedKeyPermissionError { message: format!(
                 "User {} lacks permission {:?}",
-                user_context._username, required_permission
-            )));
+                user_context.username, required_permission) });
         }
 
         Ok(())
@@ -258,7 +328,7 @@ impl AuthenticatedKeyOperations {
     /// Execute the actual _key operation
     async fn execute_key_operation(
         &self,
-        user_context: &UserContext,
+        _user_context: &UserContext,
         operation: &KeyOperation,
     ) -> std::result::Result<String, SecretonError> {
         let manager = self.key_manager.read().await;
@@ -333,37 +403,23 @@ impl AuthenticatedKeyOperations {
         Ok(key_id)
     }
 
-    /// Record audit trail
-    async fn record_audit(
-        &self,
-        operation_id: String,
-        operation: &KeyOperation,
-        key_id: &str,
-        user_context: &UserContext,
-        success: bool,
-        error: Option<String>,
-        metadata: &HashMap<String, String>,
-    ) -> std::result::Result<String, SecretonError> {
-        let audit_id = Uuid::new_v4().to_string();
-        let record = KeyAuditRecord {
-            audit_id: audit_id.clone(),
-            operation_id,
-            operation_type: self.operation_name(operation),
-            key_id: key_id.to_string(),
-            user_id: user_context.user_id.clone(),
-            _username: user_context._username.clone(),
-            timestamp: Utc::now(),
-            success,
-            error,
-            metadata: metadata.clone(),
-        };
-
-        self.audit_records.write().await.push(record);
-        Ok(audit_id)
-    }
-
     /// Record metrics
     async fn record_metrics(&self, operation: &KeyOperation, success: bool, duration_ms: f64) {
+        let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+
+        // Record operation count
+        if success {
+            tokio::spawn(async move {
+                registry.increment("key_operations_total").await;
+            });
+        } else {
+            let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
+            tokio::spawn(async move {
+                registry.increment("key_operation_failures_total").await;
+            });
+        }
+
+        // Also keep the old metrics records for backward compatibility
         let mut labels = HashMap::new();
         labels.insert("operation".to_string(), self.operation_name(operation));
         labels.insert("success".to_string(), success.to_string());
@@ -391,24 +447,62 @@ impl AuthenticatedKeyOperations {
         metrics.push(duration_metric);
     }
 
-    /// Load _user permissions (mock)
-    async fn load_permissions(&self, user_id: &str) -> Vec<KeyPermission> {
+    /// Load user permissions based on roles
+    async fn load_permissions(&self, user_roles: &[String]) -> Vec<KeyPermission> {
+        // Create a cache key from the roles
+        let cache_key = format!("{:?}", user_roles);
         let cache = self.permission_cache.read().await;
-        if let Some(perms) = cache.get(user_id) {
+        if let Some(perms) = cache.get(&cache_key) {
             return perms.clone();
         }
 
-        // Mock: grant all permissions for testing
-        vec![
-            KeyPermission::GenerateKey,
-            KeyPermission::RotateKey,
-            KeyPermission::DeriveKey,
-            KeyPermission::EscrowKey,
-            KeyPermission::RecoverKey,
-            KeyPermission::DestroyKey,
-            KeyPermission::ViewKey,
-            KeyPermission::ListKeys,
-        ]
+        // Drop the read lock before acquiring write lock
+        drop(cache);
+
+        // TODO: Load user roles from database or external service
+        // For now, implement basic role-based permissions
+        let mut permissions = Vec::new();
+
+        for role in user_roles {
+            match role.as_str() {
+                "key-admin" | "admin" => {
+                    permissions.extend(vec![
+                        KeyPermission::GenerateKey,
+                        KeyPermission::RotateKey,
+                        KeyPermission::DeriveKey,
+                        KeyPermission::EscrowKey,
+                        KeyPermission::RecoverKey,
+                        KeyPermission::DestroyKey,
+                        KeyPermission::ViewKey,
+                        KeyPermission::ListKeys,
+                    ]);
+                }
+                "key-operator" => {
+                    permissions.extend(vec![
+                        KeyPermission::GenerateKey,
+                        KeyPermission::RotateKey,
+                        KeyPermission::DeriveKey,
+                        KeyPermission::ViewKey,
+                        KeyPermission::ListKeys,
+                    ]);
+                }
+                "key-user" => {
+                    permissions.extend(vec![
+                        KeyPermission::ViewKey,
+                        KeyPermission::ListKeys,
+                    ]);
+                }
+                _ => {
+                    // No permissions for unknown roles
+                }
+            }
+        }
+
+        // Cache the permissions
+        let mut cache = self.permission_cache.write().await;
+        cache.insert(cache_key, permissions.clone());
+
+        permissions
     }
 
     /// Get operation _name as string
@@ -492,8 +586,21 @@ impl AuthenticatedKeyOperations {
 mod tests {
     use super::*;
 
-    fn create_test_token(user_id: &str, _username: &str) -> String {
-        format!("{}:{}:test-token", user_id, _username)
+    fn create_test_token(user_id: &str, username: &str) -> String {
+        use jsonwebtoken::{encode, Header, Algorithm};
+
+        let jwt_secret = "test-jwt-secret-for-testing-purposes-only";
+
+        let claims = Claims {
+            sub: user_id.to_string(),
+            username: username.to_string(),
+            roles: vec!["key-admin".to_string()], // Give admin role for tests
+            exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            iat: Utc::now().timestamp() as usize,
+        };
+
+        encode(&Header::default(), &claims, &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()))
+            .expect("Failed to create test JWT token")
     }
 
     #[tokio::test]
@@ -626,7 +733,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            AuthError::AuthenticatedKeyAuthFailed { .. }
+            SecretonError::AuthenticatedKeyAuthError { .. }
         ));
     }
 

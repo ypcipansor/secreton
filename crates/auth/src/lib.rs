@@ -1,14 +1,12 @@
-//! # Secreton Authentication & Identity Management
+//! # Brankas Authentication
 //!
-//! Comprehensive authentication and identity management services for the Secreton
-//! security vault system, providing multi-factor authentication, role-based access
-//! control, token management, and identity federation.
+//! Authentication and authorization system for the Brankas security vault.
+//! Provides multi-factor authentication, role-based access control,
+//! and secure token management.
 
-#![allow(async_fn_in_trait)]
-
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub mod agent_auth;
 pub mod agent_templating;
@@ -24,8 +22,8 @@ pub mod token;
 pub mod ldap;
 
 // Re-export shared crates
-pub use secreton_common::*;
-pub use secreton_errors::*;
+pub use secreton_common::{SecurityLevel, Result as CommonResult};
+pub use secreton_errors::{self, SecretonError};
 pub use secreton_config::*;
 
 // Re-export main types
@@ -35,7 +33,10 @@ pub use token::{Token, TokenType};
 
 // Type alias for backward compatibility
 pub type AuthError = SecretonError;
-pub type AuthResult<T> = Result<T>;
+pub type AuthResult<T> = std::result::Result<T, SecretonError>;
+
+// Type alias for MFA method (backward compatibility)
+pub use crate::mfa::MfaMethodType as MfaMethod;
 
 /// Authentication result
 #[derive(Debug, Clone, Serialize, Deserialize)]

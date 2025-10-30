@@ -3,7 +3,6 @@
 //! Shared configuration patterns and utilities for all Secreton crates.
 //! Provides consistent configuration loading, validation, and management.
 
-use secreton_common::{Result, SecurityLevel};
 use secreton_errors::{SecretonError, Result as SecretonResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,7 +30,7 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 
     /// Load configuration from environment variables
     fn load_from_env() -> SecretonResult<Self> {
-        let mut config = Self::default();
+        let config = Self::default();
 
         // This would be implemented by each config struct
         // For now, return default
@@ -41,7 +40,7 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 
     /// Load configuration with layered sources (file + env + defaults)
     fn load() -> SecretonResult<Self> {
-        let mut settings = config::Config::builder()
+        let settings = config::Config::builder()
             .add_source(config::File::with_name("config/default"))
             .add_source(
                 config::File::with_name("config/local")

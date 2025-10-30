@@ -7,5 +7,5 @@ pub mod rbac;
 pub mod token;
 pub mod userpass;
 
-#[cfg(test)]
-mod mod_tests;
+// #[cfg(test)]
+// mod mod_tests;

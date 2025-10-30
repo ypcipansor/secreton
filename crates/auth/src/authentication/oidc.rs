@@ -279,7 +279,7 @@ impl OidcAuth {
         // Get role
         let roles = self.roles.read().await;
         let role = roles.get(role_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: role_name.to_string( }))?;
+            .ok_or_else(|| SecretonError::NotFound { resource: role_name.to_string() })?;
         
         // Validate claims against role
         role.validate_claims(&claims)?;
@@ -346,7 +346,7 @@ impl OidcAuth {
     pub async fn delete_role(&self, _name: &str) -> Result<()> {
         let mut roles = self.roles.write().await;
         roles.remove(_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string( }))?;
+            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })?;
         Ok(())
     }
     

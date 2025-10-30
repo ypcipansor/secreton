@@ -1,11 +1,10 @@
 // Advanced MFA - FIDO2, WebAuthn, biometric authentication
 use chrono::{DateTime, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use crate::AuthError;
 
 /// MFA method
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

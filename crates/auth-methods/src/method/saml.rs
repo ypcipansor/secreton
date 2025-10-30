@@ -1,9 +1,6 @@
 //! SAML authentication method
 
 use async_trait::async_trait;
-use chrono::Utc;
-use std::collections::HashMap;
-use uuid::Uuid;
 use reqwest::Client;
 use xml::reader::{EventReader, XmlEvent};
 use base64::{Engine as _, engine::general_purpose};
@@ -149,87 +146,6 @@ impl SamlAuthMethod {
         }
 
         Ok(assertion)
-    }
-
-    /// Validate SAML assertion
-    fn validate_assertion(&self, assertion: &SamlAssertion) -> AuthMethodResult<()> {
-        let config = self.saml_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("SAML config not set".to_string()))?;
-
-        // Check issuer
-        if assertion.issuer != config.idp_entity_id {
-            return Err(AuthMethodError::SamlError("Invalid issuer".to_string()));
-        }
-
-        // Check audience
-        if !assertion.audience.contains(&config.entity_id) {
-            return Err(AuthMethodError::SamlError("Invalid audience".to_string()));
-        }
-
-        // Check expiration
-        if let Some(not_after) = assertion.not_after {
-            if chrono::Utc::now() > not_after {
-                return Err(AuthMethodError::SamlError("Assertion expired".to_string()));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Extract user information from SAML assertion
-    fn extract_user_info(&self, assertion: &SamlAssertion) -> UserInfo {
-        let mut username = assertion.name_id.to_string();
-        let mut groups = Vec::new();
-        let mut metadata = HashMap::new();
-
-        for attr in &assertion.attributes {
-            match attr.name.as_str() {
-                "username" | "urn:oid:0.9.2342.19200300.100.1.1" => {
-                    if let Some(value) = attr.values.first() {
-                        username = value.to_string();
-                    }
-                }
-                "groups" | "memberOf" | "urn:oid:1.3.6.1.4.1.5923.1.5.1.1" => {
-                    groups.extend(attr.values.clone());
-                }
-                "email" | "urn:oid:0.9.2342.19200300.100.1.3" => {
-                    if let Some(value) = attr.values.first() {
-                        metadata.insert("email".to_string(), value.to_string());
-                    }
-                }
-                "firstName" | "givenName" | "urn:oid:2.5.4.42" => {
-                    if let Some(value) = attr.values.first() {
-                        metadata.insert("first_name".to_string(), value.to_string());
-                    }
-                }
-                "lastName" | "sn" | "urn:oid:2.5.4.4" => {
-                    if let Some(value) = attr.values.first() {
-                        metadata.insert("last_name".to_string(), value.to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        UserInfo {
-            username,
-            id: Uuid::new_v4(), // Generate UUID since SAML name_id might not be UUID
-            groups,
-            metadata: metadata.clone(),
-            email: metadata.get("email").cloned(),
-            display_name: {
-                let first_name = metadata.get("first_name");
-                let last_name = metadata.get("last_name");
-                match (first_name, last_name) {
-                    (Some(f), Some(l)) => Some(format!("{} {}", f, l)),
-                    (Some(f), None) => Some(f.to_string()),
-                    (None, Some(l)) => Some(l.to_string()),
-                    _ => None,
-                }
-            },
-            created_at: Utc::now(),
-            last_login: Some(Utc::now()),
-        }
     }
 }
 

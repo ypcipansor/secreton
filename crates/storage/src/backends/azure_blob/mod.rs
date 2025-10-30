@@ -1,5 +1,10 @@
 use async_trait::async_trait;
+use azure_storage_blobs::prelude::*;
+use futures::StreamExt;
+use serde_json;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
@@ -140,121 +145,109 @@ impl AzureBlobConfig {
 ///
 pub struct AzureBlobStorage {
     config: AzureBlobConfig,
-    // NOTE: Azure SDK client would be initialized here in production
-    // For compilation without Azure SDK, we store config only
-    // When azure_storage_blobs is added as dependency, uncomment:
-    // container_client: Arc<ContainerClient>,
+    container_client: Arc<ContainerClient>,
 }
 
 impl AzureBlobStorage {
-    /// Create a new Azure Blob storage instance
-    ///
-    /// This method initializes the Azure Blob Storage client with the provided configuration.
-    ///
-    /// ## Production Implementation
-    /// When Azure SDK is available, this method will:
-    /// 1. Create storage credentials (account key, SAS token, or emulator)
-    /// 2. Initialize BlobServiceClient
-    /// 3. Get or create the container
-    /// 4. Return configured storage instance
-    ///
-    pub async fn new(config: AzureBlobConfig) -> StorageResult<Self> {
-        // Validate production configuration
-        #[cfg(not(debug_assertions))]
-        config.validate_production()?;
-
-        #[cfg(debug_assertions)]
-        if !config.use_emulator {
-            config.validate_production()?;
-        }
-
-        // Validate configuration (legacy check for backward compatibility)
-        if !config.use_emulator && config.account_key.is_none() && config.sas_token.is_none() {
-            return Err(StorageError::ConfigurationError {
-                message: "Azure Blob requires either account_key, sas_token, or use_emulator"
-                    .to_string(),
-            });
-        }
-
-        // TODO: When azure_storage_blobs is available, implement:
-        /*
-        let credentials = if config.use_emulator {
-            StorageCredentials::emulator()
-        } else if let Some(sas_token) = &config.sas_token {
-            StorageCredentials::sas_token(sas_token.clone())
-                .map_err(|e| StorageError::ConnectionFailed {
-                    message: format!("Invalid SAS token: {}", e)
-                })?
-        } else if let Some(account_key) = &config.account_key {
-            StorageCredentials::access_key(config.account_name.clone(), account_key.clone())
-        } else {
-            unreachable!() // Already validated above
-        };
-
-        let blob_service = BlobServiceClient::new(&config.account_name, credentials);
-        let container_client = blob_service.container_client(&config.container_name);
-
-        // Create container if it doesn't exist
-        let _ = container_client.create().into_future().await;
-
-        Ok(Self {
-            container_client: Arc::new(container_client),
-            config,
-        })
-        */
-
-        // Current mock implementation for compilation
-        tracing::warn!(
-            "Azure Blob Storage: Running in MOCK mode. Add azure_storage_blobs dependency for production use."
-        );
-
-        Ok(Self { config })
-    }
-
-    /// Convert VaultEntry to JSON bytes
-    fn serialize_entry(&self, entry: &VaultEntry) -> StorageResult<Vec<u8>> {
-        serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
-            message: format!("Failed to serialize entry: {}", e),
-        })
-    }
-
-    /// Convert JSON bytes to VaultEntry
-    fn deserialize_entry(&self, data: &[u8]) -> StorageResult<VaultEntry> {
-        serde_json::from_slice(data).map_err(|e| StorageError::SerializationError {
-            message: format!("Failed to deserialize entry: {}", e),
-        })
-    }
-
-    /// Convert path to blob name (ensure proper format)
-    fn path_to_blob_name(&self, path: &str) -> String {
-        path.trim_start_matches('/').to_string()
-    }
-
-    /// Convert UUID to blob name
-    fn id_to_blob_name(&self, id: Uuid) -> String {
-        format!("entries/{}.json", id)
+    /// Convert a vault path to a valid Azure blob name
+    /// Azure blob names must be valid and cannot contain certain characters
+    fn path_to_blob_name(path: &str) -> String {
+        // Remove leading slash and replace path separators with underscores
+        // Also replace other invalid characters
+        path.trim_start_matches('/')
+            .replace('/', "_")
+            .replace('\\', "_")
+            .replace(':', "_")
+            .replace('*', "_")
+            .replace('?', "_")
+            .replace('"', "_")
+            .replace('<', "_")
+            .replace('>', "_")
+            .replace('|', "_")
+            // Ensure it's not empty
+            .trim()
+            .to_string()
     }
 }
 
 #[async_trait]
 impl StorageBackend for AzureBlobStorage {
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
-        // TODO: Implement with Azure SDK when available
-        // Current mock implementation
-        tracing::debug!("Azure Blob store (MOCK): path={}", entry.path);
+        let blob_name = Self::path_to_blob_name(&entry.path);
+        let data = serde_json::to_vec(entry)
+            .map_err(|e| StorageError::SerializationError {
+                message: format!("Failed to serialize vault entry: {}", e)
+            })?;
+
+        let blob_client = self.container_client.blob_client(&blob_name);
+
+        blob_client
+            .put_block_blob(data)
+            .content_type("application/json")
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to store blob '{}': {}", blob_name, e)
+            })?;
+
+        tracing::debug!("Stored vault entry: path={}, blob={}", entry.path, blob_name);
         Ok(())
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob get_by_id (MOCK): id={}", id);
+        // Azure Blob doesn't support direct ID lookup, so we need to search through blobs
+        // This is inefficient for large datasets, but necessary for the interface
+        let mut stream = self.container_client
+            .list_blobs()
+            .max_results(NonZeroU32::new(5000).unwrap()) // Reasonable limit to prevent excessive API calls
+            .into_stream();
+
+        while let Some(response) = stream.next().await {
+            let response = response.map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to list blobs: {}", e)
+            })?;
+
+            for blob in response.blobs.blobs() {
+                let blob_name = blob.name.clone();
+                let blob_client = self.container_client.blob_client(blob_name);
+
+                let mut blob_stream = blob_client.get().into_stream();
+                let mut data = Vec::new();
+                while let Some(value) = blob_stream.next().await {
+                    let chunk = value?.data.collect().await?;
+                    data.extend(chunk);
+                }
+
+                if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                    if entry.id == id {
+                        return Ok(Some(entry));
+                    }
+                }
+            }
+        }
+
         Ok(None)
     }
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob get_by_path (MOCK): path={}", path);
-        Ok(None)
+        let blob_name = Self::path_to_blob_name(path);
+        let blob_client = self.container_client.blob_client(&blob_name);
+
+        let mut stream = blob_client.get().into_stream();
+        let mut data = Vec::new();
+        while let Some(value) = stream.next().await {
+            let chunk = value?.data.collect().await?;
+            data.extend(chunk);
+        }
+
+        match serde_json::from_slice(&data) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(e) if e.to_string().contains("404") || e.to_string().contains("NotFound") => {
+                Ok(None)
+            }
+            Err(e) => Err(StorageError::SerializationError {
+                message: format!("Failed to deserialize vault entry: {}", e)
+            })
+        }
     }
 
     async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
@@ -263,74 +256,308 @@ impl StorageBackend for AzureBlobStorage {
     }
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob delete_by_id (MOCK): id={}", id);
-        Ok(false)
+        // Find the blob with matching ID first
+        if let Some(entry) = self.get_by_id(id).await? {
+            self.delete_by_path(&entry.path).await
+        } else {
+            Ok(false)
+        }
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob delete_by_path (MOCK): path={}", path);
-        Ok(false)
+        let blob_name = Self::path_to_blob_name(path);
+        let blob_client = self.container_client.blob_client(&blob_name);
+
+        match blob_client.delete().await {
+            Ok(_) => {
+                tracing::debug!("Deleted vault entry: path={}, blob={}", path, blob_name);
+                Ok(true)
+            }
+            Err(e) if e.to_string().contains("404") || e.to_string().contains("NotFound") => {
+                Ok(false)
+            }
+            Err(e) => Err(StorageError::ConnectionFailed {
+                message: format!("Failed to delete blob '{}': {}", blob_name, e)
+            })
+        }
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob list (MOCK): params={:?}", params);
-        Ok(Vec::new())
+        let mut entries = Vec::new();
+        let max_results = params.limit.unwrap_or(1000).min(5000); // Cap at reasonable limit
+        let mut stream = self.container_client
+            .list_blobs()
+            .max_results(NonZeroU32::new(max_results as u32).unwrap())
+            .into_stream();
+
+        while let Some(response) = stream.next().await {
+            let response = response.map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to list blobs: {}", e)
+            })?;
+
+            for blob in response.blobs.blobs() {
+                let blob_name = blob.name.clone();
+                let blob_client = self.container_client.blob_client(blob_name);
+
+                let mut blob_stream = blob_client.get().into_stream();
+                let mut data = Vec::new();
+                while let Some(value) = blob_stream.next().await {
+                    let chunk = value?.data.collect().await?;
+                    data.extend(chunk);
+                }
+
+                if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                    // Apply filters
+                    let mut include = true;
+
+                    // Path prefix filter
+                    if let Some(prefix) = &params.path_prefix {
+                        if !entry.path.starts_with(prefix) {
+                            include = false;
+                        }
+                    }
+
+                    // Security level filter
+                    if let Some(level) = params.security_level {
+                        if entry.security_level != level {
+                            include = false;
+                        }
+                    }
+
+                    // Owner filter
+                    if let Some(owner_id) = params.owner_id {
+                        if entry.owner_id != owner_id {
+                            include = false;
+                        }
+                    }
+
+                    // Tag filter
+                    if !params.tags.is_empty() {
+                        let has_matching_tag = params.tags.iter().any(|tag| entry.tags.contains(tag));
+                        if !has_matching_tag {
+                            include = false;
+                        }
+                    }
+
+                    // Skip expired entries unless explicitly requested
+                    if !params.include_expired && entry.is_expired() {
+                        include = false;
+                    }
+
+                    if include {
+                        entries.push(entry);
+
+                        // Check limit
+                        if let Some(limit) = params.limit {
+                            if entries.len() >= limit as usize {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(limit) = params.limit {
+                if entries.len() >= limit as usize {
+                    break;
+                }
+            }
+        }
+
+        Ok(entries)
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob count (MOCK): params={:?}", params);
-        Ok(0)
+        let mut count = 0u64;
+        let mut stream = self.container_client
+            .list_blobs()
+            .max_results(NonZeroU32::new(5000).unwrap()) // Reasonable batch size
+            .into_stream();
+
+        while let Some(response) = stream.next().await {
+            let response = response.map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to list blobs: {}", e)
+            })?;
+
+            for blob in response.blobs.blobs() {
+                let blob_name = blob.name.clone();
+                let blob_client = self.container_client.blob_client(blob_name);
+
+                let mut blob_stream = blob_client.get().into_stream();
+                let mut data = Vec::new();
+                while let Some(value) = blob_stream.next().await {
+                    let chunk = value?.data.collect().await?;
+                    data.extend(chunk);
+                }
+
+                if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                    // Apply same filters as list method
+                    let mut include = true;
+
+                    if let Some(prefix) = &params.path_prefix {
+                        if !entry.path.starts_with(prefix) {
+                            include = false;
+                        }
+                    }
+
+                    if let Some(level) = params.security_level {
+                        if entry.security_level != level {
+                            include = false;
+                        }
+                    }
+
+                    if let Some(owner_id) = params.owner_id {
+                        if entry.owner_id != owner_id {
+                            include = false;
+                        }
+                    }
+
+                    if !params.tags.is_empty() {
+                        let has_matching_tag = params.tags.iter().any(|tag| entry.tags.contains(tag));
+                        if !has_matching_tag {
+                            include = false;
+                        }
+                    }
+
+                    if !params.include_expired && entry.is_expired() {
+                        include = false;
+                    }
+
+                    if include {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(count)
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
-        // TODO: Implement with Azure SDK when available
-        tracing::debug!("Azure Blob exists (MOCK): path={}", path);
-        Ok(false)
+        let blob_name = Self::path_to_blob_name(path);
+        let blob_client = self.container_client.blob_client(&blob_name);
+
+        match blob_client.get_properties().await {
+            Ok(_) => Ok(true),
+            Err(e) if e.to_string().contains("404") || e.to_string().contains("NotFound") => {
+                Ok(false)
+            }
+            Err(e) => Err(StorageError::ConnectionFailed {
+                message: format!("Failed to check blob existence '{}': {}", blob_name, e)
+            })
+        }
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn crate::StorageTransaction>> {
         // Azure Blob doesn't support traditional transactions
-        // Return a mock transaction
+        // Return a mock transaction that operates on individual blobs
         Ok(Box::new(crate::MockTransaction))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         let start = std::time::Instant::now();
 
-        // In production, would check Azure container accessibility
-        let is_healthy = true; // Mock mode always healthy
+        // Test connectivity by listing blobs (lightweight operation)
+        let result = self.container_client
+            .list_blobs()
+            .max_results(NonZeroU32::new(1).unwrap())
+            .into_stream()
+            .next()
+            .await;
+
+        let (is_healthy, last_error) = match result {
+            Some(Ok(_)) => (true, None),
+            Some(Err(e)) => (false, Some(format!("Azure Blob connection failed: {}", e))),
+            None => (true, None), // No blobs found is still healthy
+        };
 
         let duration = start.elapsed().as_millis() as f64;
 
         Ok(HealthStatus {
             is_healthy,
             response_time_ms: duration,
-            connections_active: 0,
+            connections_active: 0, // Azure SDK manages connections internally
             connections_idle: 0,
-            last_error: None,
-            uptime_seconds: 0,
+            last_error,
+            uptime_seconds: 0, // Not tracked for Azure Blob
         })
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        // TODO: Implement with Azure SDK when available
+        let mut total_entries = 0u64;
+        let mut total_size_bytes = 0u64;
+        let mut entries_by_security_level = HashMap::new();
+        let mut entries_created_today = 0u64;
+        let mut entries_updated_today = 0u64;
+        let mut expired_entries = 0u64;
+
+        let today = chrono::Utc::now().date_naive();
+
+        let mut stream = self.container_client
+            .list_blobs()
+            .max_results(NonZeroU32::new(5000).unwrap())
+            .into_stream();
+
+        while let Some(response) = stream.next().await {
+            let response = response.map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to list blobs for stats: {}", e)
+            })?;
+
+            for blob in response.blobs.blobs() {
+                let blob_name = blob.name.clone();
+                let blob_client = self.container_client.blob_client(blob_name);
+
+                let mut blob_stream = blob_client.get().into_stream();
+                let mut data = Vec::new();
+                while let Some(value) = blob_stream.next().await {
+                    let chunk = value?.data.collect().await?;
+                    data.extend(chunk);
+                }
+
+                if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                    total_entries += 1;
+                    total_size_bytes += data.len() as u64;
+
+                    // Count by security level
+                    *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+
+                    // Count entries created/updated today
+                    if entry.created_at.date_naive() == today {
+                        entries_created_today += 1;
+                    }
+                    if entry.updated_at.date_naive() == today {
+                        entries_updated_today += 1;
+                    }
+
+                    // Count expired entries
+                    if entry.is_expired() {
+                        expired_entries += 1;
+                    }
+                }
+            }
+        }
+
+        let average_entry_size = if total_entries > 0 {
+            total_size_bytes as f64 / total_entries as f64
+        } else {
+            0.0
+        };
+
         Ok(StorageStats {
-            total_entries: 0,
-            total_size_bytes: 0,
-            average_entry_size: 0.0,
-            entries_by_security_level: HashMap::new(),
-            entries_created_today: 0,
-            entries_updated_today: 0,
-            expired_entries: 0,
+            total_entries,
+            total_size_bytes,
+            average_entry_size,
+            entries_by_security_level,
+            entries_created_today,
+            entries_updated_today,
+            expired_entries,
         })
     }
 
     async fn migrate(&self) -> StorageResult<()> {
         // Azure Blob migrations would be implemented here
+        // For now, this is a no-op as the current format is stable
+        tracing::info!("Azure Blob Storage migration completed (no-op)");
         Ok(())
     }
 }

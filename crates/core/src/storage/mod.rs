@@ -3,23 +3,36 @@
 //! This module provides a comprehensive storage system with multiple backends
 //! and a unified interface for data persistence.
 
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use deadpool_postgres::Pool;
+use secreton_policies::{Policy, PolicyType, PolicyRule, PolicyEffect};
+use secreton_auth::{Token, TokenType};
+use crate::models::plugin::PluginCatalogEntry;
+use secreton_auth_methods::model::MfaMethod;
+use crate::CoreError;
+
 // Re-export storage modules
 pub mod mfa;
 pub mod secure;
+pub mod secret;
 pub mod types;
 pub mod traits;
 pub mod storage;
 
 // Re-export types and traits
 pub use mfa::{MfaRecoveryCodes, MfaSecret, MfaStorage};
-pub use secure::{SecureStorage, SharedSecureStorage};
+pub use secure::storage::{SecureStorage, SharedSecureStorage};
+pub use secret::*;
 pub use types::*;
 pub use traits::*;
-pub use storage::*;
 
 // Type alias for backward compatibility
 pub type MemoryStorage = Storage;
-pub use storage::Storage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditLog {
@@ -39,68 +52,68 @@ pub trait StorageBackend: Send + Sync {
         &self,
         user_id: &str,
         secret: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<()>;
+        method: MfaMethod,
+    ) -> Result<(), CoreError>;
     async fn get_mfa_secret(
         &self,
         user_id: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<String>;
+        method: MfaMethod,
+    ) -> Result<String, CoreError>;
     async fn delete_mfa_secret(
         &self,
         user_id: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<()>;
-    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool>;
+        method: MfaMethod,
+    ) -> Result<(), CoreError>;
+    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool, CoreError>;
     async fn get_user_mfa_methods(&self, user_id: &str)
-        -> Result<Vec<crate::auth::mfa::MfaMethod>>;
+        -> Result<Vec<MfaMethod>, CoreError>;
     async fn get_mfa_status(
         &self,
         user_id: &str,
-    ) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>>;
-    async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()>;
-    async fn disable_mfa(&self, user_id: &str) -> Result<()>;
-    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()>;
-    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>>;
-    async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32>;
-    async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>>;
-    async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>>;
-    async fn create_user(&self, username: &str, password: &str) -> Result<()>;
-    async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool>;
-    async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<()>;
+    ) -> Result<std::collections::HashMap<MfaMethod, bool>, CoreError>;
+    async fn enable_mfa(&self, user_id: &str, method: MfaMethod) -> Result<(), CoreError>;
+    async fn disable_mfa(&self, user_id: &str) -> Result<(), CoreError>;
+    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<(), CoreError>;
+    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>, CoreError>;
+    async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32, CoreError>;
+    async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, CoreError>;
+    async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, CoreError>;
+    async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError>;
+    async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool, CoreError>;
+    async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<(), CoreError>;
     async fn add_policy_to_role(
         &self,
         role: &str,
         path: &str,
         action: &str,
         effect: &str,
-    ) -> Result<()>;
-    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool>;
-    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<()>;
-    async fn is_token_valid(&self, token: &str) -> Result<bool>;
-    async fn revoke_token(&self, token: &str) -> Result<()>;
-    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<()>;
+    ) -> Result<(), CoreError>;
+    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool, CoreError>;
+    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<(), CoreError>;
+    async fn is_token_valid(&self, token: &str) -> Result<bool, CoreError>;
+    async fn revoke_token(&self, token: &str) -> Result<(), CoreError>;
+    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<(), CoreError>;
     async fn get_policies_for_user(
         &self,
         user_id: &str,
         entity_alias: Option<&str>,
-    ) -> Result<Vec<Policy>>;
+    ) -> Result<Vec<Policy>, CoreError>;
     async fn insert_sentinel_policy_version(
         &self,
         p: &crate::models::sentinel::SentinelPolicy,
-    ) -> Result<()>;
+    ) -> Result<(), CoreError>;
     async fn list_sentinel_policy_versions(
         &self,
         namespace: &str,
         name: &str,
-    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>>;
+    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>, CoreError>;
     async fn delete_sentinel_policy_version(
         &self,
         namespace: &str,
         name: &str,
         version: u32,
-    ) -> Result<()>;
-    async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()>;
+    ) -> Result<(), CoreError>;
+    async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError>;
 }
 
 pub enum StorageType {
@@ -113,16 +126,17 @@ pub struct PostgresStorage {
 }
 
 impl PostgresStorage {
-    pub async fn new(pool: Pool) -> Result<Self> {
-        Self::create_tables(&pool).await?;
+    pub async fn new(pool: Pool) -> Result<Self, CoreError> {
+        Self::create_tables(&pool).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(Self { pool })
     }
 
-    pub async fn from_url(database_url: &str) -> Result<Self> {
+    pub async fn from_url(database_url: &str) -> Result<Self, CoreError> {
         use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
         use tokio_postgres::{Config as PgConfig, NoTls};
 
-        let _pg_config = database_url.parse::<PgConfig>()?;
+        let _pg_config = database_url.parse::<PgConfig>()
+            .map_err(|e| anyhow::anyhow!("Failed to parse database URL: {}", e))?;
         let mgr_config = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         };
@@ -131,11 +145,12 @@ impl PostgresStorage {
             ..Default::default()
         };
 
-        let pool = config.create_pool(Some(Runtime::Tokio1), NoTls)?;
+        let pool = config.create_pool(Some(Runtime::Tokio1), NoTls)
+            .map_err(|e| anyhow::anyhow!("Failed to create pool: {:?}", e))?;
         Self::new(pool).await
     }
-    async fn create_tables(pool: &Pool) -> Result<()> {
-        let client = pool.get().await?;
+    async fn create_tables(pool: &Pool) -> Result<(), CoreError> {
+        let client = pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Create MFA tables
         client
@@ -153,7 +168,7 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -167,7 +182,7 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Create main tables
         client
@@ -185,7 +200,7 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -199,7 +214,7 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -213,7 +228,7 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -229,56 +244,80 @@ impl PostgresStorage {
             "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(())
     }
 
-    pub async fn migrate_tokens(&self) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn migrate_tokens(&self) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
             CREATE TABLE IF NOT EXISTS tokens (
-                token TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
+                id TEXT PRIMARY KEY,
+                token TEXT NOT NULL UNIQUE,
+                token_type TEXT NOT NULL,
+                policies TEXT[], -- Array of policy names
+                entity_id TEXT,
+                display_name TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
                 expires_at TIMESTAMP,
-                orphan BOOLEAN,
-                batch BOOLEAN,
-                locked BOOLEAN,
-                created_at TIMESTAMP NOT NULL
+                renewed_at TIMESTAMP,
+                renew_count INTEGER DEFAULT 0,
+                max_renewals INTEGER,
+                ttl INTEGER NOT NULL,
+                max_ttl INTEGER NOT NULL,
+                parent_id TEXT,
+                num_uses INTEGER DEFAULT 0,
+                metadata JSONB,
+                revoked BOOLEAN DEFAULT FALSE,
+                revoked_at TIMESTAMP
             )
         "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn insert_token(&self, t: &Token) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn insert_token(&self, t: &Token) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
+        let policies_json = serde_json::to_value(&t.policies)?;
+        let metadata_json = serde_json::to_value(&t.metadata)?;
         client
             .execute(
                 r#"
-            INSERT INTO tokens (token, username, expires_at, orphan, batch, locked, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO tokens (id, token, token_type, policies, entity_id, display_name, created_at, expires_at, renewed_at, renew_count, max_renewals, ttl, max_ttl, parent_id, num_uses, metadata, revoked, revoked_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#,
                 &[
+                    &t.id,
                     &t.token,
-                    &t.user,
-                    &t.expires_at,
-                    &t.orphan,
-                    &t.batch,
-                    &t.locked,
+                    &serde_json::to_string(&t.token_type)?,
+                    &policies_json,
+                    &t.entity_id,
+                    &t.display_name,
                     &t.created_at,
+                    &t.expires_at,
+                    &t.renewed_at,
+                    &(t.renew_count as i32),
+                    &t.max_renewals.map(|x| x as i32),
+                    &(t.ttl as i32),
+                    &(t.max_ttl as i32),
+                    &t.parent_id,
+                    &(t.num_uses as i32),
+                    &metadata_json,
+                    &t.revoked,
+                    &t.revoked_at,
                 ],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn update_token_expiry(&self, token: &str, expires_at: DateTime<Utc>) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn update_token_expiry(&self, token: &str, expires_at: DateTime<Utc>) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
@@ -286,72 +325,98 @@ impl PostgresStorage {
         "#,
                 &[&expires_at, &token],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn delete_token(&self, token: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn delete_token(&self, token: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute("DELETE FROM tokens WHERE token = $1", &[&token])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn lockout_user_tokens(&self, user: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn lockout_user_tokens(&self, user: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "UPDATE tokens SET locked = TRUE WHERE username = $1",
                 &[&user],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn get_token(&self, token: &str) -> Result<Option<Token>> {
-        let client = self.pool.get().await?;
+    pub async fn get_token(&self, token: &str) -> Result<Option<Token>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client.query(
-            "SELECT token, username, expires_at, orphan, batch, locked, created_at FROM tokens WHERE token = $1",
+            "SELECT id, token, token_type, policies, entity_id, display_name, created_at, expires_at, renewed_at, renew_count, max_renewals, ttl, max_ttl, parent_id, num_uses, metadata, revoked, revoked_at FROM tokens WHERE token = $1",
             &[&token]
-        ).await?;
+        ).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         if let Some(row) = rows.first() {
-            let token_val: String = row.get(0);
-            let user: String = row.get(1);
-            let expires_at: Option<DateTime<Utc>> = row.get(2);
-            let orphan: bool = row.get(3);
-            let batch: bool = row.get(4);
-            let locked: bool = row.get(5);
+            let id: String = row.get(0);
+            let token_val: String = row.get(1);
+            let token_type_str: String = row.get(2);
+            let policies_json: serde_json::Value = row.get(3);
+            let entity_id: Option<String> = row.get(4);
+            let display_name: String = row.get(5);
             let created_at: DateTime<Utc> = row.get(6);
+            let expires_at: Option<DateTime<Utc>> = row.get(7);
+            let renewed_at: Option<DateTime<Utc>> = row.get(8);
+            let renew_count: i32 = row.get(9);
+            let max_renewals: Option<i32> = row.get(10);
+            let ttl: i32 = row.get(11);
+            let max_ttl: i32 = row.get(12);
+            let parent_id: Option<String> = row.get(13);
+            let num_uses: i32 = row.get(14);
+            let metadata_json: serde_json::Value = row.get(15);
+            let revoked: bool = row.get(16);
+            let revoked_at: Option<DateTime<Utc>> = row.get(17);
+
+            let token_type: TokenType = serde_json::from_str(&token_type_str)?;
+            let policies: Vec<String> = serde_json::from_value(policies_json)?;
+            let metadata: HashMap<String, String> = serde_json::from_value(metadata_json)?;
 
             Ok(Some(Token {
+                id,
                 token: token_val,
-                user,
-                expires_at,
-                orphan,
-                batch,
-                locked,
+                token_type,
+                policies,
+                entity_id,
+                display_name,
                 created_at,
+                expires_at,
+                renewed_at,
+                renew_count: renew_count as u32,
+                max_renewals: max_renewals.map(|x| x as u32),
+                ttl: ttl as u32,
+                max_ttl: max_ttl as u32,
+                parent_id,
+                num_uses: num_uses as u32,
+                metadata,
+                revoked,
+                revoked_at,
             }))
         } else {
             Ok(None)
         }
     }
 
-    pub async fn cleanup_expired_tokens(&self) -> Result<u64> {
-        let client = self.pool.get().await?;
+    pub async fn cleanup_expired_tokens(&self) -> Result<u64, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let res = client
             .execute(
                 "DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < NOW()",
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(res)
     }
 
-    pub async fn migrate_plugin_catalog(&self) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn migrate_plugin_catalog(&self) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
@@ -367,12 +432,12 @@ impl PostgresStorage {
         "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn insert_plugin(&self, p: &PluginCatalogEntry) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn insert_plugin(&self, p: &PluginCatalogEntry) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
@@ -388,27 +453,27 @@ impl PostgresStorage {
                     &p.metadata,
                 ],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn pin_plugin(&self, name: &str, version: &str, pinned: bool) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn pin_plugin(&self, name: &str, version: &str, pinned: bool) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "UPDATE plugin_catalog SET pinned = $1 WHERE name = $2 AND version = $3",
                 &[&pinned, &name, &version],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    pub async fn list_plugin_catalog(&self) -> Result<Vec<PluginCatalogEntry>> {
-        let client = self.pool.get().await?;
+    pub async fn list_plugin_catalog(&self) -> Result<Vec<PluginCatalogEntry>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client.query(
             "SELECT name, version, checksum, artifact_path, pinned, metadata FROM plugin_catalog",
             &[],
-        ).await?;
+        ).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(rows
             .iter()
@@ -427,11 +492,11 @@ impl PostgresStorage {
         &self,
         path: &str,
         data: &serde_json::Value,
-    ) -> Result<u32> {
-        let client = self.pool.get().await?;
+    ) -> Result<u32, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query("SELECT MAX(version) FROM secrets WHERE path = $1", &[&path])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let version = if let Some(row) = rows.first() {
             let max_version: Option<i64> = row.get(0);
             max_version.unwrap_or(0) + 1
@@ -443,18 +508,18 @@ impl PostgresStorage {
                 "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
                 &[&path, &(version as i64), &data],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(version as u32)
     }
 
-    pub async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, serde_json::Value)>> {
-        let client = self.pool.get().await?;
+    pub async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, serde_json::Value)>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC",
                 &[&path],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let mut result = Vec::new();
         for row in rows {
             let version: i64 = row.get(0);
@@ -464,32 +529,32 @@ impl PostgresStorage {
         Ok(result)
     }
 
-    pub async fn backup_data(&self) -> Result<serde_json::Value> {
-        let client = self.pool.get().await?;
+    pub async fn backup_data(&self) -> Result<serde_json::Value, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query("SELECT path, version, data FROM secrets", &[])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let secrets_json: Vec<_> = rows.iter().map(|row| serde_json::json!({"path": row.get::<_, String>("path"), "version": row.get::<_, i64>("version"), "data": row.get::<_, serde_json::Value>("data")})).collect();
         Ok(serde_json::json!({"secrets": secrets_json}))
     }
 
-    pub async fn restore_data(&self, backup: &serde_json::Value) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn restore_data(&self, backup: &serde_json::Value) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         if let Some(secrets) = backup.get("secrets").and_then(|v| v.as_array()) {
             for s in secrets {
                 let path = s.get("path").and_then(|v| v.as_str()).unwrap_or("");
                 let version = s.get("version").and_then(|v| v.as_i64()).unwrap_or(1);
                 let default_data = serde_json::json!({});
                 let data = s.get("data").unwrap_or(&default_data);
-                client.execute("INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", &[&path, &version, &data]).await?;
+                client.execute("INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", &[&path, &version, &data]).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
             }
         }
         Ok(())
     }
 
-    pub async fn migrate_sentinel_policy_versions(&self) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn migrate_sentinel_policy_versions(&self) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
@@ -507,19 +572,19 @@ impl PostgresStorage {
         "#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
     pub async fn insert_sentinel_policy_version(
         &self,
         p: &crate::models::sentinel::SentinelPolicy,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client.execute(r#"
             INSERT INTO sentinel_policies (namespace, name, version, policy_type, source_code, egp, rgp, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#, &[&p.namespace, &p.name, &p.version, &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at]).await?;
+        "#, &[&p.namespace, &p.name, &p.version, &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at]).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
@@ -527,12 +592,12 @@ impl PostgresStorage {
         &self,
         namespace: &str,
         name: &str,
-    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>> {
-        let client = self.pool.get().await?;
+    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client.query(
             "SELECT id, namespace, name, version, policy_type, source_code, egp, rgp, created_at FROM sentinel_policies WHERE namespace = $1 AND name = $2 ORDER BY version DESC",
             &[&namespace, &name],
-        ).await?;
+        ).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(rows
             .iter()
@@ -555,24 +620,24 @@ impl PostgresStorage {
         namespace: &str,
         name: &str,
         version: u32,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
                 &[&namespace, &name, &version],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
-    pub async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    pub async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "DELETE FROM secrets WHERE path = $1 AND namespace = $2",
                 &[&path, &namespace],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 }
@@ -587,14 +652,17 @@ impl StorageBackend for PostgresStorage {
         &self,
         user_id: &str,
         secret: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+        method: MfaMethod,
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let method_str = match method {
-            crate::auth::mfa::MfaMethod::Totp => "totp",
-            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
-            crate::auth::mfa::MfaMethod::Email => "email",
-            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+            MfaMethod::Totp => "totp",
+            MfaMethod::Sms => "sms",
+            MfaMethod::Push => "push",
+            MfaMethod::Hardware => "hardware",
+            MfaMethod::WebAuthn => "webauthn",
+            MfaMethod::Email => "email",
+            MfaMethod::Recovery => "recovery",
         };
 
         client
@@ -607,21 +675,24 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&user_id, &method_str, &secret],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
     async fn get_mfa_secret(
         &self,
         user_id: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<String> {
-        let client = self.pool.get().await?;
+        method: MfaMethod,
+    ) -> Result<String, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let method_str = match method {
-            crate::auth::mfa::MfaMethod::Totp => "totp",
-            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
-            crate::auth::mfa::MfaMethod::Email => "email",
-            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+            MfaMethod::Totp => "totp",
+            MfaMethod::Sms => "sms",
+            MfaMethod::Push => "push",
+            MfaMethod::Hardware => "hardware",
+            MfaMethod::WebAuthn => "webauthn",
+            MfaMethod::Email => "email",
+            MfaMethod::Recovery => "recovery",
         };
 
         let rows = client
@@ -629,21 +700,21 @@ impl StorageBackend for PostgresStorage {
                 "SELECT secret FROM mfa_secrets WHERE user_id = $1 AND method = $2",
                 &[&user_id, &method_str],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         rows.first()
             .map(|r| r.get::<_, String>("secret"))
-            .ok_or_else(|| anyhow::anyhow!("MFA secret not found"))
+            .ok_or_else(|| CoreError::Database { message: "MFA secret not found".to_string() })
     }
 
-    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool> {
-        let client = self.pool.get().await?;
+    async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT is_enabled FROM user_mfa_settings WHERE user_id = $1",
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(rows
             .first()
@@ -651,13 +722,16 @@ impl StorageBackend for PostgresStorage {
             .unwrap_or(false))
     }
 
-    async fn enable_mfa(&self, user_id: &str, method: crate::auth::mfa::MfaMethod) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn enable_mfa(&self, user_id: &str, method: MfaMethod) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let method_str = match method {
-            crate::auth::mfa::MfaMethod::Totp => "totp",
-            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
-            crate::auth::mfa::MfaMethod::Email => "email",
-            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+            MfaMethod::Totp => "totp",
+            MfaMethod::Sms => "sms",
+            MfaMethod::Push => "push",
+            MfaMethod::Hardware => "hardware",
+            MfaMethod::WebAuthn => "webauthn",
+            MfaMethod::Email => "email",
+            MfaMethod::Recovery => "recovery",
         };
 
         client
@@ -670,13 +744,13 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&user_id, &method_str],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(())
     }
 
-    async fn disable_mfa(&self, user_id: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn disable_mfa(&self, user_id: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 r#"
@@ -686,7 +760,7 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(())
     }
@@ -694,14 +768,17 @@ impl StorageBackend for PostgresStorage {
     async fn delete_mfa_secret(
         &self,
         user_id: &str,
-        method: crate::auth::mfa::MfaMethod,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+        method: MfaMethod,
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let method_str = match method {
-            crate::auth::mfa::MfaMethod::Totp => "totp",
-            crate::auth::mfa::MfaMethod::WebAuthn => "webauthn",
-            crate::auth::mfa::MfaMethod::Email => "email",
-            crate::auth::mfa::MfaMethod::Recovery => "recovery",
+            MfaMethod::Totp => "totp",
+            MfaMethod::Sms => "sms",
+            MfaMethod::Push => "push",
+            MfaMethod::Hardware => "hardware",
+            MfaMethod::WebAuthn => "webauthn",
+            MfaMethod::Email => "email",
+            MfaMethod::Recovery => "recovery",
         };
 
         client
@@ -712,7 +789,7 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&user_id, &method_str],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(())
     }
@@ -720,14 +797,14 @@ impl StorageBackend for PostgresStorage {
     async fn get_user_mfa_methods(
         &self,
         user_id: &str,
-    ) -> Result<Vec<crate::auth::mfa::MfaMethod>> {
-        let client = self.pool.get().await?;
+    ) -> Result<Vec<MfaMethod>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT method FROM user_mfa_settings WHERE user_id = $1 AND is_enabled = TRUE",
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let methods = rows
             .into_iter()
@@ -740,14 +817,14 @@ impl StorageBackend for PostgresStorage {
     async fn get_mfa_status(
         &self,
         user_id: &str,
-    ) -> Result<std::collections::HashMap<crate::auth::mfa::MfaMethod, bool>> {
-        let client = self.pool.get().await?;
+    ) -> Result<std::collections::HashMap<MfaMethod, bool>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT method, is_enabled FROM user_mfa_settings WHERE user_id = $1",
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let mut status = std::collections::HashMap::new();
         for row in rows {
@@ -760,10 +837,10 @@ impl StorageBackend for PostgresStorage {
 
         // Check all possible methods and set to false if not present
         for method in [
-            crate::auth::mfa::MfaMethod::Totp,
-            crate::auth::mfa::MfaMethod::WebAuthn,
-            crate::auth::mfa::MfaMethod::Email,
-            crate::auth::mfa::MfaMethod::Recovery,
+            MfaMethod::Totp,
+            MfaMethod::WebAuthn,
+            MfaMethod::Email,
+            MfaMethod::Recovery,
         ] {
             status.entry(method).or_insert(false);
         }
@@ -771,8 +848,8 @@ impl StorageBackend for PostgresStorage {
         Ok(status)
     }
 
-    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Delete existing codes
         client
@@ -783,7 +860,7 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Insert new codes
         for code in codes {
@@ -795,20 +872,20 @@ impl StorageBackend for PostgresStorage {
                 "#,
                     &[&user_id, code],
                 )
-                .await?;
+                .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         }
 
         Ok(())
     }
 
-    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>> {
-        let client = self.pool.get().await?;
+    async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT code FROM mfa_recovery_codes WHERE user_id = $1 AND is_used = FALSE",
                 &[&user_id],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let codes = rows
             .into_iter()
@@ -817,8 +894,8 @@ impl StorageBackend for PostgresStorage {
         Ok(codes)
     }
 
-    async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
-        let client = self.pool.get().await?;
+    async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Get the latest version
         let row = client
@@ -826,7 +903,7 @@ impl StorageBackend for PostgresStorage {
                 "SELECT COALESCE(MAX(version), 0) as max_version FROM secrets WHERE path = $1",
                 &[&path],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let version: i32 = row.map_or(0, |r| r.get("max_version"));
         let new_version = version + 1;
@@ -837,19 +914,19 @@ impl StorageBackend for PostgresStorage {
                 "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
                 &[&path, &new_version, &data_str],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(new_version as u32)
     }
-    async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>> {
-        let client = self.pool.get().await?;
+    async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let row = client
             .query_opt(
                 "SELECT data, version FROM secrets WHERE path = $1 ORDER BY version DESC LIMIT 1",
                 &[&path],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         if let Some(row) = row {
             let data: String = row.get("data");
@@ -860,15 +937,15 @@ impl StorageBackend for PostgresStorage {
             Ok(None)
         }
     }
-    async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>> {
-        let client = self.pool.get().await?;
+    async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let rows = client
             .query(
                 "SELECT version, data FROM secrets WHERE path = $1 ORDER BY version DESC",
                 &[&path],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -879,25 +956,25 @@ impl StorageBackend for PostgresStorage {
         }
         Ok(result)
     }
-    async fn create_user(&self, username: &str, password: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let hash = Storage::hash_password(password)?;
         client
             .execute(
                 "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
                 &[&username, &hash],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
-    async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool> {
-        let client = self.pool.get().await?;
+    async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client
             .query(
                 "SELECT password_hash FROM users WHERE username = $1",
                 &[&username],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         if let Some(row) = rows.first() {
             let hash: String = row.get("password_hash");
@@ -906,8 +983,8 @@ impl StorageBackend for PostgresStorage {
             Ok(false)
         }
     }
-    async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Ensure tables exist
         client
@@ -918,7 +995,7 @@ impl StorageBackend for PostgresStorage {
             )"#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -930,7 +1007,7 @@ impl StorageBackend for PostgresStorage {
             )"#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Insert role if not exists
         client
@@ -938,22 +1015,22 @@ impl StorageBackend for PostgresStorage {
                 "INSERT INTO roles (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
                 &[&role],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Get user_id and role_id
         let user_row = client
             .query_one("SELECT id FROM users WHERE username = $1", &[&username])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let user_id: i32 = user_row.get("id");
 
         let role_row = client
             .query_one("SELECT id FROM roles WHERE name = $1", &[&role])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let role_id: i32 = role_row.get("id");
 
         // Insert into user_roles
         client.execute("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id, role_id) DO NOTHING", &[&user_id, &role_id])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
     async fn add_policy_to_role(
@@ -962,34 +1039,37 @@ impl StorageBackend for PostgresStorage {
         path: &str,
         action: &str,
         effect: &str,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         // Ensure policies table exists
         client
             .execute(
                 r#"CREATE TABLE IF NOT EXISTS policies (
-                id SERIAL PRIMARY KEY,
-                role TEXT NOT NULL,
-                path TEXT NOT NULL,
-                action TEXT NOT NULL,
+                id UUID PRIMARY KEY,
+                name TEXT NOT NULL,
+                policy_type TEXT NOT NULL,
                 effect TEXT NOT NULL,
-                entity_alias TEXT
+                rules JSONB NOT NULL,
+                metadata JSONB,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE
             )"#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
                 "INSERT INTO policies (role, path, action, effect) VALUES ($1, $2, $3, $4)",
                 &[&role, &path, &action, &effect],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
-    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool> {
-        let client = self.pool.get().await?;
+    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let row = client
             .query_one(
                 r#"
@@ -1001,12 +1081,12 @@ impl StorageBackend for PostgresStorage {
             "#,
                 &[&username, &path, &action],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let count: i64 = row.get("count");
         Ok(count > 0)
     }
-    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
@@ -1018,21 +1098,21 @@ impl StorageBackend for PostgresStorage {
             )"#,
                 &[],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         client
             .execute(
                 "INSERT INTO tokens (user, token, expires_at) VALUES ($1, $2, $3)",
                 &[&user, &token, &expires_at],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
-    async fn is_token_valid(&self, token: &str) -> Result<bool> {
-        let client = self.pool.get().await?;
+    async fn is_token_valid(&self, token: &str) -> Result<bool, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let row = client
             .query_opt("SELECT expires_at FROM tokens WHERE token = $1", &[&token])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         if let Some(row) = row {
             let expires_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("expires_at").ok();
@@ -1045,111 +1125,100 @@ impl StorageBackend for PostgresStorage {
             Ok(false)
         }
     }
-    async fn revoke_token(&self, token: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn revoke_token(&self, token: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute("DELETE FROM tokens WHERE token = $1", &[&token])
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
-    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "INSERT INTO audit_logs (user, action, path, status) VALUES ($1, $2, $3, $4)",
                 &[&user, &action, &path, &status],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
     async fn get_policies_for_user(
         &self,
-        user_id: &str,
-        entity_alias: Option<&str>,
-    ) -> Result<Vec<Policy>> {
-        let client = self.pool.get().await?;
+        _user_id: &str,
+        _entity_alias: Option<&str>,
+    ) -> Result<Vec<Policy>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let mut policies = Vec::new();
 
         // Get policies based on user_id (via role)
-        let rows = client
-            .query(
-                r#"
-            SELECT p.id, r.name as role, p.path, p.action, p.effect, p.entity_alias
-            FROM user_roles ur
-            JOIN users u ON ur.user_id = u.id
-            JOIN roles r ON ur.role_id = r.id
-            JOIN policies p ON p.role = r.name
-            WHERE u.username = $1
-            "#,
-                &[&user_id],
-            )
-            .await?;
-        for row in rows {
-            policies.push(Policy {
-                id: row.get("id"),
-                role: row.get("role"),
-                path: row.get("path"),
-                action: row.get("action"),
-                effect: row.get("effect"),
-                entity_alias: row.get("entity_alias"),
-                namespace: row
-                    .get::<_, Option<String>>("namespace")
-                    .unwrap_or_else(|| "default".to_string()),
-            });
-        }
-
-        // If entity_alias exists, get matching policies
-        if let Some(alias) = entity_alias {
             let rows = client
                 .query(
                     r#"
-                SELECT id, role, path, action, effect, entity_alias
-                FROM policies
-                WHERE entity_alias = $1
-                "#,
-                    &[&alias],
+            SELECT id, name, policy_type, effect, rules, metadata, created_at, updated_at, enabled
+            FROM policies
+            WHERE enabled = true
+            "#,
+                    &[],
                 )
-                .await?;
+                .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
+        for row in rows {
+            let id: uuid::Uuid = row.get("id");
+            let name: String = row.get("name");
+            let policy_type_str: String = row.get("policy_type");
+            let effect_str: String = row.get("effect");
+            let rules_json: serde_json::Value = row.get("rules");
+            let metadata_json: Option<serde_json::Value> = row.get("metadata");
+            let created_at: DateTime<Utc> = row.get("created_at");
+            let updated_at: DateTime<Utc> = row.get("updated_at");
+            let enabled: bool = row.get("enabled");
 
-            for row in rows {
-                policies.push(Policy {
-                    id: row.get("id"),
-                    role: row.get("role"),
-                    path: row.get("path"),
-                    action: row.get("action"),
-                    effect: row.get("effect"),
-                    entity_alias: row.get("entity_alias"),
-                    namespace: row
-                        .get::<_, Option<String>>("namespace")
-                        .unwrap_or_else(|| "default".to_string()),
-                });
-            }
+            let policy_type: PolicyType = serde_json::from_str(&format!("\"{}\"", policy_type_str))?;
+            let effect: PolicyEffect = serde_json::from_str(&format!("\"{}\"", effect_str))?;
+            let rules: Vec<PolicyRule> = serde_json::from_value(rules_json)?;
+            let metadata: HashMap<String, String> = metadata_json
+                .map(|v| serde_json::from_value(v))
+                .transpose()?
+                .unwrap_or_default();
+
+            policies.push(Policy {
+                id,
+                name,
+                policy_type,
+                effect,
+                rules,
+                metadata,
+                created_at,
+                updated_at,
+                enabled,
+            });
         }
+
+        // Note: entity_alias filtering removed as it's not part of the new Policy struct
         Ok(policies)
     }
     async fn insert_sentinel_policy_version(
         &self,
         p: &crate::models::sentinel::SentinelPolicy,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client.execute(r#"
             INSERT INTO sentinel_policies (namespace, name, version, policy_type, source_code, egp, rgp, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#, &[&p.namespace, &p.name, &p.version, &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at])
-        .await?;
+        .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
     async fn list_sentinel_policy_versions(
         &self,
         namespace: &str,
         name: &str,
-    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>> {
-        let client = self.pool.get().await?;
+    ) -> Result<Vec<crate::models::sentinel::SentinelPolicy>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         let rows = client.query(
             "SELECT id, namespace, name, version, policy_type, source_code, egp, rgp, created_at FROM sentinel_policies WHERE namespace = $1 AND name = $2 ORDER BY version DESC",
             &[&namespace, &name]
         )
-        .await?;
+        .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
 
         Ok(rows
             .into_iter()
@@ -1172,29 +1241,28 @@ impl StorageBackend for PostgresStorage {
         namespace: &str,
         name: &str,
         version: u32,
-    ) -> Result<()> {
-        let client = self.pool.get().await?;
+    ) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
                 &[&namespace, &name, &version],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
-    async fn delete_secret(&self, path: &str, namespace: &str) -> Result<()> {
-        let client = self.pool.get().await?;
+    async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         client
             .execute(
                 "DELETE FROM secrets WHERE path = $1 AND namespace = $2",
                 &[&path, &namespace],
             )
-            .await?;
+            .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 }
 
-#[async_trait]
 // Re-export for backward compatibility
 pub use storage::Storage;

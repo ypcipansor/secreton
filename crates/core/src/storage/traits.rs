@@ -2,19 +2,21 @@
 //!
 //! This module defines the core traits that storage backends must implement.
 
-use crate::error::CoreError;
-use crate::models::lease::Lease;
-use crate::models::pki::{PkiCa, PkiCert};
+use crate::CoreError;
 use crate::models::plugin::PluginCatalogEntry;
-use crate::models::policy::Policy;
-use crate::models::sentinel::SentinelPolicy;
-use crate::models::user::Token;
-use crate::services::audit::AuditDevice;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
 use secreton_auth_methods::model::MfaMethod;
+
+// Import the actual types from their respective crates
+use secreton_security::policies::policy::Policy;
+use secreton_auth_methods::token::token::Token;
+use secreton_storage::models::lease::Lease;
+use crate::models::pki::{PkiCa, PkiCert};
+use crate::models::sentinel::SentinelPolicy;
+use secreton_security::policies::audit::AuditDevice;
 
 use super::types::StorageEntry;
 

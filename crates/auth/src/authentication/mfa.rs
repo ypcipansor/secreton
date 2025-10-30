@@ -4,6 +4,7 @@
 //! for enhanced security across all authentication methods.
 
 use chrono::{DateTime, Duration, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -221,7 +222,7 @@ impl MfaService {
             .or_insert_with(|| MfaConfig::new(user_id.to_string()));
 
         if _config.totp.is_some() {
-            return Err(AuthError::mfa_already_configured("TOTP"));
+            return Err(SecretonError::MfaAlreadyConfigured { method: "TOTP".to_string() });
         }
 
         let totp_config = TotpConfig::new(issuer, account_name);
@@ -237,12 +238,12 @@ impl MfaService {
             let configs = self.configs.read().await;
             let _config = configs
                 .get(user_id)
-                .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string( }))?;
+                .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
 
             _config
                 .totp
                 .as_ref()
-                .ok_or_else(|| SecretonError::MfaNotConfigured { user: "TOTP".to_string( }))?
+                .ok_or_else(|| SecretonError::MfaNotConfigured { user: "TOTP".to_string() })?
                 .clone()
         };
 
@@ -254,7 +255,7 @@ impl MfaService {
 
             for entry in entries {
                 if entry.timestamp > recent_window && entry.code == code {
-                    return Err(AuthError::mfa_code_reused());
+                    return Err(SecretonError::MfaCodeReused);
                 }
             }
         }
@@ -290,16 +291,16 @@ impl MfaService {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string( }))?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
 
         // Check if already used
         if _config.used_recovery_codes.contains(&code.to_string()) {
-            return Err(AuthError::recovery_code_used());
+            return Err(SecretonError::RecoveryCodeUsed);
         }
 
         // Check if valid
         if !_config.recovery_codes.contains(&code.to_string()) {
-            return Err(AuthError::recovery_code_not_found());
+            return Err(SecretonError::RecoveryCodeNotFound);
         }
 
         // Mark as used
@@ -314,7 +315,7 @@ impl MfaService {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string( }))?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
 
         _config.totp = None;
         _config.enabled_methods.retain(|m| *m != MfaMethodType::TOTP);
@@ -342,7 +343,7 @@ impl MfaService {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string( }))?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
 
         _config.recovery_codes = MfaConfig::generate_recovery_codes();
         _config.used_recovery_codes.clear();

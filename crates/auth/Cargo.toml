@@ -47,6 +47,9 @@ urlencoding.workspace = true
 # Security policies
 secreton-security.workspace = true
 
+# JWT support
+jsonwebtoken = "9.3"
+
 # LDAP support
 ldap3 = { workspace = true, optional = true }
 

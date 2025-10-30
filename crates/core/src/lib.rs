@@ -4,12 +4,8 @@
 //! Provides foundational abstractions for security levels, audit logging,
 //! error handling, and common data structures.
 
-#![allow(async_fn_in_trait)]
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
 
 pub mod api;
 pub mod models;
@@ -19,12 +15,27 @@ pub mod services;
 pub mod storage;
 pub mod types;
 
-// Re-export shared crates
-pub use secreton_common::*;
+// Re-export shared crates with specific imports to avoid conflicts
+pub use secreton_common::{
+    SecurityLevel, Result as CommonResult
+};
 pub use secreton_errors::*;
-pub use secreton_config::*;
-pub use secreton_replication::*;
-pub use secreton_storage::*;
+pub use secreton_config::{
+    Config, DatabaseConfig, ServerConfig, TlsConfig,
+    AuthConfig, StorageConfig as ConfigStorageConfig,
+    StorageBackendType as ConfigStorageBackendType, RaftConfig as ConfigRaftConfig,
+    ConsulStorageConfig as ConfigConsulStorageConfig, S3StorageConfig as ConfigS3StorageConfig,
+    EtcdStorageConfig as ConfigEtcdStorageConfig, DynamoDBStorageConfig as ConfigDynamoDBStorageConfig,
+    MySQLStorageConfig as ConfigMySQLStorageConfig
+};
+pub use secreton_replication::{
+    DisasterRecoveryService, PerformanceReplication
+};
+pub use secreton_storage::{
+    StorageBackend, QueryParams as StorageQueryParams, VaultEntry, StorageResult,
+    StorageConfig as StorageStorageConfig, StorageBackendType as StorageStorageBackendType,
+    RaftConfig as StorageRaftConfig
+};
 
 // Re-export for backward compatibility
 pub type CoreError = SecretonError;
@@ -49,71 +60,6 @@ pub use secreton_security::policies::policy::{Policy, PolicyRule, ControlGroup};
 // Include integration tests - Disabled: missing dependencies
 // #[cfg(test)]
 // mod integration_tests;
-
-/// Security classification levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
-pub enum SecurityLevel {
-    /// Public information - no security controls required
-    Public = 0,
-
-    /// Internal use - basic access controls
-    #[default]
-    Internal = 1,
-
-    /// Confidential - restricted access
-    Confidential = 2,
-
-    /// Secret - highly restricted access
-    Secret = 3,
-
-    /// Top Secret - maximum security controls
-    TopSecret = 4,
-}
-
-impl SecurityLevel {
-    /// Get security level name
-    pub fn name(&self) -> &'static str {
-        match self {
-            SecurityLevel::Public => "Public",
-            SecurityLevel::Internal => "Internal",
-            SecurityLevel::Confidential => "Confidential",
-            SecurityLevel::Secret => "Secret",
-            SecurityLevel::TopSecret => "Top Secret",
-        }
-    }
-
-    /// Get security level from string
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "public" => Some(SecurityLevel::Public),
-            "internal" => Some(SecurityLevel::Internal),
-            "confidential" => Some(SecurityLevel::Confidential),
-            "secret" => Some(SecurityLevel::Secret),
-            "topsecret" | "top_secret" | "top-secret" => Some(SecurityLevel::TopSecret),
-            _ => None,
-        }
-    }
-
-    /// Check if current level can access target level
-    pub fn can_access(&self, target: SecurityLevel) -> bool {
-        *self >= target
-    }
-}
-
-impl FromStr for SecurityLevel {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "public" => Ok(SecurityLevel::Public),
-            "internal" => Ok(SecurityLevel::Internal),
-            "confidential" => Ok(SecurityLevel::Confidential),
-            "secret" => Ok(SecurityLevel::Secret),
-            "topsecret" | "top_secret" | "top-secret" => Ok(SecurityLevel::TopSecret),
-            _ => Err(format!("Unknown security level: {}", s)),
-        }
-    }
-}
 
 /// Metadata structure for extensible data
 #[derive(Debug, Clone, Serialize, Deserialize)]

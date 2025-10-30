@@ -73,18 +73,6 @@ impl InMemoryTokenRevocationService {
         }
     }
 
-    /// Check if an entity is revoked
-    async fn is_entity_revoked(&self, entity_id: Uuid) -> bool {
-        let entity_revocations = self.entity_revocations.read().await;
-        entity_revocations.contains_key(&entity_id)
-    }
-
-    /// Check if a prefix is revoked
-    async fn is_prefix_revoked(&self, accessor: &str) -> bool {
-        let prefix_revocations = self.prefix_revocations.read().await;
-        prefix_revocations.iter().any(|prefix| accessor.starts_with(prefix))
-    }
-
     /// Revoke a token in the token store
     async fn revoke_token_in_store(&self, token_id: Uuid, reason: RevocationReason) -> Result<(), SecretonError> {
         let mut tokens = self.tokens.write().await;

@@ -42,28 +42,21 @@ impl ZKPSystem {
         Self {}
     }
 
-    // Placeholder implementations
+    // Placeholder implementations - ZKP not implemented in this version
     pub async fn commit(&self, _data: &[u8]) -> Result<Vec<u8>> {
-        Ok(vec![1, 2, 3, 4]) // Mock commitment
+        Err(PrivacyAuthError::NotImplemented("Zero-knowledge proof commitment not implemented".to_string()))
     }
 
     pub async fn create_auth_challenge(&self) -> Result<PrivacyAuthChallenge> {
-        Ok(PrivacyAuthChallenge {
-            challenge_id: Uuid::new_v4().to_string(),
-            username: "mock".to_string(),
-            challenge_data: vec![1, 2, 3],
-            protocol: ZKPProtocol::Schnorr,
-            created_at: Utc::now(),
-            expires_at: Utc::now() + Duration::hours(1),
-        })
+        Err(PrivacyAuthError::NotImplemented("Zero-knowledge proof authentication not implemented".to_string()))
     }
 
     pub async fn verify_proof(&self, _proof: &ZKProof, _username: &str) -> Result<bool> {
-        Ok(true) // Mock verification - always succeeds
+        Err(PrivacyAuthError::NotImplemented("Zero-knowledge proof verification not implemented".to_string()))
     }
 
     pub async fn verify_auth_response(&self, _response: &AuthResponse, _username: &str) -> Result<bool> {
-        Ok(true) // Mock verification - always succeeds
+        Err(PrivacyAuthError::NotImplemented("Authentication response verification not implemented".to_string()))
     }
 }
 
@@ -85,6 +78,8 @@ pub enum PrivacyAuthError {
     ChallengeExpired(String),
     #[error("Identity not found: {0}")]
     IdentityNotFound(String),
+    #[error("Feature not implemented: {0}")]
+    NotImplemented(String),
 }
 
 pub type Result<T> = std::result::Result<T, PrivacyAuthError>;

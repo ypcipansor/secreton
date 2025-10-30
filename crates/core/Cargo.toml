@@ -31,6 +31,8 @@ secreton-storage.workspace = true
 secreton-crypto.workspace = true
 secreton-security.workspace = true
 secreton-policies.workspace = true
+secreton-auth.workspace = true
+secreton-auth-methods.workspace = true
 
 # Shared crates
 secreton-common.workspace = true

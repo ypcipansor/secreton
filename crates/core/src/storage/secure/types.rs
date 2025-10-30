@@ -2,6 +2,7 @@
 //!
 //! This module contains the core data structures used throughout the secure storage system.
 
+use base64::{Engine as _};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +29,8 @@ pub struct KeyEntry {
     pub active: bool,
     /// Key version for ordering
     pub version: u32,
+    /// Additional metadata associated with the key
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl KeyEntry {
@@ -47,6 +50,7 @@ impl KeyEntry {
             expires_at: 0,
             active: true,
             version: 1,
+            metadata: std::collections::HashMap::new(),
         }
     }
 

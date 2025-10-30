@@ -6,7 +6,7 @@ use tracing::info;
 
 // Use proper imports from secreton_api
 use secreton_api::{
-    ApiConfig, ApiState, KVApiState, KVEngine, TransitApiState, create_api_router,
+    ApiConfig, ApiState, KVApiState, TransitApiState, create_api_router,
     performance_optimizer::OptimizationLevel,
 };
 use secreton_crypto::transit::TransitEngine;
@@ -28,8 +28,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transit_engine = Arc::new(TransitEngine::new());
 
     info!("Creating KV engine...");
-    // Create KV engine
-    let kv_engine = Arc::new(KVEngine::new());
+    // Create KV engine - using default in-memory storage for now
+    let kv_state = KVApiState::default();
 
     info!("Creating API state...");
     // Create API state
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         TransitApiState {
             engine: transit_engine,
         },
-        KVApiState { engine: kv_engine },
+        kv_state,
         OptimizationLevel::Balanced,
     )
     .await?;

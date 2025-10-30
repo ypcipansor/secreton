@@ -11,6 +11,21 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// OTP entry for tracking one-time passwords
+#[derive(Debug, Clone)]
+pub struct OtpEntry {
+    /// Username
+    pub _username: String,
+    /// IP address
+    pub ip: String,
+    /// OTP value
+    pub otp: String,
+    /// Creation time
+    pub created_at: DateTime<Utc>,
+    /// Expiration time
+    pub expires_at: DateTime<Utc>,
+}
+
 /// Error types for SSH engine
 #[derive(Error, Debug)]
 pub enum SshError {
@@ -68,6 +83,7 @@ impl SshKeyType {
             SshKeyType::Ed25519 => "ed25519",
         }
     }
+
 }
 
 /// SSH role configuration
@@ -142,11 +158,12 @@ impl Default for SshRole {
             key_bits: 2048,
             algorithm_signer: None,
             allowed_extensions: HashMap::new(),
-            default_extensions: HashMap::new(),
             allowed_critical_options: HashMap::new(),
             default_critical_options: HashMap::new(),
+            default_extensions: HashMap::new(),
         }
-    }
+
+}
 }
 
 /// SSH CA configuration
@@ -207,17 +224,6 @@ pub struct SshCredentials {
     /// Role used
     pub role_name: String,
 }
-
-/// One-time _password entry
-#[derive(Debug, Clone)]
-struct OtpEntry {
-    _username: String,
-    ip: String,
-    otp: String,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
-}
-
 /// SSH secrets engine
 pub struct SshEngine {
     roles: Arc<RwLock<HashMap<String, SshRole>>>,
@@ -227,7 +233,6 @@ pub struct SshEngine {
 }
 
 impl SshEngine {
-    /// Create new SSH engine
     pub fn new() -> Self {
         Self {
             roles: Arc::new(RwLock::new(HashMap::new())),
@@ -249,9 +254,7 @@ impl SshEngine {
         roles.insert(role._name.clone(), role);
         Ok(())
     }
-
-    /// Generate SSH CA
-    pub async fn generate_ca(
+    pub async fn create_ca(
         &self,
         _name: String,
         key_type: SshKeyType,

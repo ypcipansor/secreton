@@ -17,6 +17,7 @@ members = [
     "crates/infrastructure",
     "crates/enterprise",
     "crates/secrets",
+    "crates/auth",
     "crates/auth-methods",
     "crates/policies",
     # "fuzz"
@@ -49,6 +50,7 @@ secreton-integrations = { path = "crates/integrations" }
 secreton-infrastructure = { path = "crates/infrastructure" }
 secreton-enterprise = { path = "crates/enterprise" }
 secreton-secrets = { path = "crates/secrets" }
+secreton-auth = { path = "crates/auth" }
 secreton-auth-methods = { path = "crates/auth-methods" }
 secreton-policies = { path = "crates/policies" }
 audit-log = { path = "crates/security", package = "secreton-security" }

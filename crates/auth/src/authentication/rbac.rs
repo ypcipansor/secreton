@@ -75,7 +75,7 @@ pub fn resolve_user_roles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::policy::Policy;
+    use secreton_security::policies::policy::Policy;
 
     #[test]
     fn test_policy_globbing() {

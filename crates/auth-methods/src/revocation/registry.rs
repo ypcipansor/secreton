@@ -41,26 +41,6 @@ impl InMemoryRevocationRegistry {
             crl_validity_period,
         }
     }
-
-    /// Get or create CRL for an issuer
-    async fn get_or_create_crl(&self, issuer: String) -> CertificateRevocationList {
-        let mut crls = self.crls.write().await;
-
-        if let Some(crl) = crls.get(&issuer) {
-            crl.clone()
-        } else {
-            let crl = CertificateRevocationList {
-                id: Uuid::new_v4(),
-                issuer: issuer.clone(),
-                this_update: Utc::now(),
-                next_update: Utc::now() + self.crl_validity_period,
-                revoked_certificates: Vec::new(),
-                version: 1,
-            };
-            crls.insert(issuer, crl.clone());
-            crl
-        }
-    }
 }
 
 #[async_trait]

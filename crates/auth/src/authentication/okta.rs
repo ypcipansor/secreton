@@ -125,11 +125,11 @@ impl OktaAuthService {
     pub async fn configure(&self, _config: OktaConfig) -> Result<()> {
         // Validate configuration
         if _config.okta_domain.is_empty() {
-            return Err(SecretonError::Validation { message: "Okta _domain is required".to_string( }));
+            return Err(SecretonError::Validation { message: "Okta _domain is required".to_string() });
         }
         
         if _config.client_id.is_empty() {
-            return Err(SecretonError::Validation { message: "Client ID is required".to_string( }));
+            return Err(SecretonError::Validation { message: "Client ID is required".to_string() });
         }
         
         let mut configs = self.configs.write().await;
@@ -147,7 +147,7 @@ impl OktaAuthService {
         let configs = self.configs.read().await;
         let _config = configs
             .get(organization)
-            .ok_or_else(|| SecretonError::NotFound { resource: organization.to_string( }))?;
+            .ok_or_else(|| SecretonError::NotFound { resource: organization.to_string() })?;
         
         // Build OAuth2 authorization URL
         let auth_url = format!(
@@ -257,7 +257,7 @@ impl OktaAuthService {
         let configs = self.configs.read().await;
         let _config = configs
             .get(organization)
-            .ok_or_else(|| SecretonError::NotFound { resource: organization.to_string( }))?;
+            .ok_or_else(|| SecretonError::NotFound { resource: organization.to_string() })?;
         
         // TODO: Implement actual token verification
         // 1. Introspect token with Okta

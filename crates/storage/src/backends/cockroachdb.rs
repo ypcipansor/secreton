@@ -257,33 +257,32 @@ impl StorageBackend for CockroachDBStorage {
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
-        let mut _param_index = 1;
+        let mut param_index = 1;
 
         if let Some(ref prefix) = params.path_prefix {
-            conditions.push(format!("path LIKE ${} || '%'", _param_index));
+            conditions.push(format!("path LIKE ${} || '%'", param_index));
             param_values.push(Box::new(prefix.clone()));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if let Some(owner_id) = params.owner_id {
-            conditions.push(format!("owner_id = ${}", _param_index));
+            conditions.push(format!("owner_id = ${}", param_index));
             param_values.push(Box::new(owner_id));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if let Some(security_level) = params.security_level {
-            conditions.push(format!("security_level >= ${}", _param_index));
+            conditions.push(format!("security_level >= ${}", param_index));
             param_values.push(Box::new(security_level as i16));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if !params.include_expired {
             conditions.push(format!(
                 "(expires_at IS NULL OR expires_at > ${})",
-                _param_index
+                param_index
             ));
             param_values.push(Box::new(Utc::now()));
-            _param_index += 1;
         }
 
         let where_clause = if conditions.is_empty() {
@@ -324,34 +323,32 @@ impl StorageBackend for CockroachDBStorage {
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
-        #[allow(unused_assignments)]
-        let mut _param_index = 1;
+        let mut param_index = 1;
 
         if let Some(ref prefix) = params.path_prefix {
-            conditions.push(format!("path LIKE ${} || '%'", _param_index));
+            conditions.push(format!("path LIKE ${} || '%'", param_index));
             param_values.push(Box::new(prefix.clone()));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if let Some(owner_id) = params.owner_id {
-            conditions.push(format!("owner_id = ${}", _param_index));
+            conditions.push(format!("owner_id = ${}", param_index));
             param_values.push(Box::new(owner_id));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if let Some(security_level) = params.security_level {
-            conditions.push(format!("security_level >= ${}", _param_index));
+            conditions.push(format!("security_level >= ${}", param_index));
             param_values.push(Box::new(security_level as i16));
-            _param_index += 1;
+            param_index += 1;
         }
 
         if !params.include_expired {
             conditions.push(format!(
                 "(expires_at IS NULL OR expires_at > ${})",
-                _param_index
+                param_index
             ));
             param_values.push(Box::new(Utc::now()));
-            _param_index += 1;
         }
 
         let where_clause = if conditions.is_empty() {

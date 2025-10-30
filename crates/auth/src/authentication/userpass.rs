@@ -8,13 +8,13 @@ use argon2::{
     Argon2,
 };
 use chrono::{DateTime, Duration, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::UserInfo;
-use crate::AuthError;
 
 /// User account information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,29 +270,6 @@ impl UserPassAuth {
     ) -> Result<(), SecretonError> {
         // Validate _password policy
         self._config.password_policy.validate(_password)
-            .map_err(|_e| AuthError::HashingFailed { message: _e })?;
-        
-        let mut users = self.users.write().await;
-        
-        if users.contains_key(&_username) {
-            return Err(AuthError::user_already_exists(_username));
-        }
-        
-        let mut _user = UserPassUser::new(_username.clone(), _password, policies)?;
-        _user.metadata = metadata;
-        
-        // Set _password expiration if configured
-        if let Some(days) = self._config.password_policy.expiration_days {
-            _user.password_expires_at = Some(Utc::now() + Duration::days(days as i64));
-        }
-        
-        users.insert(_username, _user);
-        Ok(())
-    }
-    
-    ) -> Result<(), SecretonError> {
-        // Validate _password policy
-        self._config.password_policy.validate(_password)
             .map_err(|_e| SecretonError::HashingFailed { message: _e })?;
         
         let mut users = self.users.write().await;
@@ -331,6 +308,9 @@ impl UserPassAuth {
         if let Some(days) = self._config.password_policy.expiration_days {
             _user.password_expires_at = Some(Utc::now() + Duration::days(days as i64));
         }
+        
+        Ok(())
+    }
     
     /// Delete a _user
     pub async fn delete_user(&self, _username: &str) -> Result<(), SecretonError> {
@@ -433,7 +413,7 @@ mod tests {
         
         // Authenticate successfully
         let user_info = auth.authenticate("testuser", "TestPass123!").await.unwrap();
-        assert_eq!(user_info._username, "testuser");
+        assert_eq!(user_info.username, "testuser");
         
         // Wrong _password
         let result = auth.authenticate("testuser", "wrongpass").await;

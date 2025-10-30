@@ -24,14 +24,6 @@ pub enum MetricType {
     Gauge,
 }
 
-// Mock token claims for integration (would use actual token service)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TokenClaims {
-    sub: String,
-    exp: i64,
-    roles: Vec<String>,
-}
-
 #[derive(Debug, Error)]
 pub enum AuthenticatedKeyError {
     #[error("Authentication failed: {0}")]
@@ -117,15 +109,13 @@ pub enum KeyPermission {
 /// User context from token
 #[derive(Debug, Clone)]
 struct UserContext {
-    user_id: String,
     username: String,
-    roles: Vec<String>,
     permissions: Vec<KeyPermission>,
 }
 
 /// Audit record for key operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct KeyAuditRecord {
+pub struct KeyAuditRecord {
     audit_id: String,
     operation_id: String,
     operation_type: String,
@@ -140,7 +130,7 @@ struct KeyAuditRecord {
 
 /// Metrics record for key operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct KeyMetricsRecord {
+pub struct KeyMetricsRecord {
     metric_name: String,
     metric_type: MetricType,
     value: f64,
@@ -249,9 +239,7 @@ impl AuthenticatedKeyOperations {
         let permissions = self.load_permissions(&user_id).await;
 
         Ok(UserContext {
-            user_id,
             username,
-            roles: vec!["key-admin".to_string()], // Mock roles
             permissions,
         })
     }
@@ -357,35 +345,6 @@ impl AuthenticatedKeyOperations {
         };
 
         Ok(key_id)
-    }
-
-    /// Record audit trail
-    async fn record_audit(
-        &self,
-        operation_id: String,
-        operation: &KeyOperation,
-        key_id: &str,
-        user_context: &UserContext,
-        success: bool,
-        error: Option<String>,
-        metadata: &HashMap<String, String>,
-    ) -> Result<String> {
-        let audit_id = Uuid::new_v4().to_string();
-        let record = KeyAuditRecord {
-            audit_id: audit_id.clone(),
-            operation_id,
-            operation_type: self.operation_name(operation),
-            key_id: key_id.to_string(),
-            user_id: user_context.user_id.clone(),
-            username: user_context.username.clone(),
-            timestamp: Utc::now(),
-            success,
-            error,
-            metadata: metadata.clone(),
-        };
-
-        self.audit_records.write().await.push(record);
-        Ok(audit_id)
     }
 
     /// Record metrics

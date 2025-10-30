@@ -1,10 +1,8 @@
-//! # Secreton Common
+//! # Brankas Common
 //!
-//! Common types, traits, and utilities shared across Secreton crates.
-//! Provides foundational abstractions for security levels, audit logging,
-//! error handling, and common data structures.
-
-#![allow(async_fn_in_trait)]
+//! Common types and utilities shared across all Brankas crates.
+//! Provides foundational abstractions for security levels, error handling,
+//! and common data structures.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

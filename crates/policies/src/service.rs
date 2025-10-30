@@ -362,6 +362,7 @@ impl PolicyService {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use crate::model::{PolicyType, PolicyEffect};
 
     #[tokio::test]
     async fn test_create_policy() {

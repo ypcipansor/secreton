@@ -53,12 +53,13 @@ impl TransitEngine {
         use aes_gcm::{Aes256Gcm, Key, Nonce};
         use aes_gcm::aead::{Aead, KeyInit};
 
-        let cipher_key = Key::<Aes256Gcm>::clone_from_slice(&key);
+        let key_array: [u8; 32] = key.as_slice().try_into().unwrap();
+        let cipher_key = Key::<Aes256Gcm>::from(key_array);
         let cipher = Aes256Gcm::new(&cipher_key);
 
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::clone_from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = cipher.encrypt(&nonce, plaintext)
             .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {}", e)))?;
@@ -88,11 +89,13 @@ impl TransitEngine {
         use aes_gcm::{Aes256Gcm, Key, Nonce};
         use aes_gcm::aead::{Aead, KeyInit};
 
-        let cipher_key = *Key::<Aes256Gcm>::from_slice(&key);
+        let key_array: [u8; 32] = key.as_slice().try_into().unwrap();
+        let cipher_key = Key::<Aes256Gcm>::from(key_array);
         let cipher = Aes256Gcm::new(&cipher_key);
 
         let (nonce_bytes, ciphertext) = combined.split_at(12);
-        let nonce = *Nonce::from_slice(nonce_bytes);
+        let nonce_array: [u8; 12] = nonce_bytes.try_into().unwrap();
+        let nonce = Nonce::from(nonce_array);
 
         let plaintext = cipher.decrypt(&nonce, ciphertext)
             .map_err(|e| SecretError::DecryptionFailed(format!("Decryption failed: {}", e)))?;

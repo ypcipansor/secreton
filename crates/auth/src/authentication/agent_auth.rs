@@ -4,6 +4,7 @@
 //! and sinks for credential delivery.
 
 use chrono::{DateTime, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -147,9 +148,8 @@ impl AgentAuth {
     pub async fn configure(&self, _config: AgentConfig) -> Result<(), SecretonError> {
         // Validate configuration
         if _config.sinks.is_empty() {
-            return Err(AuthError::agent_config_error(
-                "At least one sink must be configured".to_string(),
-            ));
+            return Err(SecretonError::AgentConfigError { message: 
+                "At least one sink must be configured".to_string() });
         }
 
         let mut current_config = self._config.write().await;
@@ -161,7 +161,7 @@ impl AgentAuth {
     pub async fn authenticate(&self) -> Result<AuthResult, SecretonError> {
         let _config = self._config.read().await;
         let _config = _config.as_ref().ok_or_else(|| {
-            SecretonError::AgentConfigError { message: "No configuration set".to_string( })
+            SecretonError::AgentConfigError { message: "No configuration set".to_string() }
         })?;
 
         // Perform authentication based on method
@@ -202,7 +202,7 @@ impl AgentAuth {
     ) -> Result<Vec<SinkWriteResult>, AuthError> {
         let _config = self._config.read().await;
         let _config = _config.as_ref().ok_or_else(|| {
-            SecretonError::AgentConfigError { message: "No configuration set".to_string( })
+            SecretonError::AgentConfigError { message: "No configuration set".to_string() }
         })?;
 
         let mut results = Vec::new();
@@ -227,7 +227,7 @@ impl AgentAuth {
             if !result.success && _config.exit_on_err {
                 let error_msg = result.error.clone().unwrap_or_default();
                 results.push(result);
-                return Err(AuthError::agent_sink_write_error(error_msg));
+                return Err(SecretonError::AgentSinkWriteError { message: error_msg });
             }
 
             results.push(result);
@@ -243,9 +243,8 @@ impl AgentAuth {
                 // In production, write to file with proper permissions
                 // For now, simulate
                 if _path.is_empty() {
-                    return Err(AuthError::agent_sink_write_error(
-                        "Empty file _path".to_string(),
-                    ));
+                    return Err(SecretonError::AgentSinkWriteError { message: 
+                        "Empty file _path".to_string() });
                 }
                 Ok(())
             }
@@ -271,12 +270,11 @@ impl AgentAuth {
 
         let current = current_clone
             .as_ref()
-            .ok_or_else(|| AuthError::agent_renewal_error("No token to renew".to_string()))?;
+            .ok_or_else(|| SecretonError::AgentRenewalError { message: "No token to renew".to_string() })?;
 
         if !current.renewable {
-            return Err(AuthError::agent_renewal_error(
-                "Token not renewable".to_string(),
-            ));
+            return Err(SecretonError::AgentRenewalError { message: 
+                "Token not renewable".to_string() });
         }
 
         // In production, call Vault API to renew token

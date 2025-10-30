@@ -3,8 +3,6 @@
 //! Third-party service integrations and connectors for the Secreton
 //! security vault, including cloud providers, CI/CD systems, and infrastructure tools.
 
-#![allow(async_fn_in_trait)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

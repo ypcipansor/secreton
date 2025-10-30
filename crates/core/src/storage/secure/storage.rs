@@ -14,7 +14,6 @@ use aes_gcm::{
 };
 use anyhow::{anyhow, Result};
 use argon2::{Argon2, Params};
-use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
@@ -23,7 +22,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use super::types::{KeyConfig, KeyEntry};
-use super::keystore::KeyStore;
+use super::KeyStore;
 
 const KEY_LENGTH: usize = 32; // 256 bits for AES-256
 const NONCE_LENGTH: usize = 12; // 96 bits for GCM
@@ -42,11 +41,6 @@ const KEY_VERSION_LENGTH: usize = 8; // First 8 bytes of key ID
 /// - **Thread-Safe**: All operations are thread-safe using async/await
 /// - **Secure Defaults**: Uses modern cryptographic primitives with secure defaults
 ///
-/// # Security Considerations
-///
-/// - The master key should be kept secure and never hardcoded
-/// - Key material is stored encrypted at rest by the `KeyStore`
-/// - Each encryption operation uses a unique nonce
 /// - Keys are derived using Argon2 with a unique salt per key
 ///
 /// # Example
@@ -130,16 +124,15 @@ impl SecureStorage {
         since = "0.2.0",
         note = "Use `SecureStorage::new_with_keystore` for key rotation support"
     )]
-    pub fn new(master_key: &[u8]) -> Self {
+    pub fn new(master_key: &[u8]) -> Result<Self> {
         // Generate a new random salt
         let mut salt = [0u8; SALT_LENGTH];
         OsRng.fill_bytes(&mut salt);
 
         // Derive the key
-        let key = Self::derive_key(master_key, &salt).unwrap_or_else(|_| {
-            // In a real implementation, you might want to handle this error more gracefully
-            panic!("Failed to derive key");
-        });
+        let key = Self::derive_key(master_key, &salt).map_err(|e| {
+            anyhow!("Failed to derive key: {}", e)
+        })?;
 
         // Create a key entry
         let key_entry = KeyEntry {
@@ -151,13 +144,19 @@ impl SecureStorage {
                 .map_err(|e| anyhow!("Time went backwards: {}", e))
                 .unwrap()
                 .as_secs(),
+            rotated_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| anyhow!("Time went backwards: {}", e))
+                .unwrap()
+                .as_secs(),
+            expires_at: 0,
             active: true,
-            expires_at: None,
-            metadata: HashMap::new(),
+            version: 1,
+            metadata: std::collections::HashMap::new(),
         };
 
         // Create a key store with the single key
-        let key_store = Arc::new(super::keystore::MemoryKeyStore::with_initial_state(
+        let key_store = Arc::new(super::MemoryKeyStore::with_initial_state(
             HashMap::from([(key_entry.id.clone(), key_entry.clone())]),
             Some(key_entry.id.clone()),
         ));
@@ -166,21 +165,21 @@ impl SecureStorage {
         let key_config = KeyConfig::default();
 
         // Create the cipher with the derived key
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let cipher = Aes256Gcm::new_from_slice(&key).expect("Invalid key length");
 
         // Initialize the keys map with our single key
         let mut keys = HashMap::new();
         let current_key_id = key_entry.id.clone();
         keys.insert(key_entry.id.clone(), key_entry);
 
-        Self {
+        Ok(Self {
             current_cipher: cipher,
             current_key_id,
             keys: RwLock::new(keys),
             key_config,
             key_store,
             master_key: master_key.to_vec(),
-        }
+        })
     }
 
     /// Derive a key from a master key and salt
@@ -209,7 +208,7 @@ impl SecureStorage {
     /// Returns an error if key derivation fails or if there's a system time issue
     fn generate_key_entry(
         master_key: &[u8],
-        metadata: Option<HashMap<String, String>>,
+        _metadata: Option<HashMap<String, String>>,
     ) -> Result<KeyEntry> {
         // Generate a random salt for key derivation
         let mut salt = [0u8; SALT_LENGTH];
@@ -227,9 +226,14 @@ impl SecureStorage {
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| anyhow!("Time went backwards: {}", e))?
                 .as_secs(),
+            rotated_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| anyhow!("Time went backwards: {}", e))?
+                .as_secs(),
+            expires_at: 0,
             active: true,
-            expires_at: None,
-            metadata: metadata.unwrap_or_default(),
+            version: 1,
+            metadata: std::collections::HashMap::new(),
         })
     }
 
@@ -348,7 +352,7 @@ impl SecureStorage {
         let derived_key = Self::derive_key(master_key, &salt_bytes)?;
 
         // Create the cipher with the derived key
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived_key));
+        let cipher = Aes256Gcm::new_from_slice(&derived_key).expect("Invalid key length");
 
         // Create the storage instance with the provided or default config
         let key_config = key_config.unwrap_or_default();
@@ -376,12 +380,12 @@ impl SecureStorage {
         // Generate a random nonce for each encryption
         let mut nonce_bytes = [0u8; NONCE_LENGTH];
         OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         // Encrypt the data with the current cipher
         let ciphertext = self
             .current_cipher
-            .encrypt(nonce, data)
+            .encrypt(&nonce, data)
             .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
         // Combine key ID, nonce, and ciphertext
@@ -412,7 +416,8 @@ impl SecureStorage {
         let key_id = std::str::from_utf8(key_id_bytes)
             .map_err(|_| anyhow!("Invalid key ID in ciphertext"))?;
 
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce_bytes_array: [u8; NONCE_LENGTH] = nonce_bytes.try_into().unwrap();
+        let nonce = Nonce::from(nonce_bytes_array);
 
         // Find the key used for encryption
         let keys = self.keys.read().await;
@@ -427,9 +432,9 @@ impl SecureStorage {
             .map_err(|e| anyhow!("Invalid key format: {}", e))?;
 
         // Decrypt the data directly with the derived key
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let cipher = Aes256Gcm::new_from_slice(&key).expect("Invalid key length");
         cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| anyhow!("Decryption failed: {}", e))
     }
 
@@ -477,7 +482,7 @@ impl SecureStorage {
 
                 // Set expiration on old key
                 if let Some(old_key) = keys.get_mut(&self.current_key_id) {
-                    old_key.expires_at = Some(now + self.key_config.key_retention_period);
+                    old_key.expires_at = now + self.key_config.key_retention_period;
                 }
 
                 // Add new key
@@ -514,10 +519,8 @@ impl SecureStorage {
         let expired_keys: Vec<String> = keys
             .iter()
             .filter_map(|(id, key)| {
-                if let Some(expires_at) = key.expires_at {
-                    if expires_at <= now {
-                        return Some(id.clone());
-                    }
+                if key.expires_at > 0 && key.expires_at <= now {
+                    return Some(id.clone());
                 }
                 None
             })
@@ -589,7 +592,7 @@ impl SecureStorage {
             &BASE64.decode(&current_key_entry.key)?,
             &BASE64.decode(&current_key_entry.salt)?,
         )?;
-        self.current_cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        self.current_cipher = Aes256Gcm::new_from_slice(&key).expect("Invalid key length");
 
         Ok(())
     }
@@ -604,12 +607,10 @@ impl SecureStorage {
         let mut keys = self.keys.write().await;
         if let Some(key_entry) = keys.get_mut(key_id) {
             key_entry.active = false;
-            key_entry.expires_at = Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|e| anyhow!("Time went backwards: {}", e))?
-                    .as_secs(),
-            );
+            key_entry.expires_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| anyhow!("Time went backwards: {}", e))?
+                .as_secs();
         } else {
             return Err(anyhow!("Key not found"));
         }

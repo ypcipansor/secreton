@@ -86,8 +86,6 @@ impl CertificateBuilder {
     }
 }
 
-type SignatureAlgorithm = String;
-
 /// Error types for PKI engine
 #[derive(Error, Debug)]
 pub enum PkiError {
