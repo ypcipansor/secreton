@@ -18,11 +18,13 @@ fn test_secret_versioning_and_revocation_audit() {
 
     // Create first version
     let v1 = SecretVersion {
-        version: 1,
-        data: "secret1".to_string(),
+        version_id: 1,
+        secret_path: "test/secret".to_string(),
+        _data: [("value".to_string(), "secret1".to_string())].into(),
         created_by: "alice".to_string(),
         created_at: chrono::Utc::now(),
         checksum: "hash1".to_string(),
+        is_deleted: false,
         metadata: VersionMetadata {
             change_type: ChangeType::Create,
             change_reason: None,
@@ -53,11 +55,13 @@ fn test_secret_versioning_and_revocation_audit() {
 
     // Create second version
     let v2 = SecretVersion {
-        version: 2,
-        data: "secret2".to_string(),
+        version_id: 2,
+        secret_path: "test/secret".to_string(),
+        _data: [("value".to_string(), "secret2".to_string())].into(),
         created_by: "bob".to_string(),
         created_at: chrono::Utc::now(),
         checksum: "hash2".to_string(),
+        is_deleted: false,
         metadata: VersionMetadata {
             change_type: ChangeType::Update,
             change_reason: Some("changed value".to_string()),

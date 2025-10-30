@@ -74,10 +74,11 @@ pub mod storage;
 // Re-exports for public API
 pub use types::{KeyConfig, KeyEntry};
 // pub use keystore::{KeyStore, MemoryKeyStore};
-// pub use storage::{SecureStorage, SharedSecureStorage};
+pub use storage::{SecureStorage, SharedSecureStorage};
 
 // Required imports for cryptographic operations
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 

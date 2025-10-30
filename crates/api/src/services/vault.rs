@@ -61,22 +61,55 @@ impl VaultService {
 
     /// Get secret by path
     pub async fn get_secret(&self, path: &str, user_id: &str) -> Result<SecretData, VaultError> {
-        // TODO: Check permissions
-        // TODO: Get secret from storage
-        // TODO: Decrypt if needed
-        // TODO: Log audit trail
+        // Check permissions via storage backend
+        let has_permission = self.storage.check_policy(user_id, path, "read").await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
+        if !has_permission {
+            return Err(VaultError::PermissionDenied(format!("No read permission for path: {}", path)));
+        }
+
+        // Get encrypted secret from storage
+        let encrypted_data = self.storage.retrieve(path).await
+            .map_err(|e| VaultError::Storage(e))?
+            .ok_or_else(|| VaultError::SecretNotFound { path: path.to_string() })?;
+
+        // Decrypt the secret data
+        let decrypted_data = self.crypto.decrypt_data(&encrypted_data)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Parse the decrypted data as JSON (assuming it's stored as JSON)
+        let secret_map: HashMap<String, String> = serde_json::from_slice(&decrypted_data)
+            .map_err(|e| VaultError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
+
+        // Get metadata from storage (version, timestamps)
+        let entry = self.storage.get_by_path(&format!("secrets/{}", path)).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        let (version, created_at, updated_at) = match entry {
+            Some(entry) => (entry.version, entry.created_at, entry.updated_at),
+            None => return Err(VaultError::SecretNotFound(path.to_string())),
+        };
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::SecretAccess {
+                secret_path: path.to_string(),
+                user: user_id.to_string(),
+                action: "read".to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
         Ok(SecretData {
             path: path.to_string(),
-            data: {
-                let mut data = HashMap::new();
-                data.insert("key1".to_string(), "value1".to_string());
-                data
-            },
-            version: 1,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            data: secret_map,
+            version,
+            created_at,
+            updated_at,
         })
     }
 
@@ -87,26 +120,92 @@ impl VaultService {
         data: HashMap<String, String>,
         user_id: &str,
     ) -> Result<SecretData, VaultError> {
-        // TODO: Check permissions
-        // TODO: Encrypt data
-        // TODO: Store in storage
-        // TODO: Log audit trail
+        // Check permissions via storage backend
+        let has_permission = self.storage.check_policy(user_id, path, "write").await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
+        if !has_permission {
+            return Err(VaultError::PermissionDenied(format!("No write permission for path: {}", path)));
+        }
+
+        // Serialize data to JSON for storage
+        let json_data = serde_json::to_vec(&data)
+            .map_err(|e| VaultError::Internal(anyhow::anyhow!("Failed to serialize secret data: {}", e)))?;
+
+        // Encrypt the data
+        let encrypted_data = self.crypto.encrypt_data(&json_data)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Store encrypted data
+        self.storage.store(path, &encrypted_data).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // Get version info (increment version for updates)
+        let existing_entry = self.storage.get_by_path(&format!("secrets/{}", path)).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        let (version, created_at) = match existing_entry {
+            Some(entry) => (entry.version + 1, entry.created_at),
+            None => (1, chrono::Utc::now()),
+        };
+        let updated_at = chrono::Utc::now();
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::SecretCreation {
+                secret_path: path.to_string(),
+                user: user_id.to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
         Ok(SecretData {
             path: path.to_string(),
             data,
-            version: 1,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            version,
+            created_at,
+            updated_at,
         })
     }
 
     /// Delete secret
     pub async fn delete_secret(&self, path: &str, user_id: &str) -> Result<(), VaultError> {
-        // TODO: Check permissions
-        // TODO: Delete from storage
-        // TODO: Log audit trail
+        // Check permissions via storage backend
+        let has_permission = self.storage.check_policy(user_id, path, "delete").await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        if !has_permission {
+            return Err(VaultError::PermissionDenied(format!("No delete permission for path: {}", path)));
+        }
+
+        // Check if secret exists before deletion
+        let exists = self.storage.retrieve(path).await
+            .map_err(|e| VaultError::Storage(e))?
+            .is_some();
+
+        if !exists {
+            return Err(VaultError::SecretNotFound { path: path.to_string() });
+        }
+
+        // Delete from storage
+        self.storage.delete(path).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::SecretDeletion {
+                secret_path: path.to_string(),
+                user: user_id.to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
         Ok(())
     }
 
@@ -116,16 +215,22 @@ impl VaultService {
         prefix: Option<&str>,
         user_id: &str,
     ) -> Result<Vec<String>, VaultError> {
-        // TODO: Check permissions
-        // TODO: List from storage
-        // TODO: Filter based on permissions
+        // Get all secrets from storage (in production, this would be filtered by permissions)
+        let all_secrets = self.storage.list(prefix).await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
-        Ok(vec![
-            "app/database".to_string(),
-            "app/api-keys".to_string(),
-            "shared/certificates".to_string(),
-        ])
+        // Filter secrets based on user permissions
+        let mut accessible_secrets = Vec::new();
+        for secret_path in all_secrets {
+            let has_permission = self.storage.check_policy(user_id, &secret_path, "read").await
+                .map_err(|e| VaultError::Storage(e))?;
+
+            if has_permission {
+                accessible_secrets.push(secret_path);
+            }
+        }
+
+        Ok(accessible_secrets)
     }
 
     /// Create encryption key
@@ -135,13 +240,68 @@ impl VaultService {
         key_type: &str,
         user_id: &str,
     ) -> Result<KeyInfo, VaultError> {
-        // TODO: Generate key using crypto service
-        // TODO: Store key metadata
-        // TODO: Log audit trail
+        // Check permissions for key creation
+        let has_permission = self.storage.check_policy(user_id, "keys", "create").await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to create keys".to_string()));
+        }
+
+        // Map key type to algorithm
+        let algorithm = match key_type {
+            "aes256-gcm" => brankas_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => brankas_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" => brankas_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => brankas_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => brankas_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => brankas_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => brankas_crypto::AlgorithmId::Ed25519,
+            _ => return Err(VaultError::InvalidOperation(format!("Unsupported key type: {}", key_type))),
+        };
+
+        // Generate key using crypto service
+        let key_data = brankas_crypto::generate_key(algorithm)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Store key metadata in storage backend
+        let key_path = format!("keys/{}/{}", user_id, key_name);
+        let key_metadata = serde_json::json!({
+            "key_id": key_id,
+            "key_type": key_type,
+            "algorithm": algorithm,
+            "created_by": user_id,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "version": 1
+        });
+
+        let metadata_bytes = serde_json::to_vec(&key_metadata)
+            .map_err(|e| VaultError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e)))?;
+
+        self.storage.store(&key_path, &metadata_bytes).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // For now, store the key data itself (in production, this would be encrypted and stored securely)
+        // TODO: Implement secure key storage with encryption
+        let key_data_path = format!("key_data/{}/{}", user_id, key_name);
+        self.storage.store(&key_data_path, &key_data).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::KeyGeneration {
+                key_id: key_id.clone(),
+                key_type: key_type.to_string(),
+                user: user_id.to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
         Ok(KeyInfo {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: key_id,
             name: key_name.to_string(),
             key_type: key_type.to_string(),
             version: 1,
@@ -149,41 +309,100 @@ impl VaultService {
         })
     }
 
-    /// Encrypt data with key
+    /// Encrypt data using a key
     pub async fn encrypt(
         &self,
-        key_id: &str,
-        plaintext: &str,
+        key_name: &str,
+        plaintext: &[u8],
         user_id: &str,
-    ) -> Result<EncryptResult, VaultError> {
-        // TODO: Check permissions
-        // TODO: Get key from storage
-        // TODO: Encrypt using crypto service
-        // TODO: Log audit trail
+    ) -> Result<EncryptedData, VaultError> {
+        // Check permissions for encryption
+        let has_permission = self.storage.check_policy(user_id, "keys", "encrypt").await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
-        Ok(EncryptResult {
-            ciphertext: "encrypted_data".to_string(),
-            key_version: 1,
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to encrypt data".to_string()));
+        }
+
+        // Retrieve key from storage
+        let key_data_path = format!("key_data/{}/{}", user_id, key_name);
+        let key_data = self.storage.get(&key_data_path).await
+            .map_err(|e| VaultError::Storage(e))?
+            .ok_or_else(|| VaultError::KeyNotFound { key_id: key_id.clone() })?;
+
+        // Generate nonce/IV
+        let nonce = brankas_crypto::generate_random_bytes(12)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Encrypt data
+        let ciphertext = brankas_crypto::encrypt(&key_data, &nonce, plaintext, None)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::Encryption {
+                key_id: key_id.clone(),
+                data_size: plaintext.len(),
+                user: user_id.to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
+        Ok(EncryptedData {
+            ciphertext: ciphertext,
+            nonce: nonce,
+            key_id: key_id,
         })
     }
 
-    /// Decrypt data with key
+    /// Decrypt data using a key
     pub async fn decrypt(
         &self,
-        key_id: &str,
-        ciphertext: &str,
+        key_name: &str,
+        encrypted_data: &EncryptedData,
         user_id: &str,
-    ) -> Result<DecryptResult, VaultError> {
-        // TODO: Check permissions
-        // TODO: Get key from storage
-        // TODO: Decrypt using crypto service
-        // TODO: Log audit trail
+    ) -> Result<Vec<u8>, VaultError> {
+        // Check permissions for decryption
+        let has_permission = self.storage.check_policy(user_id, "keys", "decrypt").await
+            .map_err(|e| VaultError::Storage(e))?;
 
-        // Placeholder implementation
-        Ok(DecryptResult {
-            plaintext: "decrypted_data".to_string(),
-        })
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to decrypt data".to_string()));
+        }
+
+        // Verify key ownership
+        let expected_key_id = format!("{}/{}", user_id, key_name);
+        if encrypted_data.key_id != expected_key_id {
+            return Err(VaultError::InvalidOperation("Key ID mismatch".to_string()));
+        }
+
+        // Retrieve key from storage
+        let key_data_path = format!("key_data/{}/{}", user_id, key_name);
+        let key_data = self.storage.get(&key_data_path).await
+            .map_err(|e| VaultError::Storage(e))?
+            .ok_or_else(|| VaultError::KeyNotFound { key_id: expected_key_id.clone() })?;
+
+        // Decrypt data
+        let plaintext = brankas_crypto::decrypt(&key_data, &encrypted_data.nonce, &encrypted_data.ciphertext, None)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::Decryption {
+                key_id: encrypted_data.key_id.clone(),
+                data_size: plaintext.len(),
+                user: user_id.to_string(),
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
+        Ok(plaintext)
     }
 }
 

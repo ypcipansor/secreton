@@ -4,50 +4,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use secreton_api::services::vault::{VaultService, KeyInfo, EncryptedData};
+use brankas_storage::MockStorageBackend;
+use brankas_crypto::CryptoService;
+use brankas_core::audit::AuditLogger;
+use brankas_crypto::SecurityParams;
 
-// Mock implementations for testing
-struct MockSecurityOrchestrator {
-    initialized: bool,
+// Helper function to create a test vault service
+async fn create_test_vault_service() -> Result<VaultService, Box<dyn std::error::Error>> {
+    let storage = Arc::new(MockStorageBackend::new());
+    let crypto = Arc::new(CryptoService::new(SecurityParams::default())?);
+    let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
+
+    Ok(VaultService::new(storage, crypto, audit).await?)
 }
-
-impl MockSecurityOrchestrator {
-    async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self { initialized: true })
-    }
-    
-    async fn get_health_status(&self) -> Result<HealthStatus, Box<dyn std::error::Error>> {
-        Ok(HealthStatus {
-            overall_health: 95.0,
-            components_healthy: 10,
-            components_total: 10,
-        })
-    }
-    
-    async fn encrypt_data(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
-        // Mock encryption - just base64 encode for testing
-        use base64::{Engine as _, engine::general_purpose};
-        let encrypted = general_purpose::STANDARD.encode(format!("encrypted_{}", data));
-        Ok(encrypted)
-    }
-    
-    async fn decrypt_data(&self, encrypted: &str) -> Result<String, Box<dyn std::error::Error>> {
-        // Mock decryption - decode and remove prefix
-        use base64::{Engine as _, engine::general_purpose};
-        let decoded = general_purpose::STANDARD.decode(encrypted)?;
-        let decoded_str = String::from_utf8(decoded)?;
-        
-        if decoded_str.starts_with("encrypted_") {
-            Ok(decoded_str.strip_prefix("encrypted_").unwrap().to_string())
-        } else {
-            Err("Invalid encrypted data".into())
-        }
-    }
-    
-    async fn check_compliance(&self) -> Result<ComplianceStatus, Box<dyn std::error::Error>> {
-        Ok(ComplianceStatus {
-            pci_dss_compliant: true,
-            sox_compliant: true,
-            fips_140_2_compliant: true,
             common_criteria_compliant: Some(true),
         })
     }
@@ -71,109 +41,139 @@ struct ComplianceStatus {
 /// Test banking-grade security orchestrator
 #[tokio::test]
 async fn test_banking_orchestrator_initialization() -> Result<(), Box<dyn std::error::Error>> {
-    let orchestrator = MockSecurityOrchestrator::new().await?;
-    
-    // Test health status
-    let health = orchestrator.get_health_status().await?;
-    assert!(health.overall_health >= 90.0, 
-           "Banking-grade orchestrator should have >= 90% health, got {}", 
-           health.overall_health);
-    
-    // Test basic encryption/decryption
-    let test_data = "sensitive_banking_data";
-    let encrypted = orchestrator.encrypt_data(test_data).await?;
-    let decrypted = orchestrator.decrypt_data(&encrypted).await?;
-    
-    assert_eq!(test_data, decrypted, "Encryption/decryption should preserve data");
-    assert_ne!(test_data, encrypted, "Encrypted data should differ from plaintext");
-    
+    let vault_service = create_test_vault_service().await?;
+
+    // Test basic secret operations
+    let test_data = serde_json::json!({"account_number": "1234567890", "balance": 1000.0});
+    let secret = vault_service.put_secret("banking/test_account", test_data, "test_user").await?;
+    assert_eq!(secret.path, "banking/test_account");
+
+    // Test secret retrieval
+    let retrieved = vault_service.get_secret("banking/test_account", "test_user").await?;
+    assert_eq!(retrieved.path, "banking/test_account");
+    assert!(retrieved.data.contains_key("account_number"));
+
+    // Test key operations
+    let key_info = vault_service.create_key("test_key", "aes256-gcm", "test_user").await?;
+    assert_eq!(key_info.name, "test_key");
+    assert_eq!(key_info.key_type, "aes256-gcm");
+
+    // Test encryption/decryption
+    let plaintext = b"sensitive banking data";
+    let encrypted = vault_service.encrypt("test_key", plaintext, "test_user").await?;
+    let decrypted = vault_service.decrypt("test_key", &encrypted, "test_user").await?;
+    assert_eq!(plaintext, &decrypted[..]);
+
     Ok(())
 }
 
 /// Test compliance validation
 #[tokio::test]
 async fn test_compliance_validation() -> Result<(), Box<dyn std::error::Error>> {
-    let orchestrator = MockSecurityOrchestrator::new().await?;
-    
-    let compliance = orchestrator.check_compliance().await?;
-    
-    // Test banking compliance requirements
-    assert!(compliance.pci_dss_compliant, "PCI DSS compliance required for banking");
-    assert!(compliance.sox_compliant, "SOX compliance required for financial institutions");
-    assert!(compliance.fips_140_2_compliant, "FIPS 140-2 compliance required");
-    
+    let vault_service = create_test_vault_service().await?;
+
+    // Test that secrets are properly encrypted and access-controlled
+    let sensitive_data = serde_json::json!({"ssn": "123-45-6789", "credit_card": "4111111111111111"});
+
+    // Store sensitive data
+    let secret = vault_service.put_secret("compliance/test_pii", sensitive_data, "compliance_user").await?;
+    assert_eq!(secret.path, "compliance/test_pii");
+
+    // Verify data is retrievable by authorized user
+    let retrieved = vault_service.get_secret("compliance/test_pii", "compliance_user").await?;
+    assert!(retrieved.data.contains_key("ssn"));
+    assert!(retrieved.data.contains_key("credit_card"));
+
+    // Test that unauthorized access fails
+    let unauthorized_result = vault_service.get_secret("compliance/test_pii", "unauthorized_user").await;
+    assert!(unauthorized_result.is_err(), "Unauthorized access should fail");
+
     Ok(())
 }
 
 /// Test concurrent operations
 #[tokio::test]
 async fn test_concurrent_encryption() -> Result<(), Box<dyn std::error::Error>> {
-    let orchestrator = Arc::new(MockSecurityOrchestrator::new().await?);
-    
+    let vault_service = Arc::new(create_test_vault_service().await?);
+
     let mut tasks = Vec::new();
-    
-    // Test 10 concurrent encryption operations
+
+    // Test 10 concurrent secret operations
     for i in 0..10 {
-        let orch = Arc::clone(&orchestrator);
-        let data = format!("concurrent_test_data_{}", i);
-        
+        let vault = Arc::clone(&vault_service);
+        let data = serde_json::json!({"concurrent_test": format!("data_{}", i)});
+
         let task = tokio::spawn(async move {
-            let encrypted = orch.encrypt_data(&data).await?;
-            let decrypted = orch.decrypt_data(&encrypted).await?;
-            assert_eq!(data, decrypted);
+            let path = format!("concurrent/test_{}", i);
+            let secret = vault.put_secret(&path, data, "concurrent_user").await?;
+            let retrieved = vault.get_secret(&path, "concurrent_user").await?;
+            assert_eq!(retrieved.path, path);
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         });
-        
+
         tasks.push(task);
     }
-    
+
     // Wait for all tasks with timeout
     let results = timeout(Duration::from_secs(10), futures::future::try_join_all(tasks)).await?;
-    
+
     // Verify all operations succeeded
     for result in results {
         result??;
     }
-    
+
     Ok(())
 }
 
 /// Test error handling
 #[tokio::test]
 async fn test_error_handling() -> Result<(), Box<dyn std::error::Error>> {
-    let orchestrator = MockSecurityOrchestrator::new().await?;
-    
-    // Test decryption of invalid data
-    let result = orchestrator.decrypt_data("invalid_base64_!@#").await;
-    assert!(result.is_err(), "Invalid encrypted data should return error");
-    
+    let vault_service = create_test_vault_service().await?;
+
+    // Test accessing non-existent secret
+    let result = vault_service.get_secret("nonexistent/path", "test_user").await;
+    assert!(result.is_err(), "Accessing non-existent secret should return error");
+
+    // Test unauthorized access
+    let test_data = serde_json::json!({"test": "data"});
+    vault_service.put_secret("error_test/secret", test_data, "owner").await?;
+
+    let unauthorized_result = vault_service.get_secret("error_test/secret", "unauthorized").await;
+    assert!(unauthorized_result.is_err(), "Unauthorized access should return error");
+
     Ok(())
 }
 
 /// Test system resilience
 #[tokio::test]
 async fn test_system_resilience() -> Result<(), Box<dyn std::error::Error>> {
-    let orchestrator = MockSecurityOrchestrator::new().await?;
-    
-    // Test system health under load
+    let vault_service = Arc::new(create_test_vault_service().await?);
+
+    // Test system resilience under load
     let mut tasks = Vec::new();
-    
-    for _ in 0..50 {
-        let orch = Arc::new(orchestrator);
+
+    for i in 0..50 {
+        let vault = Arc::clone(&vault_service);
+        let data = serde_json::json!({"resilience_test": format!("data_{}", i)});
+
         let task = tokio::spawn(async move {
-            let health = orch.get_health_status().await?;
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(health.overall_health)
+            let path = format!("resilience/test_{}", i);
+            vault.put_secret(&path, data, "resilience_user").await?;
+            let retrieved = vault.get_secret(&path, "resilience_user").await?;
+            assert_eq!(retrieved.path, path);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         });
+
         tasks.push(task);
     }
-    
-    let results = futures::future::try_join_all(tasks).await?;
-    
-    // All health checks should succeed
+
+    // Wait for all tasks with timeout
+    let results = timeout(Duration::from_secs(30), futures::future::try_join_all(tasks)).await?;
+
+    // Verify all operations succeeded
     for result in results {
-        let health = result?;
-        assert!(health >= 90.0, "System should maintain health under load");
+        result??;
     }
-    
+
     Ok(())
 }

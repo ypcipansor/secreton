@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use crate::{
     handlers::AppState,
+    services::vault,
     ApiResponse, ApiResult,
 };
 use brankas_core::audit::SecurityEventType;
@@ -413,56 +414,109 @@ pub struct PolicyResponse {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Secret operations
+/// Get secret by path
 pub async fn get_secret(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // RBAC check (placeholder user)
-    if let Ok(false) = state.storage.check_policy("unknown", &path, "read").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &path, "read").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement secret retrieval
-    let secret = SecretResponse {
-        path: path.clone(),
-        data: {
-            let mut data = HashMap::new();
-            data.insert("key1".to_string(), "value1".to_string());
-            data.insert("key2".to_string(), "value2".to_string());
-            data
-        },
+
+    // Get secret from vault service
+    let secret_data = state.services.vault.get_secret(&path, &user.id).await
+        .map_err(|e| match e {
+            vault::VaultError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
+            vault::VaultError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to retrieve secret: {}", e)),
+        })?;
+
+    let response = SecretResponse {
+        path: secret_data.path,
+        data: secret_data.data,
         metadata: SecretMetadata {
-            description: Some("Example secret".to_string()),
-            tags: vec!["example".to_string()],
-            owner: Some("user".to_string()),
-            classification: Some("confidential".to_string()),
+            description: None, // TODO: Get from storage
+            tags: vec![], // TODO: Get from storage
+            owner: Some(user.username.clone()),
+            classification: None, // TODO: Get from storage
         },
-        version: 1,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        expires_at: None,
+        version: secret_data.version,
+        created_at: secret_data.created_at,
+        updated_at: secret_data.updated_at,
+        expires_at: None, // TODO: Implement TTL
     };
 
-    Ok(Json(ApiResponse::success(secret)))
+    // Audit: SecretAccess
+    let _ = state
+        .audit
+        .log_event(
+            SecurityEventType::SecretAccess {
+                secret_path: path,
+                user: user.username,
+                action: "read".to_string(),
+            },
+            Some(user.id),
+            None,
+            None,
+            Default::default(),
+        )
+        .await;
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
+/// Create new secret
 pub async fn create_secret(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // RBAC check (placeholder user)
-    if let Ok(false) = state.storage.check_policy("unknown", &path, "create").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &path, "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement secret creation
-    let secret = SecretResponse {
-        path: path.clone(),
-        data: request.data,
-        metadata: request.metadata.unwrap_or_default(),
-        version: 1,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
+
+    // Create secret via vault service
+    let secret_data = state.services.vault.put_secret(&path, request.data, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to create secret: {}", e)))?;
+
+    let response = SecretResponse {
+        path: secret_data.path,
+        data: secret_data.data,
+        metadata: request.metadata.unwrap_or_else(|| SecretMetadata {
+            description: None,
+            tags: vec![],
+            owner: Some(user.username.clone()),
+            classification: None,
+        }),
+        version: secret_data.version,
+        created_at: secret_data.created_at,
+        updated_at: secret_data.updated_at,
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
@@ -471,36 +525,67 @@ pub async fn create_secret(
         .audit
         .log_event(
             SecurityEventType::SecretCreation {
-                secret_path: path.clone(),
-                user: "unknown".to_string(),
+                secret_path: path,
+                user: user.username,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
         )
         .await;
 
-    Ok(Json(ApiResponse::success(secret)))
+    Ok(Json(ApiResponse::success(response)))
 }
 
+/// Update existing secret
 pub async fn update_secret(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // RBAC check (placeholder user)
-    if let Ok(false) = state.storage.check_policy("unknown", &path, "update").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &path, "update").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement secret update
-    let secret = SecretResponse {
-        path: path.clone(),
-        data: request.data,
-        metadata: request.metadata.unwrap_or_default(),
-        version: 2,
-        created_at: chrono::Utc::now() - chrono::Duration::hours(1),
-        updated_at: chrono::Utc::now(),
+
+    // Get current secret to determine version
+    let current_secret = match state.services.vault.get_secret(&path, &user.id).await {
+        Ok(secret) => secret,
+        Err(vault::VaultError::SecretNotFound { .. }) => {
+            return Err(crate::ApiError::NotFound("Secret not found".to_string()));
+        }
+        Err(e) => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
+    };
+
+    // Update secret via vault service
+    let secret_data = state.services.vault.put_secret(&path, request.data, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to update secret: {}", e)))?;
+
+    let response = SecretResponse {
+        path: secret_data.path,
+        data: secret_data.data,
+        metadata: request.metadata.unwrap_or_else(|| SecretMetadata {
+            description: None,
+            tags: vec![],
+            owner: Some(user.username.clone()),
+            classification: None,
+        }),
+        version: secret_data.version,
+        created_at: secret_data.created_at,
+        updated_at: secret_data.updated_at,
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
@@ -509,33 +594,54 @@ pub async fn update_secret(
         .audit
         .log_event(
             SecurityEventType::SecretVersionChange {
-                secret_path: path.clone(),
-                old_version: 1,
-                new_version: 2,
-                user: "unknown".to_string(),
+                secret_path: path,
+                old_version: current_secret.version,
+                new_version: secret_data.version,
+                user: user.username,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
         )
         .await;
 
-    Ok(Json(ApiResponse::success(secret)))
+    Ok(Json(ApiResponse::success(response)))
 }
 
+/// Delete secret
 pub async fn delete_secret(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    // RBAC check (placeholder user)
-    if let Ok(false) = state.storage.check_policy("unknown", &path, "delete").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &path, "delete").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement secret deletion
+
+    // Delete secret via vault service
+    state.services.vault.delete_secret(&path, &user.id).await
+        .map_err(|e| match e {
+            vault::VaultError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
+            vault::VaultError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to delete secret: {}", e)),
+        })?;
+
     let data = serde_json::json!({
         "message": "Secret deleted successfully",
-        "path": path
+        "path": path.clone()
     });
 
     // Audit: SecretDeletion
@@ -543,10 +649,10 @@ pub async fn delete_secret(
         .audit
         .log_event(
             SecurityEventType::SecretDeletion {
-                secret_path: path.clone(),
-                user: "unknown".to_string(),
+                secret_path: path,
+                user: user.username,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
@@ -556,29 +662,47 @@ pub async fn delete_secret(
     Ok(Json(ApiResponse::success(data)))
 }
 
+/// List secrets
 pub async fn list_secrets(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecretListItem>>>> {
-    // RBAC check could be resource-specific; allow listing with generic check
-    if let Ok(false) = state.storage.check_policy("unknown", "secrets:list", "read").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC) - allow listing with generic check
+    if let Ok(false) = state.services.storage.check_policy(&user.username, "secrets:list", "read").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement secret listing
-    let secrets = vec![
+
+    // List secrets via vault service
+    let secret_paths = state.services.vault.list_secrets(query.filter.as_deref(), &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
+
+    // Convert to response format (placeholder - in production, get full metadata)
+    let secrets: Vec<SecretListItem> = secret_paths.into_iter().map(|path| {
         SecretListItem {
-            path: "app/database".to_string(),
+            path,
             metadata: SecretMetadata {
-                description: Some("Database credentials".to_string()),
-                tags: vec!["database".to_string()],
-                owner: Some("admin".to_string()),
-                classification: Some("sensitive".to_string()),
+                description: None, // TODO: Get from storage
+                tags: vec![], // TODO: Get from storage
+                owner: Some(user.username.clone()),
+                classification: None, // TODO: Get from storage
             },
-            version: 3,
-            created_at: chrono::Utc::now() - chrono::Duration::days(7),
-            updated_at: chrono::Utc::now() - chrono::Duration::hours(2),
-        },
-    ];
+            version: 1, // TODO: Get actual version
+            created_at: chrono::Utc::now(), // TODO: Get actual timestamp
+            updated_at: chrono::Utc::now(), // TODO: Get actual timestamp
+        }
+    }).collect();
 
     Ok(Json(ApiResponse::success(secrets)))
 }

@@ -633,7 +633,7 @@ mod tests {
         let engine = SshEngine::new();
 
         let ca = engine
-            .generate_ca("ssh-ca".to_string(), SshKeyType::Ed25519)
+            .create_ca("ssh-ca".to_string(), SshKeyType::Ed25519)
             .await
             .unwrap();
 

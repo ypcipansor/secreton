@@ -28,6 +28,8 @@ pub enum SecurityLevel {
     TopSecret = 4,
 }
 
+use std::str::FromStr;
+
 impl SecurityLevel {
     /// Get security level name
     pub fn name(&self) -> &'static str {
@@ -51,11 +53,24 @@ impl SecurityLevel {
             _ => None,
         }
     }
+
+    /// Parse security level from string (alias for from_str)
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::from_str(s)
+    }
+
+    /// Check if this security level can access another level
+    /// Higher security levels can access lower ones, but not vice versa
+    pub fn can_access(&self, other: SecurityLevel) -> bool {
+        *self >= other
+    }
 }
 
-impl fmt::Display for SecurityLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name())
+impl FromStr for SecurityLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::from_str(s).ok_or_else(|| format!("Invalid security level: {}", s))
     }
 }
 

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use azure_storage::StorageCredentials;
 use azure_storage_blobs::prelude::*;
 use futures::StreamExt;
 use serde_json;
@@ -222,6 +223,49 @@ impl StorageTransaction for AzureBlobTransaction {
 }
 
 impl AzureBlobStorage {
+    /// Create a new Azure Blob Storage backend
+    pub async fn new(config: AzureBlobConfig) -> StorageResult<Self> {
+        let container_client = if let Some(account_key) = &config.account_key {
+            // Use account key authentication
+            let credential = StorageCredentials::access_key(
+                config.account_name.clone(),
+                account_key.clone(),
+            );
+            let service_client = azure_storage_blobs::prelude::BlobServiceClient::new(
+                config.account_name.clone(),
+                credential,
+            );
+            service_client.container_client(&config.container_name)
+        } else if let Some(sas_token) = &config.sas_token {
+            // Use SAS token authentication
+            let credential = StorageCredentials::sas_token(
+                sas_token.clone(),
+            ).map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Invalid SAS token: {}", e),
+            })?;
+            let service_client = azure_storage_blobs::prelude::BlobServiceClient::new(
+                config.account_name.clone(),
+                credential,
+            );
+            service_client.container_client(&config.container_name)
+        } else {
+            return Err(StorageError::ConfigurationError {
+                message: "Either account_key or sas_token must be provided".to_string(),
+            });
+        };
+
+        // Ensure container exists
+        container_client.create().into_future().await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to create/access container: {}", e),
+            })?;
+
+        Ok(Self {
+            config,
+            container_client: Arc::new(container_client),
+        })
+    }
+
     /// Convert a vault path to a valid Azure blob name
     /// Azure blob names must be valid and cannot contain certain characters
     fn path_to_blob_name(path: &str) -> String {

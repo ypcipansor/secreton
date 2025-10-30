@@ -349,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_playbook() {
-        let ansible = AnsibleIntegration::new(create_test_config());
+        let ansible = AnsibleIntegration::new();
         let playbook = create_test_playbook();
 
         ansible.register_playbook(playbook).await.unwrap();
@@ -403,7 +403,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_inventory_management() {
-        let ansible = AnsibleIntegration::new(create_test_config());
+        let ansible = AnsibleIntegration::new();
         let inventory = create_test_inventory();
 
         ansible.set_inventory(inventory).await.unwrap();

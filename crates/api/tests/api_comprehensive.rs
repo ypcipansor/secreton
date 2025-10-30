@@ -2,7 +2,7 @@
 //!
 //! Tests for HTTP API handlers, middleware, services, and integration
 
-use secreton_api::{ApiState, create_api_router, KVApiState, TransitApiState, KVEngine};
+use secreton_api::{ApiState, create_api_router, KVApiState, TransitApiState, kv::InMemorySecretStorage};
 use secreton_crypto::transit::TransitEngine;
 
     async fn create_test_app() -> axum::Router<()> {
@@ -12,7 +12,7 @@ use secreton_crypto::transit::TransitEngine;
             engine: std::sync::Arc::new(TransitEngine::new()),
         },
         KVApiState {
-            engine: std::sync::Arc::new(KVEngine::new()),
+            storage: std::sync::Arc::new(InMemorySecretStorage::new()),
         },
         secreton_api::performance_optimizer::OptimizationLevel::Balanced,
     )
@@ -71,7 +71,7 @@ mod api_tests {
                 engine: std::sync::Arc::new(secreton_crypto::transit::TransitEngine::new()),
             },
             KVApiState {
-                engine: std::sync::Arc::new(KVEngine::new()),
+                storage: std::sync::Arc::new(InMemorySecretStorage::new()),
             },
             secreton_api::performance_optimizer::OptimizationLevel::Balanced,
         )
