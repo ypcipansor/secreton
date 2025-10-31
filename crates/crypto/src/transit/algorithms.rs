@@ -307,12 +307,18 @@ impl AlgorithmRegistry {
         self.supported_kdfs.contains(&kdf)
     }
 
+    /// Check if signature algorithm is supported
+    pub fn supports_signature(&self, signature: SignatureAlgorithm) -> bool {
+        self.supported_signatures.contains(&signature)
+    }
+
     /// Get all supported algorithms
     pub fn supported_algorithms(&self) -> AlgorithmSupport {
         AlgorithmSupport {
             ciphers: self.supported_ciphers.clone(),
             hashes: self.supported_hashes.clone(),
             kdfs: self.supported_kdfs.clone(),
+            signatures: self.supported_signatures.clone(),
         }
     }
 }
@@ -323,6 +329,7 @@ pub struct AlgorithmSupport {
     pub ciphers: Vec<String>,
     pub hashes: Vec<HashAlgorithm>,
     pub kdfs: Vec<KdfAlgorithm>,
+    pub signatures: Vec<SignatureAlgorithm>,
 }
 
 /// Cryptographic parameters for algorithms

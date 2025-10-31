@@ -83,7 +83,7 @@ pub struct RotationResult {
 
 /// Secrets Rotation Scheduler
 pub struct RotationScheduler {
-    config: Arc<RwLock<RotationConfig>>,
+    _config: Arc<RwLock<RotationConfig>>,
     policies: Arc<RwLock<HashMap<String, RotationPolicy>>>,
     jobs: Arc<RwLock<HashMap<String, RotationJob>>>,
     history: Arc<RwLock<Vec<RotationResult>>>,
@@ -92,7 +92,7 @@ pub struct RotationScheduler {
 impl RotationScheduler {
     pub fn new(config: RotationConfig) -> Self {
         Self {
-            config: Arc::new(RwLock::new(config)),
+            _config: Arc::new(RwLock::new(config)),
             policies: Arc::new(RwLock::new(HashMap::new())),
             jobs: Arc::new(RwLock::new(HashMap::new())),
             history: Arc::new(RwLock::new(Vec::new())),

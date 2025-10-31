@@ -8,13 +8,13 @@ use std::collections::HashMap;
 
 /// Python SDK client
 pub struct PythonSdkClient {
-    config: SdkConfig,
+    _config: SdkConfig,
 }
 
 impl PythonSdkClient {
     /// Create a new Python SDK client
     pub fn new(config: SdkConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 }
 

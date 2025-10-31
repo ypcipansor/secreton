@@ -53,7 +53,6 @@ pub enum RevocationReason {
 /// Revocation registry entry
 #[derive(Debug)]
 struct RevocationEntry {
-    token_id: Uuid,
     revoked_at: DateTime<Utc>,
     reason: RevocationReason,
 }
@@ -89,7 +88,6 @@ impl InMemoryTokenRevocationService {
 
             // Record the revocation
             let revocation_entry = RevocationEntry {
-                token_id,
                 revoked_at: Utc::now(),
                 reason,
             };

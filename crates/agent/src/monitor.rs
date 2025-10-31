@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 /// System monitor for collecting system metrics
 pub struct SystemMonitor {
-    config: Arc<AgentConfig>,
+    _config: Arc<AgentConfig>,
     metrics_tx: mpsc::UnboundedSender<MetricPoint>,
     system: System,
     disks: Disks,
@@ -31,7 +31,7 @@ impl SystemMonitor {
         let networks = Networks::new_with_refreshed_list();
 
         Ok(Self {
-            config: Arc::new(config.clone()),
+            _config: Arc::new(config.clone()),
             metrics_tx,
             system,
             disks,

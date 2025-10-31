@@ -23,7 +23,7 @@ pub struct CockroachDBConfig {
 
 /// CockroachDB storage backend implementation
 pub struct CockroachDBStorage {
-    config: CockroachDBConfig,
+    _config: CockroachDBConfig,
     client: Client,
 }
 
@@ -122,7 +122,7 @@ impl CockroachDBStorage {
         // Create vault_entries table if it doesn't exist
         Self::create_tables(&client).await?;
 
-        Ok(Self { config, client })
+        Ok(Self { _config: config, client })
     }
 
     async fn create_tables(client: &Client) -> StorageResult<()> {

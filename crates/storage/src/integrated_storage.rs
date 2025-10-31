@@ -186,7 +186,7 @@ pub struct IntegratedRaftStorage {
     log: Arc<RwLock<Vec<LogEntry>>>,
     storage: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     snapshot: Arc<RwLock<Option<RaftSnapshot>>>,
-    config: Arc<RwLock<RaftConfig>>,
+    _config: Arc<RwLock<RaftConfig>>,
     commit_index: Arc<RwLock<u64>>,
     last_applied: Arc<RwLock<u64>>,
 }
@@ -199,7 +199,7 @@ impl IntegratedRaftStorage {
             log: Arc::new(RwLock::new(Vec::new())),
             storage: Arc::new(RwLock::new(HashMap::new())),
             snapshot: Arc::new(RwLock::new(None)),
-            config: Arc::new(RwLock::new(RaftConfig::default())),
+            _config: Arc::new(RwLock::new(RaftConfig::default())),
             commit_index: Arc::new(RwLock::new(0)),
             last_applied: Arc::new(RwLock::new(0)),
         }

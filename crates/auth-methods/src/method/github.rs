@@ -4,8 +4,11 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
+use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// GitHub authentication method
 pub struct GithubAuthMethod {
@@ -25,9 +28,138 @@ impl GithubAuthMethod {
         }
     }
 
-    /// Set GitHub configuration
     pub fn set_github_config(&mut self, config: GithubConfig) {
         self.github_config = Some(config);
+    }
+
+    /// Generate GitHub OAuth authorization URL
+    pub fn get_authorization_url(&self, state: &str) -> AuthMethodResult<String> {
+        if let Some(config) = &self.github_config {
+            let url = format!(
+                "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=user:email&state={}",
+                config.client_id,
+                urlencoding::encode(&config.redirect_url),
+                urlencoding::encode(state)
+            );
+            Ok(url)
+        } else {
+            Err(AuthMethodError::ConfigurationError("GitHub not configured".to_string()))
+        }
+    }
+
+    /// Exchange authorization code for access token
+    pub async fn exchange_code_for_token(&self, code: &str, state: &str) -> AuthMethodResult<GithubTokenResponse> {
+        if let Some(config) = &self.github_config {
+            let params = [
+                ("client_id", &config.client_id),
+                ("client_secret", &config.client_secret),
+                ("code", &code.to_string()),
+                ("redirect_uri", &config.redirect_url),
+                ("state", &state.to_string()),
+            ];
+
+            let response = self.http_client
+                .post("https://github.com/login/oauth/access_token")
+                .header("Accept", "application/json")
+                .form(&params)
+                .send()
+                .await
+                .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+            let token_response: GithubTokenResponse = response
+                .json()
+                .await
+                .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+            Ok(token_response)
+        } else {
+            Err(AuthMethodError::ConfigurationError("GitHub not configured".to_string()))
+        }
+    }
+
+    /// Get user information from GitHub API
+    pub async fn get_user_info(&self, access_token: &str) -> AuthMethodResult<GithubUser> {
+        let response = self.http_client
+            .get("https://api.github.com/user")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "Secreton-Auth")
+            .send()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        let user_info: GithubUser = response
+            .json()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        Ok(user_info)
+    }
+
+    /// Validate user against allowed organizations/teams
+    pub async fn validate_user_access(&self, _user_info: &GithubUser, access_token: &str) -> AuthMethodResult<bool> {
+        if let Some(config) = &self.github_config {
+            // Check organizations if specified
+            if !config.allowed_organizations.is_empty() {
+                let user_orgs = self.get_user_organizations(access_token).await?;
+                let has_access = user_orgs.iter().any(|org| 
+                    config.allowed_organizations.contains(&org.login)
+                );
+                if !has_access {
+                    return Ok(false);
+                }
+            }
+
+            // Check teams if specified
+            if !config.allowed_teams.is_empty() {
+                let user_teams = self.get_user_teams(access_token).await?;
+                let has_access = user_teams.iter().any(|team| 
+                    config.allowed_teams.contains(&format!("{}:{}", team.organization.login, team.name))
+                );
+                if !has_access {
+                    return Ok(false);
+                }
+            }
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Get user organizations
+    async fn get_user_organizations(&self, access_token: &str) -> AuthMethodResult<Vec<GithubOrg>> {
+        let response = self.http_client
+            .get("https://api.github.com/user/orgs")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "Secreton-Auth")
+            .send()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        let orgs: Vec<GithubOrg> = response
+            .json()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        Ok(orgs)
+    }
+
+    /// Get user teams
+    async fn get_user_teams(&self, access_token: &str) -> AuthMethodResult<Vec<GithubTeam>> {
+        let response = self.http_client
+            .get("https://api.github.com/user/teams")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "Secreton-Auth")
+            .send()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        let teams: Vec<GithubTeam> = response
+            .json()
+            .await
+            .map_err(|e| AuthMethodError::OAuth2FlowError(e.to_string()))?;
+
+        Ok(teams)
     }
 }
 
@@ -74,10 +206,50 @@ impl AuthMethodImpl for GithubAuthMethod {
         Ok(())
     }
 
-    async fn authenticate(&self, _credentials: &AuthCredentials) -> AuthMethodResult<AuthResult> {
-        // GitHub authentication requires OAuth flow
-        // This method should not be called directly for GitHub
-        Err(AuthMethodError::MethodNotSupported)
+    async fn authenticate(&self, credentials: &AuthCredentials) -> AuthMethodResult<AuthResult> {
+        match credentials {
+            AuthCredentials::OAuth2 { provider, code } if provider == "github" => {
+                // Exchange code for token
+                let token_response = self.exchange_code_for_token(code, "").await?;
+                
+                if let Some(access_token) = token_response.access_token {
+                    // Get user info
+                    let user_info = self.get_user_info(&access_token).await?;
+                    
+                    // Validate user access
+                    let has_access = self.validate_user_access(&user_info, &access_token).await?;
+                    
+                    if has_access {
+                        Ok(AuthResult {
+                            authenticated: true,
+                            user_info: Some(UserInfo {
+                                id: Uuid::new_v4(), // Generate new UUID for user
+                                username: user_info.login.clone(),
+                                email: user_info.email.clone(),
+                                display_name: user_info.name.clone(),
+                                groups: vec![], // Could populate with orgs/teams
+                                metadata: HashMap::new(),
+                                created_at: Utc::now(),
+                                last_login: Some(Utc::now()),
+                            }),
+                            policies: vec![],
+                            lease_duration: None,
+                            renewable: Some(false), // GitHub tokens are not renewable through this interface
+                            token: Some(access_token),
+                            accessor: None,
+                            metadata: HashMap::new(),
+                            mfa_required: false,
+                            mfa_methods: vec![],
+                        })
+                    } else {
+                        Err(AuthMethodError::AccessDenied)
+                    }
+                } else {
+                    Err(AuthMethodError::AuthenticationFailed("Failed to obtain access token".to_string()))
+                }
+            }
+            _ => Err(AuthMethodError::InvalidCredentials("Invalid credentials for GitHub authentication".to_string())),
+        }
     }
 
     async fn validate_token(&self, _token: &str) -> AuthMethodResult<UserInfo> {
@@ -151,4 +323,5 @@ pub struct GithubTeam {
     pub description: Option<String>,
     pub privacy: String,
     pub url: String,
+    pub organization: GithubOrg,
 }

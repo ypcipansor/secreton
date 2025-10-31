@@ -4,13 +4,13 @@ use super::types::{SdkConfig, SdkOperationResult, SdkResponse, SdkSecret, Secret
 
 /// JavaScript/TypeScript SDK client implementation
 pub struct JsSdkClient {
-    config: SdkConfig,
+    _config: SdkConfig,
 }
 
 impl JsSdkClient {
     /// Create a new JavaScript SDK client
     pub fn new(config: SdkConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 }
 

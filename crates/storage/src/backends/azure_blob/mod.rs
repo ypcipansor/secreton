@@ -145,7 +145,7 @@ impl AzureBlobConfig {
 /// - Handles errors appropriately with StorageError types
 ///
 pub struct AzureBlobStorage {
-    config: AzureBlobConfig,
+    _config: AzureBlobConfig,
     container_client: Arc<ContainerClient>,
 }
 
@@ -262,7 +262,7 @@ impl AzureBlobStorage {
         })?;
 
         Ok(Self {
-            config,
+            _config: config,
             container_client: Arc::new(container_client),
         })
     }

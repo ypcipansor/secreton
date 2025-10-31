@@ -121,12 +121,8 @@ pub struct TransitKey {
 /// Individual key version with cryptographic material
 #[derive(Debug)]
 struct KeyVersion {
-    /// Version number
-    version: u32,
     /// Key material (zeroized on drop)
     material: KeyMaterial,
-    /// Creation time
-    created_at: DateTime<Utc>,
 }
 
 /// Cryptographic key material (zeroized on drop)
@@ -595,7 +591,7 @@ impl TransitKey {
 
 impl KeyVersion {
     /// Create new key version with random key material
-    fn new(version: u32, key_type: &KeyType) -> CryptoResult<Self> {
+    fn new(_version: u32, key_type: &KeyType) -> CryptoResult<Self> {
         let material = match key_type {
             KeyType::Aes256Gcm => {
                 let mut key_bytes = Box::new([0u8; 32]);
@@ -638,9 +634,7 @@ impl KeyVersion {
         };
 
         Ok(Self {
-            version,
             material,
-            created_at: Utc::now(),
         })
     }
 }

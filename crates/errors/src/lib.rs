@@ -9,7 +9,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use secreton_common::{ApiResponse, Result as CommonResult};
-use serde::Serialize;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -495,14 +494,6 @@ impl From<secreton_crypto::advanced_key_manager::KeyManagerError> for SecretonEr
             }
         }
     }
-}
-
-/// Error response structure for JSON API
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-    category: String,
-    timestamp: String,
 }
 
 /// Utility functions for error handling

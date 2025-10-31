@@ -24,7 +24,7 @@ pub struct CassandraConfig {
 
 /// Cassandra storage backend implementation
 pub struct CassandraStorage {
-    config: CassandraConfig,
+    _config: CassandraConfig,
     // In a real implementation, you'd use the Cassandra driver
     // For now, we'll use a mock implementation
 }
@@ -113,7 +113,7 @@ impl CassandraStorage {
         // 3. Create the keyspace and table if they don't exist
 
         // For now, return a mock implementation
-        Ok(Self { config })
+        Ok(Self { _config: config })
     }
 }
 

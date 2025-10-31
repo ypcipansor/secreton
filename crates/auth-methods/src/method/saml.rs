@@ -13,7 +13,7 @@ pub struct SamlAuthMethod {
     enabled: bool,
     config: Option<AuthMethod>,
     saml_config: Option<SamlConfig>,
-    http_client: Client,
+    _http_client: Client,
 }
 
 impl SamlAuthMethod {
@@ -22,7 +22,7 @@ impl SamlAuthMethod {
             enabled: false,
             config: None,
             saml_config: None,
-            http_client: Client::new(),
+            _http_client: Client::new(),
         }
     }
 

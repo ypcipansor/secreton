@@ -756,6 +756,11 @@ impl KmipClient {
         self
     }
 
+    /// Get the server endpoint
+    pub fn server_endpoint(&self) -> &str {
+        &self.server_endpoint
+    }
+
     /// Query server capabilities
     pub async fn query(&self) -> CryptoResult<HashMap<String, String>> {
         // Simplified implementation - real KMIP client would implement full protocol

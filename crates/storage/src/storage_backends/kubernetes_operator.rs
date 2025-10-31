@@ -85,7 +85,7 @@ pub struct RotationSchedule {
 
 /// Kubernetes Secrets Operator
 pub struct KubernetesOperator {
-    config: Arc<RwLock<KubernetesConfig>>,
+    _config: Arc<RwLock<KubernetesConfig>>,
     operator_config: Arc<RwLock<SecretOperatorConfig>>,
     secrets: Arc<RwLock<HashMap<String, K8sSecret>>>,
     injections: Arc<RwLock<Vec<PodInjection>>>,
@@ -95,7 +95,7 @@ pub struct KubernetesOperator {
 impl KubernetesOperator {
     pub fn new(config: KubernetesConfig, operator_config: SecretOperatorConfig) -> Self {
         Self {
-            config: Arc::new(RwLock::new(config)),
+            _config: Arc::new(RwLock::new(config)),
             operator_config: Arc::new(RwLock::new(operator_config)),
             secrets: Arc::new(RwLock::new(HashMap::new())),
             injections: Arc::new(RwLock::new(Vec::new())),

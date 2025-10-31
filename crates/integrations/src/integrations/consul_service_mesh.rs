@@ -117,7 +117,7 @@ pub struct ServiceInstance {
 
 /// Consul Service Mesh
 pub struct ConsulServiceMesh {
-    config: Arc<RwLock<ConsulConfig>>,
+    _config: Arc<RwLock<ConsulConfig>>,
     services: Arc<RwLock<HashMap<String, ServiceRegistration>>>,
     intentions: Arc<RwLock<HashMap<String, ServiceIntention>>>,
     service_health: Arc<RwLock<HashMap<String, ServiceHealth>>>,
@@ -126,7 +126,7 @@ pub struct ConsulServiceMesh {
 impl ConsulServiceMesh {
     pub fn new(config: ConsulConfig) -> Self {
         Self {
-            config: Arc::new(RwLock::new(config)),
+            _config: Arc::new(RwLock::new(config)),
             services: Arc::new(RwLock::new(HashMap::new())),
             intentions: Arc::new(RwLock::new(HashMap::new())),
             service_health: Arc::new(RwLock::new(HashMap::new())),

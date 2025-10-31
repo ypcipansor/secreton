@@ -27,7 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.35", features = ["full"] }
 
 # Web framework
-axum = "0.7"
+axum = "0.8.6"
 
 # Templates and static files
 rust-embed = "8.0"
