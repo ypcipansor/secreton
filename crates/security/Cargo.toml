@@ -29,6 +29,9 @@ secreton-errors.workspace = true
 # Cryptography
 secreton-crypto.workspace = true
 
+# Random number generation
+rand.workspace = true
+
 # Storage
 secreton-storage.workspace = true
 

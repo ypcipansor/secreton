@@ -119,24 +119,65 @@ fn validate_cached_certificate(
     allowed_subjects: &[String],
 ) -> CertificateValidation {
     // Check certificate validity period
-    // TODO: Implement proper time-based validation when time crate versions are aligned
-    // For now, assume certificates are valid if they have valid date ranges
+    let now = chrono::Utc::now();
     let not_before = cert.validity().not_before.to_datetime();
     let not_after = cert.validity().not_after.to_datetime();
 
-    // Basic check: ensure not_after is after not_before
-    if not_after <= not_before {
+    // Convert time types properly
+    let not_before_chrono = chrono::DateTime::<chrono::Utc>::from_timestamp(
+        not_before.unix_timestamp(),
+        0
+    ).unwrap();
+    let not_after_chrono = chrono::DateTime::<chrono::Utc>::from_timestamp(
+        not_after.unix_timestamp(),
+        0
+    ).unwrap();
+
+    // Check if certificate is not yet valid
+    if now < not_before_chrono {
         warn!(
-            "Certificate has invalid validity period: not_before={}, not_after={}",
-            not_before, not_after
+            "Certificate is not yet valid: current={}, not_before={}",
+            now, not_before_chrono
         );
         return CertificateValidation {
             valid: false,
-            subject: cert.subject().to_string().into(),
-            issuer: cert.issuer().to_string().into(),
+            subject: Some(cert.subject().to_string()),
+            issuer: Some(cert.issuer().to_string()),
             serial_number: Some(hex::encode(cert.raw_serial())),
-            not_before: Some(not_before.to_string()),
-            not_after: Some(not_after.to_string()),
+            not_before: Some(not_before_chrono.to_string()),
+            not_after: Some(not_after_chrono.to_string()),
+        };
+    }
+
+    // Check if certificate has expired
+    if now > not_after_chrono {
+        warn!(
+            "Certificate has expired: current={}, not_after={}",
+            now, not_after_chrono
+        );
+        return CertificateValidation {
+            valid: false,
+            subject: Some(cert.subject().to_string()),
+            issuer: Some(cert.issuer().to_string()),
+            serial_number: Some(hex::encode(cert.raw_serial())),
+            not_before: Some(not_before_chrono.to_string()),
+            not_after: Some(not_after_chrono.to_string()),
+        };
+    }
+
+    // Basic check: ensure not_after is after not_before
+    if not_after_chrono <= not_before_chrono {
+        warn!(
+            "Certificate has invalid validity period: not_before={}, not_after={}",
+            not_before_chrono, not_after_chrono
+        );
+        return CertificateValidation {
+            valid: false,
+            subject: Some(cert.subject().to_string()),
+            issuer: Some(cert.issuer().to_string()),
+            serial_number: Some(hex::encode(cert.raw_serial())),
+            not_before: Some(not_before_chrono.to_string()),
+            not_after: Some(not_after_chrono.to_string()),
         };
     }
 
@@ -154,8 +195,8 @@ fn validate_cached_certificate(
         subject: Some(subject_str),
         issuer: Some(cert.issuer().to_string()),
         serial_number: Some(hex::encode(cert.raw_serial())),
-        not_before: Some(not_before.to_string()),
-        not_after: Some(not_after.to_string()),
+        not_before: Some(not_before_chrono.to_string()),
+        not_after: Some(not_after_chrono.to_string()),
     }
 }
 

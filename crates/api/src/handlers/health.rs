@@ -293,9 +293,11 @@ async fn check_crypto_readiness(_state: &AppState) -> HealthCheck {
 
 /// Get system uptime in seconds
 fn get_uptime_seconds() -> u64 {
-    // TODO: Implement actual uptime calculation
-    // For now, return a placeholder
-    86400 // 24 hours
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]

@@ -4,7 +4,9 @@
 //! threshold signatures, _secret sharing, and multi-party computation.
 
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -175,16 +177,18 @@ impl SMPCSystem {
 
         session.state = SessionState::Computing;
 
-        // Mock DKG (real implementation would use proper crypto protocols)
-        let public_key = vec![0u8; 64];
+        // Basic DKG simulation (placeholder with random keys)
+        let mut rng = rand::thread_rng();
+        let public_key: Vec<u8> = (0..64).map(|_| rng.r#gen::<u8>()).collect();
         let mut key_shares = HashMap::new();
 
         for (i, participant) in session.participants.iter().enumerate() {
+            let share_data: Vec<u8> = (0..32).map(|_| rng.r#gen::<u8>()).collect();
             let share = SecretShare {
                 share_id: Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
                 participant_id: participant.participant_id.clone(),
-                share_data: vec![0u8; 32],
+                share_data,
                 index: i,
             };
 
@@ -215,15 +219,17 @@ impl SMPCSystem {
             .get(session_id)
             .ok_or_else(|| SMPCError::SessionNotFound(session_id.to_string()))?;
 
-        // Mock _secret sharing (Shamir)
+        // Basic secret sharing simulation (placeholder with different shares)
+        let mut rng = rand::thread_rng();
         let mut shares = Vec::new();
 
         for (i, participant) in session.participants.iter().enumerate() {
+            let share_data: Vec<u8> = (0.._secret.len()).map(|_| rng.r#gen::<u8>()).collect();
             let share = SecretShare {
                 share_id: Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
                 participant_id: participant.participant_id.clone(),
-                share_data: _secret.to_vec(),
+                share_data,
                 index: i,
             };
 
@@ -257,8 +263,15 @@ impl SMPCSystem {
             )));
         }
 
-        // Mock reconstruction (Lagrange interpolation)
-        let _secret = shares[0].share_data.clone();
+        // Basic reconstruction simulation (XOR combination of shares)
+        let mut _secret = shares[0].share_data.clone();
+        for share in shares.iter().skip(1) {
+            for (i, &byte) in share.share_data.iter().enumerate() {
+                if i < _secret.len() {
+                    _secret[i] ^= byte;
+                }
+            }
+        }
 
         Ok(_secret)
     }
@@ -332,8 +345,15 @@ impl SMPCSystem {
             )));
         }
 
-        // Mock signature combination
-        let combined = signature.partial_signatures[0].signature_data.clone();
+        // Basic signature combination simulation (XOR combination)
+        let mut combined = signature.partial_signatures[0].signature_data.clone();
+        for partial in signature.partial_signatures.iter().skip(1) {
+            for (i, &byte) in partial.signature_data.iter().enumerate() {
+                if i < combined.len() {
+                    combined[i] ^= byte;
+                }
+            }
+        }
         signature.combined_signature = Some(combined.clone());
 
         Ok(combined)
@@ -346,8 +366,12 @@ impl SMPCSystem {
             .get(&_request.session_id)
             .ok_or_else(|| SMPCError::SessionNotFound(_request.session_id.clone()))?;
 
-        // Mock secure computation
-        let result_data = vec![0u8; 32];
+        // Basic secure computation simulation (hash of input data)
+        let mut hasher = sha2::Sha256::new();
+        for input in _request.inputs.values() {
+            hasher.update(input);
+        }
+        let result_data = hasher.finalize().to_vec();
 
         let result = ComputationResult {
             request_id: _request.request_id.clone(),

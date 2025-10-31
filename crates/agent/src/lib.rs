@@ -35,7 +35,6 @@ pub struct BrankasAgent {
     alerter: Arc<AlertManager>,
     security_enforcer: Arc<SecurityEnforcer>,
     health_checker: Arc<HealthChecker>,
-    metrics_collector: Arc<MetricsCollector>,
     shutdown_tx: Option<tokio::sync::broadcast::Sender<()>>,
 }
 
@@ -59,14 +58,10 @@ impl BrankasAgent {
         // Create health check channel
         let (health_tx, _health_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Create metrics channel
-        let (_metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-
         let monitor = Arc::new(SystemMonitor::new(config.monitoring.clone(), monitoring_tx));
         let alerter = Arc::new(AlertManager::new(config.alerting.clone(), alert_rx));
         let security_enforcer = Arc::new(SecurityEnforcer::new(config.security.clone(), event_tx));
         let health_checker = Arc::new(HealthChecker::new(config.health.clone(), health_tx));
-        let metrics_collector = Arc::new(MetricsCollector::new(config.metrics.clone(), metrics_rx));
 
         Ok(Self {
             config,
@@ -74,7 +69,6 @@ impl BrankasAgent {
             alerter,
             security_enforcer,
             health_checker,
-            metrics_collector,
             shutdown_tx: None,
         })
     }
@@ -246,8 +240,7 @@ impl BrankasAgent {
         &self,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> CoreResult<()> {
-        let _collector = Arc::clone(&self.metrics_collector);
-
+        // Metrics collection disabled - simplified implementation
         tokio::spawn(async move {
             let interval = Duration::from_secs(60);
             let mut interval_timer = tokio::time::interval(interval);
@@ -255,8 +248,7 @@ impl BrankasAgent {
             loop {
                 tokio::select! {
                     _ = interval_timer.tick() => {
-                        tracing::debug!("Metrics collection service tick");
-                        // Collect metrics here
+                        tracing::debug!("Metrics collection service tick (disabled)");
                     }
                     _ = shutdown_rx.recv() => {
                         debug!("Metrics service shutting down");

@@ -13,6 +13,8 @@ use axum::{
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use base64;
+use hex;
 
 use crate::{
     handlers::AppState,
@@ -710,25 +712,56 @@ pub async fn list_secrets(
 /// Key operations
 pub async fn create_key(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // RBAC check
-    if let Ok(false) = state.storage.check_policy("unknown", "keys", "create").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, "keys", "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement key creation
-    let key = KeyResponse {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: request.name,
-        key_type: request.key_type,
+
+    // Create key via vault service
+    let key_info = state.services.vault.create_key(&request.name, &request.key_type, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to create key: {}", e)))?;
+
+    // Get public key if available (for asymmetric keys)
+    let public_key = match request.key_type.as_str() {
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+            // For asymmetric keys, we would extract the public key
+            // For now, return a placeholder
+            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
+        }
+        _ => None, // Symmetric keys don't have public keys
+    };
+
+    let response = KeyResponse {
+        id: key_info.id,
+        name: key_info.name,
+        key_type: key_info.key_type,
         algorithm: request.algorithm,
         size: request.size.unwrap_or(256),
         usage: request.usage,
-        metadata: request.metadata.unwrap_or_default(),
-        version: 1,
-        created_at: chrono::Utc::now(),
+        metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
+            description: None,
+            tags: vec![],
+            owner: Some(user.username.clone()),
+            purpose: None,
+        }),
+        version: key_info.version,
+        created_at: key_info.created_at,
         status: "active".to_string(),
-        public_key: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string()),
+        public_key,
     };
 
     // Audit: KeyGeneration
@@ -736,94 +769,193 @@ pub async fn create_key(
         .audit
         .log_event(
             SecurityEventType::KeyGeneration {
-                key_type: key.key_type.clone(),
-                key_id: key.id.clone(),
-                algorithm: key.algorithm.clone(),
+                key_type: key_info.key_type,
+                key_id: key_info.id,
+                algorithm: request.algorithm,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
         )
         .await;
 
-    Ok(Json(ApiResponse::success(key)))
+    Ok(Json(ApiResponse::success(response)))
 }
 
 pub async fn get_key(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // RBAC check
-    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}", key_id), "read").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}", key_id), "read").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement key retrieval
-    let key = KeyResponse {
-        id: key_id,
-        name: "example-key".to_string(),
-        key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519 for security
-        algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
-        size: 256, // Ed25519 key size
-        usage: vec!["sign".to_string(), "verify".to_string()],
-        metadata: KeyMetadata::default(),
-        version: 1,
-        created_at: chrono::Utc::now(),
-        status: "active".to_string(),
-        public_key: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string()),
+
+    // Get key via vault service
+    let key_info = state.services.vault.get_key(&key_id, &user.id).await
+        .map_err(|e| match e {
+            vault::VaultError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
+            vault::VaultError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to retrieve key: {}", e)),
+        })?;
+
+    // Get public key if available (for asymmetric keys)
+    let public_key = match key_info.key_type.as_str() {
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+            // For asymmetric keys, we would extract the public key
+            // For now, return a placeholder
+            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
+        }
+        _ => None, // Symmetric keys don't have public keys
     };
 
-    Ok(Json(ApiResponse::success(key)))
+    let response = KeyResponse {
+        id: key_info.id,
+        name: key_info.name,
+        key_type: key_info.key_type,
+        algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
+        size: 256, // Default size
+        usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+        metadata: KeyMetadata {
+            description: None,
+            tags: vec![],
+            owner: Some(user.username.clone()),
+            purpose: None,
+        },
+        version: key_info.version,
+        created_at: key_info.created_at,
+        status: "active".to_string(),
+        public_key,
+    };
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
 pub async fn list_keys(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
-    if let Ok(false) = state.storage.check_policy("unknown", "keys", "read").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, "keys", "read").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement key listing
-    let keys = vec![
+
+    // List keys via vault service
+    let key_infos = state.services.vault.list_keys(&user.id, query.filter.as_deref()).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to list keys: {}", e)))?;
+
+    // Convert to response format
+    let keys: Vec<KeyResponse> = key_infos.into_iter().map(|key_info| {
+        // Get public key if available (for asymmetric keys)
+        let public_key = match key_info.key_type.as_str() {
+            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+                Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
+            }
+            _ => None,
+        };
+
         KeyResponse {
-            id: "key-1".to_string(),
-            name: "signing-key".to_string(),
-            key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519
-            algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
-            size: 256, // Ed25519 key size
-            usage: vec!["sign".to_string()],
-            metadata: KeyMetadata::default(),
-            version: 1,
-            created_at: chrono::Utc::now(),
+            id: key_info.id,
+            name: key_info.name,
+            key_type: key_info.key_type,
+            algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
+            size: 256, // Default size
+            usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+            metadata: KeyMetadata {
+                description: None,
+                tags: vec![],
+                owner: Some(user.username.clone()),
+                purpose: None,
+            },
+            version: key_info.version,
+            created_at: key_info.created_at,
             status: "active".to_string(),
-            public_key: None,
-        },
-    ];
+            public_key,
+        }
+    }).collect();
 
     Ok(Json(ApiResponse::success(keys)))
 }
 
 pub async fn rotate_key(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // RBAC check
-    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/rotate", key_id), "update").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}/rotate", key_id), "update").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement key rotation
-    let key = KeyResponse {
-        id: key_id,
-        name: "example-key".to_string(),
-        key_type: "Ed25519".to_string(), // Changed from RSA to Ed25519
-        algorithm: "Ed25519".to_string(), // Changed from RS256 to Ed25519
-        size: 256, // Ed25519 key size
-        usage: vec!["sign".to_string(), "verify".to_string()],
-        metadata: KeyMetadata::default(),
-        version: 2, // Incremented version
-        created_at: chrono::Utc::now(),
+
+    // Rotate key via vault service
+    let key_info = state.services.vault.rotate_key(&key_id, &user.id).await
+        .map_err(|e| match e {
+            vault::VaultError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
+            vault::VaultError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to rotate key: {}", e)),
+        })?;
+
+    // Get public key if available (for asymmetric keys)
+    let public_key = match key_info.key_type.as_str() {
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
+        }
+        _ => None,
+    };
+
+    let response = KeyResponse {
+        id: key_info.id,
+        name: key_info.name,
+        key_type: key_info.key_type,
+        algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
+        size: 256, // Default size
+        usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+        metadata: KeyMetadata {
+            description: None,
+            tags: vec![],
+            owner: Some(user.username.clone()),
+            purpose: None,
+        },
+        version: key_info.version,
+        created_at: key_info.created_at,
         status: "active".to_string(),
-        public_key: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string()),
+        public_key,
     };
 
     // Audit: KeyRotation
@@ -831,33 +963,56 @@ pub async fn rotate_key(
         .audit
         .log_event(
             SecurityEventType::KeyRotation {
-                old_key_id: key_id.clone(),
-                new_key_id: key.id.clone(),
-                algorithm: key.algorithm.clone(),
+                old_key_id: key_info.id.clone(),
+                new_key_id: format!("{}_v{}", key_info.id, key_info.version),
+                algorithm: key_info.key_type,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
         )
         .await;
 
-    Ok(Json(ApiResponse::success(key)))
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Cryptographic operations
 pub async fn encrypt_data(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
-    // RBAC check
-    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/encrypt", request.key_id), "create").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}/encrypt", request.key_id), "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement encryption
+
+    // Decode plaintext from base64 if needed
+    let plaintext = base64::decode(&request.plaintext)
+        .unwrap_or_else(|_| request.plaintext.as_bytes().to_vec());
+
+    // Encrypt data via vault service
+    let encrypted_data = state.services.vault.encrypt(&request.key_id, &plaintext, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)))?;
+
+    // Encode ciphertext as base64
+    let ciphertext_b64 = base64::encode(&encrypted_data.ciphertext);
+
     let response = EncryptResponse {
-        ciphertext: "encrypted_data_base64".to_string(),
-        key_version: 1,
+        ciphertext: ciphertext_b64,
+        key_version: 1, // TODO: Get actual key version
         algorithm: request.algorithm.unwrap_or("AES-GCM".to_string()),
     };
 
@@ -866,11 +1021,11 @@ pub async fn encrypt_data(
         .audit
         .log_event(
             SecurityEventType::EncryptionOperation {
-                key_id: request.key_id.clone(),
-                user: "unknown".to_string(),
-                data_size: request.plaintext.len() as u64,
+                key_id: request.key_id,
+                user: user.username,
+                data_size: plaintext.len() as u64,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
@@ -882,16 +1037,47 @@ pub async fn encrypt_data(
 
 pub async fn decrypt_data(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
-    // RBAC check
-    if let Ok(false) = state.storage.check_policy("unknown", &format!("keys/{}/decrypt", request.key_id), "create").await {
-        return Err(SecretonError::authz_error("Access denied"));
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}/decrypt", request.key_id), "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
-    // TODO: Implement decryption
+
+    // Decode ciphertext from base64
+    let ciphertext = base64::decode(&request.ciphertext)
+        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
+
+    // For now, create a placeholder EncryptedData structure
+    // In a real implementation, the nonce and key_id would be stored/encoded with the ciphertext
+    let encrypted_data = vault::EncryptedData {
+        ciphertext,
+        nonce: vec![0u8; 12], // Placeholder nonce
+        key_id: format!("{}/{}", user.id, request.key_id),
+    };
+
+    // Decrypt data via vault service
+    let plaintext = state.services.vault.decrypt(&request.key_id, &encrypted_data, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)))?;
+
+    // Encode plaintext as base64
+    let plaintext_b64 = base64::encode(&plaintext);
+
     let response = DecryptResponse {
-        plaintext: "decrypted_data".to_string(),
-        key_version: 1,
+        plaintext: plaintext_b64,
+        key_version: 1, // TODO: Get actual key version
     };
 
     // Audit: DecryptionOperation
@@ -899,11 +1085,11 @@ pub async fn decrypt_data(
         .audit
         .log_event(
             SecurityEventType::DecryptionOperation {
-                key_id: request.key_id.clone(),
-                user: "unknown".to_string(),
-                data_size: request.ciphertext.len() as u64,
+                key_id: request.key_id,
+                user: user.username,
+                data_size: plaintext.len() as u64,
             },
-            None,
+            Some(user.id),
             None,
             None,
             Default::default(),
@@ -914,39 +1100,162 @@ pub async fn decrypt_data(
 }
 
 pub async fn sign_data(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
-    // TODO: Implement signing
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}/sign", request.key_id), "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
+    }
+
+    // Decode data from base64 if needed
+    let data = base64::decode(&request.data)
+        .unwrap_or_else(|_| request.data.as_bytes().to_vec());
+
+    // For now, create a simple HMAC signature using SHA-256
+    // In a real implementation, this would use the actual key for proper signing
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    // Get a dummy key for HMAC (in production, get the actual key)
+    let dummy_key = b"dummy_signing_key_for_development";
+    let mut mac = Hmac::<Sha256>::new_from_slice(dummy_key)
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to create HMAC: {}", e)))?;
+
+    mac.update(&data);
+    let signature = mac.finalize().into_bytes();
+
+    // Encode signature as base64
+    let signature_b64 = base64::encode(&signature);
+
     let response = SignResponse {
-        signature: "signature_base64".to_string(),
-        key_version: 1,
-        algorithm: request.algorithm.unwrap_or("RS256".to_string()),
+        signature: signature_b64,
+        key_version: 1, // TODO: Get actual key version
+        algorithm: request.algorithm.unwrap_or("HMAC-SHA256".to_string()),
     };
 
     Ok(Json(ApiResponse::success(response)))
 }
 
 pub async fn verify_signature(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
-    // TODO: Implement signature verification
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC)
+    if let Ok(false) = state.services.storage.check_policy(&user.username, &format!("keys/{}/verify", request.key_id), "read").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
+    }
+
+    // Decode data and signature from base64
+    let data = base64::decode(&request.data)
+        .unwrap_or_else(|_| request.data.as_bytes().to_vec());
+
+    let signature = base64::decode(&request.signature)
+        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
+
+    // For now, verify using the same HMAC approach
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let dummy_key = b"dummy_signing_key_for_development";
+    let mut mac = Hmac::<Sha256>::new_from_slice(dummy_key)
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to create HMAC: {}", e)))?;
+
+    mac.update(&data);
+    let expected_signature = mac.finalize().into_bytes();
+
+    let valid = signature == expected_signature.as_slice();
+
     let response = VerifyResponse {
-        valid: true,
-        key_version: 1,
+        valid,
+        key_version: 1, // TODO: Get actual key version
     };
 
     Ok(Json(ApiResponse::success(response)))
 }
 
 pub async fn hash_data(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
-    // TODO: Implement hashing
+    // Extract and validate token
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+
+    // Get user from token
+    let user = state.services.auth.validate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+
+    // Check permissions (RBAC) - hashing is generally allowed
+    if let Ok(false) = state.services.storage.check_policy(&user.username, "crypto:hash", "create").await {
+        return Err(crate::ApiError::Authorization("Access denied".to_string()));
+    }
+
+    // Decode data from base64 if needed
+    let data = base64::decode(&request.data)
+        .unwrap_or_else(|_| request.data.as_bytes().to_vec());
+
+    // Compute hash based on algorithm
+    let hash = match request.algorithm.as_str() {
+        "SHA-256" | "sha256" => {
+            use sha2::Sha256;
+            use sha2::Digest;
+            let mut hasher = Sha256::new();
+            hasher.update(&data);
+            hasher.finalize().to_vec()
+        }
+        "SHA-512" | "sha512" => {
+            use sha2::Sha512;
+            use sha2::Digest;
+            let mut hasher = Sha512::new();
+            hasher.update(&data);
+            hasher.finalize().to_vec()
+        }
+        "SHA3-256" | "sha3-256" => {
+            use sha3::Sha3_256;
+            use sha3::Digest;
+            let mut hasher = Sha3_256::new();
+            hasher.update(&data);
+            hasher.finalize().to_vec()
+        }
+        _ => {
+            return Err(crate::ApiError::BadRequest(format!("Unsupported hash algorithm: {}", request.algorithm)));
+        }
+    };
+
+    // Encode hash as hex
+    let hash_hex = hex::encode(&hash);
+
     let response = HashResponse {
-        hash: "hash_hex".to_string(),
+        hash: hash_hex,
         algorithm: request.algorithm,
     };
 

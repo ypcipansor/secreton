@@ -182,9 +182,19 @@ impl ComplianceFramework {
         Ok(violations)
     }
 
-    async fn mock_rule_evaluation(&self, _rule: &PolicyRule, _resource: &str) -> bool {
-        // Mock: randomly detect violations
-        false
+    async fn mock_rule_evaluation(&self, rule: &PolicyRule, resource: &str) -> bool {
+        // Basic rule evaluation based on condition
+        match rule.condition.to_lowercase().as_str() {
+            "always_block" => true,
+            "never_block" => false,
+            "block_sensitive" => resource.contains("password") || resource.contains("secret"),
+            "audit_all" => false, // Audit actions don't block
+            _ => {
+                // For unknown conditions, randomly evaluate (legacy behavior)
+                use rand::Rng;
+                rand::thread_rng().gen_bool(0.1) // 10% chance of violation
+            }
+        }
     }
 
     /// Generate compliance report

@@ -12,6 +12,7 @@ use axum::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use std::collections::HashMap;
 
 // Use canonical types from core
@@ -38,6 +39,53 @@ pub fn create_routes() -> Router<AppState> {
         .route("/oauth/:provider/callback", get(oauth_callback))
         .route("/sessions", get(list_sessions))
         .route("/sessions/:session_id", delete(revoke_session))
+}
+
+/// Basic TOTP validation function
+fn validate_totp_code(code: &str, secret: &str) -> bool {
+    if code.len() != 6 || !code.chars().all(|c| c.is_numeric()) {
+        return false;
+    }
+
+    let code_num = match code.parse::<u32>() {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+
+    // Get current time window (30 second intervals)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() / 30;
+
+    // Check current and adjacent time windows (±1)
+    for time_window in (now.saturating_sub(1))..=(now + 1) {
+        let expected_code = generate_hotp(secret.as_bytes(), time_window);
+        if expected_code == code_num {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Generate HOTP code
+fn generate_hotp(key: &[u8], counter: u64) -> u32 {
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+
+    let mut mac = Hmac::<Sha1>::new_from_slice(key).expect("HMAC can take key of any size");
+    mac.update(&counter.to_be_bytes());
+    let result = mac.finalize().into_bytes();
+
+    // Dynamic truncation
+    let offset = (result[19] & 0xf) as usize;
+    let code = ((result[offset] & 0x7f) as u32) << 24
+        | ((result[offset + 1] & 0xff) as u32) << 16
+        | ((result[offset + 2] & 0xff) as u32) << 8
+        | (result[offset + 3] & 0xff) as u32;
+
+    code % 1_000_000
 }
 
 #[cfg(test)]
@@ -442,8 +490,8 @@ pub async fn verify_mfa(
     // TODO: Integrate with proper MFA service and TOTP library
     let is_valid = match request.method.as_str() {
         "totp" => {
-            // Basic TOTP validation (placeholder - should use proper TOTP library)
-            request.code.len() == 6 && request.code.chars().all(|c| c.is_numeric())
+            // Basic TOTP validation using HMAC-SHA1
+            validate_totp_code(&request.code, &user.id) // Using user ID as secret for demo
         }
         _ => false,
     };

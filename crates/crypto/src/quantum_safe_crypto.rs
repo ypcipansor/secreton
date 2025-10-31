@@ -8,6 +8,7 @@ type CryptoResult<T> = Result<T, CryptoError>;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::collections::HashSet;
+use rand::Rng;
 
 /// Quantum-safe key types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,9 +73,10 @@ pub fn is_quantum_safe(algorithm: &str) -> bool {
 pub fn generate_key_pair(algorithm: QuantumSafeAlgorithm) -> CryptoResult<(Vec<u8>, Vec<u8>)> {
     match algorithm {
         QuantumSafeAlgorithm::XmssSha256 => {
-            // Placeholder for XMSS key generation
-            let public_key = vec![0u8; 64];
-            let private_key = vec![0u8; 128];
+            // Basic XMSS key generation (placeholder with random keys)
+            let mut rng = rand::thread_rng();
+            let public_key: Vec<u8> = (0..64).map(|_| rng.r#gen::<u8>()).collect();
+            let private_key: Vec<u8> = (0..128).map(|_| rng.r#gen::<u8>()).collect();
             Ok((public_key, private_key))
         }
         _ => Err(CryptoError::KeyGenerationFailed(format!(

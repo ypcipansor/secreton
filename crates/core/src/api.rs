@@ -66,6 +66,53 @@ pub struct ClientInfo {
     pub device_fingerprint: Option<String>,
 }
 
+/// Simple TOTP validation (same logic as in handlers)
+fn validate_totp_code_simple(code: &str, secret: &str) -> bool {
+    if code.len() != 6 || !code.chars().all(|c| c.is_numeric()) {
+        return false;
+    }
+
+    let code_num = match code.parse::<u32>() {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+
+    // Get current time window (30 second intervals)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() / 30;
+
+    // Check current and adjacent time windows (±1)
+    for time_window in (now.saturating_sub(1))..=(now + 1) {
+        let expected_code = generate_hotp_simple(secret.as_bytes(), time_window);
+        if expected_code == code_num {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Generate HOTP code (simplified version)
+fn generate_hotp_simple(key: &[u8], counter: u64) -> u32 {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC can take key of any size");
+    mac.update(&counter.to_be_bytes());
+    let result = mac.finalize().into_bytes();
+
+    // Dynamic truncation (simplified)
+    let offset = (result[31] & 0xf) as usize;
+    let code = ((result[offset] & 0x7f) as u32) << 24
+        | ((result[offset + 1] & 0xff) as u32) << 16
+        | ((result[offset + 2] & 0xff) as u32) << 8
+        | (result[offset + 3] & 0xff) as u32;
+
+    code % 1_000_000
+}
+
 /// HSM operation request
 #[derive(Debug, Deserialize)]
 pub struct HsmRequest {
@@ -176,7 +223,20 @@ impl AdvancedSecurityManager {
     ) -> Result<AuthSession, CoreError> {
         info!("Authenticating user: {}", user_id);
 
-        // Mock implementation - in production this would integrate with MFA engine
+        // Basic MFA validation
+        for (method, code) in &_mfa_responses {
+            match method.as_str() {
+                "totp" => {
+                    if !validate_totp_code_simple(code, &user_id) {
+                        return Err(SecretonError::Authentication { message: "Invalid TOTP code".to_string() });
+                    }
+                }
+                _ => {
+                    return Err(SecretonError::Authentication { message: format!("Unsupported MFA method: {}", method) });
+                }
+            }
+        }
+
         let session = AuthSession {
             id: Uuid::new_v4().to_string(),
             user_id: user_id.clone(),

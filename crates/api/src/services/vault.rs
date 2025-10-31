@@ -264,6 +264,9 @@ impl VaultService {
         let key_data = brankas_crypto::generate_key(algorithm)
             .map_err(|e| VaultError::Crypto(e))?;
 
+        // Generate unique key ID
+        let key_id = format!("key_{}", uuid::Uuid::new_v4().simple());
+
         // Store key metadata in storage backend
         let key_path = format!("keys/{}/{}", user_id, key_name);
         let key_metadata = serde_json::json!({
@@ -309,6 +312,209 @@ impl VaultService {
         })
     }
 
+    /// Get key information
+    pub async fn get_key(&self, key_id: &str, user_id: &str) -> Result<KeyInfo, VaultError> {
+        // Check permissions for key access
+        let has_permission = self.storage.check_policy(user_id, &format!("keys/{}", key_id), "read").await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to access key".to_string()));
+        }
+
+        // Retrieve key metadata from storage
+        let key_path = format!("keys/{}/{}", user_id, key_id);
+        let metadata_bytes = self.storage.retrieve(&key_path).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        let metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes)
+            .map_err(|e| VaultError::Internal(anyhow::anyhow!("Failed to deserialize key metadata: {}", e)))?;
+
+        // Extract key information
+        let name = metadata.get("key_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(key_id)
+            .to_string();
+
+        let key_type = metadata.get("key_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let version = metadata.get("version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as u32;
+
+        let created_at_str = metadata.get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&chrono::Utc::now().to_rfc3339());
+
+        let created_at = chrono::DateTime::parse_from_rfc3339(created_at_str)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now());
+
+        Ok(KeyInfo {
+            id: key_id.to_string(),
+            name,
+            key_type,
+            version,
+            created_at,
+        })
+    }
+
+    /// List keys for a user
+    pub async fn list_keys(&self, user_id: &str, filter: Option<&str>) -> Result<Vec<KeyInfo>, VaultError> {
+        // Check permissions for key listing
+        let has_permission = self.storage.check_policy(user_id, "keys", "read").await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to list keys".to_string()));
+        }
+
+        // List key metadata from storage
+        let keys_prefix = format!("keys/{}/", user_id);
+        let key_paths = self.storage.list(&keys_prefix).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        let mut keys = Vec::new();
+        for path in key_paths {
+            // Extract key name from path
+            if let Some(key_name) = path.strip_prefix(&keys_prefix) {
+                // Apply filter if provided
+                if let Some(filter_str) = filter {
+                    if !key_name.contains(filter_str) {
+                        continue;
+                    }
+                }
+
+                // Retrieve key metadata
+                match self.storage.retrieve(&path).await {
+                    Ok(metadata_bytes) => {
+                        match serde_json::from_slice::<serde_json::Value>(&metadata_bytes) {
+                            Ok(metadata) => {
+                                let key_id = metadata.get("key_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(key_name)
+                                    .to_string();
+
+                                let key_type = metadata.get("key_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+
+                                let version = metadata.get("version")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(1) as u32;
+
+                                let created_at_str = metadata.get("created_at")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(&chrono::Utc::now().to_rfc3339());
+
+                                let created_at = chrono::DateTime::parse_from_rfc3339(created_at_str)
+                                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                                    .unwrap_or_else(|_| chrono::Utc::now());
+
+                                keys.push(KeyInfo {
+                                    id: key_id,
+                                    name: key_name.to_string(),
+                                    key_type,
+                                    version,
+                                    created_at,
+                                });
+                            }
+                            Err(e) => {
+                                warn!("Failed to deserialize key metadata for {}: {}", path, e);
+                                continue;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to retrieve key metadata for {}: {}", path, e);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(keys)
+    }
+
+    /// Rotate a key (create new version)
+    pub async fn rotate_key(&self, key_id: &str, user_id: &str) -> Result<KeyInfo, VaultError> {
+        // Check permissions for key rotation
+        let has_permission = self.storage.check_policy(user_id, &format!("keys/{}", key_id), "update").await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        if !has_permission {
+            return Err(VaultError::PermissionDenied("No permission to rotate key".to_string()));
+        }
+
+        // Get current key metadata
+        let current_key = self.get_key(key_id, user_id).await?;
+
+        // Generate new key with same type
+        let algorithm = match current_key.key_type.as_str() {
+            "aes256-gcm" => brankas_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => brankas_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" => brankas_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => brankas_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => brankas_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => brankas_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => brankas_crypto::AlgorithmId::Ed25519,
+            _ => return Err(VaultError::InvalidOperation(format!("Unsupported key type: {}", current_key.key_type))),
+        };
+
+        // Generate new key data
+        let new_key_data = brankas_crypto::generate_key(algorithm)
+            .map_err(|e| VaultError::Crypto(e))?;
+
+        // Update metadata with new version
+        let new_version = current_key.version + 1;
+        let key_path = format!("keys/{}/{}", user_id, key_id);
+        let key_metadata = serde_json::json!({
+            "key_id": key_id,
+            "key_type": current_key.key_type,
+            "algorithm": algorithm,
+            "created_by": user_id,
+            "created_at": current_key.created_at.to_rfc3339(),
+            "version": new_version,
+            "rotated_at": chrono::Utc::now().to_rfc3339()
+        });
+
+        let metadata_bytes = serde_json::to_vec(&key_metadata)
+            .map_err(|e| VaultError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e)))?;
+
+        self.storage.store(&key_path, &metadata_bytes).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // Store new key data with version
+        let new_key_data_path = format!("key_data/{}/{}_v{}", user_id, key_id, new_version);
+        self.storage.store(&new_key_data_path, &new_key_data).await
+            .map_err(|e| VaultError::Storage(e))?;
+
+        // Log audit trail
+        let _ = self.audit.log_event(
+            brankas_core::audit::SecurityEventType::KeyRotation {
+                old_key_id: key_id.to_string(),
+                new_key_id: format!("{}_v{}", key_id, new_version),
+                algorithm: current_key.key_type,
+            },
+            Some(user_id.to_string()),
+            None,
+            None,
+            Default::default(),
+        ).await;
+
+        Ok(KeyInfo {
+            id: key_id.to_string(),
+            name: current_key.name,
+            key_type: current_key.key_type,
+            version: new_version,
+            created_at: chrono::Utc::now(),
+        })
+    }
+
     /// Encrypt data using a key
     pub async fn encrypt(
         &self,
@@ -326,9 +532,8 @@ impl VaultService {
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user_id, key_name);
-        let key_data = self.storage.get(&key_data_path).await
-            .map_err(|e| VaultError::Storage(e))?
-            .ok_or_else(|| VaultError::KeyNotFound { key_id: key_id.clone() })?;
+        let key_data = self.storage.retrieve(&key_data_path).await
+            .map_err(|e| VaultError::Storage(e))?;
 
         // Generate nonce/IV
         let nonce = brankas_crypto::generate_random_bytes(12)
@@ -337,6 +542,9 @@ impl VaultService {
         // Encrypt data
         let ciphertext = brankas_crypto::encrypt(&key_data, &nonce, plaintext, None)
             .map_err(|e| VaultError::Crypto(e))?;
+
+        // Create key ID for audit
+        let key_id = format!("{}/{}", user_id, key_name);
 
         // Log audit trail
         let _ = self.audit.log_event(
@@ -381,9 +589,8 @@ impl VaultService {
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user_id, key_name);
-        let key_data = self.storage.get(&key_data_path).await
-            .map_err(|e| VaultError::Storage(e))?
-            .ok_or_else(|| VaultError::KeyNotFound { key_id: expected_key_id.clone() })?;
+        let key_data = self.storage.retrieve(&key_data_path).await
+            .map_err(|e| VaultError::Storage(e))?;
 
         // Decrypt data
         let plaintext = brankas_crypto::decrypt(&key_data, &encrypted_data.nonce, &encrypted_data.ciphertext, None)
