@@ -109,29 +109,6 @@ impl TotpEngine {
             width = key.digits as usize
         ))
     }
-
-    /// Validate a TOTP code
-    async fn validate_totp(&self, path: &str, code: &str, skew: Option<i64>) -> SecretResult<bool> {
-        let keys = self.keys.read().await;
-        let key = keys
-            .get(path)
-            .ok_or_else(|| SecretError::SecretNotFound(format!("TOTP key not found: {}", path)))?;
-
-        let current_time = Utc::now().timestamp() as u64;
-        let skew = skew.unwrap_or(1); // Allow 1 period skew by default
-
-        // Check current time and surrounding periods
-        for offset in -skew..=skew {
-            let check_time = ((current_time as i64) + offset * (key.period as i64)) as u64;
-            let expected_code = self.generate_totp(key, check_time)?;
-
-            if expected_code == code {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
 }
 
 #[async_trait]

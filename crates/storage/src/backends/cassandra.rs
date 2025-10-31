@@ -36,9 +36,9 @@ pub struct CassandraTransaction {
 }
 
 enum CassandraOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl CassandraTransaction {
@@ -52,35 +52,35 @@ impl CassandraTransaction {
 
 #[async_trait]
 impl StorageTransaction for CassandraTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(CassandraOperation::Store(entry.clone()));
+            .push(CassandraOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(CassandraOperation::Update(entry.clone()));
+            .push(CassandraOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CassandraOperation::Delete(id));
+        self.operations.push(CassandraOperation::Delete(()));
         Ok(true)
     }
 

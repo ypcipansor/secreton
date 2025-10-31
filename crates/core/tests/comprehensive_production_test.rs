@@ -5,9 +5,6 @@
 
 #[cfg(test)]
 mod comprehensive_tests {
-    use serde_json::Value;
-    use std::collections::HashMap;
-    use std::sync::Arc;
     use tokio::time::{Duration, sleep};
 
     /// Test all secrets engines are properly registered and functional

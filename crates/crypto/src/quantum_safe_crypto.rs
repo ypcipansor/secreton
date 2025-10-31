@@ -118,7 +118,7 @@ pub fn verify(
             // Placeholder for XMSS verification
             // In a real implementation, this would verify the XMSS signature
             let hash = sha2::Sha256::digest(data);
-            Ok(signature == hash.as_slice())
+            Ok(signature == &hash[..])
         }
         _ => Err(CryptoError::VerificationFailed(format!(
             "Quantum-safe verification not yet implemented for: {:?}",

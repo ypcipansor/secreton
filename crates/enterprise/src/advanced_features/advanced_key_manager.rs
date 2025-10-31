@@ -33,8 +33,8 @@ pub enum KeyType {
     AES256,
     RSA2048,
     RSA4096,
-    ECDSA_P256,
-    ECDSA_P384,
+    EcdsaP256,
+    EcdsaP384,
     ED25519,
     X25519,
 }
@@ -155,8 +155,8 @@ impl AdvancedKeyManager {
             KeyType::AES256 => 32,
             KeyType::RSA2048 => 256,
             KeyType::RSA4096 => 512,
-            KeyType::ECDSA_P256 => 32,
-            KeyType::ECDSA_P384 => 48,
+            KeyType::EcdsaP256 => 32,
+            KeyType::EcdsaP384 => 48,
             KeyType::ED25519 => 32,
             KeyType::X25519 => 32,
         };
@@ -606,7 +606,7 @@ mod tests {
         };
 
         let key_id = manager
-            .generate_key(KeyType::ECDSA_P256, KeyPurpose::Signing, metadata)
+            .generate_key(KeyType::EcdsaP256, KeyPurpose::Signing, metadata)
             .await
             .unwrap();
 

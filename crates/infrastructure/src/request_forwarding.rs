@@ -459,9 +459,9 @@ impl RequestForwardingService {
             .ok_or_else(|| ForwardingError::NodeNotFound(node_id.to_string()))
     }
 
-    /// Simulate forwarding (placeholder for actual HTTP request)
+    /// Forward request to node (placeholder for actual HTTP request)
     async fn simulate_forward(&self, _address: &str, _method: &str, _path: &str) -> bool {
-        // In production, this would make an actual HTTP request
+        // In production, this would make an actual HTTP request using reqwest or similar
         // For now, simulate success
         true
     }

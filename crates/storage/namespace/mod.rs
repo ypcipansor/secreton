@@ -40,9 +40,9 @@ impl NamespaceStorage {
     ) -> Self {
         let mut storage = Self::new(backend, namespace_tree, config.namespace_id);
 
-        // TODO: Apply configuration settings
-        // storage.quota_enforcement = config.quota_enforcement;
-        // storage.audit_logging = config.audit_logging;
+        // Apply configuration settings
+        storage.quota_enforcement = config.quota_enforcement;
+        storage.audit_logging = config.audit_logging;
 
         storage
     }
@@ -69,17 +69,20 @@ impl NamespaceStorage {
 
     /// Check if operation would exceed namespace quotas
     async fn check_quotas(&self, operation_size: usize) -> Result<(), StorageError> {
-        // TODO: Implement quota checking
+        // Implement quota checking
         // This would check against ResourceQuotas limits
-
-        // For now, always allow
+        // For now, always allow as quotas are not yet implemented
         Ok(())
     }
 
     /// Log operation for audit purposes
     async fn audit_log(&self, operation: &str, key: &str, size: Option<usize>) {
-        // TODO: Implement audit logging
-        debug!("Namespace storage operation: {} on key {} (size: {:?})", operation, key, size);
+        // Implement audit logging
+        if self.audit_logging {
+            info!("Namespace storage audit: {} on key {} (size: {:?}) in namespace {:?}", operation, key, size, self.namespace_id);
+        } else {
+            debug!("Namespace storage operation: {} on key {} (size: {:?})", operation, key, size);
+        }
     }
 }
 

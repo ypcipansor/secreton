@@ -27,8 +27,8 @@ pub struct MongoDBConfig {
 
 /// MongoDB storage backend implementation
 pub struct MongoDBStorage {
-    config: MongoDBConfig,
-    client: Client,
+    _config: MongoDBConfig,
+    _client: Client,
     database: Database,
     collection: Collection<Document>,
 }
@@ -40,9 +40,9 @@ pub struct MongoDBTransaction {
 }
 
 enum MongoDBOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl MongoDBTransaction {
@@ -56,34 +56,34 @@ impl MongoDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for MongoDBTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MongoDBOperation::Store(entry.clone()));
+        self.operations.push(MongoDBOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(MongoDBOperation::Update(entry.clone()));
+            .push(MongoDBOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MongoDBOperation::Delete(id));
+        self.operations.push(MongoDBOperation::Delete(()));
         Ok(true)
     }
 
@@ -141,8 +141,8 @@ impl MongoDBStorage {
             })?;
 
         Ok(Self {
-            config,
-            client,
+            _config: config,
+            _client: client,
             database,
             collection,
         })

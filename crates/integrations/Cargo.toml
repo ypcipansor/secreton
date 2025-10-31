@@ -33,6 +33,7 @@ aws-sdk-iam.workspace = true
 aws-sdk-sts.workspace = true
 aws-sdk-dynamodb.workspace = true
 aws-sdk-s3.workspace = true
+aws-sdk-secretsmanager.workspace = true
 
 # Kubernetes (optional)
 #[cfg(feature = "kubernetes")]

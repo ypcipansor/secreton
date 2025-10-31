@@ -63,9 +63,9 @@ pub struct EtcdTransaction {
 }
 
 enum EtcdOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl EtcdTransaction {
@@ -79,33 +79,33 @@ impl EtcdTransaction {
 
 #[async_trait]
 impl StorageTransaction for EtcdTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(EtcdOperation::Store(entry.clone()));
+        self.operations.push(EtcdOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(EtcdOperation::Update(entry.clone()));
+        self.operations.push(EtcdOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(EtcdOperation::Delete(id));
+        self.operations.push(EtcdOperation::Delete(()));
         Ok(true)
     }
 

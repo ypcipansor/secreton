@@ -65,9 +65,9 @@ pub struct DynamoDBTransaction {
 }
 
 enum DynamoDBOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl DynamoDBTransaction {
@@ -81,35 +81,35 @@ impl DynamoDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for DynamoDBTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(DynamoDBOperation::Store(entry.clone()));
+            .push(DynamoDBOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(DynamoDBOperation::Update(entry.clone()));
+            .push(DynamoDBOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(DynamoDBOperation::Delete(id));
+        self.operations.push(DynamoDBOperation::Delete(()));
         Ok(true)
     }
 

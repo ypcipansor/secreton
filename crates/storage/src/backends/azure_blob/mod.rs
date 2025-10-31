@@ -156,9 +156,9 @@ pub struct AzureBlobTransaction {
 }
 
 enum AzureBlobOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl AzureBlobTransaction {
@@ -172,35 +172,35 @@ impl AzureBlobTransaction {
 
 #[async_trait]
 impl StorageTransaction for AzureBlobTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(AzureBlobOperation::Store(entry.clone()));
+            .push(AzureBlobOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(AzureBlobOperation::Update(entry.clone()));
+            .push(AzureBlobOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(AzureBlobOperation::Delete(id));
+        self.operations.push(AzureBlobOperation::Delete(()));
         Ok(true)
     }
 

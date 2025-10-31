@@ -11,6 +11,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::storage::secret::SecretStorage;
+
 /// Supported external secret management systems
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ExternalSystem {
@@ -210,6 +212,7 @@ pub struct SecretsSyncManager {
     sync_configs: RwLock<HashMap<String, SyncConfig>>,
     sync_status: RwLock<HashMap<String, SyncStatus>>,
     retry_manager: Arc<RetryManager>,
+    storage: Arc<dyn SecretStorage>,
 }
 
 /// Sync manager configuration
@@ -227,12 +230,13 @@ pub struct SyncManagerConfig {
 
 impl SecretsSyncManager {
     /// Create a new sync manager
-    pub fn new(config: SyncManagerConfig) -> Self {
+    pub fn new(config: SyncManagerConfig, storage: Arc<dyn SecretStorage>) -> Self {
         Self {
             clients: RwLock::new(HashMap::new()),
             sync_configs: RwLock::new(HashMap::new()),
             sync_status: RwLock::new(HashMap::new()),
             retry_manager: Arc::new(RetryManager::new(config.default_retry)),
+            storage,
         }
     }
 
@@ -341,12 +345,17 @@ impl SecretsSyncManager {
     ) -> Result<SyncResult> {
         match operation {
             SyncOperation::Create => {
-                // This would read the secret from Secreton storage
-                // For demonstration, we'll use dummy data
-                let data = b"secret_data";
+                // Read the secret from Secreton storage
+                let (secret_data, _version) = self.storage.get_latest_secret(secreton_path).await?
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: format!("secret {}", secreton_path),
+                    })?;
+
+                // Serialize the secret data to bytes
+                let data = serde_json::to_vec(&secret_data)?;
                 let metadata = HashMap::new();
 
-                let external_id = client.create_secret(secreton_path, data, &metadata).await?;
+                let external_id = client.create_secret(secreton_path, &data, &metadata).await?;
                 Ok(SyncResult {
                     operation: SyncOperation::Create,
                     success: true,
@@ -368,10 +377,17 @@ impl SecretsSyncManager {
                     });
                 }
 
-                let data = b"updated_secret_data";
+                // Read the updated secret from Secreton storage
+                let (secret_data, _version) = self.storage.get_latest_secret(secreton_path).await?
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: format!("secret {}", secreton_path),
+                    })?;
+
+                // Serialize the secret data to bytes
+                let data = serde_json::to_vec(&secret_data)?;
                 let metadata = HashMap::new();
 
-                client.update_secret(&status.external_id, data, &metadata).await?;
+                client.update_secret(&status.external_id, &data, &metadata).await?;
                 Ok(SyncResult {
                     operation: SyncOperation::Update,
                     success: true,

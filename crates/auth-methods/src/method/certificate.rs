@@ -323,13 +323,6 @@ impl CertAuth {
 mod tests {
     use super::*;
 
-    const TEST_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
-MIICljCCAX4CCQCKz8Vv3PuGmDANBgkqhkiG9w0BAQsFADANMQswCQYDVQQGEwJV
-UzAeFw0yNTAxMDEwMDAwMDBaFw0yNjAxMDEwMDAwMDBaMA0xCzAJBgNVBAYTAlVT
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyW4TXiOt+pRKlPNTuYMO
-kYiUa3bQHDn3sVPGWJOsNcTWvJNH4FQCR1234567890abcdefghijk
------END CERTIFICATE-----"#;
-
     #[tokio::test]
     async fn test_cert_auth_creation() {
         let _config = CertConfig::default();

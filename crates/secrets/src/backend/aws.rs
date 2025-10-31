@@ -6,16 +6,16 @@ use std::collections::HashMap;
 
 /// AWS backend for generating temporary credentials
 pub struct AwsBackend {
-    access_key: String,
-    secret_key: String,
+    _access_key: String,
+    _secret_key: String,
     region: String,
 }
 
 impl AwsBackend {
     pub fn new(access_key: String, secret_key: String, region: String) -> Self {
         Self {
-            access_key,
-            secret_key,
+            _access_key: access_key,
+            _secret_key: secret_key,
             region,
         }
     }

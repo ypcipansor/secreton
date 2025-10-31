@@ -43,12 +43,12 @@ impl SecurityLevel {
 
     /// Get security level from string
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
+        match s.to_lowercase().replace("-", "_").as_str() {
             "public" => Some(SecurityLevel::Public),
             "internal" => Some(SecurityLevel::Internal),
             "confidential" => Some(SecurityLevel::Confidential),
             "secret" => Some(SecurityLevel::Secret),
-            "top secret" | "top_secret" => Some(SecurityLevel::TopSecret),
+            "top_secret" => Some(SecurityLevel::TopSecret),
             _ => None,
         }
     }

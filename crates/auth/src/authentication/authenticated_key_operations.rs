@@ -122,9 +122,7 @@ pub enum KeyPermission {
 /// User _context from token
 #[derive(Debug, Clone)]
 struct UserContext {
-    user_id: String,
     username: String,
-    roles: Vec<String>,
     permissions: Vec<KeyPermission>,
 }
 
@@ -285,9 +283,7 @@ impl AuthenticatedKeyOperations {
         let permissions = self.load_permissions(&claims.roles).await;
 
         Ok(UserContext {
-            user_id: claims.sub,
             username: claims.username,
-            roles: claims.roles,
             permissions,
         })
     }
@@ -590,7 +586,7 @@ mod tests {
     use super::*;
 
     fn create_test_token(user_id: &str, username: &str) -> String {
-        use jsonwebtoken::{Algorithm, Header, encode};
+        use jsonwebtoken::{Header, encode};
 
         let jwt_secret = "test-jwt-secret-for-testing-purposes-only";
 

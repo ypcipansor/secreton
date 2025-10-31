@@ -8,17 +8,12 @@ use std::collections::HashMap;
 
 /// Go SDK client
 pub struct GoSdkClient {
-    config: SdkConfig,
-    http_client: String, // In real implementation, this would be an HTTP client
 }
 
 impl GoSdkClient {
     /// Create a new Go SDK client
-    pub fn new(config: SdkConfig) -> Self {
-        Self {
-            config,
-            http_client: "http.Client".to_string(),
-        }
+    pub fn new(_config: SdkConfig) -> Self {
+        Self {}
     }
 }
 

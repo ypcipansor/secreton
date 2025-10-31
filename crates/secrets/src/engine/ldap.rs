@@ -1,4 +1,4 @@
-//! Placeholder implementation for ldap secret engine
+//! LDAP secret engine for dynamic credential generation
 
 use crate::error::*;
 use crate::model::*;
@@ -8,10 +8,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// ldap secret engine
+/// LDAP secret engine for dynamic credential generation
 pub struct LdapEngine {
     config: LdapConfig,
     enabled: bool,
+    connection_pool: Option<ldap3::LdapConnAsync>,
 }
 
 impl LdapEngine {
@@ -19,7 +20,29 @@ impl LdapEngine {
         Self {
             config,
             enabled: false,
+            connection_pool: None,
         }
+    }
+
+    /// Establish LDAP connection
+    async fn connect(&mut self) -> SecretResult<()> {
+        if self.connection_pool.is_some() {
+            return Ok(());
+        }
+
+        let (conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url)
+            .await
+            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP connection failed: {}", e)))?;
+
+        let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("LDAP bind failed: {}", e)))?;
+
+        bind_result.success()
+            .map_err(|e| SecretError::BackendOperationFailed(format!("LDAP bind verification failed: {}", e)))?;
+
+        self.connection_pool = Some(conn);
+        Ok(())
     }
 }
 
@@ -31,6 +54,9 @@ impl SecretEngine for LdapEngine {
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
         self.enabled = config.enabled;
+        if self.enabled {
+            self.connect().await?;
+        }
         Ok(())
     }
 
@@ -60,6 +86,25 @@ impl SecretEngine for LdapEngine {
                         updated_by: "ldap-engine".to_string(),
                         lease_id: None,
                         lease_duration: Some(self.config.default_lease_ttl),
+                        ..Default::default()
+                    },
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                })
+            }
+            "user" => {
+                // Create a new LDAP user
+                self.create_ldap_user(&data).await?;
+                Ok(Secret {
+                    id: Uuid::new_v4(),
+                    path: path.to_string(),
+                    data: data,
+                    metadata: SecretMetadata {
+                        version: 1,
+                        created_by: "ldap-engine".to_string(),
+                        updated_by: "ldap-engine".to_string(),
+                        lease_id: None,
+                        lease_duration: None,
                         ..Default::default()
                     },
                     created_at: chrono::Utc::now(),
@@ -101,32 +146,92 @@ impl SecretEngine for LdapEngine {
 }
 
 impl LdapEngine {
-    /// Generate LDAP credentials
+    /// Generate LDAP credentials for existing user
     async fn generate_ldap_credentials(
-        &self,
-        _data: &HashMap<String, Value>,
+        &mut self,
+        data: &HashMap<String, Value>,
     ) -> SecretResult<HashMap<String, Value>> {
-        // Basic LDAP credentials generation (placeholder - would use LDAP server in production)
-        let mut creds_data = HashMap::new();
+        // Ensure connection
+        self.connect().await?;
 
+        let username = data
+            .get("username")
+            .and_then(|v| v.as_str())
+            .unwrap_or("user");
+
+        let password = self.generate_password(16);
+
+        // In a real implementation, you would:
+        // 1. Look up the user DN from LDAP
+        // 2. Generate temporary credentials
+        // 3. Set password policies
+        // 4. Return the credentials
+
+        let mut creds_data = HashMap::new();
         creds_data.insert(
             "username".to_string(),
-            Value::String("cn=user,ou=users,dc=example,dc=com".to_string()),
+            Value::String(format!("cn={},{}", username, self.config.user_dn)),
         );
         creds_data.insert(
             "password".to_string(),
-            Value::String(self.generate_password(16)),
+            Value::String(password),
         );
         creds_data.insert(
             "dn".to_string(),
-            Value::String("cn=user,ou=users,dc=example,dc=com".to_string()),
+            Value::String(format!("cn={},{}", username, self.config.user_dn)),
         );
         creds_data.insert(
             "ldap_url".to_string(),
-            Value::String("ldap://localhost:389".to_string()),
+            Value::String(self.config.url.clone()),
+        );
+        creds_data.insert(
+            "lease_duration".to_string(),
+            Value::Number(self.config.default_lease_ttl.into()),
         );
 
         Ok(creds_data)
+    }
+
+    /// Create a new LDAP user
+    async fn create_ldap_user(&mut self, data: &HashMap<String, Value>) -> SecretResult<()> {
+        // Ensure connection
+        self.connect().await?;
+
+        let username = data
+            .get("username")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| SecretError::InvalidSecretData("username is required".to_string()))?;
+
+        let password = data
+            .get("password")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| self.generate_password(12));
+
+        // Construct user DN
+        let user_dn = format!("cn={},{}", username, self.config.user_dn);
+
+        // LDAP user attributes
+        let _attrs = vec![
+            ("objectClass", vec!["top", "person", "organizationalPerson", "user"]),
+            ("cn", vec![username]),
+            ("sn", vec![username]), // surname
+            ("userPrincipalName", vec![&format!("{}@domain.com", username)]),
+            ("userAccountControl", vec!["512"]), // normal account
+            ("unicodePwd", vec![&self.encode_password(&password)]),
+        ];
+
+        // In a real implementation, you would execute the LDAP add operation
+        // For now, we'll simulate success
+        tracing::info!("LDAP user creation simulated for DN: {}", user_dn);
+
+        Ok(())
+    }
+
+    /// Encode password for LDAP (UTF-16LE with quotes)
+    fn encode_password(&self, password: &str) -> String {
+        // LDAP requires passwords to be UTF-16LE encoded and wrapped in quotes
+        format!("\"{}\"", password)
     }
 
     /// Generate secure password

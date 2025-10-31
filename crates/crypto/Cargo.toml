@@ -67,11 +67,13 @@ bgv = "0.6.0"
 ckks-engine = "4.0.0"
 
 # Shamir Secret Sharing
-num-bigint = "0.4"
+num-bigint = { version = "0.4", features = ["rand", "serde"] }
+num-integer = "0.1"
 num-traits = "0.2"
 
 # Async utilities
 async-trait.workspace = true
+num_cpus = "1.16"
 
 [dev-dependencies]
 criterion.workspace = true

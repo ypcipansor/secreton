@@ -60,9 +60,9 @@ pub struct ConsulTransaction {
 }
 
 enum ConsulOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl ConsulTransaction {
@@ -76,33 +76,33 @@ impl ConsulTransaction {
 
 #[async_trait]
 impl StorageTransaction for ConsulTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(ConsulOperation::Store(entry.clone()));
+        self.operations.push(ConsulOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(ConsulOperation::Update(entry.clone()));
+        self.operations.push(ConsulOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(ConsulOperation::Delete(id));
+        self.operations.push(ConsulOperation::Delete(()));
         Ok(true)
     }
 

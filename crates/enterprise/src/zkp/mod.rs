@@ -8,4 +8,3 @@ pub mod zero_knowledge_proof;
 
 // Re-export main types
 pub use privacy_preserving_auth::*;
-pub use zero_knowledge_proof::*;

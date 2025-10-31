@@ -426,9 +426,6 @@ mod tests {
 
         let new_cert = mesh.rotate_certificate(&old_cert.cert_id).await.unwrap();
 
-        // Rotation count should be incremented
-        assert!(new_cert.rotation_count >= 0);
-
         let old_cert_status = mesh.get_certificate(&old_cert.cert_id).await.unwrap();
         // Old cert should be revoked or still active (implementation dependent)
         assert!(matches!(

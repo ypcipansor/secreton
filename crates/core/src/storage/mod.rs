@@ -73,6 +73,7 @@ pub trait StorageBackend: Send + Sync {
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32, CoreError>;
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, CoreError>;
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, CoreError>;
+    async fn delete_secret_version(&self, path: &str, version: u32) -> Result<(), CoreError>;
     async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError>;
     async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool, CoreError>;
     async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<(), CoreError>;
@@ -1155,6 +1156,29 @@ impl StorageBackend for PostgresStorage {
             result.push((version as u32, value));
         }
         Ok(result)
+    }
+    async fn delete_secret_version(&self, path: &str, version: u32) -> Result<(), CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database {
+            message: e.to_string(),
+        })?;
+
+        let rows_affected = client
+            .execute(
+                "DELETE FROM secrets WHERE path = $1 AND version = $2",
+                &[&path, &(version as i32)],
+            )
+            .await
+            .map_err(|e| CoreError::Database {
+                message: e.to_string(),
+            })?;
+
+        if rows_affected == 0 {
+            return Err(CoreError::NotFound {
+                resource: format!("secret version {} for path {}", version, path),
+            });
+        }
+
+        Ok(())
     }
     async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError> {
         let client = self.pool.get().await.map_err(|e| CoreError::Database {

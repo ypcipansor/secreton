@@ -78,22 +78,12 @@ pub use storage::{SecureStorage, SharedSecureStorage};
 
 // Required imports for cryptographic operations
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 // Import constants from storage module
-const KEY_VERSION_LENGTH: usize = 8; // First 8 bytes of key ID
-const NONCE_LENGTH: usize = 12; // 96 bits for GCM
-const KEY_LENGTH: usize = 32; // 256 bits for AES-256
-const SALT_LENGTH: usize = 16;
 
-#[cfg(test)]
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct TestData {
-    name: String,
-    value: i32,
-}
+
 
 /// Key management configuration for secure storage
 /// This struct defines the rotation and retention policies for encryption keys.

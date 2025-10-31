@@ -52,9 +52,9 @@ pub struct MySQLTransaction {
 }
 
 enum MySQLOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl MySQLTransaction {
@@ -68,33 +68,33 @@ impl MySQLTransaction {
 
 #[async_trait]
 impl StorageTransaction for MySQLTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Store(entry.clone()));
+        self.operations.push(MySQLOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Update(entry.clone()));
+        self.operations.push(MySQLOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Delete(id));
+        self.operations.push(MySQLOperation::Delete(()));
         Ok(true)
     }
 

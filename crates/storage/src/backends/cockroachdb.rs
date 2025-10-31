@@ -34,9 +34,9 @@ pub struct CockroachDBTransaction {
 }
 
 enum CockroachDBOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl CockroachDBTransaction {
@@ -50,35 +50,35 @@ impl CockroachDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for CockroachDBTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(CockroachDBOperation::Store(entry.clone()));
+            .push(CockroachDBOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
         self.operations
-            .push(CockroachDBOperation::Update(entry.clone()));
+            .push(CockroachDBOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CockroachDBOperation::Delete(id));
+        self.operations.push(CockroachDBOperation::Delete(()));
         Ok(true)
     }
 

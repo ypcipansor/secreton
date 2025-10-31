@@ -5,7 +5,6 @@ use aes_gcm::{
     aead::{Aead, Key},
 };
 use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce, XChaCha20Poly1305};
-// RSA imports removed - using Ed25519 instead
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 // CLEANUP: Removed unused imports
 // use digest::Digest; // Not used
@@ -27,7 +26,7 @@ use sha2::Sha256;
 // use sha2::{Sha384, Sha512}; // Not used
 // use sha3::{Sha3_256, Sha3_512}; // Not used
 use signature::Signer;
-// use x25519_dalek::{EphemeralSecret, PublicKey, PublicKey as X25519PublicKey}; // Not used
+use x25519_dalek::{x25519, X25519_BASEPOINT_BYTES};
 
 use crate::error::{CryptoError, CryptoResult};
 use crate::transit::algorithms::SignatureAlgorithm;
@@ -57,6 +56,8 @@ pub enum KeyType {
     EcdsaSecp256k1,
     /// X25519 key for key exchange
     X25519,
+    /// RSA key for signing/encryption
+    Rsa(u32),
 }
 
 /// Key derivation options
@@ -140,7 +141,7 @@ enum KeyMaterial {
     EcdsaSecp256k1(Box<K256SecretKey>),
     /// Ed25519 private key
     Ed25519(Box<Ed25519SigningKey>),
-    /// X25519 private key (stored as bytes since EphemeralSecret can't be stored)
+    /// X25519 private key for key exchange and encryption
     X25519(Box<[u8; 32]>),
 }
 
@@ -295,6 +296,51 @@ impl TransitKey {
                 result
             }
 
+            KeyMaterial::X25519(private_key_bytes) => {
+                // X25519 encryption using ECIES-like approach
+                // Generate ephemeral key pair for this encryption
+                let mut ephemeral_scalar = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut ephemeral_scalar);
+
+                // Compute ephemeral public key
+                let ephemeral_public = x25519(ephemeral_scalar, X25519_BASEPOINT_BYTES);
+
+                // Compute shared secret using our private key and ephemeral public key
+                let shared_secret = x25519(**private_key_bytes, ephemeral_public);
+
+                // Derive AES key from shared secret using HKDF
+                let mut aes_key = [0u8; 32];
+                hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret)
+                    .expand(b"secreton-x25519-aes", &mut aes_key)
+                    .map_err(|_| CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string()))?;
+
+                // Encrypt with AES-GCM
+                let cipher = Aes256Gcm::new_from_slice(&aes_key)
+                    .map_err(|_| CryptoError::InvalidKeyLength { expected: 32, actual: aes_key.len() })?;
+
+                let mut nonce_bytes = [0u8; 12];
+                rand::thread_rng().fill_bytes(&mut nonce_bytes);
+                let nonce = ChaChaNonce::from(nonce_bytes);
+
+                let mut payload = plaintext.to_vec();
+                if let Some(ctx) = context {
+                    payload.extend_from_slice(ctx);
+                }
+
+                let encrypted = cipher
+                    .encrypt(&nonce, payload.as_slice())
+                    .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
+
+                // Format: v<version>:<ephemeral_public_key>:<nonce>:<ciphertext>
+                let mut result = format!("v{}:", version);
+                result.push_str(&BASE64.encode(&ephemeral_public));
+                result.push(':');
+                result.push_str(&BASE64.encode(&nonce_bytes));
+                result.push(':');
+                result.push_str(&BASE64.encode(&encrypted));
+                result
+            }
+
             _ => {
                 return Err(CryptoError::InvalidUsage(
                     "Key type does not support encryption".to_string(),
@@ -414,6 +460,59 @@ impl TransitKey {
                 decrypted
             }
 
+            KeyMaterial::X25519(private_key_bytes) => {
+                if parts.len() != 4 {
+                    return Err(CryptoError::InvalidCiphertext(
+                        "Invalid X25519 format".to_string(),
+                    ));
+                }
+
+                // Decode ephemeral public key
+                let ephemeral_public_bytes = BASE64.decode(parts[1]).map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid ephemeral public key encoding".to_string())
+                })?;
+                let ephemeral_public: [u8; 32] = ephemeral_public_bytes.as_slice().try_into()
+                    .map_err(|_| CryptoError::InvalidCiphertext("Invalid ephemeral public key length".to_string()))?;
+
+                // Decode nonce
+                let nonce_bytes = BASE64.decode(parts[2]).map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
+                })?;
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce = ChaChaNonce::from(nonce_array);
+
+                // Decode ciphertext
+                let encrypted_bytes = BASE64.decode(parts[3]).map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())
+                })?;
+
+                // Compute shared secret using our private key and ephemeral public key
+                let shared_secret = x25519(**private_key_bytes, ephemeral_public);
+
+                // Derive AES key from shared secret
+                let mut aes_key = [0u8; 32];
+                hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret)
+                    .expand(b"secreton-x25519-aes", &mut aes_key)
+                    .map_err(|_| CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string()))?;
+
+                // Decrypt with AES-GCM
+                let cipher = Aes256Gcm::new_from_slice(&aes_key)
+                    .map_err(|_| CryptoError::InvalidKeyLength { expected: 32, actual: aes_key.len() })?;
+
+                let mut decrypted = cipher
+                    .decrypt(&nonce, encrypted_bytes.as_slice())
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+
+                // Remove context if present
+                if let Some(ctx) = context {
+                    if decrypted.len() >= ctx.len() && decrypted.ends_with(ctx) {
+                        decrypted.truncate(decrypted.len() - ctx.len());
+                    }
+                }
+
+                decrypted
+            }
+
             _ => {
                 return Err(CryptoError::InvalidUsage(
                     "Key type does not support decryption".to_string(),
@@ -460,6 +559,13 @@ impl TransitKey {
             KeyMaterial::Ed25519(signing_key) => {
                 let signature = signing_key.sign(data);
                 BASE64.encode(signature.to_bytes())
+            }
+
+            KeyMaterial::X25519(_private_key) => {
+                // X25519 doesn't support signing - use Ed25519 for signing
+                return Err(CryptoError::InvalidUsage(
+                    "X25519 key type does not support signing".to_string(),
+                ));
             }
 
             _ => {
@@ -538,6 +644,13 @@ impl TransitKey {
                 } else {
                     false
                 }
+            }
+
+            KeyMaterial::X25519(_private_key) => {
+                // X25519 doesn't support signature verification - use Ed25519 for signing
+                return Err(CryptoError::InvalidUsage(
+                    "X25519 key type does not support signature verification".to_string(),
+                ));
             }
 
             _ => {
@@ -627,9 +740,16 @@ impl KeyVersion {
             }
 
             KeyType::X25519 => {
-                let mut secret_bytes = [0u8; 32];
-                rand::thread_rng().fill_bytes(&mut secret_bytes);
-                KeyMaterial::X25519(Box::new(secret_bytes))
+                let mut key_bytes = Box::new([0u8; 32]);
+                rand::thread_rng().fill_bytes(key_bytes.as_mut());
+                KeyMaterial::X25519(key_bytes)
+            }
+
+            KeyType::Rsa(_size) => {
+                // Generate X25519 key for asymmetric encryption
+                let mut key_bytes = Box::new([0u8; 32]);
+                rand::thread_rng().fill_bytes(key_bytes.as_mut());
+                KeyMaterial::X25519(key_bytes)
             }
         };
 

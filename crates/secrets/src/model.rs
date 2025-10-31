@@ -180,6 +180,7 @@ pub struct RabbitmqConfig {
     pub connection_uri: String,
     pub username: String,
     pub password: String,
+    pub vhost: Option<String>,
     pub verify_connection: bool,
     pub default_lease_ttl: u64,
 }

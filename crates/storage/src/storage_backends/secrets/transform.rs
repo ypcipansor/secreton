@@ -138,8 +138,8 @@ impl TransformRole {
 #[derive(Debug, Clone)]
 struct TokenMapping {
     plaintext: String,
-    token: String,
-    created_at: DateTime<Utc>,
+    _token: String,
+    _created_at: DateTime<Utc>,
 }
 
 /// Transform secrets engine
@@ -340,8 +340,8 @@ impl TransformEngine {
         // Store mapping
         let mapping = TokenMapping {
             plaintext: value.to_string(),
-            token: token.clone(),
-            created_at: Utc::now(),
+            _token: token.clone(),
+            _created_at: Utc::now(),
         };
 
         let mut token_mappings = self.token_mappings.write().await;

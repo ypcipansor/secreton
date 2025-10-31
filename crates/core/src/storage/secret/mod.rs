@@ -3,11 +3,12 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::storage::{SecureStorage, SharedSecureStorage, StorageBackend};
+use crate::storage::{SharedSecureStorage, StorageBackend};
 
 /// Represents a versioned secret
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +58,7 @@ pub struct SecretManager<T: StorageBackend> {
     backend: Arc<T>,
     secure_storage: SharedSecureStorage,
     config: SecretManagerConfig,
+    secret_index: Arc<RwLock<HashSet<String>>>,
 }
 
 impl<T: StorageBackend> SecretManager<T> {
@@ -66,6 +68,7 @@ impl<T: StorageBackend> SecretManager<T> {
             backend,
             secure_storage,
             config: SecretManagerConfig::default(),
+            secret_index: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -79,6 +82,7 @@ impl<T: StorageBackend> SecretManager<T> {
             backend,
             secure_storage,
             config,
+            secret_index: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -110,6 +114,9 @@ impl<T: StorageBackend> SecretManager<T> {
                 }),
             )
             .await?;
+
+        // Add path to index
+        self.secret_index.write().await.insert(path.to_string());
 
         Ok(SecretMetadata {
             id: Uuid::new_v4().to_string(),
@@ -156,19 +163,26 @@ impl<T: StorageBackend> SecretManager<T> {
     }
 
     /// List all secrets under a path
-    pub async fn list_secrets(&self, _path: &str) -> Result<Vec<String>> {
-        // TODO: Implement proper secret listing
-        Ok(vec![])
+    pub async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
+        let index = self.secret_index.read().await;
+        let matching_paths: Vec<String> = index
+            .iter()
+            .filter(|secret_path| secret_path.starts_with(path))
+            .cloned()
+            .collect();
+        Ok(matching_paths)
     }
 
     /// Delete a secret or specific version
     pub async fn delete_secret(&self, path: &str, version: Option<u32>) -> Result<()> {
-        if let Some(_version) = version {
-            // TODO: Implement version-specific deletion
+        if let Some(version) = version {
+            // Delete specific version
+            self.backend.delete_secret_version(path, version).await?;
             Ok(())
         } else {
-            // Delete all versions
+            // Delete all versions and remove from index
             self.backend.delete_secret(path, "default").await?;
+            self.secret_index.write().await.remove(path);
             Ok(())
         }
     }
@@ -210,6 +224,38 @@ pub trait SecretStorage: Send + Sync {
 
     /// Delete a specific version of a secret
     async fn delete_secret_version(&self, path: &str, version: u32) -> Result<()>;
+}
+
+#[async_trait]
+impl<T: StorageBackend> SecretStorage for SecretManager<T> {
+    /// Store a new version of a secret
+    async fn store_secret_versioned(&self, path: &str, data: &serde_json::Value) -> Result<u32> {
+        // This is a simplified implementation - in practice, you'd want to use the full create_secret logic
+        let version = self.backend.store_secret_versioned(path, data).await?;
+        self.secret_index.write().await.insert(path.to_string());
+        Ok(version)
+    }
+
+    /// Get the latest version of a secret
+    async fn get_latest_secret(&self, path: &str) -> Result<Option<(serde_json::Value, u32)>> {
+        self.backend.get_latest_secret(path).await.map_err(|e| anyhow!(e))
+    }
+
+    /// List all secrets under a path
+    async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
+        self.list_secrets(path).await
+    }
+
+    /// Delete a secret (soft delete)
+    async fn delete_secret(&self, path: &str) -> Result<()> {
+        self.delete_secret(path, None).await
+    }
+
+    /// Delete a specific version of a secret
+    async fn delete_secret_version(&self, path: &str, version: u32) -> Result<()> {
+        self.backend.delete_secret_version(path, version).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

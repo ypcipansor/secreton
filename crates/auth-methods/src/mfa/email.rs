@@ -44,7 +44,7 @@ pub struct EmailValidationRequest {
 #[derive(Debug)]
 struct PendingEmailCode {
     code: String,
-    email: String,
+    _email: String,
     expiry: DateTime<Utc>,
 }
 
@@ -149,7 +149,7 @@ impl EmailService for InMemoryEmailService {
         // Store the pending code
         let pending_code = PendingEmailCode {
             code,
-            email,
+            _email: email,
             expiry: Utc::now() + Duration::seconds(self.config.code_expiry_seconds),
         };
 

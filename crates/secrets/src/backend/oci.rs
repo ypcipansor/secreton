@@ -9,7 +9,7 @@ pub struct OciBackend {
     tenancy_ocid: String,
     user_ocid: String,
     fingerprint: String,
-    private_key: String,
+    _private_key: String,
     region: String,
 }
 
@@ -26,7 +26,7 @@ impl OciBackend {
             tenancy_ocid,
             user_ocid,
             fingerprint,
-            private_key,
+            _private_key: private_key,
             region,
         }
     }

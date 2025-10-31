@@ -396,6 +396,15 @@ impl KeyStrength {
             // Ed25519 is considered very high security due to its resistance to side-channel attacks
             KeyType::Ed25519 => KeyStrength::VeryHigh,
             KeyType::X25519 => KeyStrength::High,
+            KeyType::Rsa(size) => {
+                if *size >= 4096 {
+                    KeyStrength::VeryHigh
+                } else if *size >= 2048 {
+                    KeyStrength::High
+                } else {
+                    KeyStrength::Medium
+                }
+            }
         }
     }
 }

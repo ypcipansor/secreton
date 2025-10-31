@@ -118,25 +118,6 @@ impl EvaluationResult {
     }
 }
 
-/// Simple policy rule
-#[derive(Debug, Clone)]
-enum PolicyRule {
-    /// Path must match pattern
-    PathMatch(String),
-
-    /// Time must be within business hours
-    BusinessHours,
-
-    /// Identity must have attribute
-    IdentityHasAttribute(String, String),
-
-    /// Request data must contain key
-    RequestDataHasKey(String),
-
-    /// Custom condition
-    Custom(String),
-}
-
 /// Sentinel policy engine
 pub struct SentinelEngine {
     policies: Arc<RwLock<HashMap<String, SentinelPolicy>>>,

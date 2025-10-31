@@ -26,9 +26,9 @@ pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod transit;
 
-// TODO: Fix compilation errors in these modules
-// pub mod integration;
-// pub mod quantum_safe_crypto;
+// Integration and quantum-safe crypto modules are now enabled
+pub mod integration;
+pub mod quantum_safe_crypto;
 
 pub use advanced_key_manager::{
     AdvancedKeyManager, KeyManagerError, KeyState as AdvancedKeyState, KeyType as AdvancedKeyType,

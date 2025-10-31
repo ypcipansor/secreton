@@ -51,7 +51,7 @@ pub struct SmsValidationRequest {
 #[derive(Debug)]
 struct PendingSmsCode {
     code: String,
-    phone_number: String,
+    _phone_number: String,
     expiry: DateTime<Utc>,
 }
 
@@ -163,7 +163,7 @@ impl SmsService for InMemorySmsService {
         // Store the pending code
         let pending_code = PendingSmsCode {
             code,
-            phone_number,
+            _phone_number: phone_number,
             expiry: Utc::now() + Duration::seconds(self.config.code_expiry_seconds),
         };
 

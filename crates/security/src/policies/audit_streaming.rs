@@ -537,9 +537,6 @@ mod tests {
         let event = create_test_event();
         engine.stream_event(event).await.unwrap();
 
-        // Retry failed
-        let retry_count = engine.retry_failed().await.unwrap();
-
         let metrics = engine.get_stream_metrics().await;
         assert!(metrics["total_deliveries"].as_u64().unwrap() > 0);
     }

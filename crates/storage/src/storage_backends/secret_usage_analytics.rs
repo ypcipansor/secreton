@@ -85,7 +85,7 @@ pub struct AccessPattern {
 pub struct SecretUsageAnalytics {
     config: Arc<RwLock<AnalyticsConfig>>,
     access_events: Arc<RwLock<Vec<AccessEvent>>>,
-    metrics_cache: Arc<RwLock<HashMap<String, UsageMetrics>>>,
+    _metrics_cache: Arc<RwLock<HashMap<String, UsageMetrics>>>,
 }
 
 impl SecretUsageAnalytics {
@@ -93,7 +93,7 @@ impl SecretUsageAnalytics {
         Self {
             config: Arc::new(RwLock::new(config)),
             access_events: Arc::new(RwLock::new(Vec::new())),
-            metrics_cache: Arc::new(RwLock::new(HashMap::new())),
+            _metrics_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

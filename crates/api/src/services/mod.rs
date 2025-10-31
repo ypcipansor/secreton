@@ -14,14 +14,18 @@ use crate::config::ApiConfig;
 use brankas_core::audit::AuditLogger;
 use brankas_crypto::{CryptoService, SecurityParams};
 use brankas_storage::StorageBackend;
+use brankas_core::storage::StorageBackend as CoreStorageBackend;
 
 /// Service container holding all application services
 pub struct ServiceContainer {
     /// Configuration
     pub config: ApiConfig,
     
-    /// Storage service
+    /// Storage service (storage crate)
     pub storage: Arc<dyn StorageBackend + Send + Sync>,
+    
+    /// Core storage service (core crate)
+    pub core_storage: Arc<dyn CoreStorageBackend + Send + Sync>,
     
     /// Cryptographic service
     pub crypto: Arc<CryptoService>,

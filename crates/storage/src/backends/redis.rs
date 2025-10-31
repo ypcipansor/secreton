@@ -21,9 +21,9 @@ pub struct RedisTransaction {
 }
 
 enum RedisOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
-    Delete(Uuid),
+    Store(()),
+    Update(()),
+    Delete(()),
 }
 
 impl RedisTransaction {
@@ -37,33 +37,33 @@ impl RedisTransaction {
 
 #[async_trait]
 impl StorageTransaction for RedisTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Store(entry.clone()));
+        self.operations.push(RedisOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Update(entry.clone()));
+        self.operations.push(RedisOperation::Update(()));
         Ok(())
     }
 
-    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Delete(id));
+        self.operations.push(RedisOperation::Delete(()));
         Ok(true)
     }
 
@@ -74,9 +74,8 @@ impl StorageTransaction for RedisTransaction {
             });
         }
 
-        // In a real Redis implementation, you would execute all operations
-        // in a pipeline or MULTI/EXEC transaction
-        // For now, we just mark as committed since we don't have a real connection
+        // TODO: Get Redis connection from backend
+        // For now, we just mark as committed since we don't have access to connection
         self.committed = true;
         Ok(())
     }

@@ -7,10 +7,8 @@
 use crate::transit::{TransitEngine, TransitPolicies, BatchOperation, KeyType, KeyOptions};
 use crate::error::{CryptoResult, CryptoError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
 /// Integration wrapper for the transit engine with Brankas core services
@@ -205,16 +203,15 @@ impl TransitIntegration {
             config.performance.max_concurrent_operations;
         policies.performance_limits.max_batch_size = 
             config.api.max_batch_size;
-        policies.performance_limits.operation_timeout = 
-            std::time::Duration::from_millis(config.performance.operation_timeout_ms);
+        policies.performance_limits.max_operation_timeout = 
+            chrono::Duration::milliseconds(config.performance.operation_timeout_ms as i64);
         
-        // Configure rate limiting
-        if config.api.rate_limit.enable_per_key_limits {
-            policies.rate_limiting_policy.global_rate_limit = 
-                config.api.rate_limit.requests_per_minute;
-            policies.rate_limiting_policy.per_key_rate_limit = 
-                Some(config.api.rate_limit.requests_per_minute / 10);
-        }
+        // Configure rate limiting (using key usage policy)
+        // Note: Rate limiting is not currently implemented in KeyUsagePolicy
+        // if config.api.rate_limit.enable_per_key_limits {
+        //     policies.key_usage_policy.max_operations_per_minute = 
+        //         Some(config.api.rate_limit.requests_per_minute);
+        // }
         
         // Enable audit logging if configured
         policies.audit_policy.enabled = config.enable_audit;
@@ -247,15 +244,15 @@ impl TransitIntegration {
                 tokio::fs::create_dir_all(path).await
                     .map_err(|e| CryptoError::StorageError(format!("Failed to create storage directory: {}", e)))?;
             },
-            StorageBackend::Database { url } => {
+            StorageBackend::Database { url: _ } => {
                 // Initialize database connection
                 // This would integrate with your database backend
             },
-            StorageBackend::Vault { address, token } => {
+            StorageBackend::Vault { address: _, token: _ } => {
                 // Initialize Vault client
                 // This would integrate with HashiCorp Vault
             },
-            StorageBackend::Consul { address } => {
+            StorageBackend::Consul { address: _ } => {
                 // Initialize Consul client
                 // This would integrate with HashiCorp Consul
             },

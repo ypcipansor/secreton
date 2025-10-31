@@ -175,6 +175,7 @@ aws-config = "1.8.8"
 aws-sdk-iam = "1.91.0"
 aws-sdk-sts = "1.88.0"
 aws-sdk-ec2 = "1.95.0"
+aws-sdk-secretsmanager = "1.91.0"
 
 # Authentication protocols
 jsonwebtoken = "9.3"

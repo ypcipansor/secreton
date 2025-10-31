@@ -276,16 +276,6 @@ impl AnsibleIntegration {
 mod tests {
     use super::*;
 
-    fn create_test_config() -> AnsibleConfig {
-        AnsibleConfig {
-            vault_path: "/vault".to_string(),
-            inventory_path: "/etc/ansible/hosts".to_string(),
-            connection: ConnectionType::SSH,
-            remote_user: "ansible".to_string(),
-            r#become: true,
-        }
-    }
-
     fn create_test_playbook() -> AnsiblePlaybook {
         AnsiblePlaybook {
             playbook_id: "deploy-app".to_string(),

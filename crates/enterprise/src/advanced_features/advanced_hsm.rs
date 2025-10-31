@@ -55,8 +55,8 @@ pub enum KeyType {
     AES,
     RSA2048,
     RSA4096,
-    ECDSA_P256,
-    ECDSA_P384,
+    EcdsaP256,
+    EcdsaP384,
 }
 
 /// HSM key metadata
@@ -208,7 +208,7 @@ impl AdvancedHSM {
                     KeyOperation::Sign,
                     KeyOperation::Verify,
                 ],
-                KeyType::ECDSA_P256 | KeyType::ECDSA_P384 => {
+                KeyType::EcdsaP256 | KeyType::EcdsaP384 => {
                     vec![KeyOperation::Sign, KeyOperation::Verify]
                 }
             },
@@ -536,7 +536,7 @@ mod tests {
 
         let hsm_id = hsm.initialize_hsm(config).await.unwrap();
         let key = hsm
-            .generate_key_in_hsm(&hsm_id, KeyType::ECDSA_P256, "sign-key".to_string(), false)
+            .generate_key_in_hsm(&hsm_id, KeyType::EcdsaP256, "sign-key".to_string(), false)
             .await
             .unwrap();
 

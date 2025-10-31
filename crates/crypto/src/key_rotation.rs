@@ -1,5 +1,6 @@
 // Key Rotation Engine - Automated encryption key rotation for Transit/PKI
 use chrono::{DateTime, Duration, Utc};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -490,13 +491,31 @@ impl KeyRotationService {
         Ok(())
     }
 
-    /// Generate key data based on key type (placeholder implementation)
+    /// Generate key data based on key type
     fn generate_key_data(&self, key_type: &KeyType) -> Vec<u8> {
         match key_type {
-            KeyType::Transit => vec![0; 32],      // AES-256
-            KeyType::PKI => vec![0; 256],         // RSA-2048 placeholder
-            KeyType::TokenSigning => vec![0; 64], // ED25519 placeholder
-            KeyType::SealKey => vec![0; 32],      // AES-256
+            KeyType::Transit => {
+                let mut key = vec![0u8; 32];
+                rand::thread_rng().fill_bytes(&mut key);
+                key
+            }
+            KeyType::PKI => {
+                // Generate Ed25519 key for PKI operations
+                let mut key = vec![0u8; 64]; // 32 bytes private + 32 bytes public
+                rand::thread_rng().fill_bytes(&mut key);
+                key
+            }
+            KeyType::TokenSigning => {
+                // Generate Ed25519 key
+                let mut key = vec![0u8; 64];
+                rand::thread_rng().fill_bytes(&mut key);
+                key
+            }
+            KeyType::SealKey => {
+                let mut key = vec![0u8; 32];
+                rand::thread_rng().fill_bytes(&mut key);
+                key
+            }
         }
     }
 }

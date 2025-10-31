@@ -28,7 +28,7 @@ pub type Result<T> = std::result::Result<T, ComplianceError>;
 pub enum ComplianceStandard {
     SOC2,
     HIPAA,
-    PCI_DSS,
+    PciDss,
     GDPR,
     ISO27001,
     NIST,
@@ -305,7 +305,7 @@ mod tests {
         let profile = ComplianceProfile {
             profile_id: "pci".to_string(),
             name: "PCI DSS".to_string(),
-            standard: ComplianceStandard::PCI_DSS,
+            standard: ComplianceStandard::PciDss,
             requirements: vec![ComplianceRequirement {
                 requirement_id: "req1".to_string(),
                 title: "Encryption".to_string(),
@@ -352,11 +352,10 @@ mod tests {
         };
         framework.apply_profile(profile).await.unwrap();
 
-        let violations = framework
+        framework
             .check_compliance("test", "/secret/test")
             .await
             .unwrap();
-        assert!(violations.len() >= 0);
     }
 
     #[tokio::test]

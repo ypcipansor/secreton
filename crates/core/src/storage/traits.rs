@@ -59,6 +59,7 @@ pub trait StorageBackend: Send + Sync {
     async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32, CoreError>;
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, CoreError>;
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, CoreError>;
+    async fn delete_secret_version(&self, path: &str, version: u32) -> Result<(), CoreError>;
 
     // User management methods
     async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError>;

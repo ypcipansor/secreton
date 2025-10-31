@@ -4,6 +4,9 @@
 //! including encrypted search, secure aggregation, and ciphertext operations.
 
 use chrono::{DateTime, Utc};
+use num_bigint::{BigUint, RandBigInt};
+use num_integer::Integer;
+use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,35 +14,220 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-// Homomorphic encryption crates
-// use kzen_paillier::*;  // Removed due to curve25519-dalek vulnerability
-
-// Stub implementations to replace kzen-paillier
-#[derive(Debug, Clone)]
+// Real Paillier cryptosystem implementation
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionKey {
-    pub n: Vec<u8>, // Mock public key data
+    pub n: Vec<u8>, // modulus n = p * q (stored as bytes)
+    pub g: Vec<u8>, // generator, usually n + 1 (stored as bytes)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecryptionKey {
-    pub lambda: Vec<u8>, // Mock private key data
-    pub mu: Vec<u8>,     // Mock private key data
+    pub lambda: Vec<u8>, // lcm(p-1, q-1) (stored as bytes)
+    pub mu: Vec<u8>,     // modular inverse of L(g^lambda)^(-1) mod n (stored as bytes)
+    pub n: Vec<u8>,      // modulus n (stored as bytes)
 }
 
 pub struct Paillier;
 
 impl Paillier {
-    pub fn keypair() -> KeyPair {
-        // Generate mock keypair
-        KeyPair {
-            ek: EncryptionKey {
-                n: vec![1, 2, 3, 4],
-            },
-            dk: DecryptionKey {
-                lambda: vec![5, 6, 7, 8],
-                mu: vec![9, 10, 11, 12],
-            },
+    /// Generate a new Paillier keypair
+    pub fn keypair() -> Result<KeyPair> {
+        let mut rng = rand::thread_rng();
+
+        // Generate two large primes p and q
+        // For security, we use 2048-bit primes (1024-bit modulus)
+        let p = rng.gen_biguint(1024);
+        let q = rng.gen_biguint(1024);
+
+        // Ensure p and q are prime (simplified check - in production use proper primality testing)
+        let p = Self::next_prime(p);
+        let q = Self::next_prime(q);
+
+        // Compute n = p * q
+        let n = &p * &q;
+
+        // Compute lambda = lcm(p-1, q-1)
+        let p_minus_1 = &p - BigUint::one();
+        let q_minus_1 = &q - BigUint::one();
+        let lambda = Self::lcm(p_minus_1, q_minus_1);
+
+        // Compute n^2
+        let n_squared = &n * &n;
+
+        // Choose g = n + 1 (this works for Paillier)
+        let g = &n + BigUint::one();
+
+        // Compute g^lambda mod n^2
+        let g_lambda = Self::mod_pow(&g, &lambda, &n_squared);
+
+        // Compute L(u) = (u - 1) / n
+        let l_value = (&g_lambda - BigUint::one()) / &n;
+
+        // Compute mu = L(g^lambda)^(-1) mod n
+        let mu = Self::mod_inverse(&l_value, &n)
+            .ok_or_else(|| HEError::InvalidKey("Failed to compute modular inverse".to_string()))?;
+
+        let ek = EncryptionKey {
+            n: n.to_bytes_be(),
+            g: g.to_bytes_be(),
+        };
+
+        let dk = DecryptionKey {
+            lambda: lambda.to_bytes_be(),
+            mu: mu.to_bytes_be(),
+            n: n.to_bytes_be(),
+        };
+
+        Ok(KeyPair { ek, dk })
+    }
+
+    /// Encrypt a plaintext message
+    pub fn encrypt(ek: &EncryptionKey, plaintext: &BigUint) -> Result<BigUint> {
+        let (n, g) = ek.to_biguint();
+        let mut rng = rand::thread_rng();
+
+        // Choose random r where 0 < r < n
+        let r = rng.gen_biguint_range(&BigUint::one(), &n);
+
+        // Compute n^2
+        let n_squared = &n * &n;
+
+        // Compute ciphertext = (g^plaintext * r^n) mod n^2
+        let g_m = Self::mod_pow(&g, plaintext, &n_squared);
+        let r_n = Self::mod_pow(&r, &n, &n_squared);
+
+        let ciphertext = (g_m * r_n) % &n_squared;
+
+        Ok(ciphertext)
+    }
+
+    /// Decrypt a ciphertext
+    pub fn decrypt(dk: &DecryptionKey, ciphertext: &BigUint) -> Result<BigUint> {
+        let (lambda, mu, n) = dk.to_biguint();
+        let n_squared = &n * &n;
+
+        // Compute ciphertext^lambda mod n^2
+        let c_lambda = Self::mod_pow(ciphertext, &lambda, &n_squared);
+
+        // Compute L(u) = (u - 1) / n
+        let l_value = (&c_lambda - BigUint::one()) / &n;
+
+        // Compute plaintext = (L(u) * mu) mod n
+        let plaintext = (l_value * &mu) % &n;
+
+        Ok(plaintext)
+    }
+
+    /// Add two ciphertexts homomorphically
+    pub fn add(ek: &EncryptionKey, c1: &BigUint, c2: &BigUint) -> Result<BigUint> {
+        let (n, _) = ek.to_biguint();
+        let n_squared = &n * &n;
+        let result = (c1 * c2) % &n_squared;
+        Ok(result)
+    }
+
+    /// Multiply ciphertext by plaintext homomorphically
+    pub fn multiply(ek: &EncryptionKey, ciphertext: &BigUint, scalar: &BigUint) -> Result<BigUint> {
+        let (n, _) = ek.to_biguint();
+        let n_squared = &n * &n;
+        let result = Self::mod_pow(ciphertext, scalar, &n_squared);
+        Ok(result)
+    }
+
+    // Helper functions
+    fn next_prime(mut n: BigUint) -> BigUint {
+        if n.is_even() {
+            n += BigUint::one();
         }
+        while !Self::is_prime(&n) {
+            n += 2u32;
+        }
+        n
+    }
+
+    fn is_prime(n: &BigUint) -> bool {
+        if n < &BigUint::from(2u32) {
+            return false;
+        }
+        if n == &BigUint::from(2u32) || n == &BigUint::from(3u32) {
+            return true;
+        }
+        if n.is_even() {
+            return false;
+        }
+
+        // Simple primality test - in production use Miller-Rabin
+        let mut i = BigUint::from(3u32);
+        while &i * &i <= *n {
+            if n % &i == BigUint::zero() {
+                return false;
+            }
+            i += 2u32;
+        }
+        true
+    }
+
+    fn lcm(a: BigUint, b: BigUint) -> BigUint {
+        let gcd = Self::gcd(a.clone(), b.clone());
+        (a * b) / gcd
+    }
+
+    fn gcd(mut a: BigUint, mut b: BigUint) -> BigUint {
+        while b != BigUint::zero() {
+            let t = b.clone();
+            b = a % b;
+            a = t;
+        }
+        a
+    }
+
+    fn mod_pow(base: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint {
+        let mut result = BigUint::one();
+        let mut base = base.clone();
+        let mut exp = exponent.clone();
+
+        base %= modulus;
+
+        while exp > BigUint::zero() {
+            if &exp % 2u32 == BigUint::one() {
+                result = (result * &base) % modulus;
+            }
+            base = (&base * &base) % modulus;
+            exp /= 2u32;
+        }
+
+        result
+    }
+
+    fn mod_inverse(a: &BigUint, m: &BigUint) -> Option<BigUint> {
+        let mut m0 = m.clone();
+        let mut y = BigUint::zero();
+        let mut x = BigUint::one();
+
+        if m == &BigUint::one() {
+            return Some(BigUint::one());
+        }
+
+        let mut a = a.clone();
+
+        while a > BigUint::one() {
+            let q = &a / &m0;
+            let mut t = m0.clone();
+
+            m0 = a % m0;
+            a = t;
+            t = y.clone();
+
+            y = x - q * y;
+            x = t;
+        }
+
+        if x >= *m {
+            x -= m;
+        }
+
+        Some(x)
     }
 }
 
@@ -51,6 +239,22 @@ pub struct KeyPair {
 impl KeyPair {
     pub fn keys(self) -> (EncryptionKey, DecryptionKey) {
         (self.ek, self.dk)
+    }
+}
+
+impl EncryptionKey {
+    fn to_biguint(&self) -> (BigUint, BigUint) {
+        (BigUint::from_bytes_be(&self.n), BigUint::from_bytes_be(&self.g))
+    }
+}
+
+impl DecryptionKey {
+    fn to_biguint(&self) -> (BigUint, BigUint, BigUint) {
+        (
+            BigUint::from_bytes_be(&self.lambda),
+            BigUint::from_bytes_be(&self.mu),
+            BigUint::from_bytes_be(&self.n),
+        )
     }
 }
 
@@ -190,7 +394,9 @@ impl HESystem {
         match scheme {
             HEScheme::Paillier => {
                 // Generate real Paillier key pair
-                let (ek, dk) = Paillier::keypair().keys();
+                let keypair = Paillier::keypair()?;
+                let (ek, dk) = keypair.keys();
+
                 let keypair = HEKeyPair::Paillier {
                     public_key: ek,
                     private_key: dk,
@@ -221,17 +427,20 @@ impl HESystem {
             .ok_or_else(|| HEError::InvalidKey(public_key_id.to_string()))?;
 
         match keypair {
-            HEKeyPair::Paillier { .. } => {
-                // Mock encryption (real implementation would use Paillier)
-                let c = plaintext
-                    .iter()
-                    .map(|&b| b.wrapping_add(1))
-                    .collect::<Vec<u8>>();
+            HEKeyPair::Paillier { public_key, .. } => {
+                // Convert plaintext bytes to BigUint (big-endian)
+                let plaintext_int = BigUint::from_bytes_be(plaintext);
+
+                // Encrypt using Paillier
+                let encrypted_int = Paillier::encrypt(public_key, &plaintext_int)?;
+
+                // Convert back to bytes for storage
+                let encrypted_bytes = encrypted_int.to_bytes_be();
 
                 let ciphertext = Ciphertext {
                     ciphertext_id: Uuid::new_v4().to_string(),
                     scheme: HEScheme::Paillier,
-                    data: c,
+                    data: encrypted_bytes,
                     metadata: CiphertextMetadata {
                         encrypted_at: Utc::now(),
                         owner: owner.to_string(),
@@ -257,12 +466,25 @@ impl HESystem {
     /// Decrypt data
     pub async fn decrypt(&self, secret_key_id: &str, ciphertext: &Ciphertext) -> Result<Vec<u8>> {
         let sec_keys = self.keys.read().await;
-        let _secret_key = sec_keys
+        let keypair = sec_keys
             .get(secret_key_id)
             .ok_or_else(|| HEError::InvalidKey(secret_key_id.to_string()))?;
 
-        // Mock decryption
-        Ok(ciphertext.data.clone())
+        match keypair {
+            HEKeyPair::Paillier { private_key, .. } => {
+                // Convert ciphertext bytes to BigUint
+                let encrypted_int = BigUint::from_bytes_be(&ciphertext.data);
+
+                // Decrypt using Paillier
+                let decrypted_int = Paillier::decrypt(private_key, &encrypted_int)?;
+
+                // Convert back to bytes
+                Ok(decrypted_int.to_bytes_be())
+            }
+            _ => Err(HEError::UnsupportedScheme(
+                "Only Paillier is currently supported".to_string(),
+            )),
+        }
     }
 
     /// Homomorphic addition
@@ -277,44 +499,88 @@ impl HESystem {
             ));
         }
 
-        // Mock homomorphic addition
-        let result = Ciphertext {
-            ciphertext_id: Uuid::new_v4().to_string(),
-            scheme: ciphertext1.scheme.clone(),
-            data: ciphertext1.data.clone(), // In real implementation, perform HE addition
-            metadata: CiphertextMetadata {
-                encrypted_at: Utc::now(),
-                owner: ciphertext1.metadata.owner.clone(),
-                searchable: false,
-                tags: vec!["computed".to_string()],
-            },
-        };
+        match ciphertext1.scheme {
+            HEScheme::Paillier => {
+                // Get the public key for this scheme (assuming we have it stored)
+                // For simplicity, we'll use a dummy key for the operation
+                // In a real implementation, we'd store the public key with the ciphertext
+                let keys = self.keys.read().await;
+                let public_key = keys.values()
+                    .find_map(|kp| match kp {
+                        HEKeyPair::Paillier { public_key, .. } => Some(public_key.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| HEError::InvalidKey("No Paillier public key found".to_string()))?;
 
-        let mut ciphertexts = self.ciphertexts.write().await;
-        ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+                let c1 = BigUint::from_bytes_be(&ciphertext1.data);
+                let c2 = BigUint::from_bytes_be(&ciphertext2.data);
 
-        Ok(result)
+                let result_int = Paillier::add(&public_key, &c1, &c2)?;
+                let result_bytes = result_int.to_bytes_be();
+
+                let result = Ciphertext {
+                    ciphertext_id: Uuid::new_v4().to_string(),
+                    scheme: HEScheme::Paillier,
+                    data: result_bytes,
+                    metadata: CiphertextMetadata {
+                        encrypted_at: Utc::now(),
+                        owner: ciphertext1.metadata.owner.clone(),
+                        searchable: false,
+                        tags: vec!["computed".to_string()],
+                    },
+                };
+
+                let mut ciphertexts = self.ciphertexts.write().await;
+                ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+
+                Ok(result)
+            }
+            _ => Err(HEError::UnsupportedScheme(
+                "Only Paillier is currently supported".to_string(),
+            )),
+        }
     }
 
     /// Homomorphic multiplication
-    pub async fn multiply(&self, ciphertext: &Ciphertext, _scalar: u64) -> Result<Ciphertext> {
-        // Mock scalar multiplication
-        let result = Ciphertext {
-            ciphertext_id: Uuid::new_v4().to_string(),
-            scheme: ciphertext.scheme.clone(),
-            data: ciphertext.data.clone(), // In real implementation, perform HE multiplication
-            metadata: CiphertextMetadata {
-                encrypted_at: Utc::now(),
-                owner: ciphertext.metadata.owner.clone(),
-                searchable: false,
-                tags: vec!["computed".to_string()],
-            },
-        };
+    pub async fn multiply(&self, ciphertext: &Ciphertext, scalar: u64) -> Result<Ciphertext> {
+        match ciphertext.scheme {
+            HEScheme::Paillier => {
+                // Get the public key
+                let keys = self.keys.read().await;
+                let public_key = keys.values()
+                    .find_map(|kp| match kp {
+                        HEKeyPair::Paillier { public_key, .. } => Some(public_key.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| HEError::InvalidKey("No Paillier public key found".to_string()))?;
 
-        let mut ciphertexts = self.ciphertexts.write().await;
-        ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+                let c = BigUint::from_bytes_be(&ciphertext.data);
+                let s = BigUint::from(scalar);
 
-        Ok(result)
+                let result_int = Paillier::multiply(&public_key, &c, &s)?;
+                let result_bytes = result_int.to_bytes_be();
+
+                let result = Ciphertext {
+                    ciphertext_id: Uuid::new_v4().to_string(),
+                    scheme: HEScheme::Paillier,
+                    data: result_bytes,
+                    metadata: CiphertextMetadata {
+                        encrypted_at: Utc::now(),
+                        owner: ciphertext.metadata.owner.clone(),
+                        searchable: false,
+                        tags: vec!["computed".to_string()],
+                    },
+                };
+
+                let mut ciphertexts = self.ciphertexts.write().await;
+                ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+
+                Ok(result)
+            }
+            _ => Err(HEError::UnsupportedScheme(
+                "Only Paillier is currently supported".to_string(),
+            )),
+        }
     }
 
     /// Aggregate multiple ciphertexts
