@@ -296,7 +296,8 @@ impl TransitEngine {
             .ok_or(TransitError::KeyVersionNotFound(version))?;
 
         // Perform encryption (simplified - production would use actual crypto)
-        let ciphertext = self.encrypt_with_key(key_material, plaintext, _context, &_key.key_type)?;
+        let ciphertext =
+            self.encrypt_with_key(key_material, plaintext, _context, &_key.key_type)?;
 
         // Format: vault:v{version}:{base64_ciphertext}
         let _formatted = format!("vault:v{}:{}", version, base64.encode(&ciphertext));

@@ -1,13 +1,13 @@
 //! PKI secret engine for certificate management
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use uuid::Uuid;
-use rcgen::{CertificateParams, DistinguishedName, DnType};
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use rcgen::{CertificateParams, DistinguishedName, DnType};
+use serde_json::Value;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// PKI secret engine
 pub struct PkiEngine {
@@ -74,7 +74,10 @@ impl SecretEngine for PkiEngine {
                     updated_at: chrono::Utc::now(),
                 })
             }
-            _ => Err(SecretError::InvalidPath(format!("Unsupported PKI path: {}", path))),
+            _ => Err(SecretError::InvalidPath(format!(
+                "Unsupported PKI path: {}",
+                path
+            ))),
         }
     }
 
@@ -107,81 +110,95 @@ impl SecretEngine for PkiEngine {
 
 impl PkiEngine {
     /// Generate a certificate based on request data
-    async fn generate_certificate(&self, data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
+    async fn generate_certificate(
+        &self,
+        data: &HashMap<String, Value>,
+    ) -> SecretResult<HashMap<String, Value>> {
         // Extract certificate parameters
-        let common_name = data.get("common_name")
+        let common_name = data
+            .get("common_name")
             .and_then(|v| v.as_str())
             .unwrap_or("example.com");
 
-        let organization = data.get("organization")
+        let organization = data
+            .get("organization")
             .and_then(|v| v.as_str())
             .unwrap_or("Example Organization");
 
-        let organizational_unit = data.get("organizational_unit")
-            .and_then(|v| v.as_str());
+        let organizational_unit = data.get("organizational_unit").and_then(|v| v.as_str());
 
-        let country = data.get("country")
-            .and_then(|v| v.as_str())
-            .unwrap_or("US");
+        let country = data.get("country").and_then(|v| v.as_str()).unwrap_or("US");
 
-        let state = data.get("state")
-            .and_then(|v| v.as_str());
+        let state = data.get("state").and_then(|v| v.as_str());
 
-        let locality = data.get("locality")
-            .and_then(|v| v.as_str());
+        let locality = data.get("locality").and_then(|v| v.as_str());
 
-        let _email = data.get("email")
-            .and_then(|v| v.as_str());
+        let _email = data.get("email").and_then(|v| v.as_str());
 
-        let ttl_seconds = data.get("ttl")
+        let ttl_seconds = data
+            .get("ttl")
             .and_then(|v| v.as_u64())
             .unwrap_or(self.config.default_lease_ttl);
 
-        let key_type = data.get("key_type")
+        let key_type = data
+            .get("key_type")
             .and_then(|v| v.as_str())
             .unwrap_or("rsa");
 
-        let key_bits = data.get("key_bits")
+        let key_bits = data
+            .get("key_bits")
             .and_then(|v| v.as_u64())
             .unwrap_or(2048);
 
         // Generate key pair based on key type
         let key_pair = match key_type {
-            "rsa" => {
-                match key_bits {
-                    2048 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256).map_err(|e| {
-                        SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
-                    })?,
-                    3072 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA384).map_err(|e| {
-                        SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
-                    })?,
-                    4096 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA512).map_err(|e| {
-                        SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
-                    })?,
-                    _ => return Err(SecretError::InvalidConfiguration(
-                        "Unsupported RSA key size. Use 2048, 3072, or 4096".to_string()
-                    )),
+            "rsa" => match key_bits {
+                2048 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256).map_err(|e| {
+                    SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
+                })?,
+                3072 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA384).map_err(|e| {
+                    SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
+                })?,
+                4096 => rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA512).map_err(|e| {
+                    SecretError::InvalidConfiguration(format!("Failed to generate RSA key: {}", e))
+                })?,
+                _ => {
+                    return Err(SecretError::InvalidConfiguration(
+                        "Unsupported RSA key size. Use 2048, 3072, or 4096".to_string(),
+                    ));
                 }
-            }
-            "ecdsa" => {
-                match key_bits {
-                    256 => rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
-                        SecretError::InvalidConfiguration(format!("Failed to generate ECDSA key: {}", e))
-                    })?,
-                    384 => rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).map_err(|e| {
-                        SecretError::InvalidConfiguration(format!("Failed to generate ECDSA key: {}", e))
-                    })?,
-                    _ => return Err(SecretError::InvalidConfiguration(
-                        "Unsupported ECDSA key size. Use 256 or 384".to_string()
-                    )),
+            },
+            "ecdsa" => match key_bits {
+                256 => {
+                    rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+                        SecretError::InvalidConfiguration(format!(
+                            "Failed to generate ECDSA key: {}",
+                            e
+                        ))
+                    })?
                 }
-            }
+                384 => {
+                    rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384).map_err(|e| {
+                        SecretError::InvalidConfiguration(format!(
+                            "Failed to generate ECDSA key: {}",
+                            e
+                        ))
+                    })?
+                }
+                _ => {
+                    return Err(SecretError::InvalidConfiguration(
+                        "Unsupported ECDSA key size. Use 256 or 384".to_string(),
+                    ));
+                }
+            },
             "ed25519" => rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519).map_err(|e| {
                 SecretError::InvalidConfiguration(format!("Failed to generate Ed25519 key: {}", e))
             })?,
-            _ => return Err(SecretError::InvalidConfiguration(
-                "Unsupported key type. Use 'rsa', 'ecdsa', or 'ed25519'".to_string()
-            )),
+            _ => {
+                return Err(SecretError::InvalidConfiguration(
+                    "Unsupported key type. Use 'rsa', 'ecdsa', or 'ed25519'".to_string(),
+                ));
+            }
         };
 
         // Create certificate parameters
@@ -241,8 +258,14 @@ impl PkiEngine {
         cert_data.insert("certificate".to_string(), Value::String(cert_pem));
         cert_data.insert("private_key".to_string(), Value::String(key_pem));
         cert_data.insert("serial_number".to_string(), Value::String(serial_number));
-        cert_data.insert("common_name".to_string(), Value::String(common_name.to_string()));
-        cert_data.insert("organization".to_string(), Value::String(organization.to_string()));
+        cert_data.insert(
+            "common_name".to_string(),
+            Value::String(common_name.to_string()),
+        );
+        cert_data.insert(
+            "organization".to_string(),
+            Value::String(organization.to_string()),
+        );
         cert_data.insert("key_type".to_string(), Value::String(key_type.to_string()));
         cert_data.insert("key_bits".to_string(), Value::Number(key_bits.into()));
         cert_data.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));

@@ -148,12 +148,20 @@ impl From<AuthMethodError> for SecretonError {
             },
 
             // Configuration
-            AuthMethodError::InvalidConfiguration(msg) => SecretonError::Configuration { message: msg },
-            AuthMethodError::ConfigurationError(msg) => SecretonError::Configuration { message: msg },
+            AuthMethodError::InvalidConfiguration(msg) => {
+                SecretonError::Configuration { message: msg }
+            }
+            AuthMethodError::ConfigurationError(msg) => {
+                SecretonError::Configuration { message: msg }
+            }
 
             // Authentication
-            AuthMethodError::AuthenticationFailed(msg) => SecretonError::Authentication { message: msg },
-            AuthMethodError::InvalidCredentials(msg) => SecretonError::Authentication { message: msg },
+            AuthMethodError::AuthenticationFailed(msg) => {
+                SecretonError::Authentication { message: msg }
+            }
+            AuthMethodError::InvalidCredentials(msg) => {
+                SecretonError::Authentication { message: msg }
+            }
             AuthMethodError::AccessDenied => SecretonError::Authorization {
                 message: "Access denied".to_string(),
             },
@@ -164,7 +172,9 @@ impl From<AuthMethodError> for SecretonError {
                 resource: format!("role:{}", role),
             },
             AuthMethodError::AccountLocked(username) => SecretonError::AccountLocked { username },
-            AuthMethodError::AccountDisabled(username) => SecretonError::AccountDisabled { username },
+            AuthMethodError::AccountDisabled(username) => {
+                SecretonError::AccountDisabled { username }
+            }
             AuthMethodError::PasswordExpired => SecretonError::PasswordExpired {
                 username: "unknown".to_string(),
             },
@@ -178,18 +188,21 @@ impl From<AuthMethodError> for SecretonError {
 
             // MFA
             AuthMethodError::MfaRequired => SecretonError::MfaRequired,
-            AuthMethodError::MfaVerificationFailed(msg) => SecretonError::MfaAuthError { message: msg },
+            AuthMethodError::MfaVerificationFailed(msg) => {
+                SecretonError::MfaAuthError { message: msg }
+            }
 
             // External services
-            AuthMethodError::LdapConnectionFailed(msg) |
-            AuthMethodError::LdapAuthFailed(msg) |
-            AuthMethodError::LdapError(msg) => SecretonError::ServiceUnavailable {
+            AuthMethodError::LdapConnectionFailed(msg)
+            | AuthMethodError::LdapAuthFailed(msg)
+            | AuthMethodError::LdapError(msg) => SecretonError::ServiceUnavailable {
                 service: format!("LDAP: {}", msg),
             },
-            AuthMethodError::OidcProviderError(msg) |
-            AuthMethodError::OidcError(msg) => SecretonError::ServiceUnavailable {
-                service: format!("OIDC: {}", msg),
-            },
+            AuthMethodError::OidcProviderError(msg) | AuthMethodError::OidcError(msg) => {
+                SecretonError::ServiceUnavailable {
+                    service: format!("OIDC: {}", msg),
+                }
+            }
             AuthMethodError::OAuth2FlowError(msg) => SecretonError::ServiceUnavailable {
                 service: format!("OAuth2: {}", msg),
             },
@@ -208,23 +221,38 @@ impl From<AuthMethodError> for SecretonError {
             AuthMethodError::RadiusError(msg) => SecretonError::ServiceUnavailable {
                 service: format!("RADIUS: {}", msg),
             },
-            AuthMethodError::SamlAssertionError(msg) |
-            AuthMethodError::SamlError(msg) => SecretonError::ServiceUnavailable {
-                service: format!("SAML: {}", msg),
-            },
+            AuthMethodError::SamlAssertionError(msg) | AuthMethodError::SamlError(msg) => {
+                SecretonError::ServiceUnavailable {
+                    service: format!("SAML: {}", msg),
+                }
+            }
 
             // Certificate errors
-            AuthMethodError::CertificateParseError(msg) => SecretonError::Validation { message: format!("Certificate parse error: {}", msg) },
-            AuthMethodError::CertificateNotYetValid => SecretonError::Validation { message: "Certificate not yet valid".to_string() },
-            AuthMethodError::CertificateExpired => SecretonError::Validation { message: "Certificate expired".to_string() },
-            AuthMethodError::CertificateRevoked => SecretonError::Validation { message: "Certificate revoked".to_string() },
-            AuthMethodError::CertificateUntrustedCa => SecretonError::Validation { message: "Certificate untrusted CA".to_string() },
+            AuthMethodError::CertificateParseError(msg) => SecretonError::Validation {
+                message: format!("Certificate parse error: {}", msg),
+            },
+            AuthMethodError::CertificateNotYetValid => SecretonError::Validation {
+                message: "Certificate not yet valid".to_string(),
+            },
+            AuthMethodError::CertificateExpired => SecretonError::Validation {
+                message: "Certificate expired".to_string(),
+            },
+            AuthMethodError::CertificateRevoked => SecretonError::Validation {
+                message: "Certificate revoked".to_string(),
+            },
+            AuthMethodError::CertificateUntrustedCa => SecretonError::Validation {
+                message: "Certificate untrusted CA".to_string(),
+            },
 
             // Rate limiting and permissions
             AuthMethodError::RateLimitExceeded => SecretonError::RateLimitExceeded,
             AuthMethodError::PermissionDenied(msg) => SecretonError::Authorization { message: msg },
-            AuthMethodError::InvalidInput { field, reason } => SecretonError::InvalidInput { field, reason },
-            AuthMethodError::UnsupportedMethod { method } => SecretonError::Validation { message: format!("Unsupported method: {}", method) },
+            AuthMethodError::InvalidInput { field, reason } => {
+                SecretonError::InvalidInput { field, reason }
+            }
+            AuthMethodError::UnsupportedMethod { method } => SecretonError::Validation {
+                message: format!("Unsupported method: {}", method),
+            },
         }
     }
 }
@@ -233,32 +261,54 @@ impl From<SecretonError> for AuthMethodError {
     fn from(err: SecretonError) -> Self {
         match err {
             // Authentication & Authorization
-            SecretonError::Authentication { message } => AuthMethodError::AuthenticationFailed(message),
+            SecretonError::Authentication { message } => {
+                AuthMethodError::AuthenticationFailed(message)
+            }
             SecretonError::Authorization { message } => AuthMethodError::PermissionDenied(message),
             SecretonError::TokenExpired => AuthMethodError::TokenExpired,
             SecretonError::TokenInvalid { reason } => AuthMethodError::TokenInvalid(reason),
-            SecretonError::TokenRevoked => AuthMethodError::TokenInvalid("Token revoked".to_string()),
+            SecretonError::TokenRevoked => {
+                AuthMethodError::TokenInvalid("Token revoked".to_string())
+            }
             SecretonError::TokenNotFound { token: _ } => AuthMethodError::InvalidToken,
             SecretonError::TokenRenewalFailed { reason } => AuthMethodError::TokenInvalid(reason),
             SecretonError::InsufficientPermissions { required: _ } => AuthMethodError::AccessDenied,
 
             // User Management
             SecretonError::UserNotFound { username } => AuthMethodError::UserNotFound(username),
-            SecretonError::UserAlreadyExists { username: _ } => AuthMethodError::InvalidCredentials("User already exists".to_string()),
-            SecretonError::InvalidCredentials => AuthMethodError::InvalidCredentials("Invalid credentials".to_string()),
-            SecretonError::AccountDisabled { username } => AuthMethodError::AccountDisabled(username),
+            SecretonError::UserAlreadyExists { username: _ } => {
+                AuthMethodError::InvalidCredentials("User already exists".to_string())
+            }
+            SecretonError::InvalidCredentials => {
+                AuthMethodError::InvalidCredentials("Invalid credentials".to_string())
+            }
+            SecretonError::AccountDisabled { username } => {
+                AuthMethodError::AccountDisabled(username)
+            }
             SecretonError::AccountLocked { username } => AuthMethodError::AccountLocked(username),
             SecretonError::PasswordExpired { username: _ } => AuthMethodError::PasswordExpired,
 
             // MFA
             SecretonError::MfaRequired => AuthMethodError::MfaRequired,
-            SecretonError::MfaCredentialError { message } |
-            SecretonError::MfaAuthError { message } => AuthMethodError::MfaVerificationFailed(message),
-            SecretonError::MfaAlreadyConfigured { method: _ } => AuthMethodError::InvalidConfiguration("MFA already configured".to_string()),
-            SecretonError::MfaNotConfigured { user: _ } => AuthMethodError::MfaVerificationFailed("MFA not configured".to_string()),
-            SecretonError::MfaCodeReused => AuthMethodError::MfaVerificationFailed("MFA code reused".to_string()),
-            SecretonError::RecoveryCodeUsed => AuthMethodError::MfaVerificationFailed("Recovery code used".to_string()),
-            SecretonError::RecoveryCodeNotFound => AuthMethodError::MfaVerificationFailed("Recovery code not found".to_string()),
+            SecretonError::MfaCredentialError { message }
+            | SecretonError::MfaAuthError { message } => {
+                AuthMethodError::MfaVerificationFailed(message)
+            }
+            SecretonError::MfaAlreadyConfigured { method: _ } => {
+                AuthMethodError::InvalidConfiguration("MFA already configured".to_string())
+            }
+            SecretonError::MfaNotConfigured { user: _ } => {
+                AuthMethodError::MfaVerificationFailed("MFA not configured".to_string())
+            }
+            SecretonError::MfaCodeReused => {
+                AuthMethodError::MfaVerificationFailed("MFA code reused".to_string())
+            }
+            SecretonError::RecoveryCodeUsed => {
+                AuthMethodError::MfaVerificationFailed("Recovery code used".to_string())
+            }
+            SecretonError::RecoveryCodeNotFound => {
+                AuthMethodError::MfaVerificationFailed("Recovery code not found".to_string())
+            }
 
             // Resource Management
             SecretonError::NotFound { resource } => {
@@ -269,19 +319,21 @@ impl From<SecretonError> for AuthMethodError {
                 } else {
                     AuthMethodError::UserNotFound(resource)
                 }
-            },
+            }
             SecretonError::AlreadyExists { resource } => {
                 if resource.starts_with("auth-method:") {
                     AuthMethodError::MethodAlreadyExists(resource[12..].to_string())
                 } else {
                     AuthMethodError::InvalidConfiguration(format!("{} already exists", resource))
                 }
-            },
+            }
             SecretonError::Conflict { message } => AuthMethodError::InvalidConfiguration(message),
 
             // Validation
             SecretonError::Validation { message } => AuthMethodError::InvalidConfiguration(message),
-            SecretonError::InvalidInput { field, reason } => AuthMethodError::InvalidInput { field, reason },
+            SecretonError::InvalidInput { field, reason } => {
+                AuthMethodError::InvalidInput { field, reason }
+            }
 
             // Service & Infrastructure
             SecretonError::ServiceUnavailable { service } => {
@@ -306,51 +358,123 @@ impl From<SecretonError> for AuthMethodError {
                 } else {
                     AuthMethodError::ConfigurationError(format!("Service unavailable: {}", service))
                 }
-            },
+            }
 
             // Rate Limiting
             SecretonError::RateLimitExceeded => AuthMethodError::RateLimitExceeded,
 
             // Configuration
-            SecretonError::Configuration { message } => AuthMethodError::ConfigurationError(message),
+            SecretonError::Configuration { message } => {
+                AuthMethodError::ConfigurationError(message)
+            }
 
             // Other errors map to generic auth errors
-            SecretonError::Database { message } => AuthMethodError::ConfigurationError(format!("Database error: {}", message)),
-            SecretonError::Cache { message } => AuthMethodError::ConfigurationError(format!("Cache error: {}", message)),
-            SecretonError::Network { message } => AuthMethodError::ConfigurationError(format!("Network error: {}", message)),
-            SecretonError::Timeout { operation } => AuthMethodError::ConfigurationError(format!("Timeout: {}", operation)),
-            SecretonError::SecurityViolation { violation } => AuthMethodError::PermissionDenied(format!("Security violation: {}", violation)),
-            SecretonError::PolicyViolation { policy, reason } => AuthMethodError::PermissionDenied(format!("Policy violation: {} - {}", policy, reason)),
-            SecretonError::ComplianceViolation { standard, requirement } => AuthMethodError::PermissionDenied(format!("Compliance violation: {} - {}", standard, requirement)),
-            SecretonError::Audit { message } => AuthMethodError::ConfigurationError(format!("Audit error: {}", message)),
-            SecretonError::Cryptographic { message } => AuthMethodError::ConfigurationError(format!("Cryptographic error: {}", message)),
-            SecretonError::Key { message } => AuthMethodError::ConfigurationError(format!("Key error: {}", message)),
-            SecretonError::Encryption { message } => AuthMethodError::ConfigurationError(format!("Encryption error: {}", message)),
-            SecretonError::Decryption { message } => AuthMethodError::ConfigurationError(format!("Decryption error: {}", message)),
-            SecretonError::QuotaExceeded { resource: _, limit: _, used: _ } => AuthMethodError::RateLimitExceeded,
-            SecretonError::Io(err) => AuthMethodError::ConfigurationError(format!("IO error: {}", err)),
-            SecretonError::Serialization(err) => AuthMethodError::ConfigurationError(format!("Serialization error: {}", err)),
-            SecretonError::TomlSerialization(err) => AuthMethodError::ConfigurationError(format!("TOML serialization error: {}", err)),
-            SecretonError::TomlDeserialization(err) => AuthMethodError::ConfigurationError(format!("TOML deserialization error: {}", err)),
-            SecretonError::Parse { message } => AuthMethodError::ConfigurationError(format!("Parse error: {}", message)),
-            SecretonError::Internal { message } => AuthMethodError::ConfigurationError(format!("Internal error: {}", message)),
-            SecretonError::Unknown { message } => AuthMethodError::ConfigurationError(format!("Unknown error: {}", message)),
+            SecretonError::Database { message } => {
+                AuthMethodError::ConfigurationError(format!("Database error: {}", message))
+            }
+            SecretonError::Cache { message } => {
+                AuthMethodError::ConfigurationError(format!("Cache error: {}", message))
+            }
+            SecretonError::Network { message } => {
+                AuthMethodError::ConfigurationError(format!("Network error: {}", message))
+            }
+            SecretonError::Timeout { operation } => {
+                AuthMethodError::ConfigurationError(format!("Timeout: {}", operation))
+            }
+            SecretonError::SecurityViolation { violation } => {
+                AuthMethodError::PermissionDenied(format!("Security violation: {}", violation))
+            }
+            SecretonError::PolicyViolation { policy, reason } => AuthMethodError::PermissionDenied(
+                format!("Policy violation: {} - {}", policy, reason),
+            ),
+            SecretonError::ComplianceViolation {
+                standard,
+                requirement,
+            } => AuthMethodError::PermissionDenied(format!(
+                "Compliance violation: {} - {}",
+                standard, requirement
+            )),
+            SecretonError::Audit { message } => {
+                AuthMethodError::ConfigurationError(format!("Audit error: {}", message))
+            }
+            SecretonError::Cryptographic { message } => {
+                AuthMethodError::ConfigurationError(format!("Cryptographic error: {}", message))
+            }
+            SecretonError::Key { message } => {
+                AuthMethodError::ConfigurationError(format!("Key error: {}", message))
+            }
+            SecretonError::Encryption { message } => {
+                AuthMethodError::ConfigurationError(format!("Encryption error: {}", message))
+            }
+            SecretonError::Decryption { message } => {
+                AuthMethodError::ConfigurationError(format!("Decryption error: {}", message))
+            }
+            SecretonError::QuotaExceeded {
+                resource: _,
+                limit: _,
+                used: _,
+            } => AuthMethodError::RateLimitExceeded,
+            SecretonError::Io(err) => {
+                AuthMethodError::ConfigurationError(format!("IO error: {}", err))
+            }
+            SecretonError::Serialization(err) => {
+                AuthMethodError::ConfigurationError(format!("Serialization error: {}", err))
+            }
+            SecretonError::TomlSerialization(err) => {
+                AuthMethodError::ConfigurationError(format!("TOML serialization error: {}", err))
+            }
+            SecretonError::TomlDeserialization(err) => {
+                AuthMethodError::ConfigurationError(format!("TOML deserialization error: {}", err))
+            }
+            SecretonError::Parse { message } => {
+                AuthMethodError::ConfigurationError(format!("Parse error: {}", message))
+            }
+            SecretonError::Internal { message } => {
+                AuthMethodError::ConfigurationError(format!("Internal error: {}", message))
+            }
+            SecretonError::Unknown { message } => {
+                AuthMethodError::ConfigurationError(format!("Unknown error: {}", message))
+            }
 
             // Agent and other specific errors
-            SecretonError::AgentConfigError { message } => AuthMethodError::ConfigurationError(format!("Agent config error: {}", message)),
-            SecretonError::AgentSinkWriteError { message } => AuthMethodError::ConfigurationError(format!("Agent sink error: {}", message)),
-            SecretonError::AgentRenewalError { message } => AuthMethodError::ConfigurationError(format!("Agent renewal error: {}", message)),
-            SecretonError::AuthenticatedKeyAuthError { message } => AuthMethodError::AuthenticationFailed(format!("Authenticated key error: {}", message)),
-            SecretonError::AuthenticatedKeyPermissionError { message } => AuthMethodError::PermissionDenied(format!("Authenticated key permission error: {}", message)),
+            SecretonError::AgentConfigError { message } => {
+                AuthMethodError::ConfigurationError(format!("Agent config error: {}", message))
+            }
+            SecretonError::AgentSinkWriteError { message } => {
+                AuthMethodError::ConfigurationError(format!("Agent sink error: {}", message))
+            }
+            SecretonError::AgentRenewalError { message } => {
+                AuthMethodError::ConfigurationError(format!("Agent renewal error: {}", message))
+            }
+            SecretonError::AuthenticatedKeyAuthError { message } => {
+                AuthMethodError::AuthenticationFailed(format!(
+                    "Authenticated key error: {}",
+                    message
+                ))
+            }
+            SecretonError::AuthenticatedKeyPermissionError { message } => {
+                AuthMethodError::PermissionDenied(format!(
+                    "Authenticated key permission error: {}",
+                    message
+                ))
+            }
 
             // Identity
             SecretonError::EntityNotFound { entity } => AuthMethodError::UserNotFound(entity),
-            SecretonError::AliasExists { alias: _ } => AuthMethodError::InvalidConfiguration("Alias exists".to_string()),
-            SecretonError::AliasNotFound { alias: _ } => AuthMethodError::UserNotFound("Alias not found".to_string()),
-            SecretonError::EntitySelfMerge => AuthMethodError::InvalidConfiguration("Entity self merge not allowed".to_string()),
+            SecretonError::AliasExists { alias: _ } => {
+                AuthMethodError::InvalidConfiguration("Alias exists".to_string())
+            }
+            SecretonError::AliasNotFound { alias: _ } => {
+                AuthMethodError::UserNotFound("Alias not found".to_string())
+            }
+            SecretonError::EntitySelfMerge => {
+                AuthMethodError::InvalidConfiguration("Entity self merge not allowed".to_string())
+            }
 
             // Hashing
-            SecretonError::HashingFailed { message } => AuthMethodError::ConfigurationError(format!("Hashing failed: {}", message)),
+            SecretonError::HashingFailed { message } => {
+                AuthMethodError::ConfigurationError(format!("Hashing failed: {}", message))
+            }
         }
     }
 }

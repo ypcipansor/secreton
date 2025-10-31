@@ -127,7 +127,11 @@ impl AdvancedMFA {
     }
 
     /// Register FIDO2 credential
-    pub async fn register_fido2(&self, user_id: String, public_key: Vec<u8>) -> Result<String, SecretonError> {
+    pub async fn register_fido2(
+        &self,
+        user_id: String,
+        public_key: Vec<u8>,
+    ) -> Result<String, SecretonError> {
         let credential_id = uuid::Uuid::new_v4().to_string();
 
         let credential = FIDO2Credential {
@@ -145,11 +149,17 @@ impl AdvancedMFA {
     }
 
     /// Verify FIDO2 authentication
-    pub async fn verify_fido2(&self, credential_id: &str, _signature: &[u8]) -> Result<bool, SecretonError> {
+    pub async fn verify_fido2(
+        &self,
+        credential_id: &str,
+        _signature: &[u8],
+    ) -> Result<bool, SecretonError> {
         let mut credentials = self.fido2_credentials.write().await;
-        let credential = credentials
-            .get_mut(credential_id)
-            .ok_or_else(|| SecretonError::MfaCredentialError { message: "Credential not found".to_string() })?;
+        let credential = credentials.get_mut(credential_id).ok_or_else(|| {
+            SecretonError::MfaCredentialError {
+                message: "Credential not found".to_string(),
+            }
+        })?;
 
         // Mock signature verification
         // Real implementation would verify signature with public_key
@@ -212,11 +222,17 @@ impl AdvancedMFA {
     }
 
     /// Approve push notification
-    pub async fn approve_push_notification(&self, notification_id: &str) -> Result<(), SecretonError> {
+    pub async fn approve_push_notification(
+        &self,
+        notification_id: &str,
+    ) -> Result<(), SecretonError> {
         let mut notifications = self.push_notifications.write().await;
-        let notification = notifications
-            .get_mut(notification_id)
-            .ok_or_else(|| SecretonError::MfaAuthError { message: "Notification not found".to_string() })?;
+        let notification =
+            notifications
+                .get_mut(notification_id)
+                .ok_or_else(|| SecretonError::MfaAuthError {
+                    message: "Notification not found".to_string(),
+                })?;
 
         notification._status = PushStatus::Approved;
         notification.responded_at = Some(Utc::now());
@@ -257,9 +273,12 @@ impl AdvancedMFA {
         _template_data: &[u8],
     ) -> Result<bool, SecretonError> {
         let credentials = self.biometric_credentials.read().await;
-        let _credential = credentials
-            .get(credential_id)
-            .ok_or_else(|| SecretonError::MfaCredentialError { message: "Credential not found".to_string() })?;
+        let _credential =
+            credentials
+                .get(credential_id)
+                .ok_or_else(|| SecretonError::MfaCredentialError {
+                    message: "Credential not found".to_string(),
+                })?;
 
         // Mock biometric matching
         // Real implementation would compare template with stored hash

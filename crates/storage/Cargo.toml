@@ -47,10 +47,10 @@ azure_storage_blobs.workspace = true
 azure_core.workspace = true
 
 # Cassandra
-scylla = "0.12"
+scylla = "1.3.1"
 
 # MongoDB
-mongodb = "2.8"
+mongodb.workspace = true
 regex = "1.10"
 
 # Cryptography

@@ -5,14 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
-pub mod error;
 pub mod advanced_features;
+pub mod error;
 pub mod versioning;
 pub mod zkp;
 
 // Re-export main types
-pub use error::EnterpriseError;
 pub use advanced_features::*;
+pub use error::EnterpriseError;
 
 /// Enterprise feature result
 #[derive(Debug, Clone, Serialize, Deserialize)]

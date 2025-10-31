@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use base64::{engine::general_purpose, Engine as _};
-
+use base64::{Engine as _, engine::general_purpose};
 
 /// Kubernetes operator configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

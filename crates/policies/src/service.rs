@@ -1,15 +1,15 @@
 //! Policy service layer
 
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
 
-use super::model::{Policy, Role, EvaluationContext, EvaluationResult};
 use super::engine::PolicyEngine;
-use super::evaluator::PolicyEvaluator;
 use super::error::{PolicyError, PolicyResult, ValidationErrors};
+use super::evaluator::PolicyEvaluator;
+use super::model::{EvaluationContext, EvaluationResult, Policy, Role};
 
 /// Policy service for managing policies and roles
 pub struct PolicyService {
@@ -62,18 +62,23 @@ impl PolicyService {
     /// Get policy by ID
     pub async fn get_policy(&self, policy_id: &Uuid) -> PolicyResult<Policy> {
         let policies = self.policies.read().await;
-        policies.get(policy_id).cloned().ok_or_else(|| PolicyError::PolicyNotFound {
-            policy_id: policy_id.to_string(),
-        })
+        policies
+            .get(policy_id)
+            .cloned()
+            .ok_or_else(|| PolicyError::PolicyNotFound {
+                policy_id: policy_id.to_string(),
+            })
     }
 
     /// Update policy
     pub async fn update_policy(&self, policy_id: &Uuid, updates: Policy) -> PolicyResult<Policy> {
         let mut policies = self.policies.write().await;
 
-        let existing = policies.get_mut(policy_id).ok_or_else(|| PolicyError::PolicyNotFound {
-            policy_id: policy_id.to_string(),
-        })?;
+        let existing = policies
+            .get_mut(policy_id)
+            .ok_or_else(|| PolicyError::PolicyNotFound {
+                policy_id: policy_id.to_string(),
+            })?;
 
         // Validate updates
         self.validate_policy(&updates).await?;
@@ -153,18 +158,23 @@ impl PolicyService {
     /// Get role by ID
     pub async fn get_role(&self, role_id: &Uuid) -> PolicyResult<Role> {
         let roles = self.roles.read().await;
-        roles.get(role_id).cloned().ok_or_else(|| PolicyError::RoleNotFound {
-            role_id: role_id.to_string(),
-        })
+        roles
+            .get(role_id)
+            .cloned()
+            .ok_or_else(|| PolicyError::RoleNotFound {
+                role_id: role_id.to_string(),
+            })
     }
 
     /// Update role
     pub async fn update_role(&self, role_id: &Uuid, mut updates: Role) -> PolicyResult<Role> {
         let mut roles = self.roles.write().await;
 
-        let existing = roles.get_mut(role_id).ok_or_else(|| PolicyError::RoleNotFound {
-            role_id: role_id.to_string(),
-        })?;
+        let existing = roles
+            .get_mut(role_id)
+            .ok_or_else(|| PolicyError::RoleNotFound {
+                role_id: role_id.to_string(),
+            })?;
 
         // Validate updates
         self.validate_role(&updates).await?;
@@ -213,11 +223,17 @@ impl PolicyService {
     }
 
     /// Assign policy to role
-    pub async fn assign_policy_to_role(&self, role_id: &Uuid, policy_id: &Uuid) -> PolicyResult<()> {
+    pub async fn assign_policy_to_role(
+        &self,
+        role_id: &Uuid,
+        policy_id: &Uuid,
+    ) -> PolicyResult<()> {
         let mut roles = self.roles.write().await;
-        let role = roles.get_mut(role_id).ok_or_else(|| PolicyError::RoleNotFound {
-            role_id: role_id.to_string(),
-        })?;
+        let role = roles
+            .get_mut(role_id)
+            .ok_or_else(|| PolicyError::RoleNotFound {
+                role_id: role_id.to_string(),
+            })?;
 
         // Check if policy exists
         {
@@ -239,11 +255,17 @@ impl PolicyService {
     }
 
     /// Remove policy from role
-    pub async fn remove_policy_from_role(&self, role_id: &Uuid, policy_id: &Uuid) -> PolicyResult<()> {
+    pub async fn remove_policy_from_role(
+        &self,
+        role_id: &Uuid,
+        policy_id: &Uuid,
+    ) -> PolicyResult<()> {
         let mut roles = self.roles.write().await;
-        let role = roles.get_mut(role_id).ok_or_else(|| PolicyError::RoleNotFound {
-            role_id: role_id.to_string(),
-        })?;
+        let role = roles
+            .get_mut(role_id)
+            .ok_or_else(|| PolicyError::RoleNotFound {
+                role_id: role_id.to_string(),
+            })?;
 
         role.policies.retain(|&id| id != *policy_id);
         role.updated_at = Utc::now();
@@ -252,7 +274,11 @@ impl PolicyService {
     }
 
     /// Evaluate access request
-    pub async fn evaluate_access(&self, context: &EvaluationContext, subject_roles: &[Uuid]) -> PolicyResult<EvaluationResult> {
+    pub async fn evaluate_access(
+        &self,
+        context: &EvaluationContext,
+        subject_roles: &[Uuid],
+    ) -> PolicyResult<EvaluationResult> {
         let engine_guard = self.engine.read().await;
         let evaluator = PolicyEvaluator::new((*engine_guard).clone());
         evaluator.evaluate(context, subject_roles)
@@ -279,16 +305,25 @@ impl PolicyService {
         // Validate each rule
         for (i, rule) in policy.rules.iter().enumerate() {
             if rule.actions.is_empty() && rule.resources.is_empty() {
-                errors.add(format!("rules[{}]", i), "Rule must have actions or resources");
+                errors.add(
+                    format!("rules[{}]", i),
+                    "Rule must have actions or resources",
+                );
             }
 
             for (j, condition) in rule.conditions.iter().enumerate() {
                 if condition.attribute.trim().is_empty() {
-                    errors.add(format!("rules[{}].conditions[{}].attribute", i, j), "Attribute cannot be empty");
+                    errors.add(
+                        format!("rules[{}].conditions[{}].attribute", i, j),
+                        "Attribute cannot be empty",
+                    );
                 }
 
                 if condition.values.is_empty() {
-                    errors.add(format!("rules[{}].conditions[{}].values", i, j), "Condition must have at least one value");
+                    errors.add(
+                        format!("rules[{}].conditions[{}].values", i, j),
+                        "Condition must have at least one value",
+                    );
                 }
             }
         }
@@ -313,7 +348,10 @@ impl PolicyService {
         // Check for duplicate role name
         {
             let roles = self.roles.read().await;
-            if roles.values().any(|r| r.name == role.name && r.id != role.id) {
+            if roles
+                .values()
+                .any(|r| r.name == role.name && r.id != role.id)
+            {
                 errors.add("name", "Role name already exists");
             }
         }
@@ -339,7 +377,11 @@ impl PolicyService {
             } {
                 if visited.contains(&parent_role) {
                     return Err(PolicyError::CircularRoleDependency {
-                        role_chain: vec![role.id.to_string(), current.to_string(), parent_role.to_string()],
+                        role_chain: vec![
+                            role.id.to_string(),
+                            current.to_string(),
+                            parent_role.to_string(),
+                        ],
                     });
                 }
 
@@ -361,8 +403,8 @@ impl PolicyService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{PolicyEffect, PolicyType};
     use std::collections::HashMap;
-    use crate::model::{PolicyType, PolicyEffect};
 
     #[tokio::test]
     async fn test_create_policy() {

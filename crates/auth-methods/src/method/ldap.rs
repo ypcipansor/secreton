@@ -1,13 +1,13 @@
 //! LDAP authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
 use chrono::Utc;
+use ldap3::{LdapConnAsync, Scope, SearchEntry};
 use std::collections::HashMap;
 use uuid::Uuid;
-use ldap3::{LdapConnAsync, Scope, SearchEntry};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// LDAP authentication method
 pub struct LdapAuthMethod {
@@ -32,8 +32,12 @@ impl LdapAuthMethod {
 
     /// Bind to LDAP server
     async fn bind_ldap(&self, username: &str, password: &str) -> AuthMethodResult<ldap3::Ldap> {
-        let config = self.ldap_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("LDAP config not set".to_string()))?;
+        let config = self
+            .ldap_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "LDAP config not set".to_string(),
+            ))?;
 
         let (conn, mut ldap) = LdapConnAsync::new(&config.url)
             .await
@@ -45,7 +49,10 @@ impl LdapAuthMethod {
         let bind_dn = if config.user_dn_template.contains("{username}") {
             config.user_dn_template.replace("{username}", username)
         } else {
-            format!("{}={},{}", config.user_attr, username, config.user_dn_template)
+            format!(
+                "{}={},{}",
+                config.user_attr, username, config.user_dn_template
+            )
         };
 
         ldap.simple_bind(&bind_dn, password)
@@ -58,25 +65,35 @@ impl LdapAuthMethod {
     }
 
     /// Get user information from LDAP
-    async fn get_user_info(&self, ldap: &mut ldap3::Ldap, username: &str) -> AuthMethodResult<UserInfo> {
-        let config = self.ldap_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("LDAP config not set".to_string()))?;
+    async fn get_user_info(
+        &self,
+        ldap: &mut ldap3::Ldap,
+        username: &str,
+    ) -> AuthMethodResult<UserInfo> {
+        let config = self
+            .ldap_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "LDAP config not set".to_string(),
+            ))?;
 
         let filter = format!("({}={})", config.user_attr, username);
-        let search_result = ldap.search(
-            &config.user_dn_template,
-            Scope::Subtree,
-            &filter,
-            vec!["dn", "cn", "memberOf", &config.user_attr],
-        )
-        .await
-        .map_err(|e| AuthMethodError::LdapError(format!("Search failed: {}", e)))?
-        .success()
-        .map_err(|e| AuthMethodError::LdapError(format!("Search error: {}", e)))?;
+        let search_result = ldap
+            .search(
+                &config.user_dn_template,
+                Scope::Subtree,
+                &filter,
+                vec!["dn", "cn", "memberOf", &config.user_attr],
+            )
+            .await
+            .map_err(|e| AuthMethodError::LdapError(format!("Search failed: {}", e)))?
+            .success()
+            .map_err(|e| AuthMethodError::LdapError(format!("Search error: {}", e)))?;
 
         if let Some(entry) = search_result.0.into_iter().next() {
             let search_entry = SearchEntry::construct(entry);
-            let groups = search_entry.attrs
+            let groups = search_entry
+                .attrs
                 .get("memberOf")
                 .map(|members| members.iter().map(|dn| extract_group_name(dn)).collect())
                 .unwrap_or_default();
@@ -84,8 +101,16 @@ impl LdapAuthMethod {
             Ok(UserInfo {
                 id: Uuid::new_v4(),
                 username: username.to_string(),
-                email: search_entry.attrs.get("mail").and_then(|v| v.first()).cloned(),
-                display_name: search_entry.attrs.get("displayName").and_then(|v| v.first()).cloned(),
+                email: search_entry
+                    .attrs
+                    .get("mail")
+                    .and_then(|v| v.first())
+                    .cloned(),
+                display_name: search_entry
+                    .attrs
+                    .get("displayName")
+                    .and_then(|v| v.first())
+                    .cloned(),
                 groups,
                 metadata: HashMap::new(),
                 created_at: Utc::now(),
@@ -110,26 +135,38 @@ impl AuthMethodImpl for LdapAuthMethod {
         if let Some(ldap_url) = config.config.get("url") {
             let ldap_config = LdapConfig {
                 url: ldap_url.as_str().unwrap_or("").to_string(),
-                user_dn_template: config.config.get("user_dn_template")
+                user_dn_template: config
+                    .config
+                    .get("user_dn_template")
                     .or_else(|| config.config.get("user_dn"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("ou=users,dc=example,dc=com")
                     .to_string(),
-                user_attr: config.config.get("user_attr")
+                user_attr: config
+                    .config
+                    .get("user_attr")
                     .and_then(|v| v.as_str())
                     .unwrap_or("cn")
                     .to_string(),
-                group_attr: config.config.get("group_attr")
+                group_attr: config
+                    .config
+                    .get("group_attr")
                     .and_then(|v| v.as_str())
                     .unwrap_or("memberOf")
                     .to_string(),
-                bind_dn: config.config.get("bind_dn")
+                bind_dn: config
+                    .config
+                    .get("bind_dn")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                bind_password: config.config.get("bind_password")
+                bind_password: config
+                    .config
+                    .get("bind_password")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                start_tls: config.config.get("start_tls")
+                start_tls: config
+                    .config
+                    .get("start_tls")
                     .or_else(|| config.config.get("starttls"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
@@ -164,7 +201,9 @@ impl AuthMethodImpl for LdapAuthMethod {
                     metadata: HashMap::new(),
                 })
             }
-            _ => Err(AuthMethodError::InvalidCredentials("LDAP authentication failed".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "LDAP authentication failed".to_string(),
+            )),
         }
     }
 

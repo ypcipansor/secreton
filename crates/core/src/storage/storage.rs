@@ -31,7 +31,8 @@ impl Storage {
             3,     // 3 iterations
             4,     // 4 parallelism
             32,    // 32 byte key (not used for password verification)
-        ).map_err(|e| anyhow::anyhow!("Failed to create KDF parameters: {}", e))?;
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create KDF parameters: {}", e))?;
 
         // Derive a key (we'll use the parameters for verification)
         let _derived = derive_key(password.as_bytes(), &params)
@@ -70,16 +71,24 @@ impl Storage {
             return Err(anyhow::anyhow!("Invalid parameters in hash"));
         }
 
-        let memory_cost: u32 = param_parts[0].strip_prefix("m=").unwrap().parse()
+        let memory_cost: u32 = param_parts[0]
+            .strip_prefix("m=")
+            .unwrap()
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid memory cost"))?;
-        let iterations: u32 = param_parts[1].strip_prefix("t=").unwrap().parse()
+        let iterations: u32 = param_parts[1]
+            .strip_prefix("t=")
+            .unwrap()
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid iterations"))?;
-        let parallelism: u32 = param_parts[2].strip_prefix("p=").unwrap().parse()
+        let parallelism: u32 = param_parts[2]
+            .strip_prefix("p=")
+            .unwrap()
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid parallelism"))?;
 
         let salt_hex = parts[4];
-        let salt = hex::decode(salt_hex)
-            .map_err(|_| anyhow::anyhow!("Invalid salt encoding"))?;
+        let salt = hex::decode(salt_hex).map_err(|_| anyhow::anyhow!("Invalid salt encoding"))?;
 
         // Recreate the parameters
         let params = KdfParams {

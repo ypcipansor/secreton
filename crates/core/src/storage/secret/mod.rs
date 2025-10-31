@@ -1,17 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::storage::{
-    SharedSecureStorage,
-    SecureStorage,
-    StorageBackend,
-};
+use crate::storage::{SecureStorage, SharedSecureStorage, StorageBackend};
 
 /// Represents a versioned secret
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,16 +97,19 @@ impl<T: StorageBackend> SecretManager<T> {
 
         // Encrypt the secret data
         let encrypted_data = self.secure_storage.encrypt_value(&data).await?;
-        
+
         // Store the secret in the backend
-        let metadata = self.backend.store_secret_versioned(
-            path,
-            &json!({
-                "data": encrypted_data,
-                "created_by": created_by,
-                "metadata": metadata.unwrap_or_default(),
-            }),
-        ).await?;
+        let metadata = self
+            .backend
+            .store_secret_versioned(
+                path,
+                &json!({
+                    "data": encrypted_data,
+                    "created_by": created_by,
+                    "metadata": metadata.unwrap_or_default(),
+                }),
+            )
+            .await?;
 
         Ok(SecretMetadata {
             id: Uuid::new_v4().to_string(),
@@ -127,7 +126,8 @@ impl<T: StorageBackend> SecretManager<T> {
     /// Get the latest version of a secret
     pub async fn get_secret(&self, path: &str) -> Result<Option<SecretVersion>> {
         if let Some((stored_data, version)) = self.backend.get_latest_secret(path).await? {
-            let encrypted_data = stored_data.get("data")
+            let encrypted_data = stored_data
+                .get("data")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Invalid secret data format"))?;
 
@@ -139,11 +139,13 @@ impl<T: StorageBackend> SecretManager<T> {
                 version,
                 data,
                 created_at: Utc::now(),
-                created_by: stored_data.get("created_by")
+                created_by: stored_data
+                    .get("created_by")
                     .and_then(|v| v.as_str())
                     .unwrap_or("system")
                     .to_string(),
-                metadata: stored_data.get("metadata")
+                metadata: stored_data
+                    .get("metadata")
                     .and_then(|m| serde_json::from_value(m.clone()).ok())
                     .unwrap_or_default(),
                 deleted: false,
@@ -160,11 +162,7 @@ impl<T: StorageBackend> SecretManager<T> {
     }
 
     /// Delete a secret or specific version
-    pub async fn delete_secret(
-        &self,
-        path: &str,
-        version: Option<u32>,
-    ) -> Result<()> {
+    pub async fn delete_secret(&self, path: &str, version: Option<u32>) -> Result<()> {
         if let Some(_version) = version {
             // TODO: Implement version-specific deletion
             Ok(())
@@ -199,17 +197,10 @@ impl<T: StorageBackend> SecretManager<T> {
 #[async_trait]
 pub trait SecretStorage: Send + Sync {
     /// Store a new version of a secret
-    async fn store_secret_versioned(
-        &self,
-        path: &str,
-        data: &serde_json::Value,
-    ) -> Result<u32>;
+    async fn store_secret_versioned(&self, path: &str, data: &serde_json::Value) -> Result<u32>;
 
     /// Get the latest version of a secret
-    async fn get_latest_secret(
-        &self,
-        path: &str,
-    ) -> Result<Option<(serde_json::Value, u32)>>;
+    async fn get_latest_secret(&self, path: &str) -> Result<Option<(serde_json::Value, u32)>>;
 
     /// List all secrets under a path
     async fn list_secrets(&self, path: &str) -> Result<Vec<String>>;

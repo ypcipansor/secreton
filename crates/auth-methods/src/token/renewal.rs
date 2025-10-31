@@ -1,11 +1,11 @@
 //! Token renewal functionality
 
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use super::token::*;
 use secreton_errors::SecretonError;
@@ -14,7 +14,10 @@ use secreton_errors::SecretonError;
 #[async_trait]
 pub trait TokenRenewalService: Send + Sync {
     /// Renew a token
-    async fn renew_token(&self, request: TokenRenewalRequest) -> Result<TokenRenewalResponse, SecretonError>;
+    async fn renew_token(
+        &self,
+        request: TokenRenewalRequest,
+    ) -> Result<TokenRenewalResponse, SecretonError>;
 
     /// Get renewal information for a token
     async fn get_renewal_info(&self, token_id: Uuid) -> Result<TokenRenewalInfo, SecretonError>;
@@ -38,7 +41,11 @@ pub struct InMemoryTokenRenewalService {
 }
 
 impl InMemoryTokenRenewalService {
-    pub fn new(tokens: Arc<RwLock<HashMap<Uuid, Token>>>, default_increment: Duration, max_ttl: Option<Duration>) -> Self {
+    pub fn new(
+        tokens: Arc<RwLock<HashMap<Uuid, Token>>>,
+        default_increment: Duration,
+        max_ttl: Option<Duration>,
+    ) -> Self {
         Self {
             tokens,
             default_increment,
@@ -49,15 +56,24 @@ impl InMemoryTokenRenewalService {
 
 #[async_trait]
 impl TokenRenewalService for InMemoryTokenRenewalService {
-    async fn renew_token(&self, request: TokenRenewalRequest) -> Result<TokenRenewalResponse, SecretonError> {
+    async fn renew_token(
+        &self,
+        request: TokenRenewalRequest,
+    ) -> Result<TokenRenewalResponse, SecretonError> {
         let mut tokens = self.tokens.write().await;
 
-        let token = tokens.get_mut(&request.token_id)
-            .ok_or_else(|| SecretonError::TokenInvalid { reason: request.token_id.to_string() })?;
+        let token =
+            tokens
+                .get_mut(&request.token_id)
+                .ok_or_else(|| SecretonError::TokenInvalid {
+                    reason: request.token_id.to_string(),
+                })?;
 
         // Check if token is valid
         if !token.is_valid() {
-            return Err(SecretonError::TokenInvalid { reason: request.token_id.to_string() });
+            return Err(SecretonError::TokenInvalid {
+                reason: request.token_id.to_string(),
+            });
         }
 
         // Renew the token
@@ -71,8 +87,11 @@ impl TokenRenewalService for InMemoryTokenRenewalService {
 
     async fn get_renewal_info(&self, token_id: Uuid) -> Result<TokenRenewalInfo, SecretonError> {
         let tokens = self.tokens.read().await;
-        let token = tokens.get(&token_id)
-            .ok_or_else(|| SecretonError::TokenInvalid { reason: token_id.to_string() })?;
+        let token = tokens
+            .get(&token_id)
+            .ok_or_else(|| SecretonError::TokenInvalid {
+                reason: token_id.to_string(),
+            })?;
 
         let time_remaining = if let Some(expiry) = token.expiry_time {
             Some(expiry.signed_duration_since(Utc::now()))

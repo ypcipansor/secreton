@@ -1,13 +1,13 @@
 //! AWS secret engine for AWS integration
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use uuid::Uuid;
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 use crate::backend::AwsBackend;
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// AWS secret engine
 pub struct AwsEngine {
@@ -103,7 +103,10 @@ impl SecretEngine for AwsEngine {
                     updated_at: chrono::Utc::now(),
                 })
             }
-            _ => Err(SecretError::InvalidPath(format!("Unsupported AWS path: {}", path))),
+            _ => Err(SecretError::InvalidPath(format!(
+                "Unsupported AWS path: {}",
+                path
+            ))),
         }
     }
 
@@ -139,7 +142,10 @@ impl AwsEngine {
     async fn generate_sts_credentials(&self) -> SecretResult<HashMap<String, Value>> {
         // Use the AWS backend to generate real STS credentials
         let ttl_seconds = self.config.default_lease_ttl as u32;
-        let credentials = self.backend.generate_credentials(None, ttl_seconds).await
+        let credentials = self
+            .backend
+            .generate_credentials(None, ttl_seconds)
+            .await
             .map_err(|e| SecretError::BackendOperationFailed(format!("AWS STS error: {}", e)))?;
 
         // Convert to the expected format

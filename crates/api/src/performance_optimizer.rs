@@ -22,7 +22,9 @@ pub fn performance_routes() -> Router<()> {
         Json(optimizer.get_metrics().clone())
     }
 
-    async fn get_optimization_recommendations(Extension(state): Extension<ApiState>) -> Json<Vec<String>> {
+    async fn get_optimization_recommendations(
+        Extension(state): Extension<ApiState>,
+    ) -> Json<Vec<String>> {
         let optimizer = state
             .performance_optimizer
             .write()

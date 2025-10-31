@@ -3,7 +3,6 @@
 //! System infrastructure components including API gateways, observability,
 //! monitoring, plugin systems, and request forwarding services.
 
-
 pub mod advanced_observability;
 pub mod api_gateway;
 pub mod connection_pooling;

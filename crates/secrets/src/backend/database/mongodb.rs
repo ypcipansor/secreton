@@ -1,8 +1,8 @@
 //! MongoDB database backend
 
-use std::collections::HashMap;
-use serde_json::Value;
 use crate::error::*;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// MongoDB database backend
 pub struct MongodbBackend {
@@ -16,27 +16,44 @@ impl MongodbBackend {
 
     /// Test connection to MongoDB
     pub async fn test_connection(&self) -> SecretResult<()> {
-        let client = mongodb::Client::with_uri_str(&self.connection_string).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e)))?;
+        let client = mongodb::Client::with_uri_str(&self.connection_string)
+            .await
+            .map_err(|e| {
+                SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e))
+            })?;
 
         // Test with a simple ping
-        client.database("admin").run_command(mongodb::bson::doc! { "ping": 1 }).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("MongoDB connection test failed: {}", e)))?;
+        client
+            .database("admin")
+            .run_command(mongodb::bson::doc! { "ping": 1 })
+            .await
+            .map_err(|e| {
+                SecretError::InvalidConfiguration(format!("MongoDB connection test failed: {}", e))
+            })?;
 
         Ok(())
     }
 
     /// Create a database user with specified privileges
-    pub async fn create_user(&self, username: &str, password: &str, role_sql: &str) -> SecretResult<()> {
-        let client = mongodb::Client::with_uri_str(&self.connection_string).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e)))?;
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        role_sql: &str,
+    ) -> SecretResult<()> {
+        let client = mongodb::Client::with_uri_str(&self.connection_string)
+            .await
+            .map_err(|e| {
+                SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e))
+            })?;
 
         let admin_db = client.database("admin");
 
         // Parse role_sql as JSON for MongoDB roles
         let roles: Vec<mongodb::bson::Document> = if !role_sql.is_empty() {
-            serde_json::from_str(role_sql)
-                .map_err(|e| SecretError::InvalidConfiguration(format!("Invalid role SQL JSON: {}", e)))?
+            serde_json::from_str(role_sql).map_err(|e| {
+                SecretError::InvalidConfiguration(format!("Invalid role SQL JSON: {}", e))
+            })?
         } else {
             vec![mongodb::bson::doc! {
                 "role": "readWrite",
@@ -51,16 +68,20 @@ impl MongodbBackend {
             "roles": roles
         };
 
-        admin_db.run_command(create_user_cmd).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Failed to create user: {}", e)))?;
+        admin_db.run_command(create_user_cmd).await.map_err(|e| {
+            SecretError::InvalidConfiguration(format!("Failed to create user: {}", e))
+        })?;
 
         Ok(())
     }
 
     /// Revoke database user
     pub async fn revoke_user(&self, username: &str) -> SecretResult<()> {
-        let client = mongodb::Client::with_uri_str(&self.connection_string).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e)))?;
+        let client = mongodb::Client::with_uri_str(&self.connection_string)
+            .await
+            .map_err(|e| {
+                SecretError::InvalidConfiguration(format!("Failed to connect to MongoDB: {}", e))
+            })?;
 
         let admin_db = client.database("admin");
 
@@ -69,16 +90,21 @@ impl MongodbBackend {
             "dropUser": username
         };
 
-        admin_db.run_command(drop_user_cmd).await
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Failed to revoke user: {}", e)))?;
+        admin_db.run_command(drop_user_cmd).await.map_err(|e| {
+            SecretError::InvalidConfiguration(format!("Failed to revoke user: {}", e))
+        })?;
 
         Ok(())
     }
 
     /// Generate dynamic credentials
-    pub async fn generate_credentials(&self, role_name: &str, role_sql: &str) -> SecretResult<HashMap<String, Value>> {
+    pub async fn generate_credentials(
+        &self,
+        role_name: &str,
+        role_sql: &str,
+    ) -> SecretResult<HashMap<String, Value>> {
         // Generate random credentials
-        use rand::{distributions::Alphanumeric, Rng};
+        use rand::{Rng, distributions::Alphanumeric};
         let username: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(16)

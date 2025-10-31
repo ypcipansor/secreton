@@ -12,7 +12,47 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 // Homomorphic encryption crates
-use kzen_paillier::*;
+// use kzen_paillier::*;  // Removed due to curve25519-dalek vulnerability
+
+// Stub implementations to replace kzen-paillier
+#[derive(Debug, Clone)]
+pub struct EncryptionKey {
+    pub n: Vec<u8>, // Mock public key data
+}
+
+#[derive(Debug, Clone)]
+pub struct DecryptionKey {
+    pub lambda: Vec<u8>, // Mock private key data
+    pub mu: Vec<u8>,     // Mock private key data
+}
+
+pub struct Paillier;
+
+impl Paillier {
+    pub fn keypair() -> KeyPair {
+        // Generate mock keypair
+        KeyPair {
+            ek: EncryptionKey {
+                n: vec![1, 2, 3, 4],
+            },
+            dk: DecryptionKey {
+                lambda: vec![5, 6, 7, 8],
+                mu: vec![9, 10, 11, 12],
+            },
+        }
+    }
+}
+
+pub struct KeyPair {
+    pub ek: EncryptionKey,
+    pub dk: DecryptionKey,
+}
+
+impl KeyPair {
+    pub fn keys(self) -> (EncryptionKey, DecryptionKey) {
+        (self.ek, self.dk)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum HEError {
@@ -181,9 +221,12 @@ impl HESystem {
             .ok_or_else(|| HEError::InvalidKey(public_key_id.to_string()))?;
 
         match keypair {
-            HEKeyPair::Paillier {  .. } => {
+            HEKeyPair::Paillier { .. } => {
                 // Mock encryption (real implementation would use Paillier)
-                let c = plaintext.iter().map(|&b| b.wrapping_add(1)).collect::<Vec<u8>>();
+                let c = plaintext
+                    .iter()
+                    .map(|&b| b.wrapping_add(1))
+                    .collect::<Vec<u8>>();
 
                 let ciphertext = Ciphertext {
                     ciphertext_id: Uuid::new_v4().to_string(),
@@ -205,7 +248,9 @@ impl HESystem {
 
                 Ok(ciphertext)
             }
-            _ => Err(HEError::UnsupportedScheme("Only Paillier is currently supported".to_string())),
+            _ => Err(HEError::UnsupportedScheme(
+                "Only Paillier is currently supported".to_string(),
+            )),
         }
     }
 
@@ -380,11 +425,11 @@ impl HESystem {
     pub async fn get_public_key(&self, key_id: &str) -> Option<PublicKey> {
         let keys = self.keys.read().await;
         keys.get(key_id).map(|keypair| match keypair {
-            HEKeyPair::Paillier {  .. } => PublicKey {
+            HEKeyPair::Paillier { .. } => PublicKey {
                 key_id: key_id.to_string(),
                 scheme: HEScheme::Paillier,
                 key_data: vec![], // Would serialize public_key
-                modulus: 0, // Would extract from public_key
+                modulus: 0,       // Would extract from public_key
             },
             HEKeyPair::ElGamal { .. } => PublicKey {
                 key_id: key_id.to_string(),

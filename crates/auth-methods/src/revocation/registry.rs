@@ -1,10 +1,10 @@
 //! Revocation registry management
 
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use super::certificate::*;
 use crate::error::*;
@@ -13,16 +13,30 @@ use crate::error::*;
 #[async_trait]
 pub trait RevocationRegistry: Send + Sync {
     /// Revoke a certificate
-    async fn revoke_certificate(&self, request: CertificateRevocationRequest, issuer: String) -> Result<(), AuthMethodError>;
+    async fn revoke_certificate(
+        &self,
+        request: CertificateRevocationRequest,
+        issuer: String,
+    ) -> Result<(), AuthMethodError>;
 
     /// Check certificate status
-    async fn check_certificate_status(&self, request: CertificateStatusRequest) -> Result<CertificateStatusResponse, AuthMethodError>;
+    async fn check_certificate_status(
+        &self,
+        request: CertificateStatusRequest,
+    ) -> Result<CertificateStatusResponse, AuthMethodError>;
 
     /// Get CRL for an issuer
-    async fn get_crl(&self, issuer: String) -> Result<Option<CertificateRevocationList>, AuthMethodError>;
+    async fn get_crl(
+        &self,
+        issuer: String,
+    ) -> Result<Option<CertificateRevocationList>, AuthMethodError>;
 
     /// Update CRL next update time
-    async fn update_crl(&self, issuer: String, next_update: DateTime<Utc>) -> Result<(), AuthMethodError>;
+    async fn update_crl(
+        &self,
+        issuer: String,
+        next_update: DateTime<Utc>,
+    ) -> Result<(), AuthMethodError>;
 
     /// Clean up expired CRLs
     async fn cleanup_expired_crls(&self) -> Result<usize, AuthMethodError>;
@@ -45,17 +59,23 @@ impl InMemoryRevocationRegistry {
 
 #[async_trait]
 impl RevocationRegistry for InMemoryRevocationRegistry {
-    async fn revoke_certificate(&self, request: CertificateRevocationRequest, issuer: String) -> Result<(), AuthMethodError> {
+    async fn revoke_certificate(
+        &self,
+        request: CertificateRevocationRequest,
+        issuer: String,
+    ) -> Result<(), AuthMethodError> {
         let mut crls = self.crls.write().await;
 
-        let crl = crls.entry(issuer.clone()).or_insert_with(|| CertificateRevocationList {
-            id: Uuid::new_v4(),
-            issuer: issuer.clone(),
-            this_update: Utc::now(),
-            next_update: Utc::now() + self.crl_validity_period,
-            revoked_certificates: Vec::new(),
-            version: 1,
-        });
+        let crl = crls
+            .entry(issuer.clone())
+            .or_insert_with(|| CertificateRevocationList {
+                id: Uuid::new_v4(),
+                issuer: issuer.clone(),
+                this_update: Utc::now(),
+                next_update: Utc::now() + self.crl_validity_period,
+                revoked_certificates: Vec::new(),
+                version: 1,
+            });
 
         let revocation = CertificateRevocation {
             serial_number: request.serial_number,
@@ -69,7 +89,10 @@ impl RevocationRegistry for InMemoryRevocationRegistry {
         Ok(())
     }
 
-    async fn check_certificate_status(&self, request: CertificateStatusRequest) -> Result<CertificateStatusResponse, AuthMethodError> {
+    async fn check_certificate_status(
+        &self,
+        request: CertificateStatusRequest,
+    ) -> Result<CertificateStatusResponse, AuthMethodError> {
         let crls = self.crls.read().await;
 
         if let Some(crl) = crls.get(&request.issuer) {
@@ -96,12 +119,19 @@ impl RevocationRegistry for InMemoryRevocationRegistry {
         }
     }
 
-    async fn get_crl(&self, issuer: String) -> Result<Option<CertificateRevocationList>, AuthMethodError> {
+    async fn get_crl(
+        &self,
+        issuer: String,
+    ) -> Result<Option<CertificateRevocationList>, AuthMethodError> {
         let crls = self.crls.read().await;
         Ok(crls.get(&issuer).cloned())
     }
 
-    async fn update_crl(&self, issuer: String, next_update: DateTime<Utc>) -> Result<(), AuthMethodError> {
+    async fn update_crl(
+        &self,
+        issuer: String,
+        next_update: DateTime<Utc>,
+    ) -> Result<(), AuthMethodError> {
         let mut crls = self.crls.write().await;
 
         if let Some(crl) = crls.get_mut(&issuer) {
@@ -117,7 +147,8 @@ impl RevocationRegistry for InMemoryRevocationRegistry {
         let mut crls = self.crls.write().await;
         let now = Utc::now();
 
-        let expired_issuers: Vec<String> = crls.values()
+        let expired_issuers: Vec<String> = crls
+            .values()
             .filter(|crl| crl.next_update < now)
             .map(|crl| crl.issuer.clone())
             .collect();

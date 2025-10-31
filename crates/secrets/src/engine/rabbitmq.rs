@@ -1,12 +1,12 @@
 //! Placeholder implementation for rabbitmq secret engine
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use uuid::Uuid;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// rabbitmq secret engine
 pub struct RabbitmqEngine {
@@ -66,7 +66,10 @@ impl SecretEngine for RabbitmqEngine {
                     updated_at: chrono::Utc::now(),
                 })
             }
-            _ => Err(SecretError::InvalidPath(format!("Unsupported RabbitMQ path: {}", path))),
+            _ => Err(SecretError::InvalidPath(format!(
+                "Unsupported RabbitMQ path: {}",
+                path
+            ))),
         }
     }
 
@@ -99,14 +102,23 @@ impl SecretEngine for RabbitmqEngine {
 
 impl RabbitmqEngine {
     /// Generate RabbitMQ credentials
-    async fn generate_rabbitmq_credentials(&self, _data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
+    async fn generate_rabbitmq_credentials(
+        &self,
+        _data: &HashMap<String, Value>,
+    ) -> SecretResult<HashMap<String, Value>> {
         // Basic RabbitMQ credentials generation (placeholder - would use RabbitMQ management API in production)
         let mut creds_data = HashMap::new();
 
         creds_data.insert("username".to_string(), Value::String("guest".to_string()));
-        creds_data.insert("password".to_string(), Value::String(self.generate_password(16)));
+        creds_data.insert(
+            "password".to_string(),
+            Value::String(self.generate_password(16)),
+        );
         creds_data.insert("vhost".to_string(), Value::String("/".to_string()));
-        creds_data.insert("connection_string".to_string(), Value::String("amqp://guest:password@localhost:5672/".to_string()));
+        creds_data.insert(
+            "connection_string".to_string(),
+            Value::String("amqp://guest:password@localhost:5672/".to_string()),
+        );
 
         Ok(creds_data)
     }

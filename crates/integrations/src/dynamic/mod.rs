@@ -1,11 +1,11 @@
 use aws_sdk_iam::Client as IamClient;
 use chrono::{Duration, Utc};
-use mongodb::options::ClientOptions;
 use mongodb::Client as MongoClient;
-use mysql_async::prelude::Queryable;
+use mongodb::options::ClientOptions;
 use mysql_async::Pool as MySqlPool;
-use rand::distributions::Alphanumeric;
+use mysql_async::prelude::Queryable;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug)]
@@ -86,7 +86,10 @@ impl RevocableCredential for DynamicAzureCredential {
     fn revoke(&self) {
         // Note: In a real implementation, this would need Azure credentials
         // For now, this is a placeholder that would be called when the credential expires
-        tracing::info!("Azure client credential revoked for client: {}", self.client_id);
+        tracing::info!(
+            "Azure client credential revoked for client: {}",
+            self.client_id
+        );
     }
 }
 
@@ -120,7 +123,10 @@ pub async fn generate_db_credential_postgres(pool: &Pool, role: &str) -> Dynamic
     }
 }
 
-pub async fn generate_mysql_credential(role: &str, mysql_url: &str) -> Result<DynamicMysqlCredential, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn generate_mysql_credential(
+    role: &str,
+    mysql_url: &str,
+) -> Result<DynamicMysqlCredential, Box<dyn std::error::Error + Send + Sync>> {
     let username = format!("{}_{}", role, Utc::now().timestamp());
     let password: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -140,7 +146,8 @@ pub async fn generate_mysql_credential(role: &str, mysql_url: &str) -> Result<Dy
 
     let mut conn = pool.get_conn().await?;
     conn.query_drop(&create_user_query).await?;
-    conn.query_drop(&format!("GRANT SELECT ON *.* TO '{}'@'%'", username)).await?;
+    conn.query_drop(&format!("GRANT SELECT ON *.* TO '{}'@'%'", username))
+        .await?;
 
     Ok(DynamicMysqlCredential {
         username,
@@ -148,7 +155,11 @@ pub async fn generate_mysql_credential(role: &str, mysql_url: &str) -> Result<Dy
         expires_at,
     })
 }
-pub async fn generate_mongo_credential(role: &str, mongo_url: &str, database: &str) -> Result<DynamicMongoCredential, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn generate_mongo_credential(
+    role: &str,
+    mongo_url: &str,
+    database: &str,
+) -> Result<DynamicMongoCredential, Box<dyn std::error::Error + Send + Sync>> {
     let username = format!("{}_{}", role, Utc::now().timestamp());
     let password: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -182,7 +193,9 @@ pub async fn generate_mongo_credential(role: &str, mongo_url: &str, database: &s
         expires_at,
     })
 }
-pub async fn generate_aws_credential(role: &str) -> Result<DynamicAwsCredential, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn generate_aws_credential(
+    role: &str,
+) -> Result<DynamicAwsCredential, Box<dyn std::error::Error + Send + Sync>> {
     let username = format!("{}_{}", role, Utc::now().timestamp());
     let _password: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -196,11 +209,7 @@ pub async fn generate_aws_credential(role: &str) -> Result<DynamicAwsCredential,
     let iam_client = IamClient::new(&config);
 
     // Create IAM user
-    iam_client
-        .create_user()
-        .user_name(&username)
-        .send()
-        .await?;
+    iam_client.create_user().user_name(&username).send().await?;
 
     // Create access key for the user
     let access_key_response = iam_client

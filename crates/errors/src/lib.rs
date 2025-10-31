@@ -4,9 +4,9 @@
 //! Provides consistent error types, HTTP responses, and error handling utilities.
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use secreton_common::{ApiResponse, Result as CommonResult};
 use serde::Serialize;
@@ -159,7 +159,10 @@ pub enum SecretonError {
     PolicyViolation { policy: String, reason: String },
 
     #[error("Compliance violation: {standard} - {requirement}")]
-    ComplianceViolation { standard: String, requirement: String },
+    ComplianceViolation {
+        standard: String,
+        requirement: String,
+    },
 
     #[error("Audit error: {message}")]
     Audit { message: String },
@@ -185,7 +188,7 @@ pub enum SecretonError {
     QuotaExceeded {
         resource: String,
         limit: u64,
-        used: u64
+        used: u64,
     },
 
     // Configuration
@@ -397,7 +400,11 @@ impl SecretonError {
 
             SecretonError::Configuration { .. } => "configuration",
 
-            SecretonError::Io(_) | SecretonError::Serialization(_) | SecretonError::TomlSerialization(_) | SecretonError::TomlDeserialization(_) | SecretonError::Parse { .. } => "system",
+            SecretonError::Io(_)
+            | SecretonError::Serialization(_)
+            | SecretonError::TomlSerialization(_)
+            | SecretonError::TomlDeserialization(_)
+            | SecretonError::Parse { .. } => "system",
 
             SecretonError::Internal { .. } | SecretonError::Unknown { .. } => "internal",
         }
@@ -462,19 +469,29 @@ impl From<secreton_crypto::advanced_key_manager::KeyManagerError> for SecretonEr
     fn from(err: secreton_crypto::advanced_key_manager::KeyManagerError) -> Self {
         match err {
             secreton_crypto::advanced_key_manager::KeyManagerError::KeyNotFound(key) => {
-                SecretonError::Key { message: format!("Key not found: {}", key) }
+                SecretonError::Key {
+                    message: format!("Key not found: {}", key),
+                }
             }
             secreton_crypto::advanced_key_manager::KeyManagerError::InvalidKeyFormat(msg) => {
-                SecretonError::Cryptographic { message: format!("Invalid key format: {}", msg) }
+                SecretonError::Cryptographic {
+                    message: format!("Invalid key format: {}", msg),
+                }
             }
             secreton_crypto::advanced_key_manager::KeyManagerError::InsufficientShares(msg) => {
-                SecretonError::Cryptographic { message: format!("Insufficient shares: {}", msg) }
+                SecretonError::Cryptographic {
+                    message: format!("Insufficient shares: {}", msg),
+                }
             }
             secreton_crypto::advanced_key_manager::KeyManagerError::DerivationFailed(msg) => {
-                SecretonError::Cryptographic { message: format!("Key derivation failed: {}", msg) }
+                SecretonError::Cryptographic {
+                    message: format!("Key derivation failed: {}", msg),
+                }
             }
             secreton_crypto::advanced_key_manager::KeyManagerError::EscrowFailed(msg) => {
-                SecretonError::Cryptographic { message: format!("Escrow failed: {}", msg) }
+                SecretonError::Cryptographic {
+                    message: format!("Escrow failed: {}", msg),
+                }
             }
         }
     }

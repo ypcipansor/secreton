@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::common::{BaseReplicationConfig, ClusterNode, ReplicationMode, ReplicationState, ReplicationStatus};
+use crate::common::{
+    BaseReplicationConfig, ClusterNode, ReplicationMode, ReplicationState, ReplicationStatus,
+};
 use crate::error::ReplicationError;
 
 /// Cluster status for performance replication
@@ -300,7 +302,10 @@ impl PerformanceReplication {
             return 0;
         }
 
-        let total_lag: u64 = active_replicas.iter().map(|r| r.replication_lag.unwrap()).sum();
+        let total_lag: u64 = active_replicas
+            .iter()
+            .map(|r| r.replication_lag.unwrap())
+            .sum();
         total_lag / active_replicas.len() as u64
     }
 
@@ -348,15 +353,16 @@ impl Default for PerformanceReplication {
 mod tests {
     use super::*;
 
-fn create_test_config() -> BaseReplicationConfig {
-    BaseReplicationConfig {
-        mode: ReplicationMode::Performance,
-        cluster_id: "test-cluster".to_string(),
-        primary_cluster_addr: None,
-        secondary_token: None,
-        enabled: true,
+    fn create_test_config() -> BaseReplicationConfig {
+        BaseReplicationConfig {
+            mode: ReplicationMode::Performance,
+            cluster_id: "test-cluster".to_string(),
+            primary_cluster_addr: None,
+            secondary_token: None,
+            enabled: true,
+        }
     }
-}    fn create_test_replica(name: &str) -> ClusterNode {
+    fn create_test_replica(name: &str) -> ClusterNode {
         ClusterNode {
             node_id: uuid::Uuid::new_v4().to_string(),
             address: format!("https://{}.vault.example.com", name),
@@ -424,10 +430,7 @@ fn create_test_config() -> BaseReplicationConfig {
             .await
             .unwrap();
 
-        let status = replication
-            .get_sync_status(&replica.node_id)
-            .await
-            .unwrap();
+        let status = replication.get_sync_status(&replica.node_id).await.unwrap();
 
         assert_eq!(status.operations_pending, 1);
         assert_eq!(status.operations_synced, 0);
@@ -435,10 +438,7 @@ fn create_test_config() -> BaseReplicationConfig {
         // Sync
         replication.sync_to_replicas().await.unwrap();
 
-        let status = replication
-            .get_sync_status(&replica.node_id)
-            .await
-            .unwrap();
+        let status = replication.get_sync_status(&replica.node_id).await.unwrap();
 
         assert_eq!(status.operations_pending, 0);
         assert_eq!(status.operations_synced, 1);
@@ -451,10 +451,7 @@ fn create_test_config() -> BaseReplicationConfig {
 
         replication.add_replica(replica.clone()).await.unwrap();
 
-        replication
-            .promote_replica(&replica.node_id)
-            .await
-            .unwrap();
+        replication.promote_replica(&replica.node_id).await.unwrap();
 
         let config = replication.config.read().await;
         assert_eq!(config.primary_cluster_addr, Some(replica.address));
@@ -490,6 +487,9 @@ fn create_test_config() -> BaseReplicationConfig {
         };
 
         let result = replication.configure(dr_config).await;
-        assert!(matches!(result, Err(ReplicationError::InvalidConfiguration(_))));
+        assert!(matches!(
+            result,
+            Err(ReplicationError::InvalidConfiguration(_))
+        ));
     }
 }

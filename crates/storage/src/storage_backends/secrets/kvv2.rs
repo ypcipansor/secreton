@@ -218,7 +218,11 @@ impl Kvv2Engine {
     }
 
     /// Read _secret (latest or specific version)
-    pub async fn read(&self, _path: &str, version: Option<u64>) -> Result<SecretVersion, Kvv2Error> {
+    pub async fn read(
+        &self,
+        _path: &str,
+        version: Option<u64>,
+    ) -> Result<SecretVersion, Kvv2Error> {
         let secrets = self.secrets.read().await;
 
         let _secret = secrets
@@ -384,7 +388,10 @@ mod tests {
             Value::String("secret123".to_string()),
         );
 
-        let version = kv.write("_secret/myapp", _data.clone(), None).await.unwrap();
+        let version = kv
+            .write("_secret/myapp", _data.clone(), None)
+            .await
+            .unwrap();
         assert_eq!(version.version, 1);
 
         let read = kv.read("_secret/myapp", None).await.unwrap();

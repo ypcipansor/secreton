@@ -1,17 +1,17 @@
 //! OIDC authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::HashMap;
-use uuid::Uuid;
-use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
+use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
 use serde::{Deserialize, Serialize};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// OIDC authentication method
 pub struct OidcAuthMethod {
@@ -40,7 +40,9 @@ impl OidcAuthMethod {
             AuthUrl::new(config.auth_url.clone()).expect("Invalid auth URL"),
             Some(TokenUrl::new(config.token_url.clone()).expect("Invalid token URL")),
         )
-        .set_redirect_uri(RedirectUrl::new(config.redirect_url.clone()).expect("Invalid redirect URL"));
+        .set_redirect_uri(
+            RedirectUrl::new(config.redirect_url.clone()).expect("Invalid redirect URL"),
+        );
 
         self.client = Some(client);
         self.oidc_config = Some(config);
@@ -48,8 +50,12 @@ impl OidcAuthMethod {
 
     /// Start OIDC authentication flow
     pub async fn start_auth(&self) -> AuthMethodResult<OidcAuthUrl> {
-        let client = self.client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("OIDC client not configured".to_string()))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "OIDC client not configured".to_string(),
+            ))?;
 
         // Generate PKCE challenge
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -71,13 +77,25 @@ impl OidcAuthMethod {
     }
 
     /// Complete OIDC authentication
-    pub async fn complete_auth(&self, code: &str, state: &str, stored_state: &str, pkce_verifier: &str) -> AuthMethodResult<AuthResult> {
-        let client = self.client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("OIDC client not configured".to_string()))?;
+    pub async fn complete_auth(
+        &self,
+        code: &str,
+        state: &str,
+        stored_state: &str,
+        pkce_verifier: &str,
+    ) -> AuthMethodResult<AuthResult> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "OIDC client not configured".to_string(),
+            ))?;
 
         // Verify state
         if state != stored_state {
-            return Err(AuthMethodError::InvalidCredentials("OIDC state mismatch".to_string()));
+            return Err(AuthMethodError::InvalidCredentials(
+                "OIDC state mismatch".to_string(),
+            ));
         }
 
         // Exchange code for token
@@ -96,7 +114,9 @@ impl OidcAuthMethod {
 
         let user_info = UserInfo {
             id: Uuid::new_v4(),
-            username: claims.preferred_username.unwrap_or_else(|| claims.sub.to_string()),
+            username: claims
+                .preferred_username
+                .unwrap_or_else(|| claims.sub.to_string()),
             email: claims.email,
             display_name: claims.name,
             groups: claims.groups.unwrap_or_default(),
@@ -130,7 +150,13 @@ impl AuthMethodImpl for OidcAuthMethod {
         self.config = Some(config.clone());
 
         // Parse OIDC configuration from config
-        if let (Some(client_id), Some(client_secret), Some(auth_url), Some(token_url), Some(redirect_url)) = (
+        if let (
+            Some(client_id),
+            Some(client_secret),
+            Some(auth_url),
+            Some(token_url),
+            Some(redirect_url),
+        ) = (
             config.config.get("client_id").and_then(|v| v.as_str()),
             config.config.get("client_secret").and_then(|v| v.as_str()),
             config.config.get("auth_url").and_then(|v| v.as_str()),
@@ -143,7 +169,9 @@ impl AuthMethodImpl for OidcAuthMethod {
                 auth_url: auth_url.to_string(),
                 token_url: token_url.to_string(),
                 redirect_url: redirect_url.to_string(),
-                scopes: config.config.get("scopes")
+                scopes: config
+                    .config
+                    .get("scopes")
                     .and_then(|v| v.as_str())
                     .unwrap_or("openid profile email")
                     .to_string(),

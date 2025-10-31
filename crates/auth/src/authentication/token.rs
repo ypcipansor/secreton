@@ -154,7 +154,9 @@ impl Token {
     /// Renew token
     pub fn renew(&mut self, increment: u32) -> Result<(), SecretonError> {
         if !self.can_renew() {
-            return Err(SecretonError::TokenRenewalFailed { reason: "Token increment exceeds maximum allowed".to_string() });
+            return Err(SecretonError::TokenRenewalFailed {
+                reason: "Token increment exceeds maximum allowed".to_string(),
+            });
         }
 
         let new_ttl = increment.min(self.max_ttl);
@@ -230,14 +232,19 @@ impl TokenService {
     /// Lookup token by value
     pub async fn lookup_token(&self, token_value: &str) -> Result<Token, SecretonError> {
         let token_by_value = self.token_by_value.read().await;
-        let token_id = token_by_value
-            .get(token_value)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_value.to_string() })?;
+        let token_id =
+            token_by_value
+                .get(token_value)
+                .ok_or_else(|| SecretonError::TokenNotFound {
+                    token: token_value.to_string(),
+                })?;
 
         let tokens = self.tokens.read().await;
         let token = tokens
             .get(token_id)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_id.to_string() })?;
+            .ok_or_else(|| SecretonError::TokenNotFound {
+                token: token_id.to_string(),
+            })?;
 
         Ok(token.clone())
     }
@@ -265,14 +272,18 @@ impl TokenService {
         let token_by_value = self.token_by_value.read().await;
         let token_id = token_by_value
             .get(token_value)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_value.to_string() })?
+            .ok_or_else(|| SecretonError::TokenNotFound {
+                token: token_value.to_string(),
+            })?
             .clone();
         drop(token_by_value);
 
         let mut tokens = self.tokens.write().await;
         let token = tokens
             .get_mut(&token_id)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_id.to_string() })?;
+            .ok_or_else(|| SecretonError::TokenNotFound {
+                token: token_id.to_string(),
+            })?;
 
         token.renew(increment)?;
 
@@ -284,14 +295,18 @@ impl TokenService {
         let token_by_value = self.token_by_value.read().await;
         let token_id = token_by_value
             .get(token_value)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_value.to_string() })?
+            .ok_or_else(|| SecretonError::TokenNotFound {
+                token: token_value.to_string(),
+            })?
             .clone();
         drop(token_by_value);
 
         let mut tokens = self.tokens.write().await;
         let token = tokens
             .get_mut(&token_id)
-            .ok_or_else(|| SecretonError::TokenNotFound { token: token_id.to_string() })?;
+            .ok_or_else(|| SecretonError::TokenNotFound {
+                token: token_id.to_string(),
+            })?;
 
         token.revoke();
 

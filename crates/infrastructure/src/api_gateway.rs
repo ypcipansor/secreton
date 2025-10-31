@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Error)]
@@ -269,7 +268,11 @@ impl ApiGateway {
         Ok(())
     }
 
-    async fn forward_to_backend(&self, _route: &Route, request: &ApiRequest) -> Result<ApiResponse> {
+    async fn forward_to_backend(
+        &self,
+        _route: &Route,
+        request: &ApiRequest,
+    ) -> Result<ApiResponse> {
         // Mock backend forwarding
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 

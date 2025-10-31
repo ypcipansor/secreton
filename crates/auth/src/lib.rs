@@ -18,17 +18,17 @@ pub mod revocation;
 pub mod token;
 
 // Feature-gated modules
-#[cfg(feature = "ldap")]
-pub mod ldap;
+// #[cfg(feature = "ldap")]
+// pub mod ldap;
 
 // Re-export shared crates
-pub use secreton_common::{SecurityLevel, Result as CommonResult};
-pub use secreton_errors::{self, SecretonError};
+pub use secreton_common::{Result as CommonResult, SecurityLevel};
 pub use secreton_config::*;
+pub use secreton_errors::{self, SecretonError};
 
 // Re-export main types
 pub use identity::{Entity as Identity, IdentityService as IdentityProvider};
-pub use revocation::{RevocationRegistry, RevocationScope, RevocationEvent};
+pub use revocation::{RevocationEvent, RevocationRegistry, RevocationScope};
 pub use token::{Token, TokenType};
 
 // Type alias for backward compatibility
@@ -64,7 +64,8 @@ pub struct UserInfo {
 #[async_trait::async_trait]
 pub trait AuthManager: Send + Sync {
     /// Authenticate a user with given credentials
-    async fn authenticate(&self, credentials: &AuthCredentials) -> AuthResult<AuthenticationResult>;
+    async fn authenticate(&self, credentials: &AuthCredentials)
+    -> AuthResult<AuthenticationResult>;
 
     /// Validate a token
     async fn validate_token(&self, token: &str) -> AuthResult<Token>;

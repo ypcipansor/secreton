@@ -322,7 +322,8 @@ impl SecretVersioning {
             .get(secret_path)
             .ok_or_else(|| VersionError::SecretNotFound(secret_path.to_string()))?;
 
-        serde_json::to_string_pretty(history).map_err(|_e| VersionError::VersionError(_e.to_string()))
+        serde_json::to_string_pretty(history)
+            .map_err(|_e| VersionError::VersionError(_e.to_string()))
     }
 
     /// Get current version

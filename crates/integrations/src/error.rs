@@ -12,7 +12,11 @@ pub enum IntegrationError {
     AuthenticationFailed { provider: String },
 
     #[error("API error: {provider} - {status}: {message}")]
-    ApiError { provider: String, status: u16, message: String },
+    ApiError {
+        provider: String,
+        status: u16,
+        message: String,
+    },
 
     #[error("Configuration error: {field} - {reason}")]
     ConfigError { field: String, reason: String },

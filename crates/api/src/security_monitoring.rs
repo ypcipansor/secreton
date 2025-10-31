@@ -3,12 +3,7 @@
 //! Provides comprehensive security metrics, alerting, and health checks
 //! for production Secreton deployments.
 
-use axum::{
-    Router,
-    extract::Extension,
-    response::Json,
-    routing::get,
-};
+use axum::{Router, extract::Extension, response::Json, routing::get};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

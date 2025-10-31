@@ -56,7 +56,8 @@ impl StorageTransaction for CockroachDBTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CockroachDBOperation::Store(entry.clone()));
+        self.operations
+            .push(CockroachDBOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -66,7 +67,8 @@ impl StorageTransaction for CockroachDBTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CockroachDBOperation::Update(entry.clone()));
+        self.operations
+            .push(CockroachDBOperation::Update(entry.clone()));
         Ok(())
     }
 

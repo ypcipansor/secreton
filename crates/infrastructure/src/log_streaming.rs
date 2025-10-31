@@ -269,9 +269,8 @@ impl LogStreaming {
         destination: &LogDestination,
     ) -> Result<String> {
         match format {
-            LogFormat::JSON => {
-                serde_json::to_string(event).map_err(|_e| LogStreamError::StreamError(_e.to_string()))
-            }
+            LogFormat::JSON => serde_json::to_string(event)
+                .map_err(|_e| LogStreamError::StreamError(_e.to_string())),
             LogFormat::Fluentd => self.format_for_fluentd(event, &destination.tag),
             LogFormat::Logstash => self.format_for_logstash(event, destination),
         }
@@ -280,8 +279,8 @@ impl LogStreaming {
     /// Format for Fluentd (tag + JSON)
     fn format_for_fluentd(&self, event: &LogEvent, tag: &str) -> Result<String> {
         let timestamp = event.timestamp.timestamp();
-        let json =
-            serde_json::to_string(event).map_err(|_e| LogStreamError::StreamError(_e.to_string()))?;
+        let json = serde_json::to_string(event)
+            .map_err(|_e| LogStreamError::StreamError(_e.to_string()))?;
 
         Ok(format!("[{}, {}, {}]", tag, timestamp, json))
     }

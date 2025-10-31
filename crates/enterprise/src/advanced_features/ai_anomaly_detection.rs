@@ -3,7 +3,7 @@
 //! Provides ML-based anomaly detection, behavioral analysis, threat scoring,
 //! pattern recognition, and auto-remediation recommendations.
 
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -157,7 +157,9 @@ impl AnomalyDetectionSystem {
         training_data: Vec<AccessEvent>,
     ) -> std::result::Result<String, EnterpriseError> {
         if training_data.len() < 100 {
-            return Err(EnterpriseError::validation("Need at least 100 events for training"));
+            return Err(EnterpriseError::validation(
+                "Need at least 100 events for training",
+            ));
         }
 
         // Mock training process
@@ -173,7 +175,10 @@ impl AnomalyDetectionSystem {
     }
 
     /// Record access event
-    pub async fn record_event(&self, event: AccessEvent) -> std::result::Result<(), EnterpriseError> {
+    pub async fn record_event(
+        &self,
+        event: AccessEvent,
+    ) -> std::result::Result<(), EnterpriseError> {
         // Store event first
         {
             let mut events = self.events.write().await;
@@ -220,7 +225,10 @@ impl AnomalyDetectionSystem {
         false
     }
 
-    async fn create_anomaly(&self, event: &AccessEvent) -> std::result::Result<(), EnterpriseError> {
+    async fn create_anomaly(
+        &self,
+        event: &AccessEvent,
+    ) -> std::result::Result<(), EnterpriseError> {
         let anomaly = Anomaly {
             anomaly_id: Uuid::new_v4().to_string(),
             event_id: event.event_id.clone(),
@@ -242,7 +250,10 @@ impl AnomalyDetectionSystem {
         Ok(())
     }
 
-    async fn generate_remediation(&self, anomaly: &Anomaly) -> std::result::Result<(), EnterpriseError> {
+    async fn generate_remediation(
+        &self,
+        anomaly: &Anomaly,
+    ) -> std::result::Result<(), EnterpriseError> {
         let _action = RemediationAction {
             action_id: Uuid::new_v4().to_string(),
             anomaly_id: anomaly.anomaly_id.clone(),
@@ -260,7 +271,10 @@ impl AnomalyDetectionSystem {
     }
 
     /// Establish baseline for _user
-    pub async fn establish_baseline(&self, user_id: &str) -> std::result::Result<(), EnterpriseError> {
+    pub async fn establish_baseline(
+        &self,
+        user_id: &str,
+    ) -> std::result::Result<(), EnterpriseError> {
         // Clone events to avoid holding read lock
         let user_events: Vec<AccessEvent> = {
             let events = self.events.read().await;
@@ -332,12 +346,15 @@ impl AnomalyDetectionSystem {
     }
 
     /// Apply remediation
-    pub async fn apply_remediation(&self, action_id: &str) -> std::result::Result<(), EnterpriseError> {
+    pub async fn apply_remediation(
+        &self,
+        action_id: &str,
+    ) -> std::result::Result<(), EnterpriseError> {
         let remediations = self.remediations.read().await;
 
-        let _action = remediations
-            .get(action_id)
-            .ok_or_else(|| EnterpriseError::not_found(format!("remediation _action: {}", action_id)))?;
+        let _action = remediations.get(action_id).ok_or_else(|| {
+            EnterpriseError::not_found(format!("remediation _action: {}", action_id))
+        })?;
 
         // Mock remediation application
         println!("Applying remediation: {:?}", _action.action_type);
@@ -346,7 +363,11 @@ impl AnomalyDetectionSystem {
     }
 
     /// Update anomaly state
-    pub async fn update_anomaly_state(&self, anomaly_id: &str, state: AnomalyState) -> std::result::Result<(), EnterpriseError> {
+    pub async fn update_anomaly_state(
+        &self,
+        anomaly_id: &str,
+        state: AnomalyState,
+    ) -> std::result::Result<(), EnterpriseError> {
         let mut anomalies = self.anomalies.write().await;
 
         let anomaly = anomalies
@@ -358,7 +379,10 @@ impl AnomalyDetectionSystem {
     }
 
     /// Record threat intelligence
-    pub async fn record_threat(&self, threat: ThreatIntelligence) -> std::result::Result<String, EnterpriseError> {
+    pub async fn record_threat(
+        &self,
+        threat: ThreatIntelligence,
+    ) -> std::result::Result<String, EnterpriseError> {
         let mut threats = self.threats.write().await;
         let threat_id = threat.threat_id.clone();
         threats.insert(threat_id.clone(), threat);
@@ -377,7 +401,10 @@ impl AnomalyDetectionSystem {
     }
 
     /// Get model
-    pub async fn get_model(&self, model_id: &str) -> std::result::Result<AnomalyModel, EnterpriseError> {
+    pub async fn get_model(
+        &self,
+        model_id: &str,
+    ) -> std::result::Result<AnomalyModel, EnterpriseError> {
         let models = self.models.read().await;
         models
             .get(model_id)

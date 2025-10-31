@@ -1,9 +1,9 @@
 //! Data models and DTOs for authentication methods
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// Authentication method configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,8 +19,11 @@ pub struct AuthMethod {
 
 impl std::fmt::Display for AuthMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AuthMethod {{ id: {}, name: {}, type: {:?}, enabled: {} }}",
-               self.id, self.name, self.method_type, self.enabled)
+        write!(
+            f,
+            "AuthMethod {{ id: {}, name: {}, type: {:?}, enabled: {} }}",
+            self.id, self.name, self.method_type, self.enabled
+        )
     }
 }
 
@@ -60,7 +63,11 @@ pub enum AuthCredentials {
     /// Kubernetes JWT authentication
     Kubernetes { jwt: String },
     /// AWS IAM authentication
-    Aws { access_key: String, secret_key: String, session_token: Option<String> },
+    Aws {
+        access_key: String,
+        secret_key: String,
+        session_token: Option<String>,
+    },
     /// GitHub token authentication
     Github { token: String },
     /// Okta authentication
@@ -101,13 +108,20 @@ pub struct UserInfo {
 
 impl std::fmt::Display for UserInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "UserInfo {{ id: {}, username: {}, email: {:?}, display_name: {:?}, groups: [{}], metadata: {{{}}} }}",
-               self.id,
-               self.username,
-               self.email,
-               self.display_name,
-               self.groups.join(", "),
-               self.metadata.iter().map(|(k, v)| format!("{}: {}", k, v)).collect::<Vec<_>>().join(", "))
+        write!(
+            f,
+            "UserInfo {{ id: {}, username: {}, email: {:?}, display_name: {:?}, groups: [{}], metadata: {{{}}} }}",
+            self.id,
+            self.username,
+            self.email,
+            self.display_name,
+            self.groups.join(", "),
+            self.metadata
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 

@@ -3,7 +3,7 @@
 //! Comprehensive HTTP API for the Brankas transit engine with enterprise-grade
 //! security monitoring, compliance, and zero-trust architecture.
 
-use axum::{extract::Extension, Json, Router, routing::get};
+use axum::{Json, Router, extract::Extension, routing::get};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -208,9 +208,7 @@ pub fn create_api_router(state: ApiState) -> Router<()> {
 }
 
 /// Enhanced health check with security status
-pub async fn health_check(
-    Extension(state): Extension<ApiState>,
-) -> Json<HealthResponse> {
+pub async fn health_check(Extension(state): Extension<ApiState>) -> Json<HealthResponse> {
     let security_status = if let Some(validator) = &state.security_validator {
         match validator.validate_runtime_security().await.overall_status {
             runtime_security::SecurityStatus::Healthy => "healthy",

@@ -1,13 +1,13 @@
 //! Policy evaluation logic
 
-use std::collections::HashMap;
-use regex::Regex;
-use uuid::Uuid;
 use chrono::Utc;
+use regex::Regex;
+use std::collections::HashMap;
+use uuid::Uuid;
 
-use super::model::{EvaluationContext, EvaluationResult, PolicyEffect, ConditionOperator};
-use super::engine::{PolicyEngine, CompiledPolicy, CompiledRule, CompiledCondition};
+use super::engine::{CompiledCondition, CompiledPolicy, CompiledRule, PolicyEngine};
 use super::error::PolicyResult;
+use super::model::{ConditionOperator, EvaluationContext, EvaluationResult, PolicyEffect};
 
 /// Policy evaluator for access control decisions
 pub struct PolicyEvaluator {
@@ -21,7 +21,11 @@ impl PolicyEvaluator {
     }
 
     /// Evaluate access request against all applicable policies
-    pub fn evaluate(&self, context: &EvaluationContext, subject_roles: &[Uuid]) -> PolicyResult<EvaluationResult> {
+    pub fn evaluate(
+        &self,
+        context: &EvaluationContext,
+        subject_roles: &[Uuid],
+    ) -> PolicyResult<EvaluationResult> {
         let mut evaluated_policies = Vec::new();
         let _evaluated_roles = subject_roles.to_vec();
         let mut allow_count = 0;
@@ -78,7 +82,11 @@ impl PolicyEvaluator {
     }
 
     /// Evaluate a single compiled policy
-    fn evaluate_policy(&self, policy: &CompiledPolicy, context: &EvaluationContext) -> PolicyResult<PolicyEvaluation> {
+    fn evaluate_policy(
+        &self,
+        policy: &CompiledPolicy,
+        context: &EvaluationContext,
+    ) -> PolicyResult<PolicyEvaluation> {
         let mut rule_results = Vec::new();
 
         // Evaluate each rule in the policy
@@ -101,7 +109,11 @@ impl PolicyEvaluator {
     }
 
     /// Evaluate a single rule
-    fn evaluate_rule(&self, rule: &CompiledRule, context: &EvaluationContext) -> PolicyResult<RuleEvaluation> {
+    fn evaluate_rule(
+        &self,
+        rule: &CompiledRule,
+        context: &EvaluationContext,
+    ) -> PolicyResult<RuleEvaluation> {
         // Check if action matches
         if !rule.actions.is_empty() && !rule.actions.contains(&context.action) {
             return Ok(RuleEvaluation::NoMatch);
@@ -123,7 +135,11 @@ impl PolicyEvaluator {
     }
 
     /// Evaluate a single condition
-    fn evaluate_condition(&self, condition: &CompiledCondition, context: &EvaluationContext) -> PolicyResult<bool> {
+    fn evaluate_condition(
+        &self,
+        condition: &CompiledCondition,
+        context: &EvaluationContext,
+    ) -> PolicyResult<bool> {
         let attribute_value = self.get_attribute_value(&condition.attribute, context);
 
         if attribute_value.is_none() && !condition.values.is_empty() {
@@ -132,9 +148,7 @@ impl PolicyEvaluator {
         }
 
         match condition.operator {
-            ConditionOperator::Equals => {
-                Ok(attribute_value.as_ref() == Some(&condition.values[0]))
-            }
+            ConditionOperator::Equals => Ok(attribute_value.as_ref() == Some(&condition.values[0])),
             ConditionOperator::NotEquals => {
                 Ok(attribute_value.as_ref() != Some(&condition.values[0]))
             }
@@ -167,8 +181,12 @@ impl PolicyEvaluator {
                 }
             }
             ConditionOperator::GreaterThan => {
-                if let (Some(attr_val), Some(cond_val)) = (&attribute_value, condition.values.first()) {
-                    if let (Ok(attr_num), Ok(cond_num)) = (attr_val.parse::<f64>(), cond_val.parse::<f64>()) {
+                if let (Some(attr_val), Some(cond_val)) =
+                    (&attribute_value, condition.values.first())
+                {
+                    if let (Ok(attr_num), Ok(cond_num)) =
+                        (attr_val.parse::<f64>(), cond_val.parse::<f64>())
+                    {
                         Ok(attr_num > cond_num)
                     } else {
                         Ok(false)
@@ -178,8 +196,12 @@ impl PolicyEvaluator {
                 }
             }
             ConditionOperator::LessThan => {
-                if let (Some(attr_val), Some(cond_val)) = (&attribute_value, condition.values.first()) {
-                    if let (Ok(attr_num), Ok(cond_num)) = (attr_val.parse::<f64>(), cond_val.parse::<f64>()) {
+                if let (Some(attr_val), Some(cond_val)) =
+                    (&attribute_value, condition.values.first())
+                {
+                    if let (Ok(attr_num), Ok(cond_num)) =
+                        (attr_val.parse::<f64>(), cond_val.parse::<f64>())
+                    {
                         Ok(attr_num < cond_num)
                     } else {
                         Ok(false)
@@ -189,7 +211,9 @@ impl PolicyEvaluator {
                 }
             }
             ConditionOperator::Regex => {
-                if let (Some(attr_val), Some(pattern)) = (&attribute_value, condition.values.first()) {
+                if let (Some(attr_val), Some(pattern)) =
+                    (&attribute_value, condition.values.first())
+                {
                     if let Ok(regex) = Regex::new(pattern) {
                         Ok(regex.is_match(attr_val))
                     } else {
@@ -230,7 +254,11 @@ impl PolicyEvaluator {
     }
 
     /// Get nested value from attribute map
-    fn get_nested_value(&self, attributes: &HashMap<String, String>, path: &[&str]) -> Option<String> {
+    fn get_nested_value(
+        &self,
+        attributes: &HashMap<String, String>,
+        path: &[&str],
+    ) -> Option<String> {
         if path.is_empty() {
             return None;
         }
@@ -259,7 +287,11 @@ impl PolicyEvaluator {
     }
 
     /// Check if resource pattern matches (supports wildcards)
-    fn resource_pattern_matches(&self, pattern: &str, resource_attrs: &HashMap<String, String>) -> bool {
+    fn resource_pattern_matches(
+        &self,
+        pattern: &str,
+        resource_attrs: &HashMap<String, String>,
+    ) -> bool {
         // Simple implementation - check if any resource attribute contains the pattern
         for value in resource_attrs.values() {
             if value.contains(pattern) {

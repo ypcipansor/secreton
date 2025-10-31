@@ -1,13 +1,15 @@
 //! Policy engine and parsing logic
 
+use chrono::Utc;
 use pest::Parser;
 use pest_derive::Parser;
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::Utc;
 
-use super::model::{Policy, PolicyRule, PolicyCondition, ConditionOperator, PolicyEffect, PolicyType};
 use super::error::{PolicyError, PolicyResult};
+use super::model::{
+    ConditionOperator, Policy, PolicyCondition, PolicyEffect, PolicyRule, PolicyType,
+};
 
 /// Pest parser for policy language
 #[derive(Parser)]
@@ -50,7 +52,10 @@ impl PolicyEngine {
 
     /// Add role hierarchy relationship
     pub fn add_role_relationship(&mut self, child_role: Uuid, parent_role: Uuid) {
-        self.role_hierarchy.entry(child_role).or_insert_with(Vec::new).push(parent_role);
+        self.role_hierarchy
+            .entry(child_role)
+            .or_insert_with(Vec::new)
+            .push(parent_role);
     }
 
     /// Compile a policy into executable form
@@ -116,10 +121,15 @@ impl PolicyEngine {
     }
 
     /// Build policy from parsed pairs
-    fn build_policy_from_pairs(&self, mut pairs: pest::iterators::Pairs<Rule>) -> PolicyResult<Policy> {
-        let pair = pairs.next().ok_or_else(|| PolicyError::InvalidPolicySyntax {
-            details: "Empty policy".to_string(),
-        })?;
+    fn build_policy_from_pairs(
+        &self,
+        mut pairs: pest::iterators::Pairs<Rule>,
+    ) -> PolicyResult<Policy> {
+        let pair = pairs
+            .next()
+            .ok_or_else(|| PolicyError::InvalidPolicySyntax {
+                details: "Empty policy".to_string(),
+            })?;
 
         let mut policy = Policy {
             id: Uuid::new_v4(),
@@ -152,7 +162,11 @@ impl PolicyEngine {
     }
 
     /// Parse policy header
-    fn parse_policy_header(&self, pair: pest::iterators::Pair<Rule>, policy: &mut Policy) -> PolicyResult<()> {
+    fn parse_policy_header(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        policy: &mut Policy,
+    ) -> PolicyResult<()> {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::identifier => {
@@ -202,7 +216,10 @@ impl PolicyEngine {
     }
 
     /// Parse condition block
-    fn parse_condition_block(&self, pair: pest::iterators::Pair<Rule>) -> PolicyResult<PolicyCondition> {
+    fn parse_condition_block(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+    ) -> PolicyResult<PolicyCondition> {
         let mut condition = PolicyCondition {
             attribute: String::new(),
             operator: ConditionOperator::Equals,
@@ -273,7 +290,7 @@ impl PolicyEngine {
     fn parse_string(&self, pair: pest::iterators::Pair<Rule>) -> Option<String> {
         let text = pair.as_str();
         if text.starts_with('"') && text.ends_with('"') {
-            Some(text[1..text.len()-1].to_string())
+            Some(text[1..text.len() - 1].to_string())
         } else {
             Some(text.to_string())
         }

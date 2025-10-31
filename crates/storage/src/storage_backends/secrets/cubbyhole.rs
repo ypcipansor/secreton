@@ -310,7 +310,10 @@ mod tests {
             .write("token1", "app/credentials", _data.clone())
             .await
             .unwrap();
-        cubbyhole.write("token1", "db/_config", _data).await.unwrap();
+        cubbyhole
+            .write("token1", "db/_config", _data)
+            .await
+            .unwrap();
 
         let app_paths = cubbyhole.list("token1", "app/").await;
         assert_eq!(app_paths.len(), 2);

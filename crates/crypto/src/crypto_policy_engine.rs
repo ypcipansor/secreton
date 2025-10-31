@@ -266,9 +266,8 @@ impl CryptoPolicyEngine {
                 candidates.first().cloned()
             }
             "signing" => {
-                candidates.retain(|a| {
-                    matches!(a, CryptoAlgorithm::ED25519 | CryptoAlgorithm::EcdsaP256)
-                });
+                candidates
+                    .retain(|a| matches!(a, CryptoAlgorithm::ED25519 | CryptoAlgorithm::EcdsaP256));
                 candidates.first().cloned()
             }
             _ => candidates.first().cloned(),
@@ -539,10 +538,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         engine
-            .deprecate_algorithm(
-                CryptoAlgorithm::Aes128Gcm,
-                Some(CryptoAlgorithm::Aes256Gcm),
-            )
+            .deprecate_algorithm(CryptoAlgorithm::Aes128Gcm, Some(CryptoAlgorithm::Aes256Gcm))
             .await
             .ok();
 

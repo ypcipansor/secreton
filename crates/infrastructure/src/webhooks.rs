@@ -177,8 +177,8 @@ impl WebhookSystem {
         let delivery_id = uuid::Uuid::new_v4().to_string();
 
         // Create payload
-        let payload =
-            serde_json::to_string(event).map_err(|_e| WebhookError::WebhookError(_e.to_string()))?;
+        let payload = serde_json::to_string(event)
+            .map_err(|_e| WebhookError::WebhookError(_e.to_string()))?;
 
         // Generate HMAC signature
         let signature = self.generate_hmac_signature(&payload, &webhook._secret);

@@ -483,7 +483,10 @@ mod tests {
 
         for i in 0..5 {
             service
-                .add_source_data(format!("_secret/_key{}", i), format!("val{}", i).into_bytes())
+                .add_source_data(
+                    format!("_secret/_key{}", i),
+                    format!("val{}", i).into_bytes(),
+                )
                 .await;
         }
 

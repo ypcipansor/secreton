@@ -5,7 +5,7 @@
 //! _key lifecycle operations with full observability and compliance tracking.
 
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,9 +17,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 // Import from crypto crate
-use secreton_crypto::advanced_key_manager::{
-    AdvancedKeyManager, KeyPurpose, KeyShare, KeyType,
-};
+use secreton_crypto::advanced_key_manager::{AdvancedKeyManager, KeyPurpose, KeyShare, KeyType};
 
 // Simple metrics registry for auth operations
 #[derive(Debug, Clone)]
@@ -48,11 +46,11 @@ impl AuthMetricsRegistry {
 // JWT claims structure
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    sub: String,  // User ID
+    sub: String, // User ID
     username: String,
     roles: Vec<String>,
-    exp: usize,   // Expiration time
-    iat: usize,   // Issued at
+    exp: usize, // Expiration time
+    iat: usize, // Issued at
 }
 
 /// Authenticated _key operation _request
@@ -241,7 +239,10 @@ impl AuthenticatedKeyOperations {
     }
 
     /// Authenticate token and extract user context
-    async fn authenticate_token(&self, token: &str) -> std::result::Result<UserContext, SecretonError> {
+    async fn authenticate_token(
+        &self,
+        token: &str,
+    ) -> std::result::Result<UserContext, SecretonError> {
         // Get JWT secret from environment or configuration
         // Use test secret for unit tests
         let jwt_secret = if cfg!(test) {
@@ -268,7 +269,9 @@ impl AuthenticatedKeyOperations {
                 // Record failed JWT validation
                 let registry: Arc<AuthMetricsRegistry> = Arc::clone(&self.metrics_registry);
                 tokio::spawn(async move {
-                    registry.increment("auth_jwt_validation_failures_total").await;
+                    registry
+                        .increment("auth_jwt_validation_failures_total")
+                        .await;
                 });
                 return Err(SecretonError::AuthenticatedKeyAuthError {
                     message: format!("Invalid JWT token: {}", e),
@@ -317,9 +320,12 @@ impl AuthenticatedKeyOperations {
                 registry.increment("auth_permission_denials_total").await;
             });
 
-            return Err(SecretonError::AuthenticatedKeyPermissionError { message: format!(
-                "User {} lacks permission {:?}",
-                user_context.username, required_permission) });
+            return Err(SecretonError::AuthenticatedKeyPermissionError {
+                message: format!(
+                    "User {} lacks permission {:?}",
+                    user_context.username, required_permission
+                ),
+            });
         }
 
         Ok(())
@@ -487,10 +493,7 @@ impl AuthenticatedKeyOperations {
                     ]);
                 }
                 "key-user" => {
-                    permissions.extend(vec![
-                        KeyPermission::ViewKey,
-                        KeyPermission::ListKeys,
-                    ]);
+                    permissions.extend(vec![KeyPermission::ViewKey, KeyPermission::ListKeys]);
                 }
                 _ => {
                     // No permissions for unknown roles
@@ -587,7 +590,7 @@ mod tests {
     use super::*;
 
     fn create_test_token(user_id: &str, username: &str) -> String {
-        use jsonwebtoken::{encode, Header, Algorithm};
+        use jsonwebtoken::{Algorithm, Header, encode};
 
         let jwt_secret = "test-jwt-secret-for-testing-purposes-only";
 
@@ -599,8 +602,12 @@ mod tests {
             iat: Utc::now().timestamp() as usize,
         };
 
-        encode(&Header::default(), &claims, &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()))
-            .expect("Failed to create test JWT token")
+        encode(
+            &Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
+        )
+        .expect("Failed to create test JWT token")
     }
 
     #[tokio::test]

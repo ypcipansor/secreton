@@ -1,13 +1,13 @@
 //! AppRole authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
+use chrono::Utc;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// AppRole authentication method
 pub struct AppRoleAuthMethod {
@@ -26,7 +26,14 @@ impl AppRoleAuthMethod {
     }
 
     /// Create a new AppRole
-    pub async fn create_role(&self, role_name: String, role_id: String, secret_id: String, policies: Vec<String>, metadata: HashMap<String, String>) -> AuthMethodResult<()> {
+    pub async fn create_role(
+        &self,
+        role_name: String,
+        role_id: String,
+        secret_id: String,
+        policies: Vec<String>,
+        metadata: HashMap<String, String>,
+    ) -> AuthMethodResult<()> {
         let role = AppRole {
             role_name: role_name.to_string(),
             role_id,
@@ -78,13 +85,15 @@ impl AuthMethodImpl for AppRoleAuthMethod {
             AuthCredentials::AppRole { role_id, secret_id } => {
                 // Find role by role_id
                 let roles = self.roles.read().await;
-                let role = roles.values()
-                    .find(|r| r.role_id == *role_id)
-                    .ok_or(AuthMethodError::InvalidCredentials("Role not found".to_string()))?;
+                let role = roles.values().find(|r| r.role_id == *role_id).ok_or(
+                    AuthMethodError::InvalidCredentials("Role not found".to_string()),
+                )?;
 
                 // Verify secret_id
                 if role.secret_id != *secret_id {
-                    return Err(AuthMethodError::InvalidCredentials("Invalid secret_id".to_string()));
+                    return Err(AuthMethodError::InvalidCredentials(
+                        "Invalid secret_id".to_string(),
+                    ));
                 }
 
                 let user_info = UserInfo {
@@ -111,7 +120,9 @@ impl AuthMethodImpl for AppRoleAuthMethod {
                     metadata: HashMap::new(),
                 })
             }
-            _ => Err(AuthMethodError::InvalidCredentials("Unsupported credential type".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "Unsupported credential type".to_string(),
+            )),
         }
     }
 

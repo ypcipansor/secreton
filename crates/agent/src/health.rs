@@ -180,8 +180,14 @@ impl HealthChecker {
                 response_time_ms: None,
                 details: {
                     let mut map = HashMap::new();
-                    map.insert("total_mb".to_string(), format!("{:.1}", total_memory / 1024.0 / 1024.0));
-                    map.insert("used_mb".to_string(), format!("{:.1}", used_memory / 1024.0 / 1024.0));
+                    map.insert(
+                        "total_mb".to_string(),
+                        format!("{:.1}", total_memory / 1024.0 / 1024.0),
+                    );
+                    map.insert(
+                        "used_mb".to_string(),
+                        format!("{:.1}", used_memory / 1024.0 / 1024.0),
+                    );
                     map.insert("usage_percent".to_string(), format!("{:.1}", usage_percent));
                     map
                 },
@@ -228,8 +234,14 @@ impl HealthChecker {
                     details: {
                         let mut map = HashMap::new();
                         map.insert("mount_point".to_string(), mount_point.to_string());
-                        map.insert("total_gb".to_string(), format!("{:.1}", total_space / 1024.0 / 1024.0 / 1024.0));
-                        map.insert("available_gb".to_string(), format!("{:.1}", available_space / 1024.0 / 1024.0 / 1024.0));
+                        map.insert(
+                            "total_gb".to_string(),
+                            format!("{:.1}", total_space / 1024.0 / 1024.0 / 1024.0),
+                        );
+                        map.insert(
+                            "available_gb".to_string(),
+                            format!("{:.1}", available_space / 1024.0 / 1024.0 / 1024.0),
+                        );
                         map.insert("usage_percent".to_string(), format!("{:.1}", usage_percent));
                         map
                     },
@@ -245,7 +257,8 @@ impl HealthChecker {
     /// Check network connectivity
     async fn check_network_connectivity(&self) -> CoreResult<()> {
         // Simple connectivity check to a reliable endpoint
-        match self.http_client
+        match self
+            .http_client
             .get("https://www.google.com")
             .timeout(Duration::from_secs(5))
             .send()

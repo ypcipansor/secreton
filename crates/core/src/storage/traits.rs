@@ -5,18 +5,18 @@
 use crate::CoreError;
 use crate::models::plugin::PluginCatalogEntry;
 use async_trait::async_trait;
+use secreton_auth_methods::model::MfaMethod;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
-use secreton_auth_methods::model::MfaMethod;
 
 // Import the actual types from their respective crates
-use secreton_security::policies::policy::Policy;
-use secreton_auth_methods::token::token::Token;
-use secreton_storage::models::lease::Lease;
 use crate::models::pki::{PkiCa, PkiCert};
 use crate::models::sentinel::SentinelPolicy;
+use secreton_auth_methods::token::token::Token;
 use secreton_security::policies::audit::AuditDevice;
+use secreton_security::policies::policy::Policy;
+use secreton_storage::models::lease::Lease;
 
 use super::types::StorageEntry;
 
@@ -41,26 +41,18 @@ pub trait StorageBackend: Send + Sync {
         secret: &str,
         method: MfaMethod,
     ) -> Result<(), CoreError>;
-    async fn get_mfa_secret(
-        &self,
-        user_id: &str,
-        method: MfaMethod,
-    ) -> Result<String, CoreError>;
-    async fn delete_mfa_secret(
-        &self,
-        user_id: &str,
-        method: MfaMethod,
-    ) -> Result<(), CoreError>;
+    async fn get_mfa_secret(&self, user_id: &str, method: MfaMethod) -> Result<String, CoreError>;
+    async fn delete_mfa_secret(&self, user_id: &str, method: MfaMethod) -> Result<(), CoreError>;
     async fn is_mfa_enabled(&self, user_id: &str) -> Result<bool, CoreError>;
-    async fn get_user_mfa_methods(&self, user_id: &str)
-        -> Result<Vec<MfaMethod>, CoreError>;
-    async fn get_mfa_status(
-        &self,
-        user_id: &str,
-    ) -> Result<HashMap<MfaMethod, bool>, CoreError>;
+    async fn get_user_mfa_methods(&self, user_id: &str) -> Result<Vec<MfaMethod>, CoreError>;
+    async fn get_mfa_status(&self, user_id: &str) -> Result<HashMap<MfaMethod, bool>, CoreError>;
     async fn enable_mfa(&self, user_id: &str, method: MfaMethod) -> Result<(), CoreError>;
     async fn disable_mfa(&self, user_id: &str) -> Result<(), CoreError>;
-    async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<(), CoreError>;
+    async fn store_mfa_recovery_codes(
+        &self,
+        user_id: &str,
+        codes: &[String],
+    ) -> Result<(), CoreError>;
     async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>, CoreError>;
 
     // Secret versioning methods
@@ -118,7 +110,11 @@ pub trait StorageBackend: Send + Sync {
 
     // Audit logging methods
     async fn store_audit_log(&self, log: &super::types::AuditLog) -> Result<(), CoreError>;
-    async fn get_audit_logs(&self, user: Option<&str>, limit: usize) -> Result<Vec<super::types::AuditLog>, CoreError>;
+    async fn get_audit_logs(
+        &self,
+        user: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<super::types::AuditLog>, CoreError>;
 
     // Vault state management methods
     async fn is_sealed(&self) -> Result<bool, CoreError>;

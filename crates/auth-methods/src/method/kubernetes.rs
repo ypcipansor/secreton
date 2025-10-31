@@ -1,13 +1,13 @@
 //! Kubernetes authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
-use std::collections::HashMap;
 use k8s_openapi::api::authentication::v1::TokenReview;
 use k8s_openapi::api::core::v1::ServiceAccount;
 use kube::{Api, Client, Config};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
+use std::collections::HashMap;
 
 /// Kubernetes authentication method
 pub struct KubernetesAuthMethod {
@@ -35,11 +35,13 @@ impl KubernetesAuthMethod {
     /// Initialize Kubernetes client
     async fn init_client(&mut self) -> AuthMethodResult<()> {
         if self.client.is_none() {
-            let config = Config::incluster()
-                .map_err(|e| AuthMethodError::KubernetesError(format!("Failed to load incluster config: {}", e)))?;
+            let config = Config::incluster().map_err(|e| {
+                AuthMethodError::KubernetesError(format!("Failed to load incluster config: {}", e))
+            })?;
 
-            let client = Client::try_from(config)
-                .map_err(|e| AuthMethodError::KubernetesError(format!("Failed to create client: {}", e)))?;
+            let client = Client::try_from(config).map_err(|e| {
+                AuthMethodError::KubernetesError(format!("Failed to create client: {}", e))
+            })?;
 
             self.client = Some(client);
         }
@@ -50,19 +52,26 @@ impl KubernetesAuthMethod {
     async fn validate_jwt(&self, jwt: &str) -> AuthMethodResult<TokenReviewResult> {
         self.init_client().await?;
 
-        let client = self.client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("Kubernetes client not initialized".to_string()))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "Kubernetes client not initialized".to_string(),
+            ))?;
 
         let token_review = TokenReview {
             spec: k8s_openapi::api::authentication::v1::TokenReviewSpec {
                 token: Some(jwt.to_string()),
-                audiences: Some(vec!["https://kubernetes.default.svc.cluster.local".to_string()]),
+                audiences: Some(vec![
+                    "https://kubernetes.default.svc.cluster.local".to_string(),
+                ]),
             },
             ..Default::default()
         };
 
         let api: Api<TokenReview> = Api::all(client.to_string());
-        let review = api.create(&Default::default(), &token_review)
+        let review = api
+            .create(&Default::default(), &token_review)
             .await
             .map_err(|e| AuthMethodError::KubernetesError(format!("Token review failed: {}", e)))?;
 
@@ -76,21 +85,31 @@ impl KubernetesAuthMethod {
                 Err(AuthMethodError::InvalidCredentials)
             }
         } else {
-            Err(AuthMethodError::KubernetesError("No status in token review response".to_string()))
+            Err(AuthMethodError::KubernetesError(
+                "No status in token review response".to_string(),
+            ))
         }
     }
 
     /// Get service account information
-    async fn get_service_account_info(&self, namespace: &str, service_account_name: &str) -> AuthMethodResult<ServiceAccountInfo> {
+    async fn get_service_account_info(
+        &self,
+        namespace: &str,
+        service_account_name: &str,
+    ) -> AuthMethodResult<ServiceAccountInfo> {
         self.init_client().await?;
 
-        let client = self.client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("Kubernetes client not initialized".to_string()))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "Kubernetes client not initialized".to_string(),
+            ))?;
 
         let api: Api<ServiceAccount> = Api::namespaced(client.to_string(), namespace);
-        let sa = api.get(service_account_name)
-            .await
-            .map_err(|e| AuthMethodError::KubernetesError(format!("Failed to get service account: {}", e)))?;
+        let sa = api.get(service_account_name).await.map_err(|e| {
+            AuthMethodError::KubernetesError(format!("Failed to get service account: {}", e))
+        })?;
 
         let labels = sa.metadata.labels.unwrap_or_default();
         let annotations = sa.metadata.annotations.unwrap_or_default();
@@ -115,22 +134,36 @@ impl AuthMethodImpl for KubernetesAuthMethod {
 
         // Parse Kubernetes configuration from config
         let k8s_config = KubernetesConfig {
-            kubernetes_host: config.config.get("kubernetes_host")
+            kubernetes_host: config
+                .config
+                .get("kubernetes_host")
                 .or_else(|| config.config.get("host"))
                 .cloned()
                 .unwrap_or_else(|| "https://kubernetes.default.svc".to_string()),
-            kubernetes_ca_cert: config.config.get("kubernetes_ca_cert")
+            kubernetes_ca_cert: config
+                .config
+                .get("kubernetes_ca_cert")
                 .or_else(|| config.config.get("ca_cert"))
                 .cloned(),
             token_reviewer_jwt: config.config.get("token_reviewer_jwt").cloned(),
-            pem_keys: config.config.get("pem_keys")
+            pem_keys: config
+                .config
+                .get("pem_keys")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                }),
             issuer: config.config.get("issuer").cloned(),
-            disable_iss_validation: config.config.get("disable_iss_validation")
+            disable_iss_validation: config
+                .config
+                .get("disable_iss_validation")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(false),
-            disable_local_ca_jwt: config.config.get("disable_local_ca_jwt")
+            disable_local_ca_jwt: config
+                .config
+                .get("disable_local_ca_jwt")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(false),
         };
@@ -155,19 +188,22 @@ impl AuthMethodImpl for KubernetesAuthMethod {
                     let username = user.username;
                     let user_id = username.to_string();
 
-                    let (namespace, service_account) = if username.starts_with("system:serviceaccount:") {
-                        let parts: Vec<&str> = username.split(':').collect();
-                        if parts.len() >= 4 {
-                            (parts[2].to_string(), parts[3].to_string())
+                    let (namespace, service_account) =
+                        if username.starts_with("system:serviceaccount:") {
+                            let parts: Vec<&str> = username.split(':').collect();
+                            if parts.len() >= 4 {
+                                (parts[2].to_string(), parts[3].to_string())
+                            } else {
+                                ("default".to_string(), username.to_string())
+                            }
                         } else {
                             ("default".to_string(), username.to_string())
-                        }
-                    } else {
-                        ("default".to_string(), username.to_string())
-                    };
+                        };
 
                     // Get service account details
-                    let sa_info = self.get_service_account_info(&namespace, &service_account).await
+                    let sa_info = self
+                        .get_service_account_info(&namespace, &service_account)
+                        .await
                         .unwrap_or_else(|_| ServiceAccountInfo {
                             name: service_account.to_string(),
                             namespace: namespace.to_string(),

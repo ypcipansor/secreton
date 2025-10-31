@@ -204,17 +204,23 @@ impl QuotasService {
     pub async fn create_quota(&self, _config: QuotaConfig) -> Result<(), SecretonError> {
         // Validate configuration
         if _config.limit == 0 {
-            return Err(SecretonError::Configuration { message: "Limit must be greater than 0".to_string() });
+            return Err(SecretonError::Configuration {
+                message: "Limit must be greater than 0".to_string(),
+            });
         }
 
         if _config.quota_type == QuotaType::RateLimit && _config.window_seconds.is_none() {
-            return Err(SecretonError::Configuration { message: "Rate limit requires window_seconds".to_string() });
+            return Err(SecretonError::Configuration {
+                message: "Rate limit requires window_seconds".to_string(),
+            });
         }
 
         let mut quotas = self.quotas.write().await;
 
         if quotas.contains_key(&_config._name) {
-            return Err(SecretonError::AlreadyExists { resource: _config._name.clone() });
+            return Err(SecretonError::AlreadyExists {
+                resource: _config._name.clone(),
+            });
         }
 
         let quota_name = _config._name.clone();
@@ -278,9 +284,12 @@ impl QuotasService {
 
         // Check each applicable quota
         for quota in applicable {
-            let quota_usage = usage
-                .get_mut(&quota._name)
-                .ok_or_else(|| SecretonError::NotFound { resource: quota._name.clone() })?;
+            let quota_usage =
+                usage
+                    .get_mut(&quota._name)
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: quota._name.clone(),
+                    })?;
 
             // For rate limits, check if window has expired
             if quota.quota_type == QuotaType::RateLimit {
@@ -422,7 +431,9 @@ impl QuotasService {
         quotas
             .get(_name)
             .cloned()
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: _name.to_string(),
+            })
     }
 
     /// Get quota usage statistics
@@ -431,7 +442,9 @@ impl QuotasService {
         usage
             .get(_name)
             .cloned()
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: _name.to_string(),
+            })
     }
 
     /// List all quotas
@@ -451,7 +464,9 @@ impl QuotasService {
         let mut quotas = self.quotas.write().await;
         quotas
             .remove(_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })?;
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: _name.to_string(),
+            })?;
 
         let mut usage = self.usage.write().await;
         usage.remove(_name);
@@ -464,7 +479,9 @@ impl QuotasService {
         let mut usage = self.usage.write().await;
         let quota_usage = usage
             .get_mut(_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: _name.to_string() })?;
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: _name.to_string(),
+            })?;
 
         quota_usage.reset();
         Ok(())

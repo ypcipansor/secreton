@@ -10,9 +10,7 @@ pub struct AwsCredential {
     pub expires_at: String,
 }
 
-pub async fn generate_aws_credential(
-    role: &str,
-) -> Result<AwsCredential, String> {
+pub async fn generate_aws_credential(role: &str) -> Result<AwsCredential, String> {
     // Dummy: generate random access_key/secret_key, expiry
     // (Bisa dikembangkan: create IAM user, attach policy, generate access key)
     let username = format!("{}_{}", role, Utc::now().timestamp());

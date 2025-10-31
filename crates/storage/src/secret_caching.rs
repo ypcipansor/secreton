@@ -199,10 +199,7 @@ impl SecretCachingService {
         let ttl = ttl_secs.unwrap_or(self.config.default_ttl_secs);
 
         if ttl > self.config.max_ttl_secs {
-            return Err(format!(
-                "TTL {} exceeds max {}",
-                ttl, self.config.max_ttl_secs
-            ).into());
+            return Err(format!("TTL {} exceeds max {}", ttl, self.config.max_ttl_secs).into());
         }
 
         let entry = CacheEntry::new(key.clone(), value, ttl);

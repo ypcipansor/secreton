@@ -219,7 +219,10 @@ impl ObservabilityPlatform {
 
         let mut grouped: HashMap<String, Vec<&Metric>> = HashMap::new();
         for metric in metrics.values() {
-            grouped.entry(metric._name.clone()).or_default().push(metric);
+            grouped
+                .entry(metric._name.clone())
+                .or_default()
+                .push(metric);
         }
 
         for (_name, metric_list) in grouped {

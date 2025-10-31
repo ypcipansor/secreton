@@ -1,11 +1,11 @@
 //! Agent templating functionality
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use regex::Regex;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use regex::Regex;
 
 use crate::error::*;
 
@@ -48,22 +48,39 @@ pub struct TemplateRenderResponse {
 #[async_trait]
 pub trait TemplateService: Send + Sync {
     /// Create a new template
-    async fn create_template(&self, name: String, template_type: TemplateType, agent_type: super::agent::AgentType, template: String) -> AuthMethodResult<AgentTemplate>;
+    async fn create_template(
+        &self,
+        name: String,
+        template_type: TemplateType,
+        agent_type: super::agent::AgentType,
+        template: String,
+    ) -> AuthMethodResult<AgentTemplate>;
 
     /// Get a template by ID
     async fn get_template(&self, id: Uuid) -> AuthMethodResult<Option<AgentTemplate>>;
 
     /// Update a template
-    async fn update_template(&self, id: Uuid, name: Option<String>, template: Option<String>) -> AuthMethodResult<AgentTemplate>;
+    async fn update_template(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        template: Option<String>,
+    ) -> AuthMethodResult<AgentTemplate>;
 
     /// Delete a template
     async fn delete_template(&self, id: Uuid) -> AuthMethodResult<()>;
 
     /// List templates
-    async fn list_templates(&self, agent_type: Option<super::agent::AgentType>) -> AuthMethodResult<Vec<AgentTemplate>>;
+    async fn list_templates(
+        &self,
+        agent_type: Option<super::agent::AgentType>,
+    ) -> AuthMethodResult<Vec<AgentTemplate>>;
 
     /// Render a template
-    async fn render_template(&self, request: TemplateRenderRequest) -> AuthMethodResult<TemplateRenderResponse>;
+    async fn render_template(
+        &self,
+        request: TemplateRenderRequest,
+    ) -> AuthMethodResult<TemplateRenderResponse>;
 }
 
 /// In-memory template service implementation
@@ -89,7 +106,10 @@ impl InMemoryTemplateService {
     }
 
     /// Render template with variables
-    fn render_template_content(template: &str, variables: &HashMap<String, String>) -> AuthMethodResult<String> {
+    fn render_template_content(
+        template: &str,
+        variables: &HashMap<String, String>,
+    ) -> AuthMethodResult<String> {
         let mut result = template.to_string();
 
         for (key, value) in variables {
@@ -99,7 +119,9 @@ impl InMemoryTemplateService {
 
         // Check for any remaining unsubstituted variables
         if result.contains("{{") && result.contains("}}") {
-            return Err(AuthMethodError::ConfigurationError("Not all template variables were provided".to_string()));
+            return Err(AuthMethodError::ConfigurationError(
+                "Not all template variables were provided".to_string(),
+            ));
         }
 
         Ok(result)
@@ -108,7 +130,13 @@ impl InMemoryTemplateService {
 
 #[async_trait]
 impl TemplateService for InMemoryTemplateService {
-    async fn create_template(&self, name: String, template_type: TemplateType, agent_type: super::agent::AgentType, template: String) -> AuthMethodResult<AgentTemplate> {
+    async fn create_template(
+        &self,
+        name: String,
+        template_type: TemplateType,
+        agent_type: super::agent::AgentType,
+        template: String,
+    ) -> AuthMethodResult<AgentTemplate> {
         let variables = Self::extract_variables(&template);
 
         let template_obj = AgentTemplate {
@@ -133,7 +161,12 @@ impl TemplateService for InMemoryTemplateService {
         Ok(templates.get(&id).cloned())
     }
 
-    async fn update_template(&self, id: Uuid, name: Option<String>, template: Option<String>) -> AuthMethodResult<AgentTemplate> {
+    async fn update_template(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        template: Option<String>,
+    ) -> AuthMethodResult<AgentTemplate> {
         let mut templates = self.templates.write().await;
 
         if let Some(existing_template) = templates.get_mut(&id) {
@@ -157,10 +190,14 @@ impl TemplateService for InMemoryTemplateService {
         Ok(())
     }
 
-    async fn list_templates(&self, agent_type: Option<super::agent::AgentType>) -> AuthMethodResult<Vec<AgentTemplate>> {
+    async fn list_templates(
+        &self,
+        agent_type: Option<super::agent::AgentType>,
+    ) -> AuthMethodResult<Vec<AgentTemplate>> {
         let templates = self.templates.read().await;
 
-        let filtered_templates: Vec<AgentTemplate> = templates.values()
+        let filtered_templates: Vec<AgentTemplate> = templates
+            .values()
             .filter(|template| {
                 if let Some(agent_type) = &agent_type {
                     template.agent_type == *agent_type
@@ -174,16 +211,19 @@ impl TemplateService for InMemoryTemplateService {
         Ok(filtered_templates)
     }
 
-    async fn render_template(&self, request: TemplateRenderRequest) -> AuthMethodResult<TemplateRenderResponse> {
+    async fn render_template(
+        &self,
+        request: TemplateRenderRequest,
+    ) -> AuthMethodResult<TemplateRenderResponse> {
         let templates = self.templates.read().await;
 
-        let template = templates.get(&request.template_id)
-            .ok_or_else(|| AuthMethodError::UserNotFound(format!("template {}", request.template_id)))?;
+        let template = templates.get(&request.template_id).ok_or_else(|| {
+            AuthMethodError::UserNotFound(format!("template {}", request.template_id))
+        })?;
 
-        let rendered_content = Self::render_template_content(&template.template, &request.variables)?;
+        let rendered_content =
+            Self::render_template_content(&template.template, &request.variables)?;
 
-        Ok(TemplateRenderResponse {
-            rendered_content,
-        })
+        Ok(TemplateRenderResponse { rendered_content })
     }
 }

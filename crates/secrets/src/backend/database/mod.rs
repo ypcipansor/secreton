@@ -1,10 +1,9 @@
 //! Database backend implementations
 
-pub mod postgres;
-pub mod mysql;
 pub mod mongodb;
+pub mod mysql;
+pub mod postgres;
 
-pub use postgres::*;
-pub use mysql::*;
 pub use mongodb::*;
-
+pub use mysql::*;
+pub use postgres::*;

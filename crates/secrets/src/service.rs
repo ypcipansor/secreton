@@ -1,10 +1,10 @@
 //! Business logic services for secret management
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// Core trait for secret engines
 #[async_trait]
@@ -92,15 +92,24 @@ impl SecretService {
 
     /// Read a secret from any registered engine
     pub async fn read_secret(&self, engine: &str, path: &str) -> SecretResult<Option<Secret>> {
-        let engine = self.registry.get(engine)
+        let engine = self
+            .registry
+            .get(engine)
             .ok_or_else(|| SecretError::EngineNotFound(engine.to_string()))?;
 
         engine.read(path).await
     }
 
     /// Write a secret to any registered engine
-    pub async fn write_secret(&mut self, engine: &str, path: &str, data: HashMap<String, Value>) -> SecretResult<Secret> {
-        let engine = self.registry.get_mut(engine)
+    pub async fn write_secret(
+        &mut self,
+        engine: &str,
+        path: &str,
+        data: HashMap<String, Value>,
+    ) -> SecretResult<Secret> {
+        let engine = self
+            .registry
+            .get_mut(engine)
             .ok_or_else(|| SecretError::EngineNotFound(engine.to_string()))?;
 
         engine.write(path, data).await
@@ -108,7 +117,9 @@ impl SecretService {
 
     /// Delete a secret from any registered engine
     pub async fn delete_secret(&mut self, engine: &str, path: &str) -> SecretResult<()> {
-        let engine = self.registry.get_mut(engine)
+        let engine = self
+            .registry
+            .get_mut(engine)
             .ok_or_else(|| SecretError::EngineNotFound(engine.to_string()))?;
 
         engine.delete(path).await
@@ -116,7 +127,9 @@ impl SecretService {
 
     /// List secrets from any registered engine
     pub async fn list_secrets(&self, engine: &str, path: &str) -> SecretResult<Vec<String>> {
-        let engine = self.registry.get(engine)
+        let engine = self
+            .registry
+            .get(engine)
             .ok_or_else(|| SecretError::EngineNotFound(engine.to_string()))?;
 
         engine.list(path).await

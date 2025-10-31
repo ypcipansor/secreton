@@ -42,9 +42,9 @@ impl From<ReplicationError> for SecretonError {
             ReplicationError::NotReplicating => SecretonError::Internal {
                 message: "Not replicating".to_string(),
             },
-            ReplicationError::InvalidConfiguration(msg) => SecretonError::Configuration {
-                message: msg,
-            },
+            ReplicationError::InvalidConfiguration(msg) => {
+                SecretonError::Configuration { message: msg }
+            }
             ReplicationError::SyncFailed(msg) => SecretonError::Internal {
                 message: format!("Sync failed: {}", msg),
             },

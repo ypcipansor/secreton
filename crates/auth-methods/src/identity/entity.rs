@@ -1,9 +1,9 @@
 //! Identity entities and user management
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// Identity entity representing a user or service account
 #[derive(Debug, Clone, Serialize, Deserialize)]

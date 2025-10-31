@@ -1,12 +1,12 @@
 //! Placeholder implementation for ldap secret engine
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use uuid::Uuid;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// ldap secret engine
 pub struct LdapEngine {
@@ -66,7 +66,10 @@ impl SecretEngine for LdapEngine {
                     updated_at: chrono::Utc::now(),
                 })
             }
-            _ => Err(SecretError::InvalidPath(format!("Unsupported LDAP path: {}", path))),
+            _ => Err(SecretError::InvalidPath(format!(
+                "Unsupported LDAP path: {}",
+                path
+            ))),
         }
     }
 
@@ -99,14 +102,29 @@ impl SecretEngine for LdapEngine {
 
 impl LdapEngine {
     /// Generate LDAP credentials
-    async fn generate_ldap_credentials(&self, _data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
+    async fn generate_ldap_credentials(
+        &self,
+        _data: &HashMap<String, Value>,
+    ) -> SecretResult<HashMap<String, Value>> {
         // Basic LDAP credentials generation (placeholder - would use LDAP server in production)
         let mut creds_data = HashMap::new();
 
-        creds_data.insert("username".to_string(), Value::String("cn=user,ou=users,dc=example,dc=com".to_string()));
-        creds_data.insert("password".to_string(), Value::String(self.generate_password(16)));
-        creds_data.insert("dn".to_string(), Value::String("cn=user,ou=users,dc=example,dc=com".to_string()));
-        creds_data.insert("ldap_url".to_string(), Value::String("ldap://localhost:389".to_string()));
+        creds_data.insert(
+            "username".to_string(),
+            Value::String("cn=user,ou=users,dc=example,dc=com".to_string()),
+        );
+        creds_data.insert(
+            "password".to_string(),
+            Value::String(self.generate_password(16)),
+        );
+        creds_data.insert(
+            "dn".to_string(),
+            Value::String("cn=user,ou=users,dc=example,dc=com".to_string()),
+        );
+        creds_data.insert(
+            "ldap_url".to_string(),
+            Value::String("ldap://localhost:389".to_string()),
+        );
 
         Ok(creds_data)
     }

@@ -183,8 +183,8 @@ impl SnapshotService {
         }
 
         // Calculate size and checksum
-        let serialized =
-            serde_json::to_vec(&_data).map_err(|_e| SnapshotError::CreationFailed(_e.to_string()))?;
+        let serialized = serde_json::to_vec(&_data)
+            .map_err(|_e| SnapshotError::CreationFailed(_e.to_string()))?;
 
         let size = serialized.len() as u64;
         let checksum = self.calculate_checksum(&serialized);
@@ -232,8 +232,8 @@ impl SnapshotService {
             self.calculate_diff(&base_data, &current_state)
         };
 
-        let serialized =
-            serde_json::to_vec(&diff).map_err(|_e| SnapshotError::CreationFailed(_e.to_string()))?;
+        let serialized = serde_json::to_vec(&diff)
+            .map_err(|_e| SnapshotError::CreationFailed(_e.to_string()))?;
 
         let size = serialized.len() as u64;
         let checksum = self.calculate_checksum(&serialized);

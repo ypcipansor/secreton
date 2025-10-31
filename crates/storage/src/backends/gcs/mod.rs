@@ -100,7 +100,10 @@ impl GoogleCloudStorage {
         // In a production implementation, we would implement OAuth2 flow
         let access_token = None;
 
-        tracing::info!("GCS Storage: Initialized with HTTP client for project {}", config.project_id);
+        tracing::info!(
+            "GCS Storage: Initialized with HTTP client for project {}",
+            config.project_id
+        );
 
         Ok(Self {
             config,
@@ -136,7 +139,8 @@ impl StorageBackend for GoogleCloudStorage {
             message: format!("Failed to serialize entry: {}", e),
         })?;
 
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .body(data);
@@ -162,7 +166,10 @@ impl StorageBackend for GoogleCloudStorage {
             });
         }
 
-        tracing::debug!("GCS store: Successfully stored entry at path={}", entry.path);
+        tracing::debug!(
+            "GCS store: Successfully stored entry at path={}",
+            entry.path
+        );
         Ok(())
     }
 
@@ -208,11 +215,10 @@ impl StorageBackend for GoogleCloudStorage {
                 message: format!("Failed to read response: {}", e),
             })?;
 
-        let entry: VaultEntry = serde_json::from_slice(&data).map_err(|e| {
-            StorageError::SerializationError {
+        let entry: VaultEntry =
+            serde_json::from_slice(&data).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to deserialize entry: {}", e),
-            }
-        })?;
+            })?;
 
         Ok(Some(entry))
     }
@@ -259,11 +265,10 @@ impl StorageBackend for GoogleCloudStorage {
                 message: format!("Failed to read response: {}", e),
             })?;
 
-        let entry: VaultEntry = serde_json::from_slice(&data).map_err(|e| {
-            StorageError::SerializationError {
+        let entry: VaultEntry =
+            serde_json::from_slice(&data).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to deserialize entry: {}", e),
-            }
-        })?;
+            })?;
 
         Ok(Some(entry))
     }
@@ -396,11 +401,13 @@ impl StorageBackend for GoogleCloudStorage {
                 });
             }
 
-            let list_response: serde_json::Value = response.json().await.map_err(|e| {
-                StorageError::SerializationError {
-                    message: format!("Failed to parse GCS list response: {}", e),
-                }
-            })?;
+            let list_response: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| StorageError::SerializationError {
+                        message: format!("Failed to parse GCS list response: {}", e),
+                    })?;
 
             // Parse objects from response
             if let Some(items) = list_response.get("items").and_then(|i| i.as_array()) {
@@ -420,7 +427,8 @@ impl StorageBackend for GoogleCloudStorage {
 
                         let mut obj_request = self.client.get(&object_url);
                         if let Some(token) = &self.access_token {
-                            obj_request = obj_request.header("Authorization", format!("Bearer {}", token));
+                            obj_request =
+                                obj_request.header("Authorization", format!("Bearer {}", token));
                         }
 
                         if let Ok(obj_response) = obj_request.send().await {
@@ -589,11 +597,13 @@ impl StorageBackend for GoogleCloudStorage {
                 });
             }
 
-            let list_response: serde_json::Value = response.json().await.map_err(|e| {
-                StorageError::SerializationError {
-                    message: format!("Failed to parse GCS list response: {}", e),
-                }
-            })?;
+            let list_response: serde_json::Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| StorageError::SerializationError {
+                        message: format!("Failed to parse GCS list response: {}", e),
+                    })?;
 
             // Parse objects from response
             if let Some(items) = list_response.get("items").and_then(|i| i.as_array()) {
@@ -620,7 +630,8 @@ impl StorageBackend for GoogleCloudStorage {
 
                         let mut obj_request = self.client.get(&object_url);
                         if let Some(token) = &self.access_token {
-                            obj_request = obj_request.header("Authorization", format!("Bearer {}", token));
+                            obj_request =
+                                obj_request.header("Authorization", format!("Bearer {}", token));
                         }
 
                         if let Ok(obj_response) = obj_request.send().await {
@@ -628,7 +639,9 @@ impl StorageBackend for GoogleCloudStorage {
                                 if let Ok(data) = obj_response.bytes().await {
                                     if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
                                         // Count by security level
-                                        *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+                                        *entries_by_security_level
+                                            .entry(entry.security_level)
+                                            .or_insert(0) += 1;
 
                                         // Count entries created/updated today
                                         if entry.created_at.date_naive() == today {

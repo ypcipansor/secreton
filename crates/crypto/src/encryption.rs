@@ -41,7 +41,7 @@ impl SymmetricCipher for Aes256GcmCipher {
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
         let nonce_bytes_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-                let nonce = Nonce::from(nonce_bytes_array);
+        let nonce = Nonce::from(nonce_bytes_array);
 
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("AES-GCM encryption failed: {}", e))
@@ -101,7 +101,7 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
         // Generate random nonce
         let nonce_bytes = generate_random_bytes(12)?;
         let nonce_bytes_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-                let nonce = Nonce::from(nonce_bytes_array);
+        let nonce = Nonce::from(nonce_bytes_array);
 
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("ChaCha20-Poly1305 encryption failed: {}", e))

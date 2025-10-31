@@ -26,19 +26,19 @@
 //! - `service/`: Business logic services
 //! - `error/`: Secret-specific error types
 
-pub mod engine;
 pub mod backend;
+pub mod engine;
+pub mod error;
 pub mod model;
 pub mod service;
-pub mod error;
 
-pub use engine::{
-    KvEngine, TransitEngine, DatabaseEngine, AwsEngine, OciEngine,
-    PkiEngine, SshEngine, TotpEngine, RabbitmqEngine, MongodbEngine, LdapEngine
-};
 pub use backend::{
-    AwsBackend, OciBackend, VaultBackend, PostgresBackend, MysqlBackend, MongodbBackend
+    AwsBackend, MongodbBackend, MysqlBackend, OciBackend, PostgresBackend, VaultBackend,
 };
+pub use engine::{
+    AwsEngine, DatabaseEngine, KvEngine, LdapEngine, MongodbEngine, OciEngine, PkiEngine,
+    RabbitmqEngine, SshEngine, TotpEngine, TransitEngine,
+};
+pub use error::*;
 pub use model::*;
 pub use service::*;
-pub use error::*;

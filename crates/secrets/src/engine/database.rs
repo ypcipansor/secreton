@@ -1,11 +1,11 @@
 //! Database secret engine for dynamic credential generation
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// Database type
 #[derive(Debug, Clone, PartialEq)]
@@ -42,14 +42,15 @@ impl DatabaseEngine {
     /// Generate database credentials
     async fn generate_credentials(&self, role_name: &str) -> SecretResult<HashMap<String, Value>> {
         // Get role configuration
-        let role = self.roles.get(role_name)
-            .ok_or_else(|| SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name)))?;
+        let role = self.roles.get(role_name).ok_or_else(|| {
+            SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name))
+        })?;
 
         // Generate random username and password using shared utility
         let _password = secreton_common::generate_password()?;
 
         // Generate random username
-        use rand::{distributions::Alphanumeric, Rng};
+        use rand::{Rng, distributions::Alphanumeric};
         let _username: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(16)
@@ -63,19 +64,19 @@ impl DatabaseEngine {
         match db_type {
             DatabaseType::PostgreSQL => {
                 let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.connection_url.clone()
+                    self.config.connection_url.clone(),
                 );
                 backend.generate_credentials(role_name, &role.sql).await
             }
             DatabaseType::MySQL => {
                 let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.connection_url.clone()
+                    self.config.connection_url.clone(),
                 );
                 backend.generate_credentials(role_name, &role.sql).await
             }
             DatabaseType::MongoDB => {
                 let backend = crate::backend::database::mongodb::MongodbBackend::new(
-                    self.config.connection_url.clone()
+                    self.config.connection_url.clone(),
                 );
                 backend.generate_credentials(role_name, &role.sql).await
             }
@@ -84,14 +85,18 @@ impl DatabaseEngine {
 
     /// Detect database type from connection URL
     fn detect_database_type(&self, connection_url: &str) -> SecretResult<DatabaseType> {
-        if connection_url.starts_with("postgresql://") || connection_url.starts_with("postgres://") {
+        if connection_url.starts_with("postgresql://") || connection_url.starts_with("postgres://")
+        {
             Ok(DatabaseType::PostgreSQL)
         } else if connection_url.starts_with("mysql://") {
             Ok(DatabaseType::MySQL)
         } else if connection_url.starts_with("mongodb://") {
             Ok(DatabaseType::MongoDB)
         } else {
-            Err(SecretError::InvalidConfiguration(format!("Unsupported database type in URL: {}", connection_url)))
+            Err(SecretError::InvalidConfiguration(format!(
+                "Unsupported database type in URL: {}",
+                connection_url
+            )))
         }
     }
 }
@@ -156,15 +161,17 @@ impl SecretEngine for DatabaseEngine {
         if path.starts_with("roles/") {
             let role_name = &path[6..]; // Remove "roles/" prefix
 
-            let sql = data.get("sql")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| SecretError::InvalidConfiguration("Missing SQL for role".to_string()))?;
+            let sql = data.get("sql").and_then(|v| v.as_str()).ok_or_else(|| {
+                SecretError::InvalidConfiguration("Missing SQL for role".to_string())
+            })?;
 
-            let max_ttl = data.get("max_ttl")
+            let max_ttl = data
+                .get("max_ttl")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(86400); // 24 hours default
 
-            let default_ttl = data.get("default_ttl")
+            let default_ttl = data
+                .get("default_ttl")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(3600); // 1 hour default
 
@@ -196,7 +203,9 @@ impl SecretEngine for DatabaseEngine {
 
             Ok(secret)
         } else {
-            Err(SecretError::InvalidConfiguration("Invalid database path".to_string()))
+            Err(SecretError::InvalidConfiguration(
+                "Invalid database path".to_string(),
+            ))
         }
     }
 
@@ -210,7 +219,9 @@ impl SecretEngine for DatabaseEngine {
             self.roles.remove(role_name);
             Ok(())
         } else {
-            Err(SecretError::InvalidConfiguration("Invalid database path".to_string()))
+            Err(SecretError::InvalidConfiguration(
+                "Invalid database path".to_string(),
+            ))
         }
     }
 

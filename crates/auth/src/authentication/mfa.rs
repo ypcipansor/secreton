@@ -222,7 +222,9 @@ impl MfaService {
             .or_insert_with(|| MfaConfig::new(user_id.to_string()));
 
         if _config.totp.is_some() {
-            return Err(SecretonError::MfaAlreadyConfigured { method: "TOTP".to_string() });
+            return Err(SecretonError::MfaAlreadyConfigured {
+                method: "TOTP".to_string(),
+            });
         }
 
         let totp_config = TotpConfig::new(issuer, account_name);
@@ -238,12 +240,16 @@ impl MfaService {
             let configs = self.configs.read().await;
             let _config = configs
                 .get(user_id)
-                .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
+                .ok_or_else(|| SecretonError::MfaNotConfigured {
+                    user: user_id.to_string(),
+                })?;
 
             _config
                 .totp
                 .as_ref()
-                .ok_or_else(|| SecretonError::MfaNotConfigured { user: "TOTP".to_string() })?
+                .ok_or_else(|| SecretonError::MfaNotConfigured {
+                    user: "TOTP".to_string(),
+                })?
                 .clone()
         };
 
@@ -287,11 +293,17 @@ impl MfaService {
     }
 
     /// Verify recovery code
-    pub async fn verify_recovery_code(&self, user_id: &str, code: &str) -> Result<bool, SecretonError> {
+    pub async fn verify_recovery_code(
+        &self,
+        user_id: &str,
+        code: &str,
+    ) -> Result<bool, SecretonError> {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured {
+                user: user_id.to_string(),
+            })?;
 
         // Check if already used
         if _config.used_recovery_codes.contains(&code.to_string()) {
@@ -315,10 +327,14 @@ impl MfaService {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured {
+                user: user_id.to_string(),
+            })?;
 
         _config.totp = None;
-        _config.enabled_methods.retain(|m| *m != MfaMethodType::TOTP);
+        _config
+            .enabled_methods
+            .retain(|m| *m != MfaMethodType::TOTP);
 
         Ok(())
     }
@@ -343,7 +359,9 @@ impl MfaService {
         let mut configs = self.configs.write().await;
         let _config = configs
             .get_mut(user_id)
-            .ok_or_else(|| SecretonError::MfaNotConfigured { user: user_id.to_string() })?;
+            .ok_or_else(|| SecretonError::MfaNotConfigured {
+                user: user_id.to_string(),
+            })?;
 
         _config.recovery_codes = MfaConfig::generate_recovery_codes();
         _config.used_recovery_codes.clear();

@@ -9,20 +9,20 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, OsRng},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use argon2::{Argon2, Params};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::RwLock;
 use tracing::info;
 use uuid::Uuid;
 
-use super::types::{KeyConfig, KeyEntry};
 use super::KeyStore;
+use super::types::{KeyConfig, KeyEntry};
 
 const KEY_LENGTH: usize = 32; // 256 bits for AES-256
 const NONCE_LENGTH: usize = 12; // 96 bits for GCM
@@ -130,9 +130,8 @@ impl SecureStorage {
         OsRng.fill_bytes(&mut salt);
 
         // Derive the key
-        let key = Self::derive_key(master_key, &salt).map_err(|e| {
-            anyhow!("Failed to derive key: {}", e)
-        })?;
+        let key = Self::derive_key(master_key, &salt)
+            .map_err(|e| anyhow!("Failed to derive key: {}", e))?;
 
         // Create a key entry
         let key_entry = KeyEntry {

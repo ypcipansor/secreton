@@ -1,5 +1,6 @@
 //! KV Secrets Engine API endpoints
 
+use anyhow::Result;
 use axum::{
     Router,
     extract::{Extension, Path},
@@ -7,14 +8,13 @@ use axum::{
     response::Json,
     routing::{delete, get, post},
 };
+use secreton_core::storage::secret::SecretStorage;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-use secreton_core::storage::secret::SecretStorage;
-use serde_json::Value;
-use anyhow::Result;
 
 use crate::ApiState;
 
@@ -34,31 +34,35 @@ impl InMemorySecretStorage {
 
 #[async_trait::async_trait]
 impl SecretStorage for InMemorySecretStorage {
-    async fn store_secret_versioned(
-        &self,
-        path: &str,
-        data: &Value,
-    ) -> Result<u32> {
+    async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32> {
         let mut secrets = self.secrets.write().await;
         let version = secrets.get(path).map(|(_, v)| v + 1).unwrap_or(1);
         secrets.insert(path.to_string(), (data.clone(), version));
         Ok(version)
     }
 
-    async fn get_latest_secret(
-        &self,
-        path: &str,
-    ) -> Result<Option<(Value, u32)>> {
+    async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>> {
         let secrets = self.secrets.read().await;
         Ok(secrets.get(path).cloned())
     }
 
     async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
         let secrets = self.secrets.read().await;
-        let prefix = if path.ends_with('/') { path } else { &format!("{}/", path) };
-        let keys: Vec<String> = secrets.keys()
+        let prefix = if path.ends_with('/') {
+            path
+        } else {
+            &format!("{}/", path)
+        };
+        let keys: Vec<String> = secrets
+            .keys()
             .filter(|k| k.starts_with(prefix))
-            .map(|k| k[prefix.len()..].split('/').next().unwrap_or("").to_string())
+            .map(|k| {
+                k[prefix.len()..]
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect();
         Ok(keys)
     }
@@ -166,12 +170,14 @@ pub async fn put_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> Result<Json<CreateSecretResponse>, StatusCode> {
-    match state.kv.storage.store_secret_versioned(&path, &request.data).await {
+    match state
+        .kv
+        .storage
+        .store_secret_versioned(&path, &request.data)
+        .await
+    {
         Ok(version) => {
-            info!(
-                "Created secret at path '{}' version {}",
-                path, version
-            );
+            info!("Created secret at path '{}' version {}", path, version);
             Ok(Json(CreateSecretResponse {
                 version,
                 created_time: chrono::Utc::now().to_rfc3339(),
@@ -193,10 +199,7 @@ pub async fn get_secret(
     match state.kv.storage.get_latest_secret(&path).await {
         Ok(Some((data, version))) => {
             info!("Retrieved secret at path '{}'", path);
-            Ok(Json(GetSecretResponse {
-                data,
-                version,
-            }))
+            Ok(Json(GetSecretResponse { data, version }))
         }
         Ok(None) => {
             warn!("Secret not found at path '{}'", path);

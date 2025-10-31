@@ -3,7 +3,7 @@
 //! Provides command-line interface for managing users in Secreton
 
 use clap::{Parser, Subcommand};
-use secreton_ui::auth::{SessionService, PasswordPolicy};
+use secreton_ui::auth::{PasswordPolicy, SessionService};
 use std::io::{self, Write};
 
 #[derive(Parser)]

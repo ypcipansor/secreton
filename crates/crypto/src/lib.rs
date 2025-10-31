@@ -8,6 +8,10 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod advanced_key_manager;
+pub mod authenticated_key_operations;
+pub mod crypto_policy_engine;
+pub mod cryptography;
 pub mod encryption;
 pub mod error;
 pub mod hashing;
@@ -16,51 +20,48 @@ pub mod key_derivation;
 pub mod key_manager;
 pub mod kmip;
 pub mod kv_engine;
-pub mod pqc;
 pub mod policy_enforced_crypto;
+pub mod pqc;
 pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod transit;
-pub mod advanced_key_manager;
-pub mod authenticated_key_operations;
-pub mod crypto_policy_engine;
-pub mod cryptography;
 
 // TODO: Fix compilation errors in these modules
 // pub mod integration;
 // pub mod quantum_safe_crypto;
 
+pub use advanced_key_manager::{
+    AdvancedKeyManager, KeyManagerError, KeyState as AdvancedKeyState, KeyType as AdvancedKeyType,
+};
+pub use authenticated_key_operations::{
+    AuthenticatedKeyError, AuthenticatedKeyOperations, KeyOperation, KeyOperationRequest,
+    KeyOperationResult, KeyPermission, MetricType,
+};
+pub use crypto_policy_engine::{
+    AlgorithmMetadata, AlgorithmStatus, ComplianceStandard, ComplianceStatus, CryptoAlgorithm,
+    CryptoAudit, CryptoInventoryItem, CryptoOperationRequest, CryptoPolicy, CryptoPolicyEngine,
+    PolicyError,
+};
+pub use cryptography::*;
 pub use encryption::*;
 pub use error::*;
-pub use homomorphic_encryption::{HESystem, Ciphertext, HEError};
-pub use key_derivation::{derive_key, KdfParams, DerivedKey};
+pub use homomorphic_encryption::{Ciphertext, HEError, HESystem};
+pub use key_derivation::{DerivedKey, KdfParams, derive_key};
 pub use key_manager::*;
-pub use kmip::{KmipClient, KeyState as KmipKeyState};
+pub use kmip::{KeyState as KmipKeyState, KmipClient};
 pub use kv_engine::*;
-pub use pqc::*;
 pub use policy_enforced_crypto::{
-    PolicyEnforcementError, PolicyEnforcedEncryptionRequest, EncryptedSecret,
-    ComplianceViolation, ViolationType, RemediationStatus, MigrationPlan,
-    MigrationProgress, ComplianceScanResult, PolicyEnforcedCryptoOperations
+    ComplianceScanResult, ComplianceViolation, EncryptedSecret, MigrationPlan, MigrationProgress,
+    PolicyEnforcedCryptoOperations, PolicyEnforcedEncryptionRequest, PolicyEnforcementError,
+    RemediationStatus, ViolationType,
 };
+pub use pqc::*;
 pub use secure_multi_party_computation::{
-    SMPCError, SMPCProtocol, Participant, SMPCSession, SessionState, SecretShare,
-    DKGResult, ThresholdSignature, PartialSignature, ComputationRequest,
-    ComputationResult, SMPCSystem
+    ComputationRequest, ComputationResult, DKGResult, PartialSignature, Participant, SMPCError,
+    SMPCProtocol, SMPCSession, SMPCSystem, SecretShare, SessionState, ThresholdSignature,
 };
 pub use shamir::*;
 pub use transit::TransitEngine;
-pub use advanced_key_manager::{AdvancedKeyManager, KeyManagerError, KeyType as AdvancedKeyType, KeyState as AdvancedKeyState};
-pub use authenticated_key_operations::{
-    MetricType, AuthenticatedKeyError, KeyOperationRequest, KeyOperation,
-    KeyOperationResult, KeyPermission, AuthenticatedKeyOperations
-};
-pub use crypto_policy_engine::{
-    PolicyError, CryptoAlgorithm, AlgorithmStatus, ComplianceStandard,
-    CryptoPolicy, AlgorithmMetadata, CryptoOperationRequest, CryptoAudit,
-    CryptoInventoryItem, ComplianceStatus, CryptoPolicyEngine
-};
-pub use cryptography::*;
 
 /// Supported cryptographic algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

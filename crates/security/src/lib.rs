@@ -12,13 +12,15 @@ pub mod error;
 pub mod policies;
 
 // Re-export main types
-pub use audit::{AuditLog, AuditStatus, AuditBackend, AuditError};
+pub use audit::{AuditBackend, AuditError, AuditLog, AuditStatus};
 pub use auto_unseal::{AutoUnsealError, KmsProvider};
 pub use error::SecurityError;
 pub use policies::audit::{AuditEvent, AuditEventType, AuditStatus as PolicyAuditStatus};
-pub use policies::compliance_framework::{ComplianceProfile, ComplianceRequirement, ComplianceStandard};
+pub use policies::compliance_framework::{
+    ComplianceProfile, ComplianceRequirement, ComplianceStandard,
+};
 pub use policies::policy::PolicySet;
-pub use policies::quotas::{QuotaConfig, QuotaUsage, QuotaType};
+pub use policies::quotas::{QuotaConfig, QuotaType, QuotaUsage};
 
 /// Security context for operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,5 +64,8 @@ pub trait SecurityEngine: Send + Sync {
     async fn log_event(&self, event: AuditEvent) -> Result<(), SecurityError>;
 
     /// Check compliance
-    async fn check_compliance(&self, context: &SecurityContext) -> Result<Vec<ComplianceProfile>, SecurityError>;
+    async fn check_compliance(
+        &self,
+        context: &SecurityContext,
+    ) -> Result<Vec<ComplianceProfile>, SecurityError>;
 }

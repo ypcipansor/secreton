@@ -83,7 +83,6 @@ impl SshKeyType {
             SshKeyType::Ed25519 => "ed25519",
         }
     }
-
 }
 
 /// SSH role configuration
@@ -162,8 +161,7 @@ impl Default for SshRole {
             default_critical_options: HashMap::new(),
             default_extensions: HashMap::new(),
         }
-
-}
+    }
 }
 
 /// SSH CA configuration

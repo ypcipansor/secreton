@@ -50,13 +50,18 @@ impl MetricsServer {
 
         tracing::info!("Starting metrics server on {}", addr);
 
-        let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-            CoreError::Internal { message: format!("Failed to bind to address: {}", e) }
-        })?;
+        let listener =
+            tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(|e| CoreError::Internal {
+                    message: format!("Failed to bind to address: {}", e),
+                })?;
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| CoreError::Internal { message: format!("Server error: {}", e) })?;
+            .map_err(|e| CoreError::Internal {
+                message: format!("Server error: {}", e),
+            })?;
 
         Ok(())
     }

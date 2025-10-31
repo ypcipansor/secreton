@@ -140,7 +140,8 @@ impl SecretUsageAnalytics {
         }
 
         let access_count = events.len() as u64;
-        let unique_accessors: HashSet<String> = events.iter().map(|_e| _e.accessor.clone()).collect();
+        let unique_accessors: HashSet<String> =
+            events.iter().map(|_e| _e.accessor.clone()).collect();
 
         let first_accessed = events.iter().map(|_e| _e.timestamp).min().unwrap();
         let last_accessed = events.iter().map(|_e| _e.timestamp).max().unwrap();
@@ -183,7 +184,8 @@ impl SecretUsageAnalytics {
         most_accessed.truncate(10);
 
         // Find unused secrets (no access in time range)
-        let accessed_secrets: HashSet<_> = filtered_events.iter().map(|_e| &_e.secret_path).collect();
+        let accessed_secrets: HashSet<_> =
+            filtered_events.iter().map(|_e| &_e.secret_path).collect();
         let all_secrets: HashSet<_> = access_events.iter().map(|_e| &_e.secret_path).collect();
         let unused_secrets: Vec<_> = all_secrets
             .difference(&accessed_secrets)
@@ -429,7 +431,10 @@ mod tests {
                 .unwrap();
         }
 
-        let metrics = analytics.get_usage_metrics("_secret/api/_key").await.unwrap();
+        let metrics = analytics
+            .get_usage_metrics("_secret/api/_key")
+            .await
+            .unwrap();
         assert_eq!(metrics.access_count, 10);
         assert_eq!(metrics.unique_accessors.len(), 3);
     }
@@ -501,7 +506,10 @@ mod tests {
         // Manually set old timestamp
         {
             let mut events = analytics.access_events.write().await;
-            if let Some(event) = events.iter_mut().find(|_e| _e.secret_path == "_secret/unused") {
+            if let Some(event) = events
+                .iter_mut()
+                .find(|_e| _e.secret_path == "_secret/unused")
+            {
                 event.timestamp = Utc::now() - chrono::Duration::days(31);
             }
         }

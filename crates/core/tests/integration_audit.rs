@@ -1,8 +1,10 @@
+use secreton_auth::revocation::{RevocationRegistry, RevocationScope};
+use secreton_security::audit::{AuditLog, AuditLogger, AuditStatus, MemoryBackend};
+use secreton_storage::storage_backends::secret_versioning::{
+    ChangeType, SecretVersion, VersionHistory, VersionMetadata,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
-use secreton_security::audit::{AuditLogger, AuditLog, AuditStatus, MemoryBackend};
-use secreton_auth::revocation::{RevocationRegistry, RevocationScope};
-use secreton_storage::storage_backends::secret_versioning::{VersionHistory, SecretVersion, VersionMetadata, ChangeType};
 
 #[test]
 fn test_secret_versioning_and_revocation_audit() {
@@ -51,7 +53,9 @@ fn test_secret_versioning_and_revocation_audit() {
             ("change".to_string(), "created v1".to_string()),
         ]),
     };
-    let _ = tokio::runtime::Runtime::new().unwrap().block_on(audit_logger.log(audit_entry));
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(audit_logger.log(audit_entry));
 
     // Create second version
     let v2 = SecretVersion {
@@ -89,7 +93,9 @@ fn test_secret_versioning_and_revocation_audit() {
             ("previous_hash".to_string(), "hash1".to_string()),
         ]),
     };
-    let _ = tokio::runtime::Runtime::new().unwrap().block_on(audit_logger.log(audit_entry2));
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(audit_logger.log(audit_entry2));
 
     // Granular Revocation
     let mut registry = RevocationRegistry::new();

@@ -2,7 +2,7 @@
 //!
 //! This module contains the core data structures used throughout the secure storage system.
 
-use base64::{Engine as _};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -97,10 +97,10 @@ pub struct KeyConfig {
 impl Default for KeyConfig {
     fn default() -> Self {
         Self {
-            rotation_interval: 30 * 24 * 3600, // 30 days
+            rotation_interval: 30 * 24 * 3600,    // 30 days
             key_retention_period: 90 * 24 * 3600, // 90 days
-            min_key_lifetime: 7 * 24 * 3600, // 1 week
-            max_key_lifetime: 365 * 24 * 3600, // 1 year
+            min_key_lifetime: 7 * 24 * 3600,      // 1 week
+            max_key_lifetime: 365 * 24 * 3600,    // 1 year
         }
     }
 }

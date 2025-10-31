@@ -365,7 +365,10 @@ mod tests {
         let playbook = create_test_playbook();
 
         ansible.register_playbook(playbook).await.unwrap();
-        ansible.set_inventory(create_test_inventory()).await.unwrap();
+        ansible
+            .set_inventory(create_test_inventory())
+            .await
+            .unwrap();
 
         let execution_id = ansible
             .execute_playbook("deploy-app", HashMap::new())
@@ -385,7 +388,10 @@ mod tests {
         ansible.register_playbook(playbook).await.unwrap();
 
         let mut secret_mappings = HashMap::new();
-        secret_mappings.insert("db_password".to_string(), "secret/data/db/password".to_string());
+        secret_mappings.insert(
+            "db_password".to_string(),
+            "secret/data/db/password".to_string(),
+        );
         secret_mappings.insert("api_key".to_string(), "secret/data/api/key".to_string());
 
         ansible
@@ -422,7 +428,10 @@ mod tests {
         let playbook = create_test_playbook();
 
         ansible.register_playbook(playbook).await.unwrap();
-        ansible.set_inventory(create_test_inventory()).await.unwrap();
+        ansible
+            .set_inventory(create_test_inventory())
+            .await
+            .unwrap();
 
         let execution_id = ansible
             .execute_playbook("deploy-app", HashMap::new())

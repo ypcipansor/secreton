@@ -1,5 +1,5 @@
-use secreton_auth_methods::model::MfaMethod;
 use anyhow::Result;
+use secreton_auth_methods::model::MfaMethod;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

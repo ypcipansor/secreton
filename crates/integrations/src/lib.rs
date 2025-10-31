@@ -6,22 +6,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub mod error;
 pub mod database_rotation;
-pub mod snapshot;
 pub mod dynamic;
+pub mod error;
+pub mod snapshot;
 
 // Cloud provider integrations
-#[cfg(feature = "aws")]
-pub mod aws;
-#[cfg(feature = "azure")]
-pub mod azure;
-#[cfg(feature = "gcp")]
-pub mod gcp;
+// #[cfg(feature = "aws")]
+// pub mod aws;
+// #[cfg(feature = "azure")]
+// pub mod azure;
+// #[cfg(feature = "gcp")]
+// pub mod gcp;
 
 // Infrastructure integrations
-#[cfg(feature = "kubernetes")]
-pub mod kubernetes;
+// #[cfg(feature = "kubernetes")]
+// pub mod kubernetes;
 
 // CI/CD integrations
 // pub mod cicd;
@@ -62,10 +62,17 @@ pub trait IntegrationProvider: Send + Sync {
     async fn test_connection(&self) -> Result<(), IntegrationError>;
 
     /// Sync data from external service
-    async fn sync_data(&self, config: &IntegrationConfig) -> Result<IntegrationResult, IntegrationError>;
+    async fn sync_data(
+        &self,
+        config: &IntegrationConfig,
+    ) -> Result<IntegrationResult, IntegrationError>;
 
     /// Push data to external service
-    async fn push_data(&self, data: serde_json::Value, config: &IntegrationConfig) -> Result<IntegrationResult, IntegrationError>;
+    async fn push_data(
+        &self,
+        data: serde_json::Value,
+        config: &IntegrationConfig,
+    ) -> Result<IntegrationResult, IntegrationError>;
 }
 
 /// Integration configuration
@@ -85,11 +92,18 @@ pub enum IntegrationCredentials {
     /// API key authentication
     ApiKey(String),
     /// OAuth2 authentication
-    OAuth2 { client_id: String, client_secret: String },
+    OAuth2 {
+        client_id: String,
+        client_secret: String,
+    },
     /// AWS IAM authentication
     AwsIam,
     /// Azure authentication
-    Azure { tenant_id: String, client_id: String, client_secret: String },
+    Azure {
+        tenant_id: String,
+        client_id: String,
+        client_secret: String,
+    },
     /// Service account key
     ServiceAccount(String),
 }

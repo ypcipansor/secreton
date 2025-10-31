@@ -256,7 +256,9 @@ impl IntegratedRaftStorage {
 
         // Simulate voting (in production, would send RPC to nodes)
         for _node in nodes.values() {
-            let response = self.handle_vote_request_internal(&vote_request, _node).await;
+            let response = self
+                .handle_vote_request_internal(&vote_request, _node)
+                .await;
             if response.vote_granted {
                 votes += 1;
             }
@@ -287,7 +289,8 @@ impl IntegratedRaftStorage {
     ) -> VoteResponse {
         // Simplified vote logic
         let vote_granted = _request.term >= _node.term
-            && (_node.voted_for.is_none() || _node.voted_for.as_ref() == Some(&_request.candidate_id));
+            && (_node.voted_for.is_none()
+                || _node.voted_for.as_ref() == Some(&_request.candidate_id));
 
         VoteResponse {
             term: _node.term,

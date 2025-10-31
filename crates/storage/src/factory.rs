@@ -340,26 +340,25 @@ impl StorageFactory {
 
                 let backend = MongoDBStorage::new(mongodb_config).await?;
                 Ok(Arc::new(backend))
-            }
-            // Commented out backend implementations that need fixes
-            // StorageBackendType::Aerospike => {
-            //     let aerospike_config = config.aerospike_config.ok_or_else(|| {
-            //         StorageError::ConfigurationError {
-            //             message: "Aerospike configuration is required".to_string(),
-            //         }
-            //     })?;
-            //     let backend = AerospikeStorage::new(aerospike_config);
-            //     Ok(Arc::new(backend))
-            // }
-            // StorageBackendType::AliCloudOSS => { ... }
-            // StorageBackendType::CouchDB => { ... }
-            // StorageBackendType::FoundationDB => { ... }
-            // StorageBackendType::Manta => { ... }
-            // StorageBackendType::MSSQL => { ... }
-            // StorageBackendType::OCI => { ... }
-            // StorageBackendType::Spanner => { ... }
-            // StorageBackendType::Swift => { ... }
-            // StorageBackendType::ZooKeeper => { ... }
+            } // Commented out backend implementations that need fixes
+              // StorageBackendType::Aerospike => {
+              //     let aerospike_config = config.aerospike_config.ok_or_else(|| {
+              //         StorageError::ConfigurationError {
+              //             message: "Aerospike configuration is required".to_string(),
+              //         }
+              //     })?;
+              //     let backend = AerospikeStorage::new(aerospike_config);
+              //     Ok(Arc::new(backend))
+              // }
+              // StorageBackendType::AliCloudOSS => { ... }
+              // StorageBackendType::CouchDB => { ... }
+              // StorageBackendType::FoundationDB => { ... }
+              // StorageBackendType::Manta => { ... }
+              // StorageBackendType::MSSQL => { ... }
+              // StorageBackendType::OCI => { ... }
+              // StorageBackendType::Spanner => { ... }
+              // StorageBackendType::Swift => { ... }
+              // StorageBackendType::ZooKeeper => { ... }
         }
     }
 

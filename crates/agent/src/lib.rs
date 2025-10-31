@@ -149,10 +149,8 @@ impl BrankasAgent {
             Ok::<(), CoreError>(())
         })
         .await
-        .map_err(|e| {
-            CoreError::Internal {
-                message: format!("Monitoring service task failed: {}", e),
-            }
+        .map_err(|e| CoreError::Internal {
+            message: format!("Monitoring service task failed: {}", e),
         })??;
 
         Ok(())
@@ -188,10 +186,8 @@ impl BrankasAgent {
             Ok::<(), CoreError>(())
         })
         .await
-        .map_err(|e| {
-            CoreError::Internal {
-                message: format!("Alerting service task failed: {}", e),
-            }
+        .map_err(|e| CoreError::Internal {
+            message: format!("Alerting service task failed: {}", e),
         })??;
 
         Ok(())
@@ -224,10 +220,8 @@ impl BrankasAgent {
             Ok::<(), CoreError>(())
         })
         .await
-        .map_err(|e| {
-            CoreError::Internal {
-                message: format!("Security service task failed: {}", e),
-            }
+        .map_err(|e| CoreError::Internal {
+            message: format!("Security service task failed: {}", e),
         })??;
 
         Ok(())
@@ -274,10 +268,8 @@ impl BrankasAgent {
             Ok::<(), CoreError>(())
         })
         .await
-        .map_err(|e| {
-            CoreError::Internal {
-                message: format!("Metrics service task failed: {}", e),
-            }
+        .map_err(|e| CoreError::Internal {
+            message: format!("Metrics service task failed: {}", e),
         })??;
 
         Ok(())

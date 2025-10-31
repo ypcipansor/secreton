@@ -222,7 +222,9 @@ impl AgentTemplatingService {
             }
             "_key" => {
                 if parts.len() < 2 {
-                    return Err(TemplatingError::ParseError("_key requires _path".to_string()));
+                    return Err(TemplatingError::ParseError(
+                        "_key requires _path".to_string(),
+                    ));
                 }
                 Ok(CTLFunction::Key {
                     _path: parts[1].trim_matches('"').to_string(),
@@ -554,7 +556,10 @@ mod tests {
 
         service.write_file(&rendered).await.unwrap();
 
-        let retrieved = service.get_rendered_file("/etc/test/_config").await.unwrap();
+        let retrieved = service
+            .get_rendered_file("/etc/test/_config")
+            .await
+            .unwrap();
         assert_eq!(retrieved.content, "test content");
     }
 

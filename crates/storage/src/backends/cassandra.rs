@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
+    StorageTransaction, VaultEntry,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +58,8 @@ impl StorageTransaction for CassandraTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CassandraOperation::Store(entry.clone()));
+        self.operations
+            .push(CassandraOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -68,7 +69,8 @@ impl StorageTransaction for CassandraTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(CassandraOperation::Update(entry.clone()));
+        self.operations
+            .push(CassandraOperation::Update(entry.clone()));
         Ok(())
     }
 

@@ -1,28 +1,38 @@
 //! Identity service for managing entities, aliases, and groups
 
 use async_trait::async_trait;
+use chrono::Utc;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
 
-use super::entity::*;
 use super::alias::*;
+use super::entity::*;
 use super::group::*;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 
 /// Identity service trait
 #[async_trait]
 pub trait IdentityService: Send + Sync {
     /// Create a new entity
-    async fn create_entity(&self, name: String, metadata: HashMap<String, String>) -> AuthMethodResult<Entity>;
+    async fn create_entity(
+        &self,
+        name: String,
+        metadata: HashMap<String, String>,
+    ) -> AuthMethodResult<Entity>;
 
     /// Read an entity by ID
     async fn read_entity(&self, id: Uuid) -> AuthMethodResult<Option<Entity>>;
 
     /// Update an entity
-    async fn update_entity(&self, id: Uuid, name: Option<String>, metadata: Option<HashMap<String, String>>, disabled: Option<bool>) -> AuthMethodResult<Entity>;
+    async fn update_entity(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        metadata: Option<HashMap<String, String>>,
+        disabled: Option<bool>,
+    ) -> AuthMethodResult<Entity>;
 
     /// Delete an entity
     async fn delete_entity(&self, id: Uuid) -> AuthMethodResult<()>;
@@ -31,13 +41,20 @@ pub trait IdentityService: Send + Sync {
     async fn list_entities(&self) -> AuthMethodResult<Vec<Entity>>;
 
     /// Create an entity alias
-    async fn create_entity_alias(&self, request: AliasCreationRequest) -> AuthMethodResult<EntityAlias>;
+    async fn create_entity_alias(
+        &self,
+        request: AliasCreationRequest,
+    ) -> AuthMethodResult<EntityAlias>;
 
     /// Read entity aliases for an entity
     async fn read_entity_aliases(&self, entity_id: Uuid) -> AuthMethodResult<Vec<EntityAlias>>;
 
     /// Delete an entity alias
-    async fn delete_entity_alias(&self, name: String, mount_accessor: String) -> AuthMethodResult<()>;
+    async fn delete_entity_alias(
+        &self,
+        name: String,
+        mount_accessor: String,
+    ) -> AuthMethodResult<()>;
 
     /// Create a group
     async fn create_group(&self, request: GroupCreationRequest) -> AuthMethodResult<Group>;
@@ -58,7 +75,10 @@ pub trait IdentityService: Send + Sync {
     async fn add_entity_to_group(&self, request: GroupMembershipRequest) -> AuthMethodResult<()>;
 
     /// Remove entity from group
-    async fn remove_entity_from_group(&self, request: GroupMembershipRequest) -> AuthMethodResult<()>;
+    async fn remove_entity_from_group(
+        &self,
+        request: GroupMembershipRequest,
+    ) -> AuthMethodResult<()>;
 
     /// Get user info by username
     async fn get_user_info(&self, username: &str) -> AuthMethodResult<Option<UserInfo>>;
@@ -85,7 +105,11 @@ impl InMemoryIdentityService {
 
 #[async_trait]
 impl IdentityService for InMemoryIdentityService {
-    async fn create_entity(&self, name: String, metadata: HashMap<String, String>) -> AuthMethodResult<Entity> {
+    async fn create_entity(
+        &self,
+        name: String,
+        metadata: HashMap<String, String>,
+    ) -> AuthMethodResult<Entity> {
         let entity = Entity {
             id: Uuid::new_v4(),
             name,
@@ -108,7 +132,13 @@ impl IdentityService for InMemoryIdentityService {
         Ok(entities.get(&id).cloned())
     }
 
-    async fn update_entity(&self, id: Uuid, name: Option<String>, metadata: Option<HashMap<String, String>>, disabled: Option<bool>) -> AuthMethodResult<Entity> {
+    async fn update_entity(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        metadata: Option<HashMap<String, String>>,
+        disabled: Option<bool>,
+    ) -> AuthMethodResult<Entity> {
         let mut entities = self.entities.write().await;
         if let Some(entity) = entities.get_mut(&id) {
             if let Some(name) = name {
@@ -138,7 +168,10 @@ impl IdentityService for InMemoryIdentityService {
         Ok(entities.values().cloned().collect())
     }
 
-    async fn create_entity_alias(&self, request: AliasCreationRequest) -> AuthMethodResult<EntityAlias> {
+    async fn create_entity_alias(
+        &self,
+        request: AliasCreationRequest,
+    ) -> AuthMethodResult<EntityAlias> {
         let alias = EntityAlias {
             id: Uuid::new_v4(),
             entity_id: request.entity_id,
@@ -158,13 +191,18 @@ impl IdentityService for InMemoryIdentityService {
 
     async fn read_entity_aliases(&self, entity_id: Uuid) -> AuthMethodResult<Vec<EntityAlias>> {
         let aliases = self.aliases.read().await;
-        Ok(aliases.values()
+        Ok(aliases
+            .values()
             .filter(|alias| alias.entity_id == entity_id)
             .cloned()
             .collect())
     }
 
-    async fn delete_entity_alias(&self, name: String, mount_accessor: String) -> AuthMethodResult<()> {
+    async fn delete_entity_alias(
+        &self,
+        name: String,
+        mount_accessor: String,
+    ) -> AuthMethodResult<()> {
         let key = format!("{}:{}", mount_accessor, name);
         let mut aliases = self.aliases.write().await;
         aliases.remove(&key);
@@ -237,7 +275,10 @@ impl IdentityService for InMemoryIdentityService {
             group.last_update_time = Utc::now();
             Ok(group.clone())
         } else {
-            Err(AuthMethodError::RoleNotFound(format!("group {}", request.id)))
+            Err(AuthMethodError::RoleNotFound(format!(
+                "group {}",
+                request.id
+            )))
         }
     }
 
@@ -294,7 +335,10 @@ impl IdentityService for InMemoryIdentityService {
         }
     }
 
-    async fn remove_entity_from_group(&self, request: GroupMembershipRequest) -> AuthMethodResult<()> {
+    async fn remove_entity_from_group(
+        &self,
+        request: GroupMembershipRequest,
+    ) -> AuthMethodResult<()> {
         let mut groups = self.groups.write().await;
 
         let group_id = match request.group {
@@ -310,7 +354,9 @@ impl IdentityService for InMemoryIdentityService {
         };
 
         if let Some(group) = groups.get_mut(&group_id) {
-            group.member_entity_ids.retain(|&id| id != request.entity_id);
+            group
+                .member_entity_ids
+                .retain(|&id| id != request.entity_id);
             group.last_update_time = Utc::now();
             Ok(())
         } else {

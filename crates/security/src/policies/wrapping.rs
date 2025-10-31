@@ -141,8 +141,8 @@ impl ResponseWrapping {
         ttl: u64,
         creation_path: String,
     ) -> Result<WrapInfo, WrapError> {
-        let value =
-            serde_json::to_value(_data).map_err(|_e| WrapError::SerializationError(_e.to_string()))?;
+        let value = serde_json::to_value(_data)
+            .map_err(|_e| WrapError::SerializationError(_e.to_string()))?;
 
         let wrapped = WrappedResponse::new(value, ttl, creation_path);
         let wrap_info = WrapInfo::from(&wrapped);

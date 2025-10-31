@@ -5,7 +5,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::common::{BaseReplicationConfig, ClusterNode, ReplicationMode, ReplicationState, ReplicationStatus};
+use crate::common::{
+    BaseReplicationConfig, ClusterNode, ReplicationMode, ReplicationState, ReplicationStatus,
+};
 use crate::error::ReplicationError;
 
 /// Disaster Recovery Replication Service
@@ -119,7 +121,10 @@ impl DisasterRecoveryService {
         let state = self.state.lock().unwrap();
         let is_primary = self.is_primary.lock().unwrap();
         let config = self.config.lock().unwrap();
-        let cluster_id = config.as_ref().map(|c| c.cluster_id.clone()).unwrap_or_else(|| "unknown".to_string());
+        let cluster_id = config
+            .as_ref()
+            .map(|c| c.cluster_id.clone())
+            .unwrap_or_else(|| "unknown".to_string());
         ReplicationStatus {
             state: state.clone(),
             cluster_id,
@@ -234,7 +239,10 @@ mod tests {
         };
 
         let result = service.configure(config).await;
-        assert!(matches!(result, Err(ReplicationError::InvalidConfiguration(_))));
+        assert!(matches!(
+            result,
+            Err(ReplicationError::InvalidConfiguration(_))
+        ));
     }
 
     #[tokio::test]

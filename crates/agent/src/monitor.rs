@@ -5,7 +5,7 @@ use crate::metrics::MetricPoint;
 use secreton_core::CoreResult;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use sysinfo::{System, Disks, Networks};
+use sysinfo::{Disks, Networks, System};
 use tokio::sync::mpsc;
 
 /// System monitor for collecting system metrics
@@ -48,7 +48,8 @@ impl SystemMonitor {
         self.system.refresh_all();
 
         let now = SystemTime::now();
-        let time_diff = now.duration_since(self.last_measurement_time)
+        let time_diff = now
+            .duration_since(self.last_measurement_time)
             .unwrap_or(Duration::from_secs(1))
             .as_secs_f64();
 
@@ -85,7 +86,11 @@ impl SystemMonitor {
         let cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
         let memory_used = self.system.used_memory() as f64;
         let memory_total = self.system.total_memory() as f64;
-        let memory_usage = if memory_total > 0.0 { (memory_used / memory_total) * 100.0 } else { 0.0 };
+        let memory_usage = if memory_total > 0.0 {
+            (memory_used / memory_total) * 100.0
+        } else {
+            0.0
+        };
 
         let status = format!(
             "System Status - CPU: {:.1}%, Memory: {:.1}%, Processes: {}",
@@ -100,8 +105,9 @@ impl SystemMonitor {
         let status_metric = MetricPoint::new(
             "system.status".to_string(),
             crate::metrics::MetricType::Gauge,
-            1.0
-        ).with_metadata("status_message".to_string(), status);
+            1.0,
+        )
+        .with_metadata("status_message".to_string(), status);
 
         if let Err(e) = self.metrics_tx.send(status_metric) {
             tracing::warn!("Failed to send status metric: {}", e);
@@ -116,7 +122,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.cpu.usage_percent".to_string(),
             crate::metrics::MetricType::Gauge,
-            cpu_usage
+            cpu_usage,
         );
 
         if let Err(e) = self.metrics_tx.send(metric) {
@@ -141,7 +147,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.memory.usage_percent".to_string(),
             crate::metrics::MetricType::Gauge,
-            memory_usage_percent
+            memory_usage_percent,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -149,7 +155,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.memory.total_bytes".to_string(),
             crate::metrics::MetricType::Gauge,
-            total_memory
+            total_memory,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -157,7 +163,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.memory.used_bytes".to_string(),
             crate::metrics::MetricType::Gauge,
-            used_memory
+            used_memory,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -165,7 +171,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.memory.available_bytes".to_string(),
             crate::metrics::MetricType::Gauge,
-            available_memory
+            available_memory,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -192,7 +198,7 @@ impl SystemMonitor {
             let metric = MetricPoint::new(
                 format!("system.disk.{}.usage_percent", mount_point),
                 crate::metrics::MetricType::Gauge,
-                usage_percent
+                usage_percent,
             );
             let _ = self.metrics_tx.send(metric);
 
@@ -200,7 +206,7 @@ impl SystemMonitor {
             let metric = MetricPoint::new(
                 format!("system.disk.{}.total_bytes", mount_point),
                 crate::metrics::MetricType::Gauge,
-                total_space
+                total_space,
             );
             let _ = self.metrics_tx.send(metric);
 
@@ -208,7 +214,7 @@ impl SystemMonitor {
             let metric = MetricPoint::new(
                 format!("system.disk.{}.available_bytes", mount_point),
                 crate::metrics::MetricType::Gauge,
-                available_space
+                available_space,
             );
             let _ = self.metrics_tx.send(metric);
         }
@@ -243,7 +249,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.network.bytes_sent_per_sec".to_string(),
             crate::metrics::MetricType::Gauge,
-            sent_per_sec
+            sent_per_sec,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -251,7 +257,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.network.bytes_received_per_sec".to_string(),
             crate::metrics::MetricType::Gauge,
-            recv_per_sec
+            recv_per_sec,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -267,7 +273,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.processes.count".to_string(),
             crate::metrics::MetricType::Gauge,
-            process_count
+            process_count,
         );
         let _ = self.metrics_tx.send(metric);
 
@@ -280,7 +286,7 @@ impl SystemMonitor {
         let metric = MetricPoint::new(
             "system.uptime.seconds".to_string(),
             crate::metrics::MetricType::Counter,
-            uptime
+            uptime,
         );
         let _ = self.metrics_tx.send(metric);
 

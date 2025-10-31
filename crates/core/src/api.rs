@@ -13,7 +13,7 @@ use uuid::Uuid;
 use warp::{Filter, Rejection, Reply, reject};
 
 use crate::CoreError;
-use secreton_security::{audit, AuditLog, PolicySet, ComplianceProfile, QuotaConfig};
+use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
 
 /// API Response wrapper
 #[derive(Debug, Serialize)]
@@ -152,7 +152,12 @@ impl AdvancedSecurityManager {
             enabled: true,
         };
         let rbac_policies = Vec::new();
-        let quota_engine = QuotaConfig::new("default".to_string(), secreton_security::policies::quotas::QuotaType::RateLimit, "/".to_string(), 1000);
+        let quota_engine = QuotaConfig::new(
+            "default".to_string(),
+            secreton_security::policies::quotas::QuotaType::RateLimit,
+            "/".to_string(),
+            1000,
+        );
 
         Ok(Self {
             audit_system,
@@ -190,11 +195,14 @@ impl AdvancedSecurityManager {
             status: audit::AuditStatus::Success,
             ip: Some(_client_info.ip_address),
             user_agent: _client_info.user_agent,
-            metadata: HashMap::from([
-                ("risk_score".to_string(), session.risk_score.to_string()),
-            ]),
+            metadata: HashMap::from([("risk_score".to_string(), session.risk_score.to_string())]),
         };
-        self.audit_system.log(audit_entry).await.map_err(|e| SecretonError::Audit { message: format!("Audit logging failed: {}", e) })?;
+        self.audit_system
+            .log(audit_entry)
+            .await
+            .map_err(|e| SecretonError::Audit {
+                message: format!("Audit logging failed: {}", e),
+            })?;
 
         Ok(session)
     }

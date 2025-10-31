@@ -1,12 +1,12 @@
 //! SAML authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose};
 use reqwest::Client;
 use xml::reader::{EventReader, XmlEvent};
-use base64::{Engine as _, engine::general_purpose};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// SAML authentication method
 pub struct SamlAuthMethod {
@@ -33,8 +33,12 @@ impl SamlAuthMethod {
 
     /// Generate SAML authentication request
     pub fn generate_authn_request(&self) -> AuthMethodResult<String> {
-        let config = self.saml_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("SAML config not set".to_string()))?;
+        let config = self
+            .saml_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "SAML config not set".to_string(),
+            ))?;
 
         let request_id = format!("_{}", uuid::Uuid::new_v4().simple());
         let issue_instant = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -49,18 +53,17 @@ impl SamlAuthMethod {
                     AssertionConsumerServiceURL="{}">
     <saml:Issuer>{}</saml:Issuer>
 </samlp:AuthnRequest>"#,
-            request_id,
-            issue_instant,
-            config.acs_url,
-            config.entity_id
+            request_id, issue_instant, config.acs_url, config.entity_id
         );
 
         // Compress and base64 encode
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         use std::io::Write;
-        encoder.write_all(authn_request.as_bytes())
+        encoder
+            .write_all(authn_request.as_bytes())
             .map_err(|e| AuthMethodError::SamlError(format!("Compression failed: {}", e)))?;
-        let compressed = encoder.finish()
+        let compressed = encoder
+            .finish()
             .map_err(|e| AuthMethodError::SamlError(format!("Compression finish failed: {}", e)))?;
 
         Ok(general_purpose::URL_SAFE.encode(&compressed))
@@ -69,7 +72,8 @@ impl SamlAuthMethod {
     /// Parse SAML response
     pub fn parse_saml_response(&self, saml_response: &str) -> AuthMethodResult<SamlAssertion> {
         // Decode base64
-        let decoded = general_purpose::URL_SAFE.decode(saml_response)
+        let decoded = general_purpose::URL_SAFE
+            .decode(saml_response)
             .map_err(|e| AuthMethodError::SamlError(format!("Base64 decode failed: {}", e)))?;
 
         // Decompress if needed
@@ -77,7 +81,8 @@ impl SamlAuthMethod {
             let mut decoder = flate2::read::GzDecoder::new(&decoded[..]);
             let mut decompressed = Vec::new();
             use std::io::Read;
-            decoder.read_to_end(&mut decompressed)
+            decoder
+                .read_to_end(&mut decompressed)
                 .map_err(|e| AuthMethodError::SamlError(format!("Decompression failed: {}", e)))?;
             decompressed
         } else {
@@ -140,7 +145,12 @@ impl SamlAuthMethod {
                     }
                     current_element = String::new();
                 }
-                Err(e) => return Err(AuthMethodError::SamlError(format!("XML parsing error: {}", e))),
+                Err(e) => {
+                    return Err(AuthMethodError::SamlError(format!(
+                        "XML parsing error: {}",
+                        e
+                    )));
+                }
                 _ => {}
             }
         }
@@ -170,8 +180,16 @@ impl AuthMethodImpl for SamlAuthMethod {
                 idp_entity_id: idp_entity_id.to_string(),
                 entity_id: entity_id.to_string(),
                 acs_url: acs_url.to_string(),
-                certificate: config.config.get("certificate").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                private_key: config.config.get("private_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                certificate: config
+                    .config
+                    .get("certificate")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                private_key: config
+                    .config
+                    .get("private_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             };
             self.set_saml_config(saml_config);
         }

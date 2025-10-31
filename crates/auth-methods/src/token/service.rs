@@ -1,29 +1,38 @@
 //! Unified token service combining creation, renewal, and revocation
 
 use async_trait::async_trait;
+use chrono::{Duration, Utc};
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{Utc, Duration};
-use rand::Rng;
 
-use super::token::*;
 use super::renewal::*;
 use super::revocation::*;
+use super::token::*;
 use crate::error::*;
 
 /// Token service trait
 #[async_trait]
 pub trait TokenService: Send + Sync {
     /// Create a new token
-    async fn create_token(&self, request: TokenCreationRequest) -> Result<TokenCreationResponse, AuthMethodError>;
+    async fn create_token(
+        &self,
+        request: TokenCreationRequest,
+    ) -> Result<TokenCreationResponse, AuthMethodError>;
 
     /// Lookup a token by accessor
-    async fn lookup_token(&self, request: TokenLookupRequest) -> Result<TokenLookupResponse, AuthMethodError>;
+    async fn lookup_token(
+        &self,
+        request: TokenLookupRequest,
+    ) -> Result<TokenLookupResponse, AuthMethodError>;
 
     /// Renew a token
-    async fn renew_token(&self, request: TokenRenewalRequest) -> Result<TokenRenewalResponse, AuthMethodError>;
+    async fn renew_token(
+        &self,
+        request: TokenRenewalRequest,
+    ) -> Result<TokenRenewalResponse, AuthMethodError>;
 
     /// Revoke a token
     async fn revoke_token(&self, request: TokenRevocationRequest) -> Result<(), AuthMethodError>;
@@ -78,15 +87,26 @@ impl CombinedTokenService {
     }
 
     /// Apply TTL constraints
-    fn apply_ttl_constraints(&self, requested_ttl: Option<Duration>, explicit_max_ttl: Option<Duration>) -> Duration {
-        let effective_max_ttl = explicit_max_ttl.or(self.max_ttl).unwrap_or(self.default_ttl);
-        requested_ttl.unwrap_or(self.default_ttl).min(effective_max_ttl)
+    fn apply_ttl_constraints(
+        &self,
+        requested_ttl: Option<Duration>,
+        explicit_max_ttl: Option<Duration>,
+    ) -> Duration {
+        let effective_max_ttl = explicit_max_ttl
+            .or(self.max_ttl)
+            .unwrap_or(self.default_ttl);
+        requested_ttl
+            .unwrap_or(self.default_ttl)
+            .min(effective_max_ttl)
     }
 }
 
 #[async_trait]
 impl TokenService for CombinedTokenService {
-    async fn create_token(&self, request: TokenCreationRequest) -> Result<TokenCreationResponse, AuthMethodError> {
+    async fn create_token(
+        &self,
+        request: TokenCreationRequest,
+    ) -> Result<TokenCreationResponse, AuthMethodError> {
         let ttl = self.apply_ttl_constraints(request.ttl, request.explicit_max_ttl);
         let expiry_time = Some(Utc::now() + ttl);
 
@@ -122,19 +142,34 @@ impl TokenService for CombinedTokenService {
         })
     }
 
-    async fn lookup_token(&self, request: TokenLookupRequest) -> Result<TokenLookupResponse, AuthMethodError> {
+    async fn lookup_token(
+        &self,
+        request: TokenLookupRequest,
+    ) -> Result<TokenLookupResponse, AuthMethodError> {
         let accessor_map = self.accessor_map.read().await;
         let tokens = self.tokens.read().await;
 
-        let token_id = accessor_map.get(&request.accessor)
-            .ok_or_else(|| AuthMethodError::TokenInvalid(format!("Invalid accessor: {}", request.accessor)))?;
+        let token_id = accessor_map.get(&request.accessor).ok_or_else(|| {
+            AuthMethodError::TokenInvalid(format!("Invalid accessor: {}", request.accessor))
+        })?;
 
-        let token = tokens.get(token_id)
-            .ok_or_else(|| AuthMethodError::TokenInvalid(format!("Token not found for accessor: {}", request.accessor)))?;
+        let token = tokens.get(token_id).ok_or_else(|| {
+            AuthMethodError::TokenInvalid(format!(
+                "Token not found for accessor: {}",
+                request.accessor
+            ))
+        })?;
 
-        if self.revocation_service.is_revoked(*token_id).await
-            .map_err(|e| AuthMethodError::TokenInvalid(format!("Revocation check failed: {}", e)))? {
-            return Err(AuthMethodError::TokenInvalid(format!("Token revoked: {}", request.accessor)));
+        if self
+            .revocation_service
+            .is_revoked(*token_id)
+            .await
+            .map_err(|e| AuthMethodError::TokenInvalid(format!("Revocation check failed: {}", e)))?
+        {
+            return Err(AuthMethodError::TokenInvalid(format!(
+                "Token revoked: {}",
+                request.accessor
+            )));
         }
 
         Ok(TokenLookupResponse {
@@ -144,26 +179,42 @@ impl TokenService for CombinedTokenService {
         })
     }
 
-    async fn renew_token(&self, request: TokenRenewalRequest) -> Result<TokenRenewalResponse, AuthMethodError> {
+    async fn renew_token(
+        &self,
+        request: TokenRenewalRequest,
+    ) -> Result<TokenRenewalResponse, AuthMethodError> {
         if self.revocation_service.is_revoked(request.token_id).await? {
-            return Err(AuthMethodError::TokenInvalid(format!("Token revoked: {}", request.token_id)));
+            return Err(AuthMethodError::TokenInvalid(format!(
+                "Token revoked: {}",
+                request.token_id
+            )));
         }
 
-        self.renewal_service.renew_token(request).await.map_err(AuthMethodError::from)
+        self.renewal_service
+            .renew_token(request)
+            .await
+            .map_err(AuthMethodError::from)
     }
 
     async fn revoke_token(&self, request: TokenRevocationRequest) -> Result<(), AuthMethodError> {
-        self.revocation_service.revoke_token(request).await.map_err(AuthMethodError::from)
+        self.revocation_service
+            .revoke_token(request)
+            .await
+            .map_err(AuthMethodError::from)
     }
 
     async fn revoke_entity_tokens(&self, entity_id: Uuid) -> Result<(), AuthMethodError> {
-        self.revocation_service.revoke_entity_tokens(entity_id).await.map_err(AuthMethodError::from)
+        self.revocation_service
+            .revoke_entity_tokens(entity_id)
+            .await
+            .map_err(AuthMethodError::from)
     }
 
     async fn list_tokens(&self, request: TokenListRequest) -> Result<Vec<Token>, AuthMethodError> {
         let tokens = self.tokens.read().await;
 
-        let filtered_tokens: Vec<Token> = tokens.values()
+        let filtered_tokens: Vec<Token> = tokens
+            .values()
             .filter(|token| {
                 // Filter by entity_id if specified
                 if let Some(entity_id) = request.entity_id {
@@ -191,7 +242,8 @@ impl TokenService for CombinedTokenService {
         let mut tokens = self.tokens.write().await;
         let mut accessor_map = self.accessor_map.write().await;
 
-        let expired_ids: Vec<Uuid> = tokens.values()
+        let expired_ids: Vec<Uuid> = tokens
+            .values()
             .filter(|token| token.is_expired())
             .map(|token| token.id)
             .collect();

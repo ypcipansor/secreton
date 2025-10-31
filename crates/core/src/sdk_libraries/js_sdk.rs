@@ -28,9 +28,7 @@ impl SecretonSdk for JsSdkClient {
             success: true,
             data: Some(SdkSecret {
                 path: path.to_string(),
-                data: HashMap::from([
-                    ("key".to_string(), "value".to_string()),
-                ]),
+                data: HashMap::from([("key".to_string(), "value".to_string())]),
                 metadata: Some(HashMap::new()),
                 ttl: None,
             }),

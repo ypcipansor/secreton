@@ -44,7 +44,7 @@ impl ComplianceFramework {
             ComplianceFramework::GDPR => 2555,     // 7 years
             ComplianceFramework::CCPA => 365,      // 1 year
             ComplianceFramework::SOX => 2555,      // 7 years
-            ComplianceFramework::PciDss => 365,   // 1 year minimum
+            ComplianceFramework::PciDss => 365,    // 1 year minimum
             ComplianceFramework::HIPAA => 2190,    // 6 years
             ComplianceFramework::ISO27001 => 1095, // 3 years
             ComplianceFramework::NIST => 2555,     // 7 years

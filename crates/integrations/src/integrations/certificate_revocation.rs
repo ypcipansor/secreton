@@ -310,7 +310,9 @@ impl CertificateRevocationService {
         let configs = self.crl_config.read().await;
         let _config = configs
             .get(issuer)
-            .ok_or_else(|| RevocationError::InvalidConfig(format!("No CRL _config for {}", issuer)))?
+            .ok_or_else(|| {
+                RevocationError::InvalidConfig(format!("No CRL _config for {}", issuer))
+            })?
             .clone();
         drop(configs);
 

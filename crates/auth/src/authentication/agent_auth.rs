@@ -148,8 +148,9 @@ impl AgentAuth {
     pub async fn configure(&self, _config: AgentConfig) -> Result<(), SecretonError> {
         // Validate configuration
         if _config.sinks.is_empty() {
-            return Err(SecretonError::AgentConfigError { message: 
-                "At least one sink must be configured".to_string() });
+            return Err(SecretonError::AgentConfigError {
+                message: "At least one sink must be configured".to_string(),
+            });
         }
 
         let mut current_config = self._config.write().await;
@@ -160,9 +161,11 @@ impl AgentAuth {
     /// Perform authentication
     pub async fn authenticate(&self) -> Result<AuthResult, SecretonError> {
         let _config = self._config.read().await;
-        let _config = _config.as_ref().ok_or_else(|| {
-            SecretonError::AgentConfigError { message: "No configuration set".to_string() }
-        })?;
+        let _config = _config
+            .as_ref()
+            .ok_or_else(|| SecretonError::AgentConfigError {
+                message: "No configuration set".to_string(),
+            })?;
 
         // Perform authentication based on method
         let auth_result = match &_config.method {
@@ -184,7 +187,8 @@ impl AgentAuth {
                 key_path,
                 _name,
             } => {
-                self.authenticate_certificate(&cert_path, &key_path, _name.as_deref()).await?
+                self.authenticate_certificate(&cert_path, &key_path, _name.as_deref())
+                    .await?
             }
         };
 
@@ -196,14 +200,13 @@ impl AgentAuth {
     }
 
     /// Write to sinks
-    pub async fn write_to_sinks(
-        &self,
-        token: &str,
-    ) -> Result<Vec<SinkWriteResult>, AuthError> {
+    pub async fn write_to_sinks(&self, token: &str) -> Result<Vec<SinkWriteResult>, AuthError> {
         let _config = self._config.read().await;
-        let _config = _config.as_ref().ok_or_else(|| {
-            SecretonError::AgentConfigError { message: "No configuration set".to_string() }
-        })?;
+        let _config = _config
+            .as_ref()
+            .ok_or_else(|| SecretonError::AgentConfigError {
+                message: "No configuration set".to_string(),
+            })?;
 
         let mut results = Vec::new();
 
@@ -243,8 +246,9 @@ impl AgentAuth {
                 // In production, write to file with proper permissions
                 // For now, simulate
                 if _path.is_empty() {
-                    return Err(SecretonError::AgentSinkWriteError { message: 
-                        "Empty file _path".to_string() });
+                    return Err(SecretonError::AgentSinkWriteError {
+                        message: "Empty file _path".to_string(),
+                    });
                 }
                 Ok(())
             }
@@ -270,11 +274,14 @@ impl AgentAuth {
 
         let current = current_clone
             .as_ref()
-            .ok_or_else(|| SecretonError::AgentRenewalError { message: "No token to renew".to_string() })?;
+            .ok_or_else(|| SecretonError::AgentRenewalError {
+                message: "No token to renew".to_string(),
+            })?;
 
         if !current.renewable {
-            return Err(SecretonError::AgentRenewalError { message: 
-                "Token not renewable".to_string() });
+            return Err(SecretonError::AgentRenewalError {
+                message: "Token not renewable".to_string(),
+            });
         }
 
         // In production, call Vault API to renew token

@@ -1,12 +1,12 @@
 //! Authentication service orchestration
 
+use crate::error::*;
+use crate::model::*;
 use async_trait::async_trait;
+use secreton_errors::SecretonError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::model::*;
-use crate::error::*;
-use secreton_errors::SecretonError;
 
 /// Core trait for authentication methods
 #[async_trait]
@@ -84,17 +84,26 @@ impl AuthMethodService {
     }
 
     /// Authenticate using a specific method
-    pub async fn authenticate(&self, method_name: &str, credentials: &AuthCredentials) -> AuthMethodResult<AuthResult> {
+    pub async fn authenticate(
+        &self,
+        method_name: &str,
+        credentials: &AuthCredentials,
+    ) -> AuthMethodResult<AuthResult> {
         let registry = self.registry.read().await;
-        let method = registry.get(method_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: format!("auth-method:{}", method_name) })?;
+        let method = registry
+            .get(method_name)
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: format!("auth-method:{}", method_name),
+            })?;
 
         method.authenticate(credentials).await
     }
 
     /// Login using login request
     pub async fn login(&self, request: &LoginRequest) -> AuthMethodResult<LoginResponse> {
-        let auth_result = self.authenticate(&request.method, &request.credentials).await?;
+        let auth_result = self
+            .authenticate(&request.method, &request.credentials)
+            .await?;
 
         // Check if MFA is required
         let _mfa_required = auth_result.mfa_required && request.mfa_code.is_none();
@@ -108,10 +117,17 @@ impl AuthMethodService {
     }
 
     /// Validate a token
-    pub async fn validate_token(&self, method_name: &str, token: &str) -> AuthMethodResult<UserInfo> {
+    pub async fn validate_token(
+        &self,
+        method_name: &str,
+        token: &str,
+    ) -> AuthMethodResult<UserInfo> {
         let registry = self.registry.read().await;
-        let method = registry.get(method_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: format!("auth-method:{}", method_name) })?;
+        let method = registry
+            .get(method_name)
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: format!("auth-method:{}", method_name),
+            })?;
 
         method.validate_token(token).await
     }
@@ -119,8 +135,11 @@ impl AuthMethodService {
     /// Revoke a token
     pub async fn revoke_token(&self, method_name: &str, token: &str) -> AuthMethodResult<()> {
         let registry = self.registry.read().await;
-        let method = registry.get(method_name)
-            .ok_or_else(|| SecretonError::NotFound { resource: format!("auth-method:{}", method_name) })?;
+        let method = registry
+            .get(method_name)
+            .ok_or_else(|| SecretonError::NotFound {
+                resource: format!("auth-method:{}", method_name),
+            })?;
 
         method.revoke_token(token).await
     }

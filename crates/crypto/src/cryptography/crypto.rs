@@ -14,6 +14,5 @@ pub fn hash_password(password: &str) -> String {
 pub fn verify_password(hash: &str, password: &str) -> bool {
     use crate::hashing::password::verify_password_argon2;
 
-    verify_password_argon2(password, hash)
-        .unwrap_or(false)
+    verify_password_argon2(password, hash).unwrap_or(false)
 }

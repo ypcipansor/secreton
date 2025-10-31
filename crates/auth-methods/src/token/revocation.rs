@@ -1,11 +1,11 @@
 //! Token revocation functionality
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 use super::token::*;
 use secreton_errors::SecretonError;
@@ -26,7 +26,10 @@ pub trait TokenRevocationService: Send + Sync {
     async fn is_revoked(&self, token_id: Uuid) -> Result<bool, SecretonError>;
 
     /// Get revocation information
-    async fn get_revocation_info(&self, token_id: Uuid) -> Result<Option<TokenRevocationInfo>, SecretonError>;
+    async fn get_revocation_info(
+        &self,
+        token_id: Uuid,
+    ) -> Result<Option<TokenRevocationInfo>, SecretonError>;
 }
 
 /// Token revocation information
@@ -74,7 +77,11 @@ impl InMemoryTokenRevocationService {
     }
 
     /// Revoke a token in the token store
-    async fn revoke_token_in_store(&self, token_id: Uuid, reason: RevocationReason) -> Result<(), SecretonError> {
+    async fn revoke_token_in_store(
+        &self,
+        token_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<(), SecretonError> {
         let mut tokens = self.tokens.write().await;
 
         if let Some(token) = tokens.get_mut(&token_id) {
@@ -98,7 +105,8 @@ impl InMemoryTokenRevocationService {
 #[async_trait]
 impl TokenRevocationService for InMemoryTokenRevocationService {
     async fn revoke_token(&self, request: TokenRevocationRequest) -> Result<(), SecretonError> {
-        self.revoke_token_in_store(request.token_id, RevocationReason::Explicit).await
+        self.revoke_token_in_store(request.token_id, RevocationReason::Explicit)
+            .await
     }
 
     async fn revoke_entity_tokens(&self, entity_id: Uuid) -> Result<(), SecretonError> {
@@ -109,13 +117,15 @@ impl TokenRevocationService for InMemoryTokenRevocationService {
 
         // Revoke all tokens for this entity
         let tokens = self.tokens.read().await;
-        let entity_token_ids: Vec<Uuid> = tokens.values()
+        let entity_token_ids: Vec<Uuid> = tokens
+            .values()
             .filter(|token| token.entity_id == Some(entity_id))
             .map(|token| token.id)
             .collect();
 
         for token_id in entity_token_ids {
-            self.revoke_token_in_store(token_id, RevocationReason::EntityRevoked).await?;
+            self.revoke_token_in_store(token_id, RevocationReason::EntityRevoked)
+                .await?;
         }
 
         Ok(())
@@ -128,13 +138,15 @@ impl TokenRevocationService for InMemoryTokenRevocationService {
 
         // Revoke all tokens with this prefix
         let tokens = self.tokens.read().await;
-        let prefix_token_ids: Vec<Uuid> = tokens.values()
+        let prefix_token_ids: Vec<Uuid> = tokens
+            .values()
             .filter(|token| token.accessor.starts_with(&prefix))
             .map(|token| token.id)
             .collect();
 
         for token_id in prefix_token_ids {
-            self.revoke_token_in_store(token_id, RevocationReason::PrefixRevoked).await?;
+            self.revoke_token_in_store(token_id, RevocationReason::PrefixRevoked)
+                .await?;
         }
 
         Ok(())
@@ -145,7 +157,10 @@ impl TokenRevocationService for InMemoryTokenRevocationService {
         Ok(revocations.contains_key(&token_id))
     }
 
-    async fn get_revocation_info(&self, token_id: Uuid) -> Result<Option<TokenRevocationInfo>, SecretonError> {
+    async fn get_revocation_info(
+        &self,
+        token_id: Uuid,
+    ) -> Result<Option<TokenRevocationInfo>, SecretonError> {
         let revocations = self.revocations.read().await;
 
         if let Some(entry) = revocations.get(&token_id) {

@@ -41,40 +41,38 @@
 //! - `service/`: Authentication service orchestration
 //! - `error/`: Authentication-specific error types
 
-pub mod method;
-pub mod identity;
-pub mod mfa;
-pub mod token;
-pub mod revocation;
 pub mod agent;
-pub mod model;
-pub mod service;
 pub mod error;
+pub mod identity;
+pub mod method;
+pub mod mfa;
+pub mod model;
+pub mod revocation;
+pub mod service;
+pub mod token;
 
-pub use method::{
-    CertAuth, UserPassAuthMethod, AppRoleAuthMethod,
-    GithubAuthMethod, OktaAuthMethod
-};
+pub use agent::*;
+pub use error::*;
 pub use identity::*;
-pub use mfa::{
-    TotpService, InMemoryTotpService, SmsService, InMemorySmsService,
-    EmailService, InMemoryEmailService, HardwareService, InMemoryHardwareService,
-    MfaService, CombinedMfaService
+pub use method::{
+    AppRoleAuthMethod, CertAuth, GithubAuthMethod, OktaAuthMethod, UserPassAuthMethod,
 };
-pub use token::{
-    TokenService, CombinedTokenService, TokenRenewalService, InMemoryTokenRenewalService,
-    TokenRevocationService, InMemoryTokenRevocationService
+pub use mfa::{
+    CombinedMfaService, EmailService, HardwareService, InMemoryEmailService,
+    InMemoryHardwareService, InMemorySmsService, InMemoryTotpService, MfaService, SmsService,
+    TotpService,
+};
+pub use model::{
+    AuthCredentials, AuthMethod, AuthMethodType, AuthRequest, AuthResponse, AuthResult,
+    LegacyToken, LoginRequest, LoginResponse, MfaConfig, MfaLoginRequest, MfaRecoveryCodesResponse,
+    MfaSetupRequest, MfaSetupResponse, MfaStatusResponse, MfaVerificationResult, MfaVerifyRequest,
+    RefreshTokenRequest, User, UserInfo,
 };
 pub use revocation::{
-    RevocationService, CombinedRevocationService, RevocationRegistry, InMemoryRevocationRegistry
-};
-pub use agent::*;
-pub use model::{
-    AuthMethod, AuthMethodType, AuthCredentials, AuthResult, UserInfo,
-    LoginRequest, LoginResponse, MfaConfig, MfaSetupRequest, MfaSetupResponse,
-    MfaVerifyRequest, MfaStatusResponse, MfaLoginRequest, MfaRecoveryCodesResponse,
-    MfaVerificationResult, RefreshTokenRequest, AuthRequest, AuthResponse, User,
-    LegacyToken
+    CombinedRevocationService, InMemoryRevocationRegistry, RevocationRegistry, RevocationService,
 };
 pub use service::*;
-pub use error::*;
+pub use token::{
+    CombinedTokenService, InMemoryTokenRenewalService, InMemoryTokenRevocationService,
+    TokenRenewalService, TokenRevocationService, TokenService,
+};

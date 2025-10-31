@@ -298,7 +298,8 @@ pub mod utils {
         /// Generate a secure random password with the specified length
         /// Uses a charset containing uppercase, lowercase, numbers, and special characters
         pub fn generate_password(length: usize) -> String {
-            const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+            const CHARSET: &[u8] =
+                b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
             let mut rng = rand::thread_rng();
 
             (0..length)
@@ -377,14 +378,18 @@ pub mod utils {
             }
 
             if policy.require_special {
-                let special_chars = policy.allowed_special_chars.as_deref().unwrap_or("!@#$%^&*");
+                let special_chars = policy
+                    .allowed_special_chars
+                    .as_deref()
+                    .unwrap_or("!@#$%^&*");
                 let chars: Vec<char> = special_chars.chars().collect();
                 let idx = rng.gen_range(0..chars.len());
                 password.push(chars[idx]);
             }
 
             // Fill the rest with random characters from full charset
-            let mut charset = String::from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+            let mut charset =
+                String::from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
             if policy.require_special {
                 if let Some(special) = &policy.allowed_special_chars {
                     charset.push_str(special);
@@ -424,7 +429,10 @@ pub mod utils {
 
     /// Sanitize string for safe storage
     pub fn sanitize_string(input: &str) -> String {
-        input.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect()
+        input
+            .chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect()
     }
 
     /// Create a standardized error response

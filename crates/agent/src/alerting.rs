@@ -207,7 +207,6 @@ pub struct AlertNotification {
     pub next_retry: Option<SystemTime>,
 }
 
-
 /// Alert manager
 #[derive(Debug)]
 pub struct AlertManager {
@@ -610,11 +609,15 @@ impl AlertManager {
     /// Send SMS notification
     async fn send_sms_notification(&self, alert: &Alert) -> CoreResult<()> {
         if self.config.sms.account_sid.is_empty() || self.config.sms.auth_token.is_empty() {
-            return Err(Box::new(CoreError::Configuration { message: "SMS credentials not configured".to_string() }));
+            return Err(Box::new(CoreError::Configuration {
+                message: "SMS credentials not configured".to_string(),
+            }));
         }
 
         if self.config.sms.to_numbers.is_empty() {
-            return Err(Box::new(CoreError::Configuration { message: "No SMS recipients configured".to_string() }));
+            return Err(Box::new(CoreError::Configuration {
+                message: "No SMS recipients configured".to_string(),
+            }));
         }
 
         tracing::info!("Sending SMS notification for alert: {}", alert.id);
@@ -647,7 +650,9 @@ impl AlertManager {
     /// Send webhook notification
     async fn send_webhook_notification(&self, alert: &Alert) -> CoreResult<()> {
         if self.config.webhook.url.is_empty() {
-            return Err(Box::new(CoreError::Configuration { message: "Webhook URL not configured".to_string() }));
+            return Err(Box::new(CoreError::Configuration {
+                message: "Webhook URL not configured".to_string(),
+            }));
         }
 
         let payload = serde_json::json!({
@@ -673,16 +678,16 @@ impl AlertManager {
             request = request.header(key, value);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| Box::new(CoreError::Network { message: format!("Webhook request failed: {}", e) }))?;
+        let response = request.send().await.map_err(|e| {
+            Box::new(CoreError::Network {
+                message: format!("Webhook request failed: {}", e),
+            })
+        })?;
 
         if !response.status().is_success() {
-            return Err(Box::new(CoreError::Network { message: format!(
-                "Webhook returned status: {}",
-                response.status()
-            ) }));
+            return Err(Box::new(CoreError::Network {
+                message: format!("Webhook returned status: {}", response.status()),
+            }));
         }
 
         tracing::info!("Webhook notification sent for alert: {}", alert.id);
@@ -692,7 +697,9 @@ impl AlertManager {
     /// Send Slack notification
     async fn send_slack_notification(&self, alert: &Alert) -> CoreResult<()> {
         if self.config.slack.webhook_url.is_empty() {
-            return Err(Box::new(CoreError::Configuration { message: "Slack webhook URL not configured".to_string() }));
+            return Err(Box::new(CoreError::Configuration {
+                message: "Slack webhook URL not configured".to_string(),
+            }));
         }
 
         let color = match alert.severity {
@@ -746,13 +753,16 @@ impl AlertManager {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| Box::new(CoreError::Network { message: format!("Slack webhook request failed: {}", e) }))?;
+            .map_err(|e| {
+                Box::new(CoreError::Network {
+                    message: format!("Slack webhook request failed: {}", e),
+                })
+            })?;
 
         if !response.status().is_success() {
-            return Err(Box::new(CoreError::Network { message: format!(
-                "Slack webhook returned status: {}",
-                response.status()
-            ) }));
+            return Err(Box::new(CoreError::Network {
+                message: format!("Slack webhook returned status: {}", response.status()),
+            }));
         }
 
         tracing::info!("Slack notification sent for alert: {}", alert.id);
@@ -837,15 +847,24 @@ impl AlertManager {
         let response = self
             .http_client
             .post(&url)
-            .basic_auth(&self.config.sms.account_sid, Some(&self.config.sms.auth_token))
+            .basic_auth(
+                &self.config.sms.account_sid,
+                Some(&self.config.sms.auth_token),
+            )
             .form(&params)
             .send()
             .await
-            .map_err(|e| Box::new(CoreError::Network { message: format!("Twilio API request failed: {}", e) }))?;
+            .map_err(|e| {
+                Box::new(CoreError::Network {
+                    message: format!("Twilio API request failed: {}", e),
+                })
+            })?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Box::new(CoreError::Network { message: format!("Twilio SMS send failed: {}", error_text) }));
+            return Err(Box::new(CoreError::Network {
+                message: format!("Twilio SMS send failed: {}", error_text),
+            }));
         }
 
         tracing::debug!("SMS sent successfully to {}", to);

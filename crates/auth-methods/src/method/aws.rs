@@ -1,14 +1,14 @@
 //! AWS authentication method
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use aws_config::BehaviorVersion;
-use aws_sdk_sts::{Client as StsClient, config::Credentials};
-use aws_sdk_iam::{Client as IamClient};
-use aws_sdk_ec2::{Client as Ec2Client};
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use aws_config::BehaviorVersion;
+use aws_sdk_ec2::Client as Ec2Client;
+use aws_sdk_iam::Client as IamClient;
+use aws_sdk_sts::{Client as StsClient, config::Credentials};
+use std::collections::HashMap;
 
 /// AWS authentication method
 pub struct AwsAuthMethod {
@@ -44,7 +44,8 @@ impl AwsAuthMethod {
 
             if let Some(aws_config) = &self.aws_config {
                 if let Some(region) = &aws_config.region {
-                    config_builder = config_builder.region(aws_config::Region::new(region.to_string()));
+                    config_builder =
+                        config_builder.region(aws_config::Region::new(region.to_string()));
                 }
                 if let Some(access_key) = &aws_config.access_key_id {
                     let credentials = Credentials::new(
@@ -68,11 +69,20 @@ impl AwsAuthMethod {
     }
 
     /// Validate AWS credentials
-    async fn validate_credentials(&self, access_key: &str, secret_key: &str, session_token: Option<&str>) -> AuthMethodResult<AwsIdentity> {
+    async fn validate_credentials(
+        &self,
+        access_key: &str,
+        secret_key: &str,
+        session_token: Option<&str>,
+    ) -> AuthMethodResult<AwsIdentity> {
         self.init_clients().await?;
 
-        let sts_client = self.sts_client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("STS client not initialized".to_string()))?;
+        let sts_client = self
+            .sts_client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "STS client not initialized".to_string(),
+            ))?;
 
         // Create temporary credentials for validation
         let credentials = Credentials::new(
@@ -89,13 +99,18 @@ impl AwsAuthMethod {
             .credentials_provider(credentials)
             .send()
             .await
-            .map_err(|e| AuthMethodError::AwsError(format!("Failed to validate credentials: {}", e)))?;
+            .map_err(|e| {
+                AuthMethodError::AwsError(format!("Failed to validate credentials: {}", e))
+            })?;
 
-        let account = identity.account()
-            .ok_or(AuthMethodError::AwsError("No account in identity".to_string()))?;
-        let user_id = identity.user_id()
-            .ok_or(AuthMethodError::AwsError("No user ID in identity".to_string()))?;
-        let arn = identity.arn()
+        let account = identity.account().ok_or(AuthMethodError::AwsError(
+            "No account in identity".to_string(),
+        ))?;
+        let user_id = identity.user_id().ok_or(AuthMethodError::AwsError(
+            "No user ID in identity".to_string(),
+        ))?;
+        let arn = identity
+            .arn()
             .ok_or(AuthMethodError::AwsError("No ARN in identity".to_string()))?;
 
         Ok(AwsIdentity {
@@ -110,8 +125,12 @@ impl AwsAuthMethod {
 
     /// Get IAM user information
     async fn get_iam_user_info(&self, username: &str) -> AuthMethodResult<AwsUserInfo> {
-        let iam_client = self.iam_client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("IAM client not initialized".to_string()))?;
+        let iam_client = self
+            .iam_client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "IAM client not initialized".to_string(),
+            ))?;
 
         let user = iam_client
             .get_user()
@@ -123,7 +142,10 @@ impl AwsAuthMethod {
         let user_detail = user.user();
         let arn = user_detail.arn().unwrap_or("");
         let user_id = user_detail.user_id().unwrap_or("");
-        let create_date = user_detail.create_date().map(|d| d.to_string()).unwrap_or_default();
+        let create_date = user_detail
+            .create_date()
+            .map(|d| d.to_string())
+            .unwrap_or_default();
 
         Ok(AwsUserInfo {
             username: username.to_string(),
@@ -137,8 +159,12 @@ impl AwsAuthMethod {
 
     /// Get EC2 instance information
     async fn get_ec2_instance_info(&self, instance_id: &str) -> AuthMethodResult<AwsInstanceInfo> {
-        let ec2_client = self.ec2_client.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("EC2 client not initialized".to_string()))?;
+        let ec2_client = self
+            .ec2_client
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "EC2 client not initialized".to_string(),
+            ))?;
 
         let instances = ec2_client
             .describe_instances()
@@ -149,10 +175,23 @@ impl AwsAuthMethod {
 
         if let Some(reservation) = instances.reservations().first() {
             if let Some(instance) = reservation.instances().first() {
-                let instance_type = instance.instance_type().map(|it| it.as_str()).unwrap_or("unknown");
-                let availability_zone = instance.placement().and_then(|p| p.availability_zone()).unwrap_or("unknown");
-                let tags = instance.tags().iter()
-                    .map(|tag| (tag.key().unwrap_or("").to_string(), tag.value().unwrap_or("").to_string()))
+                let instance_type = instance
+                    .instance_type()
+                    .map(|it| it.as_str())
+                    .unwrap_or("unknown");
+                let availability_zone = instance
+                    .placement()
+                    .and_then(|p| p.availability_zone())
+                    .unwrap_or("unknown");
+                let tags = instance
+                    .tags()
+                    .iter()
+                    .map(|tag| {
+                        (
+                            tag.key().unwrap_or("").to_string(),
+                            tag.value().unwrap_or("").to_string(),
+                        )
+                    })
                     .collect();
 
                 Ok(AwsInstanceInfo {
@@ -181,12 +220,34 @@ impl AuthMethodImpl for AwsAuthMethod {
 
         // Parse AWS configuration from config
         let aws_config = AwsClientConfig {
-            region: config.config.get("region").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            access_key_id: config.config.get("access_key_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            secret_access_key: config.config.get("secret_access_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            session_token: config.config.get("session_token").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            iam_role_arn: config.config.get("iam_role_arn").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            ec2_instance_profile: config.config.get("ec2_instance_profile")
+            region: config
+                .config
+                .get("region")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            access_key_id: config
+                .config
+                .get("access_key_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            secret_access_key: config
+                .config
+                .get("secret_access_key")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            session_token: config
+                .config
+                .get("session_token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            iam_role_arn: config
+                .config
+                .get("iam_role_arn")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            ec2_instance_profile: config
+                .config
+                .get("ec2_instance_profile")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
         };
@@ -202,8 +263,14 @@ impl AuthMethodImpl for AwsAuthMethod {
         }
 
         match credentials {
-            AuthCredentials::Aws { access_key, secret_key, session_token } => {
-                let aws_identity = self.validate_credentials(access_key, secret_key, session_token.as_deref()).await?;
+            AuthCredentials::Aws {
+                access_key,
+                secret_key,
+                session_token,
+            } => {
+                let aws_identity = self
+                    .validate_credentials(access_key, secret_key, session_token.as_deref())
+                    .await?;
 
                 let user_info = UserInfo {
                     username: aws_identity.username.to_string(),
@@ -234,7 +301,9 @@ impl AuthMethodImpl for AwsAuthMethod {
                     mfa_methods: Vec::new(),
                 })
             }
-            _ => Err(AuthMethodError::InvalidCredentials("Invalid AWS credentials".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "Invalid AWS credentials".to_string(),
+            )),
         }
     }
 

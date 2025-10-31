@@ -1,8 +1,8 @@
 //! OCI (Oracle Cloud Infrastructure) backend for secret management
 
-use std::collections::HashMap;
-use serde_json::Value;
 use crate::error::*;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// OCI backend for generating temporary credentials
 pub struct OciBackend {
@@ -56,14 +56,8 @@ impl OciBackend {
             "fingerprint".to_string(),
             Value::String(self.fingerprint.clone()),
         );
-        credentials_result.insert(
-            "region".to_string(),
-            Value::String(self.region.clone()),
-        );
-        credentials_result.insert(
-            "ttl".to_string(),
-            Value::Number(ttl_seconds.into()),
-        );
+        credentials_result.insert("region".to_string(), Value::String(self.region.clone()));
+        credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
         credentials_result.insert(
             "credential_type".to_string(),
             Value::String("instance_principal".to_string()),
@@ -99,14 +93,8 @@ impl OciBackend {
             "private_key".to_string(),
             Value::String("(redacted)".to_string()), // Never expose private keys
         );
-        credentials_result.insert(
-            "region".to_string(),
-            Value::String(self.region.clone()),
-        );
-        credentials_result.insert(
-            "ttl".to_string(),
-            Value::Number(ttl_seconds.into()),
-        );
+        credentials_result.insert("region".to_string(), Value::String(self.region.clone()));
+        credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
         credentials_result.insert(
             "credential_type".to_string(),
             Value::String("api_key".to_string()),
@@ -133,20 +121,17 @@ impl OciBackend {
             "resource_type".to_string(),
             Value::String(resource_type.to_string()),
         );
-        credentials_result.insert(
-            "region".to_string(),
-            Value::String(self.region.clone()),
-        );
-        credentials_result.insert(
-            "ttl".to_string(),
-            Value::Number(ttl_seconds.into()),
-        );
+        credentials_result.insert("region".to_string(), Value::String(self.region.clone()));
+        credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
         credentials_result.insert(
             "credential_type".to_string(),
             Value::String("resource_principal".to_string()),
         );
 
-        tracing::info!("Generated OCI resource principal credentials for {}", resource_type);
+        tracing::info!(
+            "Generated OCI resource principal credentials for {}",
+            resource_type
+        );
 
         Ok(credentials_result)
     }
@@ -156,14 +141,26 @@ impl OciBackend {
         // Mock compartment list
         let compartments = vec![
             HashMap::from([
-                ("id".to_string(), Value::String("ocid1.compartment.oc1..example1".to_string())),
+                (
+                    "id".to_string(),
+                    Value::String("ocid1.compartment.oc1..example1".to_string()),
+                ),
                 ("name".to_string(), Value::String("root".to_string())),
-                ("description".to_string(), Value::String("Root compartment".to_string())),
+                (
+                    "description".to_string(),
+                    Value::String("Root compartment".to_string()),
+                ),
             ]),
             HashMap::from([
-                ("id".to_string(), Value::String("ocid1.compartment.oc1..example2".to_string())),
+                (
+                    "id".to_string(),
+                    Value::String("ocid1.compartment.oc1..example2".to_string()),
+                ),
                 ("name".to_string(), Value::String("production".to_string())),
-                ("description".to_string(), Value::String("Production compartment".to_string())),
+                (
+                    "description".to_string(),
+                    Value::String("Production compartment".to_string()),
+                ),
             ]),
         ];
 
@@ -180,16 +177,34 @@ impl OciBackend {
         // Mock vault secrets
         let secrets = vec![
             HashMap::from([
-                ("id".to_string(), Value::String(format!("{}/secret1", vault_id))),
-                ("name".to_string(), Value::String("database-password".to_string())),
-                ("secret_type".to_string(), Value::String("password".to_string())),
-                ("created_at".to_string(), Value::String(chrono::Utc::now().to_rfc3339())),
+                (
+                    "id".to_string(),
+                    Value::String(format!("{}/secret1", vault_id)),
+                ),
+                (
+                    "name".to_string(),
+                    Value::String("database-password".to_string()),
+                ),
+                (
+                    "secret_type".to_string(),
+                    Value::String("password".to_string()),
+                ),
+                (
+                    "created_at".to_string(),
+                    Value::String(chrono::Utc::now().to_rfc3339()),
+                ),
             ]),
             HashMap::from([
-                ("id".to_string(), Value::String(format!("{}/secret2", vault_id))),
+                (
+                    "id".to_string(),
+                    Value::String(format!("{}/secret2", vault_id)),
+                ),
                 ("name".to_string(), Value::String("api-key".to_string())),
                 ("secret_type".to_string(), Value::String("key".to_string())),
-                ("created_at".to_string(), Value::String(chrono::Utc::now().to_rfc3339())),
+                (
+                    "created_at".to_string(),
+                    Value::String(chrono::Utc::now().to_rfc3339()),
+                ),
             ]),
         ];
 
@@ -212,14 +227,8 @@ impl OciBackend {
             "id".to_string(),
             Value::String(format!("{}/{}", vault_id, secret_name)),
         );
-        result.insert(
-            "name".to_string(),
-            Value::String(secret_name.to_string()),
-        );
-        result.insert(
-            "vault_id".to_string(),
-            Value::String(vault_id.to_string()),
-        );
+        result.insert("name".to_string(), Value::String(secret_name.to_string()));
+        result.insert("vault_id".to_string(), Value::String(vault_id.to_string()));
         result.insert(
             "secret_type".to_string(),
             Value::String(secret_type.to_string()),
@@ -228,12 +237,13 @@ impl OciBackend {
             "created_at".to_string(),
             Value::String(chrono::Utc::now().to_rfc3339()),
         );
-        result.insert(
-            "status".to_string(),
-            Value::String("active".to_string()),
-        );
+        result.insert("status".to_string(), Value::String("active".to_string()));
 
-        tracing::info!("Created OCI vault secret {} in vault {}", secret_name, vault_id);
+        tracing::info!(
+            "Created OCI vault secret {} in vault {}",
+            secret_name,
+            vault_id
+        );
 
         Ok(result)
     }

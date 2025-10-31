@@ -1,15 +1,15 @@
 //! Username/password authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
+use argon2::Argon2;
 use async_trait::async_trait;
+use chrono::Utc;
+use password_hash::{PasswordHash, PasswordVerifier};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
-use argon2::Argon2;
-use password_hash::{PasswordHash, PasswordVerifier};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// User/password authentication method
 pub struct UserPassAuthMethod {
@@ -28,7 +28,14 @@ impl UserPassAuthMethod {
     }
 
     /// Add a user with hashed password
-    pub async fn add_user(&self, username: String, password_hash: String, id: String, groups: Vec<String>, policies: Vec<String>) {
+    pub async fn add_user(
+        &self,
+        username: String,
+        password_hash: String,
+        id: String,
+        groups: Vec<String>,
+        policies: Vec<String>,
+    ) {
         let user_entry = UserEntry {
             username: username.to_string(),
             password_hash,
@@ -44,11 +51,14 @@ impl UserPassAuthMethod {
 
     /// Verify password against hash
     fn verify_password(&self, password: &str, hash: &str) -> AuthMethodResult<bool> {
-        let parsed_hash = PasswordHash::new(hash)
-            .map_err(|_| AuthMethodError::InvalidCredentials("Invalid password hash format".to_string()))?;
+        let parsed_hash = PasswordHash::new(hash).map_err(|_| {
+            AuthMethodError::InvalidCredentials("Invalid password hash format".to_string())
+        })?;
 
         let argon2 = Argon2::default();
-        Ok(argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok())
+        Ok(argon2
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok())
     }
 
     /// Get user entry
@@ -103,13 +113,19 @@ impl AuthMethodImpl for UserPassAuthMethod {
                             mfa_methods: Vec::new(),
                         })
                     } else {
-                        Err(AuthMethodError::InvalidCredentials("Invalid username or password".to_string()))
+                        Err(AuthMethodError::InvalidCredentials(
+                            "Invalid username or password".to_string(),
+                        ))
                     }
                 } else {
-                    Err(AuthMethodError::InvalidCredentials("Invalid username or password".to_string()))
+                    Err(AuthMethodError::InvalidCredentials(
+                        "Invalid username or password".to_string(),
+                    ))
                 }
             }
-            _ => Err(AuthMethodError::InvalidCredentials("Unsupported credential type".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "Unsupported credential type".to_string(),
+            )),
         }
     }
 

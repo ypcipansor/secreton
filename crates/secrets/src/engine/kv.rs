@@ -1,12 +1,12 @@
 //! Key-Value secret engine implementation
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use tokio::sync::RwLock;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 /// KV v2 secret engine with versioning support
 pub struct KvEngine {
@@ -44,7 +44,12 @@ impl KvEngine {
     }
 
     /// Add a new version to a secret
-    async fn add_version(&mut self, path: String, data: HashMap<String, Value>, created_by: String) -> SecretResult<SecretVersion> {
+    async fn add_version(
+        &mut self,
+        path: String,
+        data: HashMap<String, Value>,
+        created_by: String,
+    ) -> SecretResult<SecretVersion> {
         let mut storage = self.storage.write().await;
         let versions = storage.entry(path.clone()).or_insert_with(Vec::new);
 
@@ -121,7 +126,9 @@ impl SecretEngine for KvEngine {
             return Err(SecretError::EngineNotFound("kv".to_string()));
         }
 
-        let version = self.add_version(path.to_string(), data, "system".to_string()).await?;
+        let version = self
+            .add_version(path.to_string(), data, "system".to_string())
+            .await?;
 
         let secret = Secret {
             id: uuid::Uuid::new_v4(),

@@ -1,11 +1,11 @@
 //! Email-based MFA implementation
 
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use rand::Rng;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
-use rand::Rng;
 
 use crate::error::*;
 
@@ -131,7 +131,10 @@ impl EmailService for InMemoryEmailService {
         let email = if let Some(enrollment) = enrollments.get(&entity_id) {
             enrollment.email.clone()
         } else {
-            return Err(AuthMethodError::UserNotFound(format!("Email enrollment for entity {}", entity_id)));
+            return Err(AuthMethodError::UserNotFound(format!(
+                "Email enrollment for entity {}",
+                entity_id
+            )));
         };
 
         drop(enrollments);
@@ -178,7 +181,10 @@ impl EmailService for InMemoryEmailService {
         Ok(false)
     }
 
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<EmailEnrollment>, AuthMethodError> {
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<EmailEnrollment>, AuthMethodError> {
         let enrollments = self.enrollments.read().await;
         Ok(enrollments.get(&entity_id).cloned())
     }

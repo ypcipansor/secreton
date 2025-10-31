@@ -339,7 +339,8 @@ impl Default for AutoUnsealService {
 mod base64 {
     pub fn encode(_data: &[u8]) -> String {
         // Simplified base64 encoding
-        _data.iter()
+        _data
+            .iter()
             .map(|b| format!("{:02x}", b))
             .collect::<String>()
     }

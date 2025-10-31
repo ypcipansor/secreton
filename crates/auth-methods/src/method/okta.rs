@@ -1,14 +1,14 @@
 //! Okta authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
-use std::collections::HashMap;
-use uuid::Uuid;
 use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Okta authentication method
 pub struct OktaAuthMethod {
@@ -34,9 +34,17 @@ impl OktaAuthMethod {
     }
 
     /// Authenticate with Okta API
-    async fn authenticate_with_okta(&self, username: &str, password: &str) -> AuthMethodResult<OktaAuthResponse> {
-        let config = self.okta_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("Okta config not set".to_string()))?;
+    async fn authenticate_with_okta(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> AuthMethodResult<OktaAuthResponse> {
+        let config = self
+            .okta_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "Okta config not set".to_string(),
+            ))?;
 
         let auth_request = OktaAuthRequest {
             username: username.to_string(),
@@ -48,42 +56,59 @@ impl OktaAuthMethod {
         };
 
         let url = format!("{}/api/v1/authn", config.org_url.trim_end_matches('/'));
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&url)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&auth_request)
             .send()
             .await
-            .map_err(|e| AuthMethodError::OktaError(format!("Authentication request failed: {}", e)))?;
+            .map_err(|e| {
+                AuthMethodError::OktaError(format!("Authentication request failed: {}", e))
+            })?;
 
         if !response.status().is_success() {
-            return Err(AuthMethodError::InvalidCredentials("Invalid credentials".to_string()));
+            return Err(AuthMethodError::InvalidCredentials(
+                "Invalid credentials".to_string(),
+            ));
         }
 
-        let auth_response: OktaAuthResponse = response
-            .json()
-            .await
-            .map_err(|e| AuthMethodError::OktaError(format!("Failed to parse auth response: {}", e)))?;
+        let auth_response: OktaAuthResponse = response.json().await.map_err(|e| {
+            AuthMethodError::OktaError(format!("Failed to parse auth response: {}", e))
+        })?;
 
         // Check if authentication was successful
         match auth_response.status.as_str() {
             "SUCCESS" => Ok(auth_response),
             "MFA_REQUIRED" => Err(AuthMethodError::MfaRequired),
             "MFA_CHALLENGE" => Err(AuthMethodError::MfaRequired),
-            "LOCKED_OUT" => Err(AuthMethodError::AccountLocked("Account locked out".to_string())),
+            "LOCKED_OUT" => Err(AuthMethodError::AccountLocked(
+                "Account locked out".to_string(),
+            )),
             "PASSWORD_EXPIRED" => Err(AuthMethodError::PasswordExpired),
-            _ => Err(AuthMethodError::InvalidCredentials("Invalid credentials".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "Invalid credentials".to_string(),
+            )),
         }
     }
 
     /// Get user information from Okta
     async fn get_user_info(&self, id: &str) -> AuthMethodResult<OktaUser> {
-        let config = self.okta_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("Okta config not set".to_string()))?;
+        let config = self
+            .okta_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "Okta config not set".to_string(),
+            ))?;
 
-        let url = format!("{}/api/v1/users/{}", config.org_url.trim_end_matches('/'), id);
-        let response = self.http_client
+        let url = format!(
+            "{}/api/v1/users/{}",
+            config.org_url.trim_end_matches('/'),
+            id
+        );
+        let response = self
+            .http_client
             .get(&url)
             .header("Authorization", format!("SSWS {}", config.api_token))
             .header("Accept", "application/json")
@@ -92,22 +117,33 @@ impl OktaAuthMethod {
             .map_err(|e| AuthMethodError::OktaError(format!("User info request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            return Err(AuthMethodError::OktaError(format!("Failed to get user info: {}", response.status())));
+            return Err(AuthMethodError::OktaError(format!(
+                "Failed to get user info: {}",
+                response.status()
+            )));
         }
 
-        response
-            .json()
-            .await
-            .map_err(|e| AuthMethodError::OktaError(format!("Failed to parse user response: {}", e)))
+        response.json().await.map_err(|e| {
+            AuthMethodError::OktaError(format!("Failed to parse user response: {}", e))
+        })
     }
 
     /// Get user groups from Okta
     async fn get_user_groups(&self, id: &str) -> AuthMethodResult<Vec<OktaGroup>> {
-        let config = self.okta_config.as_ref()
-            .ok_or(AuthMethodError::ConfigurationError("Okta config not set".to_string()))?;
+        let config = self
+            .okta_config
+            .as_ref()
+            .ok_or(AuthMethodError::ConfigurationError(
+                "Okta config not set".to_string(),
+            ))?;
 
-        let url = format!("{}/api/v1/users/{}/groups", config.org_url.trim_end_matches('/'), id);
-        let response = self.http_client
+        let url = format!(
+            "{}/api/v1/users/{}/groups",
+            config.org_url.trim_end_matches('/'),
+            id
+        );
+        let response = self
+            .http_client
             .get(&url)
             .header("Authorization", format!("SSWS {}", config.api_token))
             .header("Accept", "application/json")
@@ -116,22 +152,30 @@ impl OktaAuthMethod {
             .map_err(|e| AuthMethodError::OktaError(format!("Groups request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            return Err(AuthMethodError::OktaError(format!("Failed to get user groups: {}", response.status())));
+            return Err(AuthMethodError::OktaError(format!(
+                "Failed to get user groups: {}",
+                response.status()
+            )));
         }
 
-        response
-            .json()
-            .await
-            .map_err(|e| AuthMethodError::OktaError(format!("Failed to parse groups response: {}", e)))
+        response.json().await.map_err(|e| {
+            AuthMethodError::OktaError(format!("Failed to parse groups response: {}", e))
+        })
     }
 
     /// Validate group membership
-    fn validate_group_membership(&self, user_groups: &[OktaGroup], allowed_groups: &[String]) -> bool {
+    fn validate_group_membership(
+        &self,
+        user_groups: &[OktaGroup],
+        allowed_groups: &[String],
+    ) -> bool {
         if allowed_groups.is_empty() {
             return true; // No group restrictions
         }
 
-        user_groups.iter().any(|group| allowed_groups.contains(&group.profile.name))
+        user_groups
+            .iter()
+            .any(|group| allowed_groups.contains(&group.profile.name))
     }
 }
 
@@ -145,17 +189,20 @@ impl AuthMethodImpl for OktaAuthMethod {
         self.config = Some(config.clone());
 
         // Parse Okta configuration from config
-        if let (Some(org_url), Some(api_token)) = (
-            config.config.get("org_url"),
-            config.config.get("api_token"),
-        ) {
+        if let (Some(org_url), Some(api_token)) =
+            (config.config.get("org_url"), config.config.get("api_token"))
+        {
             let okta_config = OktaConfig {
                 org_url: org_url.to_string(),
                 api_token: api_token.to_string(),
-                client_id: config.config.get("client_id")
+                client_id: config
+                    .config
+                    .get("client_id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                allowed_groups: config.config.get("allowed_groups")
+                allowed_groups: config
+                    .config
+                    .get("allowed_groups")
                     .and_then(|v| v.as_str())
                     .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
                     .unwrap_or_default(),
@@ -178,7 +225,9 @@ impl AuthMethodImpl for OktaAuthMethod {
 
                 // Get detailed user information
                 let user_info = self.get_user_info(&auth_response._embedded.user.id).await?;
-                let user_groups = self.get_user_groups(&auth_response._embedded.user.id).await?;
+                let user_groups = self
+                    .get_user_groups(&auth_response._embedded.user.id)
+                    .await?;
 
                 // Validate group membership if configured
                 let config = self.okta_config.as_ref().unwrap();
@@ -186,7 +235,8 @@ impl AuthMethodImpl for OktaAuthMethod {
                     return Err(AuthMethodError::AccessDenied);
                 }
 
-                let groups = user_groups.into_iter()
+                let groups = user_groups
+                    .into_iter()
                     .map(|g| g.profile.name)
                     .collect::<Vec<String>>();
 
@@ -235,7 +285,9 @@ impl AuthMethodImpl for OktaAuthMethod {
                     mfa_methods: Vec::new(),
                 })
             }
-            _ => Err(AuthMethodError::InvalidCredentials("Invalid credentials".to_string())),
+            _ => Err(AuthMethodError::InvalidCredentials(
+                "Invalid credentials".to_string(),
+            )),
         }
     }
 

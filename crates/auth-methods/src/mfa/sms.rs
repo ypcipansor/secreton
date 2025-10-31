@@ -1,11 +1,11 @@
 //! SMS-based MFA implementation
 
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use rand::Rng;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
-use rand::Rng;
 
 use crate::error::*;
 
@@ -59,7 +59,11 @@ struct PendingSmsCode {
 #[async_trait]
 pub trait SmsService: Send + Sync {
     /// Enroll an entity for SMS MFA
-    async fn enroll(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<SmsEnrollment>;
+    async fn enroll(
+        &self,
+        entity_id: Uuid,
+        phone_number: String,
+    ) -> AuthMethodResult<SmsEnrollment>;
 
     /// Send SMS code for validation
     async fn send_code(&self, entity_id: Uuid) -> AuthMethodResult<()>;
@@ -117,7 +121,11 @@ impl InMemorySmsService {
 
 #[async_trait]
 impl SmsService for InMemorySmsService {
-    async fn enroll(&self, entity_id: Uuid, phone_number: String) -> Result<SmsEnrollment, AuthMethodError> {
+    async fn enroll(
+        &self,
+        entity_id: Uuid,
+        phone_number: String,
+    ) -> Result<SmsEnrollment, AuthMethodError> {
         let enrollment = SmsEnrollment {
             id: Uuid::new_v4(),
             entity_id,
@@ -138,7 +146,10 @@ impl SmsService for InMemorySmsService {
         let phone_number = if let Some(enrollment) = enrollments.get(&entity_id) {
             enrollment.phone_number.clone()
         } else {
-            return Err(AuthMethodError::UserNotFound(format!("SMS enrollment for entity {}", entity_id)));
+            return Err(AuthMethodError::UserNotFound(format!(
+                "SMS enrollment for entity {}",
+                entity_id
+            )));
         };
 
         drop(enrollments);
@@ -184,7 +195,10 @@ impl SmsService for InMemorySmsService {
         Ok(false)
     }
 
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<SmsEnrollment>, AuthMethodError> {
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<SmsEnrollment>, AuthMethodError> {
         let enrollments = self.enrollments.read().await;
         Ok(enrollments.get(&entity_id).cloned())
     }

@@ -1,16 +1,16 @@
 //! Unified MFA service combining all MFA methods
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
-use super::totp::*;
-use super::sms::*;
 use super::email::*;
 use super::hardware::*;
+use super::sms::*;
+use super::totp::*;
 use crate::error::*;
 
 /// MFA method types
@@ -44,13 +44,21 @@ pub struct MfaValidationRequest {
 #[async_trait]
 pub trait MfaService: Send + Sync {
     /// Enroll an entity for MFA with specific methods
-    async fn enroll_entity(&self, entity_id: Uuid, methods: Vec<MfaMethod>) -> AuthMethodResult<MfaEnrollment>;
+    async fn enroll_entity(
+        &self,
+        entity_id: Uuid,
+        methods: Vec<MfaMethod>,
+    ) -> AuthMethodResult<MfaEnrollment>;
 
     /// Get MFA enrollment for an entity
     async fn get_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<Option<MfaEnrollment>>;
 
     /// Update MFA enrollment for an entity
-    async fn update_enrollment(&self, entity_id: Uuid, methods: Vec<MfaMethod>) -> AuthMethodResult<MfaEnrollment>;
+    async fn update_enrollment(
+        &self,
+        entity_id: Uuid,
+        methods: Vec<MfaMethod>,
+    ) -> AuthMethodResult<MfaEnrollment>;
 
     /// Remove MFA enrollment for an entity
     async fn remove_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<()>;
@@ -88,7 +96,10 @@ impl CombinedMfaService {
     }
 
     /// Validate based on MFA method
-    async fn validate_method(&self, request: &MfaValidationRequest) -> Result<bool, AuthMethodError> {
+    async fn validate_method(
+        &self,
+        request: &MfaValidationRequest,
+    ) -> Result<bool, AuthMethodError> {
         match &request.method {
             MfaMethod::Totp => {
                 if let Some(code) = &request.code {
@@ -96,7 +107,9 @@ impl CombinedMfaService {
                         entity_id: request.entity_id,
                         code: code.clone(),
                     };
-                    self.totp_service.validate(totp_request).await
+                    self.totp_service
+                        .validate(totp_request)
+                        .await
                         .map_err(|e| e.into())
                 } else {
                     Ok(false)
@@ -126,7 +139,9 @@ impl CombinedMfaService {
             }
             MfaMethod::Hardware => {
                 if let Some(hw_request) = &request.hardware_request {
-                    self.hardware_service.authenticate(hw_request.clone()).await
+                    self.hardware_service
+                        .authenticate(hw_request.clone())
+                        .await
                         .map_err(|e| e.into())
                 } else {
                     Ok(false)
@@ -138,7 +153,11 @@ impl CombinedMfaService {
 
 #[async_trait]
 impl MfaService for CombinedMfaService {
-    async fn enroll_entity(&self, entity_id: Uuid, methods: Vec<MfaMethod>) -> AuthMethodResult<MfaEnrollment> {
+    async fn enroll_entity(
+        &self,
+        entity_id: Uuid,
+        methods: Vec<MfaMethod>,
+    ) -> AuthMethodResult<MfaEnrollment> {
         let enrollment = MfaEnrollment {
             entity_id,
             methods: methods.clone(),
@@ -173,7 +192,11 @@ impl MfaService for CombinedMfaService {
         Ok(enrollments.get(&entity_id).cloned())
     }
 
-    async fn update_enrollment(&self, entity_id: Uuid, methods: Vec<MfaMethod>) -> AuthMethodResult<MfaEnrollment> {
+    async fn update_enrollment(
+        &self,
+        entity_id: Uuid,
+        methods: Vec<MfaMethod>,
+    ) -> AuthMethodResult<MfaEnrollment> {
         let mut enrollments = self.enrollments.write().await;
 
         if let Some(enrollment) = enrollments.get_mut(&entity_id) {
@@ -181,7 +204,10 @@ impl MfaService for CombinedMfaService {
             enrollment.required_methods = methods;
             Ok(enrollment.clone())
         } else {
-            Err(AuthMethodError::UserNotFound(format!("MFA enrollment for entity {}", entity_id)))
+            Err(AuthMethodError::UserNotFound(format!(
+                "MFA enrollment for entity {}",
+                entity_id
+            )))
         }
     }
 
@@ -197,7 +223,10 @@ impl MfaService for CombinedMfaService {
         // Remove all hardware enrollments for this entity
         if let Ok(hw_enrollments) = self.hardware_service.list_enrollments(entity_id).await {
             for enrollment in hw_enrollments {
-                let _ = self.hardware_service.remove_enrollment(entity_id, enrollment.credential_id).await;
+                let _ = self
+                    .hardware_service
+                    .remove_enrollment(entity_id, enrollment.credential_id)
+                    .await;
             }
         }
 

@@ -298,7 +298,8 @@ impl KmipEngine {
             .get_mut(key_id)
             .ok_or_else(|| KmipError::KeyNotFound(key_id.to_string()))?;
 
-        if _key.key_state != KmipKeyState::PreActive && _key.key_state != KmipKeyState::Deactivated {
+        if _key.key_state != KmipKeyState::PreActive && _key.key_state != KmipKeyState::Deactivated
+        {
             return Err(KmipError::InvalidKeyState(format!(
                 "Cannot activate _key in state: {:?}",
                 _key.key_state

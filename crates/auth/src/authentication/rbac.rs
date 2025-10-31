@@ -96,7 +96,13 @@ mod tests {
             "read",
             None
         ));
-        assert!(!check_policy(&roles, &policies, "sys/_config", "read", None));
+        assert!(!check_policy(
+            &roles,
+            &policies,
+            "sys/_config",
+            "read",
+            None
+        ));
     }
 
     #[test]

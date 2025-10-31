@@ -157,9 +157,10 @@ impl LeaseManager {
         parent_id: Option<String>,
     ) -> Result<EnhancedLease, LeaseError> {
         if ttl_secs <= 0 || ttl_secs > max_ttl {
-            return Err(LeaseError::InvalidTtl(
-                format!("TTL {} must be between 1 and {}", ttl_secs, max_ttl)
-            ));
+            return Err(LeaseError::InvalidTtl(format!(
+                "TTL {} must be between 1 and {}",
+                ttl_secs, max_ttl
+            )));
         }
 
         let now = Utc::now();
@@ -190,14 +191,16 @@ impl LeaseManager {
 
         // Index by user
         let mut by_user = self.by_user.write().await;
-        by_user.entry(user.to_string())
+        by_user
+            .entry(user.to_string())
             .or_insert_with(Vec::new)
             .push(lease.id.clone());
         drop(by_user);
 
         // Index by resource
         let mut by_resource = self.by_resource.write().await;
-        by_resource.entry(resource.to_string())
+        by_resource
+            .entry(resource.to_string())
             .or_insert_with(Vec::new)
             .push(lease.id.clone());
         drop(by_resource);
@@ -220,7 +223,8 @@ impl LeaseManager {
         increment: i64,
     ) -> Result<EnhancedLease, LeaseError> {
         let mut leases = self.leases.write().await;
-        let lease = leases.get_mut(lease_id)
+        let lease = leases
+            .get_mut(lease_id)
             .ok_or_else(|| LeaseError::LeaseNotFound(lease_id.to_string()))?;
 
         if lease.status != "active" {
@@ -258,7 +262,8 @@ impl LeaseManager {
 
         // Get lease
         let mut leases = self.leases.write().await;
-        let lease = leases.get_mut(lease_id)
+        let lease = leases
+            .get_mut(lease_id)
             .ok_or_else(|| LeaseError::LeaseNotFound(lease_id.to_string()))?;
 
         if lease.status == "revoked" {
@@ -285,7 +290,8 @@ impl LeaseManager {
     /// Get lease
     pub async fn get_lease(&self, lease_id: &str) -> Result<EnhancedLease, LeaseError> {
         let leases = self.leases.read().await;
-        leases.get(lease_id)
+        leases
+            .get(lease_id)
             .cloned()
             .ok_or_else(|| LeaseError::LeaseNotFound(lease_id.to_string()))
     }
@@ -297,7 +303,8 @@ impl LeaseManager {
         drop(by_user);
 
         let leases = self.leases.read().await;
-        lease_ids.iter()
+        lease_ids
+            .iter()
             .filter_map(|id| leases.get(id).cloned())
             .collect()
     }
@@ -309,7 +316,8 @@ impl LeaseManager {
         drop(by_resource);
 
         let leases = self.leases.read().await;
-        lease_ids.iter()
+        lease_ids
+            .iter()
             .filter_map(|id| leases.get(id).cloned())
             .collect()
     }
@@ -319,10 +327,9 @@ impl LeaseManager {
         let now = Utc::now();
         let leases = self.leases.read().await;
 
-        leases.values()
-            .filter(|lease| {
-                lease.status == "active" && now > lease.expired_at
-            })
+        leases
+            .values()
+            .filter(|lease| lease.status == "active" && now > lease.expired_at)
             .cloned()
             .collect()
     }
@@ -342,7 +349,8 @@ impl LeaseManager {
     /// Count active leases
     pub async fn count_active(&self) -> usize {
         let leases = self.leases.read().await;
-        leases.values()
+        leases
+            .values()
             .filter(|lease| lease.status == "active")
             .count()
     }
@@ -362,15 +370,10 @@ mod tests {
     async fn test_create_lease() {
         let manager = LeaseManager::new();
 
-        let lease = manager.create_lease(
-            "user1",
-            "/secret/data/test",
-            "kv",
-            3600,
-            86400,
-            true,
-            None,
-        ).await.unwrap();
+        let lease = manager
+            .create_lease("user1", "/secret/data/test", "kv", 3600, 86400, true, None)
+            .await
+            .unwrap();
 
         assert_eq!(lease.user, "user1");
         assert_eq!(lease.status, "active");
@@ -381,15 +384,10 @@ mod tests {
     async fn test_renew_lease() {
         let manager = LeaseManager::new();
 
-        let lease = manager.create_lease(
-            "user1",
-            "/secret/data/test",
-            "kv",
-            1800,
-            86400,
-            true,
-            None,
-        ).await.unwrap();
+        let lease = manager
+            .create_lease("user1", "/secret/data/test", "kv", 1800, 86400, true, None)
+            .await
+            .unwrap();
 
         let renewed = manager.renew_lease(&lease.id, 3600).await.unwrap();
         assert_eq!(renewed.renew_count, 1);
@@ -400,15 +398,10 @@ mod tests {
     async fn test_revoke_lease() {
         let manager = LeaseManager::new();
 
-        let lease = manager.create_lease(
-            "user1",
-            "/secret/data/test",
-            "kv",
-            3600,
-            86400,
-            true,
-            None,
-        ).await.unwrap();
+        let lease = manager
+            .create_lease("user1", "/secret/data/test", "kv", 3600, 86400, true, None)
+            .await
+            .unwrap();
 
         let revoked = manager.revoke_lease(&lease.id).await.unwrap();
         assert_eq!(revoked.len(), 1);
@@ -421,25 +414,23 @@ mod tests {
     async fn test_parent_child_revocation() {
         let manager = LeaseManager::new();
 
-        let parent = manager.create_lease(
-            "user1",
-            "/parent",
-            "kv",
-            3600,
-            86400,
-            true,
-            None,
-        ).await.unwrap();
+        let parent = manager
+            .create_lease("user1", "/parent", "kv", 3600, 86400, true, None)
+            .await
+            .unwrap();
 
-        let _child = manager.create_lease(
-            "user1",
-            "/child",
-            "kv",
-            3600,
-            86400,
-            true,
-            Some(parent.id.clone()),
-        ).await.unwrap();
+        let _child = manager
+            .create_lease(
+                "user1",
+                "/child",
+                "kv",
+                3600,
+                86400,
+                true,
+                Some(parent.id.clone()),
+            )
+            .await
+            .unwrap();
 
         // Revoke parent should revoke child too
         let revoked = manager.revoke_lease(&parent.id).await.unwrap();

@@ -33,7 +33,10 @@ pub trait KeyStore: Send + Sync {
     async fn set_active_key(&self, key_id: &str) -> Result<(), anyhow::Error>;
 
     /// Get keys that need rotation based on config
-    async fn get_keys_due_for_rotation(&self, config: &KeyConfig) -> Result<Vec<KeyEntry>, anyhow::Error>;
+    async fn get_keys_due_for_rotation(
+        &self,
+        config: &KeyConfig,
+    ) -> Result<Vec<KeyEntry>, anyhow::Error>;
 
     /// Get expired keys that should be cleaned up
     async fn get_expired_keys(&self, config: &KeyConfig) -> Result<Vec<KeyEntry>, anyhow::Error>;
@@ -99,7 +102,10 @@ impl KeyStore for MemoryKeyStore {
         Ok(())
     }
 
-    async fn get_keys_due_for_rotation(&self, config: &KeyConfig) -> Result<Vec<KeyEntry>, anyhow::Error> {
+    async fn get_keys_due_for_rotation(
+        &self,
+        config: &KeyConfig,
+    ) -> Result<Vec<KeyEntry>, anyhow::Error> {
         let keys = self.keys.read().await;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -826,10 +826,9 @@ impl SecurityEnforcer {
     async fn send_security_event(&self, event: SecurityEvent) -> CoreResult<()> {
         if let Err(e) = self.event_sender.send(event.clone()) {
             tracing::error!("Failed to send security event: {}", e);
-            return Err(Box::new(CoreError::Internal { message: format!(
-                "Failed to send security event: {}",
-                e
-            ) }));
+            return Err(Box::new(CoreError::Internal {
+                message: format!("Failed to send security event: {}", e),
+            }));
         }
 
         tracing::info!(
@@ -865,10 +864,9 @@ impl SecurityEnforcer {
             }
             Ok(())
         } else {
-            Err(Box::new(CoreError::NotFound { resource: format!(
-                "IP address not blocked: {}",
-                ip
-            ) }))
+            Err(Box::new(CoreError::NotFound {
+                resource: format!("IP address not blocked: {}", ip),
+            }))
         }
     }
 

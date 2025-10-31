@@ -115,7 +115,10 @@ impl KubernetesOperator {
         labels.insert("managed-by".to_string(), "secreton-operator".to_string());
 
         let mut annotations = HashMap::new();
-        annotations.insert("vault.secreton.io/_path".to_string(), _vault_path.to_string());
+        annotations.insert(
+            "vault.secreton.io/_path".to_string(),
+            _vault_path.to_string(),
+        );
 
         let _secret = K8sSecret {
             _name: _name.to_string(),
@@ -512,7 +515,10 @@ mod tests {
             .await
             .unwrap();
 
-        let _secret = operator.get_secret("sync-_secret", "default").await.unwrap();
+        let _secret = operator
+            .get_secret("sync-_secret", "default")
+            .await
+            .unwrap();
         assert_eq!(_secret.version, 2);
         assert!(_secret._data.contains_key("_username"));
         assert!(_secret._data.contains_key("_password"));

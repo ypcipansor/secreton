@@ -69,7 +69,7 @@ impl AuditBackend for PostgreSqlBackend {
                     &entry.resource_id,
                     &match entry.status {
                         AuditStatus::Success => "success",
-                        AuditStatus::Failure => "failure", 
+                        AuditStatus::Failure => "failure",
                         AuditStatus::Denied => "denied",
                     },
                     &entry.ip,

@@ -14,12 +14,12 @@ use uuid::Uuid;
 pub mod backends;
 pub mod cache;
 pub mod factory;
-pub mod models;
-pub mod storage_backends;
 pub mod integrated_storage;
+pub mod lease;
+pub mod models;
 pub mod secret_caching;
 pub mod secrets;
-pub mod lease;
+pub mod storage_backends;
 
 // Re-export common backends
 pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend, RedisBackend};

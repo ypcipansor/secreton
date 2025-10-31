@@ -1,25 +1,25 @@
 //! Core secret engine implementations
 
-pub mod kv;
-pub mod transit;
-pub mod database;
 pub mod aws;
+pub mod database;
+pub mod kv;
+pub mod ldap;
+pub mod mongodb;
 pub mod oci;
 pub mod pki;
+pub mod rabbitmq;
 pub mod ssh;
 pub mod totp;
-pub mod rabbitmq;
-pub mod mongodb;
-pub mod ldap;
+pub mod transit;
 
-pub use kv::*;
-pub use transit::*;
-pub use database::*;
 pub use aws::*;
+pub use database::*;
+pub use kv::*;
+pub use ldap::*;
+pub use mongodb::*;
 pub use oci::*;
 pub use pki::*;
+pub use rabbitmq::*;
 pub use ssh::*;
 pub use totp::*;
-pub use rabbitmq::*;
-pub use mongodb::*;
-pub use ldap::*;
+pub use transit::*;

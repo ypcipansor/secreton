@@ -1,14 +1,14 @@
 //! TOTP (Time-based One-Time Password) MFA implementation
 
 use async_trait::async_trait;
+use base32::{decode, encode};
+use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
+use rand::Rng;
+use sha1::Sha1;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use base32::{encode, decode};
-use hmac::{Hmac, Mac};
-use sha1::Sha1;
-use rand::Rng;
 
 use secreton_errors::SecretonError;
 
@@ -16,8 +16,8 @@ use secreton_errors::SecretonError;
 #[derive(Debug, Clone)]
 pub struct TotpConfig {
     pub issuer: String,
-    pub period: u32, // Time step in seconds (usually 30)
-    pub digits: u32, // Number of digits (usually 6)
+    pub period: u32,       // Time step in seconds (usually 30)
+    pub digits: u32,       // Number of digits (usually 6)
     pub algorithm: String, // Usually "SHA1"
 }
 
@@ -27,7 +27,7 @@ pub struct TotpEnrollment {
     pub id: Uuid,
     pub entity_id: Uuid,
     pub secret: String, // Base32 encoded secret
-    pub url: String, // otpauth:// URL
+    pub url: String,    // otpauth:// URL
     pub creation_time: DateTime<Utc>,
     pub last_used: Option<DateTime<Utc>>,
 }
@@ -43,13 +43,20 @@ pub struct TotpValidationRequest {
 #[async_trait]
 pub trait TotpService: Send + Sync {
     /// Enroll an entity for TOTP
-    async fn enroll(&self, entity_id: Uuid, issuer: String) -> Result<TotpEnrollment, SecretonError>;
+    async fn enroll(
+        &self,
+        entity_id: Uuid,
+        issuer: String,
+    ) -> Result<TotpEnrollment, SecretonError>;
 
     /// Validate a TOTP code
     async fn validate(&self, request: TotpValidationRequest) -> Result<bool, SecretonError>;
 
     /// Get enrollment for an entity
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<TotpEnrollment>, SecretonError>;
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<TotpEnrollment>, SecretonError>;
 
     /// Remove TOTP enrollment for an entity
     async fn remove_enrollment(&self, entity_id: Uuid) -> Result<(), SecretonError>;
@@ -82,15 +89,25 @@ impl InMemoryTotpService {
     }
 
     /// Generate TOTP code from secret and time
-    fn generate_totp(secret: &str, time: u64, period: u32, digits: u32) -> Result<String, SecretonError> {
+    fn generate_totp(
+        secret: &str,
+        time: u64,
+        period: u32,
+        digits: u32,
+    ) -> Result<String, SecretonError> {
         let secret_bytes = decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
-            .ok_or_else(|| SecretonError::Configuration { message: "Invalid base32 secret".to_string() })?;
+            .ok_or_else(|| SecretonError::Configuration {
+                message: "Invalid base32 secret".to_string(),
+            })?;
 
         let counter = time / period as u64;
 
         // HMAC-SHA1
-        let mut mac = Hmac::<Sha1>::new_from_slice(&secret_bytes)
-            .map_err(|_| SecretonError::Configuration { message: "Failed to create HMAC".to_string() })?;
+        let mut mac = Hmac::<Sha1>::new_from_slice(&secret_bytes).map_err(|_| {
+            SecretonError::Configuration {
+                message: "Failed to create HMAC".to_string(),
+            }
+        })?;
 
         mac.update(&counter.to_be_bytes());
         let result = mac.finalize().into_bytes();
@@ -125,7 +142,11 @@ impl InMemoryTotpService {
 
 #[async_trait]
 impl TotpService for InMemoryTotpService {
-    async fn enroll(&self, entity_id: Uuid, account_name: String) -> Result<TotpEnrollment, SecretonError> {
+    async fn enroll(
+        &self,
+        entity_id: Uuid,
+        account_name: String,
+    ) -> Result<TotpEnrollment, SecretonError> {
         let secret = Self::generate_secret();
         let url = self.generate_url(&secret, &account_name);
 
@@ -152,7 +173,8 @@ impl TotpService for InMemoryTotpService {
 
             // Check current time window and adjacent windows for clock skew
             for time_offset in [-1i64, 0, 1].iter() {
-                let check_time = (current_time as i64 + time_offset * self.config.period as i64) as u64;
+                let check_time =
+                    (current_time as i64 + time_offset * self.config.period as i64) as u64;
                 let expected_code = Self::generate_totp(
                     &enrollment.secret,
                     check_time,
@@ -175,7 +197,10 @@ impl TotpService for InMemoryTotpService {
         Ok(false)
     }
 
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<TotpEnrollment>, SecretonError> {
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<TotpEnrollment>, SecretonError> {
         let enrollments = self.enrollments.read().await;
         Ok(enrollments.get(&entity_id).cloned())
     }

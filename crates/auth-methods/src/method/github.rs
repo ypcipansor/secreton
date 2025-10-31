@@ -1,11 +1,11 @@
 //! GitHub authentication method
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// GitHub authentication method
 pub struct GithubAuthMethod {
@@ -48,15 +48,21 @@ impl AuthMethodImpl for GithubAuthMethod {
             let github_config = GithubConfig {
                 client_id: client_id.to_string(),
                 client_secret: client_secret.to_string(),
-                redirect_url: config.config.get("redirect_url")
+                redirect_url: config
+                    .config
+                    .get("redirect_url")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "http://localhost:8080/auth/github/callback".to_string()),
-                allowed_organizations: config.config.get("allowed_organizations")
+                allowed_organizations: config
+                    .config
+                    .get("allowed_organizations")
                     .and_then(|v| v.as_str())
                     .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
                     .unwrap_or_default(),
-                allowed_teams: config.config.get("allowed_teams")
+                allowed_teams: config
+                    .config
+                    .get("allowed_teams")
                     .and_then(|v| v.as_str())
                     .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
                     .unwrap_or_default(),

@@ -126,7 +126,10 @@ fn validate_cached_certificate(
 
     // Basic check: ensure not_after is after not_before
     if not_after <= not_before {
-        warn!("Certificate has invalid validity period: not_before={}, not_after={}", not_before, not_after);
+        warn!(
+            "Certificate has invalid validity period: not_before={}, not_after={}",
+            not_before, not_after
+        );
         return CertificateValidation {
             valid: false,
             subject: cert.subject().to_string().into(),

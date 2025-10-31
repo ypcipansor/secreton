@@ -1,9 +1,8 @@
 //! Certificate revocation structures
 
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
+use uuid::Uuid;
 
 /// Certificate revocation status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -83,14 +82,16 @@ impl CertificateRevocationList {
     /// Add a revocation entry
     pub fn add_revocation(&mut self, revocation: CertificateRevocation) {
         // Remove any existing revocation for this serial number
-        self.revoked_certificates.retain(|rev| rev.serial_number != revocation.serial_number);
+        self.revoked_certificates
+            .retain(|rev| rev.serial_number != revocation.serial_number);
         self.revoked_certificates.push(revocation);
         self.this_update = Utc::now();
     }
 
     /// Remove a revocation entry
     pub fn remove_revocation(&mut self, serial_number: &str) {
-        self.revoked_certificates.retain(|rev| rev.serial_number != serial_number);
+        self.revoked_certificates
+            .retain(|rev| rev.serial_number != serial_number);
         self.this_update = Utc::now();
     }
 }

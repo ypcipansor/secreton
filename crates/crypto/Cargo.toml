@@ -58,7 +58,7 @@ pqcrypto-falcon = "0.4.1"
 pqcrypto-traits = "0.3"
 
 # Homomorphic Encryption
-kzen-paillier = "0.4.3"
+# kzen-paillier = "0.4.3"  # Removed due to curve25519-dalek vulnerability
 bgv = "0.6.0"
 ckks-engine = "4.0.0"
 

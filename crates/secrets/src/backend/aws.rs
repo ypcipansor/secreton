@@ -1,8 +1,8 @@
 //! AWS backend for secret management
 
-use std::collections::HashMap;
-use serde_json::Value;
 use crate::error::*;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// AWS backend for generating temporary credentials
 pub struct AwsBackend {
@@ -21,7 +21,11 @@ impl AwsBackend {
     }
 
     /// Generate temporary AWS credentials
-    pub async fn generate_credentials(&self, role_arn: Option<&str>, ttl_seconds: u32) -> SecretResult<HashMap<String, Value>> {
+    pub async fn generate_credentials(
+        &self,
+        role_arn: Option<&str>,
+        ttl_seconds: u32,
+    ) -> SecretResult<HashMap<String, Value>> {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(self.region.clone()))
             .load()
@@ -45,18 +49,28 @@ impl AwsBackend {
                         let access_key = credentials.access_key_id().to_string();
                         let secret_key = credentials.secret_access_key().to_string();
                         let session_token = credentials.session_token().to_string();
-                        credentials_result.insert("access_key".to_string(), Value::String(access_key));
-                        credentials_result.insert("secret_key".to_string(), Value::String(secret_key));
-                        credentials_result.insert("session_token".to_string(), Value::String(session_token));
-                        credentials_result.insert("role_arn".to_string(), Value::String(role_arn.to_string()));
-                        credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
+                        credentials_result
+                            .insert("access_key".to_string(), Value::String(access_key));
+                        credentials_result
+                            .insert("secret_key".to_string(), Value::String(secret_key));
+                        credentials_result
+                            .insert("session_token".to_string(), Value::String(session_token));
+                        credentials_result
+                            .insert("role_arn".to_string(), Value::String(role_arn.to_string()));
+                        credentials_result
+                            .insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
                         credentials_result.insert("assumed_role".to_string(), Value::Bool(true));
                     } else {
-                        return Err(SecretError::InvalidConfiguration("No credentials returned from AssumeRole".to_string()));
+                        return Err(SecretError::InvalidConfiguration(
+                            "No credentials returned from AssumeRole".to_string(),
+                        ));
                     }
                 }
                 Err(e) => {
-                    return Err(SecretError::InvalidConfiguration(format!("Failed to assume role: {}", e)));
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Failed to assume role: {}",
+                        e
+                    )));
                 }
             }
         } else {
@@ -71,17 +85,26 @@ impl AwsBackend {
                         let access_key = credentials.access_key_id().to_string();
                         let secret_key = credentials.secret_access_key().to_string();
                         let session_token = credentials.session_token().to_string();
-                        credentials_result.insert("access_key".to_string(), Value::String(access_key));
-                        credentials_result.insert("secret_key".to_string(), Value::String(secret_key));
-                        credentials_result.insert("session_token".to_string(), Value::String(session_token));
-                        credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
+                        credentials_result
+                            .insert("access_key".to_string(), Value::String(access_key));
+                        credentials_result
+                            .insert("secret_key".to_string(), Value::String(secret_key));
+                        credentials_result
+                            .insert("session_token".to_string(), Value::String(session_token));
+                        credentials_result
+                            .insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
                         credentials_result.insert("assumed_role".to_string(), Value::Bool(false));
                     } else {
-                        return Err(SecretError::InvalidConfiguration("No credentials returned from GetSessionToken".to_string()));
+                        return Err(SecretError::InvalidConfiguration(
+                            "No credentials returned from GetSessionToken".to_string(),
+                        ));
                     }
                 }
                 Err(e) => {
-                    return Err(SecretError::InvalidConfiguration(format!("Failed to get session token: {}", e)));
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Failed to get session token: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -105,12 +128,15 @@ impl AwsBackend {
                 if identity.account().is_some() && identity.user_id().is_some() {
                     Ok(())
                 } else {
-                    Err(SecretError::InvalidConfiguration("AWS credentials are invalid or insufficient permissions".to_string()))
+                    Err(SecretError::InvalidConfiguration(
+                        "AWS credentials are invalid or insufficient permissions".to_string(),
+                    ))
                 }
             }
-            Err(e) => {
-                Err(SecretError::InvalidConfiguration(format!("AWS connectivity test failed: {}", e)))
-            }
+            Err(e) => Err(SecretError::InvalidConfiguration(format!(
+                "AWS connectivity test failed: {}",
+                e
+            ))),
         }
     }
 }

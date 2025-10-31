@@ -2,10 +2,12 @@
 //!
 //! Tests for HTTP API handlers, middleware, services, and integration
 
-use secreton_api::{ApiState, create_api_router, KVApiState, TransitApiState, kv::InMemorySecretStorage};
+use secreton_api::{
+    ApiState, KVApiState, TransitApiState, create_api_router, kv::InMemorySecretStorage,
+};
 use secreton_crypto::transit::TransitEngine;
 
-    async fn create_test_app() -> axum::Router<()> {
+async fn create_test_app() -> axum::Router<()> {
     // Create a simple test state for basic API testing
     let api_state = ApiState::new(
         TransitApiState {

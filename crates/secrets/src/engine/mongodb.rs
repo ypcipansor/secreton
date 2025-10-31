@@ -1,12 +1,12 @@
 //! Placeholder implementation for mongodb secret engine
 
-use async_trait::async_trait;
-use std::collections::HashMap;
-use serde_json::Value;
-use uuid::Uuid;
-use crate::model::*;
 use crate::error::*;
+use crate::model::*;
 use crate::service::*;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// mongodb secret engine
 pub struct MongodbEngine {
@@ -66,7 +66,10 @@ impl SecretEngine for MongodbEngine {
                     updated_at: chrono::Utc::now(),
                 })
             }
-            _ => Err(SecretError::InvalidPath(format!("Unsupported MongoDB path: {}", path))),
+            _ => Err(SecretError::InvalidPath(format!(
+                "Unsupported MongoDB path: {}",
+                path
+            ))),
         }
     }
 
@@ -99,13 +102,22 @@ impl SecretEngine for MongodbEngine {
 
 impl MongodbEngine {
     /// Generate MongoDB credentials
-    async fn generate_mongodb_credentials(&self, _data: &HashMap<String, Value>) -> SecretResult<HashMap<String, Value>> {
+    async fn generate_mongodb_credentials(
+        &self,
+        _data: &HashMap<String, Value>,
+    ) -> SecretResult<HashMap<String, Value>> {
         // Basic MongoDB credentials generation (placeholder - would use MongoDB auth in production)
         let mut creds_data = HashMap::new();
 
         creds_data.insert("username".to_string(), Value::String("dbuser".to_string()));
-        creds_data.insert("password".to_string(), Value::String(self.generate_password(16)));
-        creds_data.insert("connection_string".to_string(), Value::String("mongodb://dbuser:password@localhost:27017/mydb".to_string()));
+        creds_data.insert(
+            "password".to_string(),
+            Value::String(self.generate_password(16)),
+        );
+        creds_data.insert(
+            "connection_string".to_string(),
+            Value::String("mongodb://dbuser:password@localhost:27017/mydb".to_string()),
+        );
         creds_data.insert("database".to_string(), Value::String("mydb".to_string()));
 
         Ok(creds_data)

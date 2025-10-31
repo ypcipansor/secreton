@@ -26,7 +26,9 @@ impl PostgresBackend {
             }
         })?;
 
-        Ok(Self { pool: Arc::new(pool) })
+        Ok(Self {
+            pool: Arc::new(pool),
+        })
     }
 
     /// Get the connection pool
@@ -551,7 +553,11 @@ impl PostgresTransaction {
         }
     }
 
-    async fn execute_operation(&self, transaction: &deadpool_postgres::Transaction<'_>, op: &PostgresOperation) -> StorageResult<()> {
+    async fn execute_operation(
+        &self,
+        transaction: &deadpool_postgres::Transaction<'_>,
+        op: &PostgresOperation,
+    ) -> StorageResult<()> {
         match op {
             PostgresOperation::Store(entry) => {
                 let query = r#"
@@ -571,26 +577,35 @@ impl PostgresTransaction {
                         expires_at = EXCLUDED.expires_at
                 "#;
 
-                let metadata_json = serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
-                let tags_json = serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
-                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata).unwrap_or(serde_json::Value::Null);
+                let metadata_json =
+                    serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
+                let tags_json =
+                    serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
+                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
+                    .unwrap_or(serde_json::Value::Null);
 
-                transaction.execute(query, &[
-                    &entry.id,
-                    &entry.path,
-                    &entry.encrypted_data,
-                    &encryption_metadata_json,
-                    &(entry.security_level as i32),
-                    &metadata_json,
-                    &tags_json,
-                    &(entry.version as i32),
-                    &entry.owner_id,
-                    &entry.created_at.naive_utc(),
-                    &entry.updated_at.naive_utc(),
-                    &entry.expires_at.map(|dt| dt.naive_utc()),
-                ]).await.map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to store entry: {}", e),
-                })?;
+                transaction
+                    .execute(
+                        query,
+                        &[
+                            &entry.id,
+                            &entry.path,
+                            &entry.encrypted_data,
+                            &encryption_metadata_json,
+                            &(entry.security_level as i32),
+                            &metadata_json,
+                            &tags_json,
+                            &(entry.version as i32),
+                            &entry.owner_id,
+                            &entry.created_at.naive_utc(),
+                            &entry.updated_at.naive_utc(),
+                            &entry.expires_at.map(|dt| dt.naive_utc()),
+                        ],
+                    )
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to store entry: {}", e),
+                    })?;
             }
             PostgresOperation::Update(entry) => {
                 let query = r#"
@@ -608,31 +623,43 @@ impl PostgresTransaction {
                     WHERE id = $1
                 "#;
 
-                let metadata_json = serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
-                let tags_json = serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
-                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata).unwrap_or(serde_json::Value::Null);
+                let metadata_json =
+                    serde_json::to_value(&entry.metadata).unwrap_or(serde_json::Value::Null);
+                let tags_json =
+                    serde_json::to_value(&entry.tags).unwrap_or(serde_json::Value::Null);
+                let encryption_metadata_json = serde_json::to_value(&entry.encryption_metadata)
+                    .unwrap_or(serde_json::Value::Null);
 
-                transaction.execute(query, &[
-                    &entry.id,
-                    &entry.path,
-                    &entry.encrypted_data,
-                    &encryption_metadata_json,
-                    &(entry.security_level as i32),
-                    &metadata_json,
-                    &tags_json,
-                    &(entry.version as i32),
-                    &entry.owner_id,
-                    &entry.updated_at.naive_utc(),
-                    &entry.expires_at.map(|dt| dt.naive_utc()),
-                ]).await.map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to update entry: {}", e),
-                })?;
+                transaction
+                    .execute(
+                        query,
+                        &[
+                            &entry.id,
+                            &entry.path,
+                            &entry.encrypted_data,
+                            &encryption_metadata_json,
+                            &(entry.security_level as i32),
+                            &metadata_json,
+                            &tags_json,
+                            &(entry.version as i32),
+                            &entry.owner_id,
+                            &entry.updated_at.naive_utc(),
+                            &entry.expires_at.map(|dt| dt.naive_utc()),
+                        ],
+                    )
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to update entry: {}", e),
+                    })?;
             }
             PostgresOperation::Delete(id) => {
                 let query = "DELETE FROM vault_entries WHERE id = $1";
-                transaction.execute(query, &[id]).await.map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to delete entry: {}", e),
-                })?;
+                transaction
+                    .execute(query, &[id])
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to delete entry: {}", e),
+                    })?;
             }
         }
         Ok(())
@@ -647,7 +674,8 @@ impl StorageTransaction for PostgresTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(PostgresOperation::Store(entry.clone()));
+        self.operations
+            .push(PostgresOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -657,7 +685,8 @@ impl StorageTransaction for PostgresTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(PostgresOperation::Update(entry.clone()));
+        self.operations
+            .push(PostgresOperation::Update(entry.clone()));
         Ok(())
     }
 
@@ -679,21 +708,32 @@ impl StorageTransaction for PostgresTransaction {
         }
 
         // Execute all operations in a database transaction
-        let mut client = self.pool.get().await.map_err(|e| StorageError::ConnectionFailed {
-            message: format!("Failed to get connection for transaction: {}", e),
-        })?;
+        let mut client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection for transaction: {}", e),
+            })?;
 
-        let transaction = client.transaction().await.map_err(|e| StorageError::TransactionFailed {
-            message: format!("Failed to begin transaction: {}", e),
-        })?;
+        let transaction =
+            client
+                .transaction()
+                .await
+                .map_err(|e| StorageError::TransactionFailed {
+                    message: format!("Failed to begin transaction: {}", e),
+                })?;
 
         for op in &self.operations {
             self.execute_operation(&transaction, op).await?;
         }
 
-        transaction.commit().await.map_err(|e| StorageError::TransactionFailed {
-            message: format!("Failed to commit transaction: {}", e),
-        })?;
+        transaction
+            .commit()
+            .await
+            .map_err(|e| StorageError::TransactionFailed {
+                message: format!("Failed to commit transaction: {}", e),
+            })?;
 
         self.committed = true;
         Ok(())

@@ -1,14 +1,14 @@
 //! TOTP (Time-based One-Time Password) secret engine implementation
 
+use crate::error::*;
+use crate::model::*;
+use crate::service::*;
 use async_trait::async_trait;
-use std::collections::HashMap;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use crate::model::*;
-use crate::error::*;
-use crate::service::*;
 
 /// TOTP configuration for a key
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,13 +68,12 @@ impl TotpEngine {
 
     /// Generate a TOTP code for a given key and time
     fn generate_totp(&self, key: &TotpKey, time: u64) -> SecretResult<String> {
-        use base64::{Engine as _, engine::general_purpose};
-
         // Decode base32 secret
         let secret = base32::decode(
             base32::Alphabet::Rfc4648 { padding: false },
-            &key.secret.to_uppercase()
-        ).ok_or_else(|| SecretError::InvalidSecretData("Invalid base32 secret".to_string()))?;
+            &key.secret.to_uppercase(),
+        )
+        .ok_or_else(|| SecretError::InvalidSecretData("Invalid base32 secret".to_string()))?;
 
         // Calculate time counter
         let counter = time / key.period;
@@ -104,13 +103,18 @@ impl TotpEngine {
         let totp_code = (code % modulus).to_string();
 
         // Pad with zeros if necessary
-        Ok(format!("{:0width$}", totp_code, width = key.digits as usize))
+        Ok(format!(
+            "{:0width$}",
+            totp_code,
+            width = key.digits as usize
+        ))
     }
 
     /// Validate a TOTP code
     async fn validate_totp(&self, path: &str, code: &str, skew: Option<i64>) -> SecretResult<bool> {
         let keys = self.keys.read().await;
-        let key = keys.get(path)
+        let key = keys
+            .get(path)
             .ok_or_else(|| SecretError::SecretNotFound(format!("TOTP key not found: {}", path)))?;
 
         let current_time = Utc::now().timestamp() as u64;
@@ -161,13 +165,19 @@ impl SecretEngine for TotpEngine {
 
             let mut data = HashMap::new();
             data.insert("code".to_string(), Value::String(code));
-            data.insert("account_name".to_string(), Value::String(key.account_name.clone()));
+            data.insert(
+                "account_name".to_string(),
+                Value::String(key.account_name.clone()),
+            );
             if let Some(issuer) = &key.issuer {
                 data.insert("issuer".to_string(), Value::String(issuer.clone()));
             }
             data.insert("digits".to_string(), Value::Number(key.digits.into()));
             data.insert("period".to_string(), Value::Number(key.period.into()));
-            data.insert("algorithm".to_string(), Value::String(key.algorithm.clone()));
+            data.insert(
+                "algorithm".to_string(),
+                Value::String(key.algorithm.clone()),
+            );
 
             let secret = Secret {
                 id: uuid::Uuid::new_v4(),
@@ -197,46 +207,65 @@ impl SecretEngine for TotpEngine {
         }
 
         // Extract TOTP key parameters
-        let secret = data.get("secret")
+        let secret = data
+            .get("secret")
             .and_then(|v| v.as_str())
             .ok_or_else(|| SecretError::InvalidSecretData("Missing 'secret' field".to_string()))?
             .to_string();
 
-        let account_name = data.get("account_name")
+        let account_name = data
+            .get("account_name")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| SecretError::InvalidSecretData("Missing 'account_name' field".to_string()))?
+            .ok_or_else(|| {
+                SecretError::InvalidSecretData("Missing 'account_name' field".to_string())
+            })?
             .to_string();
 
-        let issuer = data.get("issuer")
+        let issuer = data
+            .get("issuer")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let digits = data.get("digits")
+        let digits = data
+            .get("digits")
             .and_then(|v| v.as_u64())
             .map(|n| n as u32)
             .unwrap_or(self.config.default_digits);
 
-        let period = data.get("period")
+        let period = data
+            .get("period")
             .and_then(|v| v.as_u64())
             .unwrap_or(self.config.default_period);
 
-        let algorithm = data.get("algorithm")
+        let algorithm = data
+            .get("algorithm")
             .and_then(|v| v.as_str())
             .unwrap_or(&self.config.default_algorithm)
             .to_string();
 
         // Validate parameters
         if digits != 6 && digits != 8 {
-            return Err(SecretError::InvalidSecretData("Digits must be 6 or 8".to_string()));
+            return Err(SecretError::InvalidSecretData(
+                "Digits must be 6 or 8".to_string(),
+            ));
         }
 
         if period < 10 || period > 120 {
-            return Err(SecretError::InvalidSecretData("Period must be between 10 and 120 seconds".to_string()));
+            return Err(SecretError::InvalidSecretData(
+                "Period must be between 10 and 120 seconds".to_string(),
+            ));
         }
 
         // Validate base32 secret
-        if base32::decode(base32::Alphabet::Rfc4648 { padding: false }, &secret.to_uppercase()).is_none() {
-            return Err(SecretError::InvalidSecretData("Invalid base32 secret".to_string()));
+        if base32::decode(
+            base32::Alphabet::Rfc4648 { padding: false },
+            &secret.to_uppercase(),
+        )
+        .is_none()
+        {
+            return Err(SecretError::InvalidSecretData(
+                "Invalid base32 secret".to_string(),
+            ));
         }
 
         let totp_key = TotpKey {
@@ -291,7 +320,10 @@ impl SecretEngine for TotpEngine {
         if keys.remove(path).is_some() {
             Ok(())
         } else {
-            Err(SecretError::SecretNotFound(format!("TOTP key not found: {}", path)))
+            Err(SecretError::SecretNotFound(format!(
+                "TOTP key not found: {}",
+                path
+            )))
         }
     }
 

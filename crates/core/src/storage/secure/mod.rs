@@ -67,9 +67,9 @@
 //! ```
 
 // Module declarations
-pub mod types;
 pub mod keystore;
 pub mod storage;
+pub mod types;
 
 // Re-exports for public API
 pub use types::{KeyConfig, KeyEntry};

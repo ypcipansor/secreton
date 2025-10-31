@@ -14,9 +14,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::crypto_policy_engine::{
-    CryptoAlgorithm, CryptoOperationRequest,
-};
+use super::crypto_policy_engine::{CryptoAlgorithm, CryptoOperationRequest};
 
 #[derive(Debug, Error)]
 pub enum PolicyEnforcementError {

@@ -1,12 +1,12 @@
+use crate::auth::{AuthError, SessionService};
 use axum::{
+    Form,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{Html, Response},
-    Form,
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use crate::auth::{SessionService, AuthError};
 
 pub async fn index() -> Html<String> {
     let html = r#"<!DOCTYPE html>
@@ -107,14 +107,17 @@ pub async fn login(
         .or_else(|| headers.get("x-real-ip"))
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    
+
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    
+
     // Attempt login with proper authentication
-    match auth.login(&form.username, &form.password, ip_address, user_agent).await {
+    match auth
+        .login(&form.username, &form.password, ip_address, user_agent)
+        .await
+    {
         Ok(_session) => {
             // Successful login - redirect to dashboard
             // In production, set secure HTTP-only session cookie here
@@ -224,7 +227,8 @@ pub async fn login(
         }
         Err(e) => {
             let error_msg = format!("Authentication error: {}", e);
-            let html = format!(r#"<!DOCTYPE html>
+            let html = format!(
+                r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -254,7 +258,9 @@ pub async fn login(
         </div>
     </div>
 </body>
-</html>"#, error_msg);
+</html>"#,
+                error_msg
+            );
             Ok(Html(html))
         }
     }
@@ -406,7 +412,7 @@ pub async fn serve_static(Path(file): Path<String>) -> Result<Response<Vec<u8>>,
     let file = file.trim_start_matches('/');
     if let Some(content) = Assets::get(file) {
         let mime_type = mime_guess::from_path(file).first_or_octet_stream();
-        
+
         Ok(Response::builder()
             .status(StatusCode::OK)
             .header("content-type", mime_type.as_ref())

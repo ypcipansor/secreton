@@ -1,9 +1,9 @@
 //! Vault backend for secret storage
 
+use crate::error::*;
+use crate::model::*;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use crate::model::*;
-use crate::error::*;
 
 /// In-memory vault backend for secret storage
 pub struct VaultBackend {
@@ -40,7 +40,8 @@ impl VaultBackend {
     /// List secrets under a path
     pub async fn list_secrets(&self, path: &str) -> SecretResult<Vec<String>> {
         let storage = self.storage.read().await;
-        let keys: Vec<String> = storage.keys()
+        let keys: Vec<String> = storage
+            .keys()
             .filter(|key| key.starts_with(path))
             .cloned()
             .collect();

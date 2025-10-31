@@ -1,7 +1,7 @@
 // Granular Revocation Module - Maximum Security, Zero Trust, Tamper-Evident
 
 use chrono::{DateTime, Utc};
-use secreton_security::audit::{AuditLogger, AuditLog, AuditStatus};
+use secreton_security::audit::{AuditLog, AuditLogger, AuditStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

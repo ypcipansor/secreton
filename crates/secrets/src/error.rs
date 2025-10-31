@@ -63,7 +63,9 @@ pub enum SecretError {
 
 impl From<SecretError> for SecretonError {
     fn from(err: SecretError) -> Self {
-        SecretonError::Internal { message: err.to_string() }
+        SecretonError::Internal {
+            message: err.to_string(),
+        }
     }
 }
 

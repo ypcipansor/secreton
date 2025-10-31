@@ -3,7 +3,7 @@
 //! Shared configuration patterns and utilities for all Secreton crates.
 //! Provides consistent configuration loading, validation, and management.
 
-use secreton_errors::{SecretonError, Result as SecretonResult};
+use secreton_errors::{Result as SecretonResult, SecretonError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -14,15 +14,13 @@ use std::path::Path;
 pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
     /// Load configuration from a file
     fn load_from_file<P: AsRef<Path>>(path: P) -> SecretonResult<Self> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| SecretonError::Configuration {
-                message: format!("Failed to read config file: {}", e),
-            })?;
+        let content = fs::read_to_string(path).map_err(|e| SecretonError::Configuration {
+            message: format!("Failed to read config file: {}", e),
+        })?;
 
-        let config: Self = toml::from_str(&content)
-            .map_err(|e| SecretonError::Parse {
-                message: format!("Failed to parse config: {}", e),
-            })?;
+        let config: Self = toml::from_str(&content).map_err(|e| SecretonError::Parse {
+            message: format!("Failed to parse config: {}", e),
+        })?;
 
         config.validate()?;
         Ok(config)
@@ -42,21 +40,19 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
     fn load() -> SecretonResult<Self> {
         let settings = config::Config::builder()
             .add_source(config::File::with_name("config/default"))
-            .add_source(
-                config::File::with_name("config/local")
-                    .required(false)
-            )
+            .add_source(config::File::with_name("config/local").required(false))
             .add_source(config::Environment::with_prefix("SECRETON"))
             .build()
             .map_err(|e| SecretonError::Configuration {
                 message: format!("Failed to build config: {}", e),
             })?;
 
-        let config: Self = settings
-            .try_deserialize()
-            .map_err(|e| SecretonError::Configuration {
-                message: format!("Failed to deserialize config: {}", e),
-            })?;
+        let config: Self =
+            settings
+                .try_deserialize()
+                .map_err(|e| SecretonError::Configuration {
+                    message: format!("Failed to deserialize config: {}", e),
+                })?;
 
         config.validate()?;
         Ok(config)
@@ -2020,28 +2016,21 @@ pub mod utils {
 
         // Add configuration files in order
         for path in config_paths {
-            builder = builder.add_source(
-                config::File::with_name(path).required(false)
-            );
+            builder = builder.add_source(config::File::with_name(path).required(false));
         }
 
         // Add environment variables
-        builder = builder.add_source(
-            config::Environment::with_prefix("SECRETON")
-                .separator("_")
-        );
+        builder = builder.add_source(config::Environment::with_prefix("SECRETON").separator("_"));
 
-        let settings = builder.build().map_err(|e| {
-            SecretonError::Configuration {
-                message: format!("Failed to build configuration: {}", e),
-            }
+        let settings = builder.build().map_err(|e| SecretonError::Configuration {
+            message: format!("Failed to build configuration: {}", e),
         })?;
 
-        let config: T = settings.try_deserialize().map_err(|e| {
-            SecretonError::Configuration {
+        let config: T = settings
+            .try_deserialize()
+            .map_err(|e| SecretonError::Configuration {
                 message: format!("Failed to deserialize configuration: {}", e),
-            }
-        })?;
+            })?;
 
         config.validate()?;
         Ok(config)
@@ -2049,11 +2038,10 @@ pub mod utils {
 
     /// Save configuration to a file
     pub fn save_config<T: Config>(config: &T, path: &str) -> SecretonResult<()> {
-        let toml_string = toml::to_string_pretty(config)
-            .map_err(|e| SecretonError::TomlSerialization(e))?;
+        let toml_string =
+            toml::to_string_pretty(config).map_err(|e| SecretonError::TomlSerialization(e))?;
 
-        fs::write(path, toml_string)
-            .map_err(|e| SecretonError::Io(e))?;
+        fs::write(path, toml_string).map_err(|e| SecretonError::Io(e))?;
 
         Ok(())
     }

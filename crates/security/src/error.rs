@@ -9,7 +9,10 @@ pub enum SecurityError {
     PolicyViolation { policy: String, reason: String },
 
     #[error("Compliance violation: {standard} - {requirement}")]
-    ComplianceViolation { standard: String, requirement: String },
+    ComplianceViolation {
+        standard: String,
+        requirement: String,
+    },
 
     #[error("Access denied: {reason}")]
     AccessDenied { reason: String },
@@ -18,7 +21,11 @@ pub enum SecurityError {
     AuditError(String),
 
     #[error("Quota exceeded: {resource} limit {limit}, used {used}")]
-    QuotaExceeded { resource: String, limit: u64, used: u64 },
+    QuotaExceeded {
+        resource: String,
+        limit: u64,
+        used: u64,
+    },
 
     #[error("Security context invalid: {reason}")]
     InvalidSecurityContext { reason: String },

@@ -14,7 +14,9 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::advanced_features::secure_multi_party_computation::{DKGResult, SMPCProtocol, SMPCSession};
+use crate::advanced_features::secure_multi_party_computation::{
+    DKGResult, SMPCProtocol, SMPCSession,
+};
 
 #[derive(Debug, Error)]
 pub enum CollaborationError {
@@ -274,7 +276,8 @@ impl SecureCollaborativeOperations {
 
         // 3. Execute SMPC computation (mock)
         // In production: use actual MPC protocol
-        let result_data = self.mock_smpc_computation(&_request.function_name, &_request.participants);
+        let result_data =
+            self.mock_smpc_computation(&_request.function_name, &_request.participants);
 
         let participants_contributed: Vec<String> = _request
             .participants

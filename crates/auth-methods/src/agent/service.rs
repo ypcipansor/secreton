@@ -1,11 +1,11 @@
 //! Unified agent service
 
 use async_trait::async_trait;
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
 
 use super::agent::*;
 use super::template::*;
@@ -15,13 +15,20 @@ use crate::error::*;
 #[async_trait]
 pub trait AgentService: Send + Sync {
     /// Register a new agent
-    async fn register_agent(&self, request: AgentRegistrationRequest) -> AuthMethodResult<AgentConfig>;
+    async fn register_agent(
+        &self,
+        request: AgentRegistrationRequest,
+    ) -> AuthMethodResult<AgentConfig>;
 
     /// Get agent configuration
     async fn get_agent(&self, name: String) -> AuthMethodResult<Option<AgentConfig>>;
 
     /// Update agent configuration
-    async fn update_agent(&self, name: String, request: AgentUpdateRequest) -> AuthMethodResult<AgentConfig>;
+    async fn update_agent(
+        &self,
+        name: String,
+        request: AgentUpdateRequest,
+    ) -> AuthMethodResult<AgentConfig>;
 
     /// Delete an agent
     async fn delete_agent(&self, name: String) -> AuthMethodResult<()>;
@@ -33,10 +40,19 @@ pub trait AgentService: Send + Sync {
     async fn authenticate(&self, request: AgentAuthRequest) -> AuthMethodResult<AgentAuthResponse>;
 
     /// Create a template
-    async fn create_template(&self, name: String, template_type: super::template::TemplateType, agent_type: AgentType, template: String) -> AuthMethodResult<super::template::AgentTemplate>;
+    async fn create_template(
+        &self,
+        name: String,
+        template_type: super::template::TemplateType,
+        agent_type: AgentType,
+        template: String,
+    ) -> AuthMethodResult<super::template::AgentTemplate>;
 
     /// Render a template
-    async fn render_template(&self, request: super::template::TemplateRenderRequest) -> AuthMethodResult<super::template::TemplateRenderResponse>;
+    async fn render_template(
+        &self,
+        request: super::template::TemplateRenderRequest,
+    ) -> AuthMethodResult<super::template::TemplateRenderResponse>;
 }
 
 /// Combined agent service implementation
@@ -54,7 +70,10 @@ impl CombinedAgentService {
     }
 
     /// Validate agent authentication (simplified implementation)
-    async fn validate_agent_auth(&self, request: &AgentAuthRequest) -> Result<Uuid, AuthMethodError> {
+    async fn validate_agent_auth(
+        &self,
+        request: &AgentAuthRequest,
+    ) -> Result<Uuid, AuthMethodError> {
         // In a real implementation, this would validate credentials against
         // the specific agent type (e.g., check Kubernetes JWT, AWS IAM, etc.)
         match request.agent_type {
@@ -62,15 +81,20 @@ impl CombinedAgentService {
                 // Validate role_id and secret_id
                 if let (Some(role_id), Some(secret_id)) = (
                     request.credentials.get("role_id"),
-                    request.credentials.get("secret_id")
+                    request.credentials.get("secret_id"),
                 ) {
                     if !role_id.is_empty() && !secret_id.is_empty() {
                         Ok(Uuid::new_v4()) // Mock entity ID
                     } else {
-                        Err(AuthMethodError::AuthenticationFailed("approle authentication failed".to_string()))
+                        Err(AuthMethodError::AuthenticationFailed(
+                            "approle authentication failed".to_string(),
+                        ))
                     }
                 } else {
-                    Err(AuthMethodError::InvalidInput { field: "credentials".to_string(), reason: "Missing role_id or secret_id".to_string() })
+                    Err(AuthMethodError::InvalidInput {
+                        field: "credentials".to_string(),
+                        reason: "Missing role_id or secret_id".to_string(),
+                    })
                 }
             }
             AgentType::Kubernetes => {
@@ -79,35 +103,50 @@ impl CombinedAgentService {
                     if !jwt.is_empty() {
                         Ok(Uuid::new_v4()) // Mock entity ID
                     } else {
-                        Err(AuthMethodError::AuthenticationFailed("kubernetes authentication failed".to_string()))
+                        Err(AuthMethodError::AuthenticationFailed(
+                            "kubernetes authentication failed".to_string(),
+                        ))
                     }
                 } else {
-                    Err(AuthMethodError::InvalidInput { field: "credentials".to_string(), reason: "Missing jwt".to_string() })
+                    Err(AuthMethodError::InvalidInput {
+                        field: "credentials".to_string(),
+                        reason: "Missing jwt".to_string(),
+                    })
                 }
             }
             AgentType::AWS => {
                 // Validate AWS credentials
                 if let (Some(access_key), Some(secret_key)) = (
                     request.credentials.get("access_key"),
-                    request.credentials.get("secret_key")
+                    request.credentials.get("secret_key"),
                 ) {
                     if !access_key.is_empty() && !secret_key.is_empty() {
                         Ok(Uuid::new_v4()) // Mock entity ID
                     } else {
-                        Err(AuthMethodError::AuthenticationFailed("aws authentication failed".to_string()))
+                        Err(AuthMethodError::AuthenticationFailed(
+                            "aws authentication failed".to_string(),
+                        ))
                     }
                 } else {
-                    Err(AuthMethodError::InvalidInput { field: "credentials".to_string(), reason: "Missing AWS credentials".to_string() })
+                    Err(AuthMethodError::InvalidInput {
+                        field: "credentials".to_string(),
+                        reason: "Missing AWS credentials".to_string(),
+                    })
                 }
             }
-            _ => Err(AuthMethodError::UnsupportedMethod { method: format!("{:?}", request.agent_type) }),
+            _ => Err(AuthMethodError::UnsupportedMethod {
+                method: format!("{:?}", request.agent_type),
+            }),
         }
     }
 }
 
 #[async_trait]
 impl AgentService for CombinedAgentService {
-    async fn register_agent(&self, request: AgentRegistrationRequest) -> AuthMethodResult<AgentConfig> {
+    async fn register_agent(
+        &self,
+        request: AgentRegistrationRequest,
+    ) -> AuthMethodResult<AgentConfig> {
         let config = AgentConfig {
             agent_type: request.agent_type,
             name: request.name.clone(),
@@ -129,7 +168,11 @@ impl AgentService for CombinedAgentService {
         Ok(agents.get(&name).cloned())
     }
 
-    async fn update_agent(&self, name: String, request: AgentUpdateRequest) -> AuthMethodResult<AgentConfig> {
+    async fn update_agent(
+        &self,
+        name: String,
+        request: AgentUpdateRequest,
+    ) -> AuthMethodResult<AgentConfig> {
         let mut agents = self.agents.write().await;
 
         if let Some(agent) = agents.get_mut(&name) {
@@ -193,11 +236,15 @@ impl AgentService for CombinedAgentService {
             AgentType::Custom(ref name) => name,
         };
 
-        let agent = agents.get(agent_name)
+        let agent = agents
+            .get(agent_name)
             .ok_or_else(|| AuthMethodError::UserNotFound(format!("agent {}", agent_name)))?;
 
         if !agent.enabled {
-            return Err(AuthMethodError::AuthenticationFailed(format!("Agent {} authentication failed", agent_name)));
+            return Err(AuthMethodError::AuthenticationFailed(format!(
+                "Agent {} authentication failed",
+                agent_name
+            )));
         }
 
         // Validate credentials
@@ -211,11 +258,22 @@ impl AgentService for CombinedAgentService {
         })
     }
 
-    async fn create_template(&self, name: String, template_type: super::template::TemplateType, agent_type: AgentType, template: String) -> AuthMethodResult<super::template::AgentTemplate> {
-        self.template_service.create_template(name, template_type, agent_type, template).await
+    async fn create_template(
+        &self,
+        name: String,
+        template_type: super::template::TemplateType,
+        agent_type: AgentType,
+        template: String,
+    ) -> AuthMethodResult<super::template::AgentTemplate> {
+        self.template_service
+            .create_template(name, template_type, agent_type, template)
+            .await
     }
 
-    async fn render_template(&self, request: super::template::TemplateRenderRequest) -> AuthMethodResult<super::template::TemplateRenderResponse> {
+    async fn render_template(
+        &self,
+        request: super::template::TemplateRenderRequest,
+    ) -> AuthMethodResult<super::template::TemplateRenderResponse> {
         self.template_service.render_template(request).await
     }
 }

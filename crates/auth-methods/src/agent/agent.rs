@@ -1,10 +1,9 @@
 //! Agent authentication structures
 
-use std::collections::HashMap;
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
+use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Agent type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

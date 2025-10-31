@@ -3,11 +3,11 @@
 //! Provides advanced security orchestration, compliance frameworks,
 //! and security configurations for different deployment scenarios.
 
+use secreton_common::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use secreton_common::Result;
 
 /// Security configuration levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,24 +319,46 @@ impl SecurityAssessment {
     }
 
     /// Check configuration compliance
-    pub async fn check_config_compliance(&mut self, config: &SecurityOrchestratorConfig) -> Result<()> {
+    pub async fn check_config_compliance(
+        &mut self,
+        config: &SecurityOrchestratorConfig,
+    ) -> Result<()> {
         match config.level {
             SecurityLevel::Banking => {
                 if let Some(banking_config) = &config.banking_config {
-                    self.compliance_checks.insert("fips_compliance".to_string(), banking_config.fips_compliance);
-                    self.compliance_checks.insert("pci_dss_compliance".to_string(), banking_config.pci_dss_compliance);
-                    self.compliance_checks.insert("dual_authorization".to_string(), banking_config.dual_authorization);
+                    self.compliance_checks.insert(
+                        "fips_compliance".to_string(),
+                        banking_config.fips_compliance,
+                    );
+                    self.compliance_checks.insert(
+                        "pci_dss_compliance".to_string(),
+                        banking_config.pci_dss_compliance,
+                    );
+                    self.compliance_checks.insert(
+                        "dual_authorization".to_string(),
+                        banking_config.dual_authorization,
+                    );
                 }
             }
             SecurityLevel::Government => {
                 if let Some(gov_config) = &config.government_config {
-                    self.compliance_checks.insert("fips_140_3_compliance".to_string(), gov_config.fips_140_3_compliance);
-                    self.compliance_checks.insert("fedramp_compliance".to_string(), gov_config.fedramp_compliance);
-                    self.compliance_checks.insert("zero_trust_enabled".to_string(), gov_config.zero_trust_enabled);
+                    self.compliance_checks.insert(
+                        "fips_140_3_compliance".to_string(),
+                        gov_config.fips_140_3_compliance,
+                    );
+                    self.compliance_checks.insert(
+                        "fedramp_compliance".to_string(),
+                        gov_config.fedramp_compliance,
+                    );
+                    self.compliance_checks.insert(
+                        "zero_trust_enabled".to_string(),
+                        gov_config.zero_trust_enabled,
+                    );
                 }
             }
             SecurityLevel::Standard => {
-                self.compliance_checks.insert("basic_security_enabled".to_string(), true);
+                self.compliance_checks
+                    .insert("basic_security_enabled".to_string(), true);
             }
         }
         Ok(())
@@ -374,7 +396,9 @@ impl SecurityAssessment {
 
         let vuln_penalty = self.vulnerabilities.len() as f64 * 0.1;
 
-        (compliance_score * 0.6 + self.crypto_strength_score * 0.4 - vuln_penalty).max(0.0).min(1.0)
+        (compliance_score * 0.6 + self.crypto_strength_score * 0.4 - vuln_penalty)
+            .max(0.0)
+            .min(1.0)
     }
 }
 

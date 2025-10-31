@@ -1,9 +1,9 @@
 //! Agent authentication and templating
 
 pub mod agent;
-pub mod template;
 pub mod service;
+pub mod template;
 
 pub use agent::*;
-pub use template::*;
 pub use service::*;
+pub use template::*;

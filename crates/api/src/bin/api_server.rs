@@ -1,6 +1,6 @@
+use axum::serve;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use axum::serve;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -53,7 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Secreton API server on http://{}", addr);
     let listener = TcpListener::bind(addr).await?;
-    serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
+    serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

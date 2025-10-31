@@ -1,9 +1,9 @@
 //! Token data structures and types
 
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
-use serde::{Deserialize, Serialize};
 
 use crate::error::*;
 
@@ -151,7 +151,11 @@ impl Token {
     }
 
     /// Renew the token
-    pub fn renew(&mut self, increment: Option<Duration>, max_ttl: Option<Duration>) -> Result<(), AuthMethodError> {
+    pub fn renew(
+        &mut self,
+        increment: Option<Duration>,
+        max_ttl: Option<Duration>,
+    ) -> Result<(), AuthMethodError> {
         if !self.can_renew(max_ttl) {
             return Err(AuthMethodError::InvalidToken);
         }

@@ -5,10 +5,10 @@
 
 #[cfg(test)]
 mod comprehensive_tests {
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::time::{Duration, sleep};
-    use serde_json::Value;
 
     /// Test all secrets engines are properly registered and functional
     #[tokio::test]
@@ -55,7 +55,6 @@ mod comprehensive_tests {
     /// Test all storage backends are properly implemented
     #[tokio::test]
     async fn test_all_storage_backends() {
-
         // Test that all storage backends exist
         let backends = vec![
             "consul",
@@ -121,7 +120,6 @@ mod comprehensive_tests {
     /// Test clustering and high availability features
     #[tokio::test]
     async fn test_clustering_features() {
-
         // Test Raft consensus
         println!("Testing Raft consensus components");
         // Components should be importable and have basic structures
@@ -140,7 +138,6 @@ mod comprehensive_tests {
     /// Test enterprise features
     #[tokio::test]
     async fn test_enterprise_features() {
-
         // Test namespace functionality
         println!("Testing namespace functionality");
         // Namespace structures should be available
@@ -159,7 +156,6 @@ mod comprehensive_tests {
     /// Test monitoring and telemetry features
     #[tokio::test]
     async fn test_monitoring_features() {
-
         // Test metrics collection
         println!("Testing metrics collection");
         // Metrics structures should be available
@@ -216,7 +212,6 @@ mod comprehensive_tests {
     /// Test error handling and edge cases
     #[tokio::test]
     async fn test_error_handling() {
-
         // Test that error types are properly defined
         println!("Testing error handling structures");
 
@@ -230,7 +225,6 @@ mod comprehensive_tests {
     /// Test security features
     #[tokio::test]
     async fn test_security_features() {
-
         // Test seal/unseal functionality
         println!("Testing seal/unseal functionality");
         // Seal structures should be available

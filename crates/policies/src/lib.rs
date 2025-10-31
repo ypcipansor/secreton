@@ -23,13 +23,13 @@
 //! - `error/`: Policy-specific error types
 
 pub mod engine;
+pub mod error;
 pub mod evaluator;
 pub mod model;
 pub mod service;
-pub mod error;
 
 pub use engine::*;
+pub use error::*;
 pub use evaluator::*;
 pub use model::*;
 pub use service::*;
-pub use error::*;

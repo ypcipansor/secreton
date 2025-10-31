@@ -101,9 +101,7 @@ impl RedisBackend {
                     message: format!("Failed to create Redis connection manager: {}", e),
                 })?;
 
-        Ok(Self {
-            manager,
-        })
+        Ok(Self { manager })
     }
 }
 

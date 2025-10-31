@@ -87,7 +87,8 @@ impl StorageTransaction for DynamoDBTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(DynamoDBOperation::Store(entry.clone()));
+        self.operations
+            .push(DynamoDBOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -97,7 +98,8 @@ impl StorageTransaction for DynamoDBTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(DynamoDBOperation::Update(entry.clone()));
+        self.operations
+            .push(DynamoDBOperation::Update(entry.clone()));
         Ok(())
     }
 

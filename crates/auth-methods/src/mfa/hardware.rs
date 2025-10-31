@@ -1,11 +1,11 @@
 //! Hardware token MFA implementation (FIDO U2F/WebAuthn, etc.)
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 
 use crate::error::*;
 
@@ -55,25 +55,41 @@ pub struct HardwareAuthenticationRequest {
 #[async_trait]
 pub trait HardwareService: Send + Sync {
     /// Register a hardware token
-    async fn register(&self, request: HardwareRegistrationRequest) -> Result<HardwareEnrollment, AuthMethodError>;
+    async fn register(
+        &self,
+        request: HardwareRegistrationRequest,
+    ) -> Result<HardwareEnrollment, AuthMethodError>;
 
     /// Authenticate with a hardware token
-    async fn authenticate(&self, request: HardwareAuthenticationRequest) -> Result<bool, AuthMethodError>;
+    async fn authenticate(
+        &self,
+        request: HardwareAuthenticationRequest,
+    ) -> Result<bool, AuthMethodError>;
 
     /// Get enrollment for an entity
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<HardwareEnrollment>, AuthMethodError>;
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<HardwareEnrollment>, AuthMethodError>;
 
     /// List all enrollments for an entity
-    async fn list_enrollments(&self, entity_id: Uuid) -> Result<Vec<HardwareEnrollment>, AuthMethodError>;
+    async fn list_enrollments(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Vec<HardwareEnrollment>, AuthMethodError>;
 
     /// Remove hardware token enrollment
-    async fn remove_enrollment(&self, entity_id: Uuid, credential_id: String) -> Result<(), AuthMethodError>;
+    async fn remove_enrollment(
+        &self,
+        entity_id: Uuid,
+        credential_id: String,
+    ) -> Result<(), AuthMethodError>;
 }
 
 /// In-memory hardware service implementation
 pub struct InMemoryHardwareService {
     enrollments: RwLock<HashMap<String, HardwareEnrollment>>, // Key: credential_id
-    entity_enrollments: RwLock<HashMap<Uuid, Vec<String>>>, // entity_id -> credential_ids
+    entity_enrollments: RwLock<HashMap<Uuid, Vec<String>>>,   // entity_id -> credential_ids
 }
 
 impl InMemoryHardwareService {
@@ -85,7 +101,10 @@ impl InMemoryHardwareService {
     }
 
     /// Verify WebAuthn/FIDO2 signature (simplified implementation)
-    async fn verify_signature(&self, _request: &HardwareAuthenticationRequest) -> Result<bool, AuthMethodError> {
+    async fn verify_signature(
+        &self,
+        _request: &HardwareAuthenticationRequest,
+    ) -> Result<bool, AuthMethodError> {
         // In a real implementation, this would:
         // 1. Parse the authenticator data
         // 2. Verify the signature using the stored public key
@@ -99,7 +118,10 @@ impl InMemoryHardwareService {
 
 #[async_trait]
 impl HardwareService for InMemoryHardwareService {
-    async fn register(&self, request: HardwareRegistrationRequest) -> Result<HardwareEnrollment, AuthMethodError> {
+    async fn register(
+        &self,
+        request: HardwareRegistrationRequest,
+    ) -> Result<HardwareEnrollment, AuthMethodError> {
         let enrollment = HardwareEnrollment {
             id: Uuid::new_v4(),
             entity_id: request.entity_id,
@@ -123,7 +145,10 @@ impl HardwareService for InMemoryHardwareService {
         Ok(enrollment)
     }
 
-    async fn authenticate(&self, request: HardwareAuthenticationRequest) -> Result<bool, AuthMethodError> {
+    async fn authenticate(
+        &self,
+        request: HardwareAuthenticationRequest,
+    ) -> Result<bool, AuthMethodError> {
         let enrollments = self.enrollments.read().await;
 
         if let Some(_enrollment) = enrollments.get(&request.credential_id) {
@@ -143,7 +168,10 @@ impl HardwareService for InMemoryHardwareService {
         Ok(false)
     }
 
-    async fn get_enrollment(&self, entity_id: Uuid) -> Result<Option<HardwareEnrollment>, AuthMethodError> {
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Option<HardwareEnrollment>, AuthMethodError> {
         let entity_enrollments = self.entity_enrollments.read().await;
         let enrollments = self.enrollments.read().await;
 
@@ -156,7 +184,10 @@ impl HardwareService for InMemoryHardwareService {
         Ok(None)
     }
 
-    async fn list_enrollments(&self, entity_id: Uuid) -> Result<Vec<HardwareEnrollment>, AuthMethodError> {
+    async fn list_enrollments(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Vec<HardwareEnrollment>, AuthMethodError> {
         let entity_enrollments = self.entity_enrollments.read().await;
         let enrollments = self.enrollments.read().await;
 
@@ -172,7 +203,11 @@ impl HardwareService for InMemoryHardwareService {
         Ok(result)
     }
 
-    async fn remove_enrollment(&self, entity_id: Uuid, credential_id: String) -> Result<(), AuthMethodError> {
+    async fn remove_enrollment(
+        &self,
+        entity_id: Uuid,
+        credential_id: String,
+    ) -> Result<(), AuthMethodError> {
         let mut enrollments = self.enrollments.write().await;
         let mut entity_enrollments = self.entity_enrollments.write().await;
 

@@ -178,7 +178,8 @@ impl StorageTransaction for AzureBlobTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(AzureBlobOperation::Store(entry.clone()));
+        self.operations
+            .push(AzureBlobOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -188,7 +189,8 @@ impl StorageTransaction for AzureBlobTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(AzureBlobOperation::Update(entry.clone()));
+        self.operations
+            .push(AzureBlobOperation::Update(entry.clone()));
         Ok(())
     }
 
@@ -227,10 +229,8 @@ impl AzureBlobStorage {
     pub async fn new(config: AzureBlobConfig) -> StorageResult<Self> {
         let container_client = if let Some(account_key) = &config.account_key {
             // Use account key authentication
-            let credential = StorageCredentials::access_key(
-                config.account_name.clone(),
-                account_key.clone(),
-            );
+            let credential =
+                StorageCredentials::access_key(config.account_name.clone(), account_key.clone());
             let service_client = azure_storage_blobs::prelude::BlobServiceClient::new(
                 config.account_name.clone(),
                 credential,
@@ -238,10 +238,10 @@ impl AzureBlobStorage {
             service_client.container_client(&config.container_name)
         } else if let Some(sas_token) = &config.sas_token {
             // Use SAS token authentication
-            let credential = StorageCredentials::sas_token(
-                sas_token.clone(),
-            ).map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Invalid SAS token: {}", e),
+            let credential = StorageCredentials::sas_token(sas_token.clone()).map_err(|e| {
+                StorageError::ConnectionFailed {
+                    message: format!("Invalid SAS token: {}", e),
+                }
             })?;
             let service_client = azure_storage_blobs::prelude::BlobServiceClient::new(
                 config.account_name.clone(),
@@ -255,10 +255,11 @@ impl AzureBlobStorage {
         };
 
         // Ensure container exists
-        container_client.create().into_future().await
-            .map_err(|e| StorageError::ConnectionFailed {
+        container_client.create().into_future().await.map_err(|e| {
+            StorageError::ConnectionFailed {
                 message: format!("Failed to create/access container: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             config,
@@ -291,10 +292,9 @@ impl AzureBlobStorage {
 impl StorageBackend for AzureBlobStorage {
     async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
         let blob_name = Self::path_to_blob_name(&entry.path);
-        let data = serde_json::to_vec(entry)
-            .map_err(|e| StorageError::SerializationError {
-                message: format!("Failed to serialize vault entry: {}", e)
-            })?;
+        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
+            message: format!("Failed to serialize vault entry: {}", e),
+        })?;
 
         let blob_client = self.container_client.blob_client(&blob_name);
 
@@ -303,24 +303,29 @@ impl StorageBackend for AzureBlobStorage {
             .content_type("application/json")
             .await
             .map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to store blob '{}': {}", blob_name, e)
+                message: format!("Failed to store blob '{}': {}", blob_name, e),
             })?;
 
-        tracing::debug!("Stored vault entry: path={}, blob={}", entry.path, blob_name);
+        tracing::debug!(
+            "Stored vault entry: path={}, blob={}",
+            entry.path,
+            blob_name
+        );
         Ok(())
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
         // Azure Blob doesn't support direct ID lookup, so we need to search through blobs
         // This is inefficient for large datasets, but necessary for the interface
-        let mut stream = self.container_client
+        let mut stream = self
+            .container_client
             .list_blobs()
             .max_results(NonZeroU32::new(5000).unwrap()) // Reasonable limit to prevent excessive API calls
             .into_stream();
 
         while let Some(response) = stream.next().await {
             let response = response.map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to list blobs: {}", e)
+                message: format!("Failed to list blobs: {}", e),
             })?;
 
             for blob in response.blobs.blobs() {
@@ -362,8 +367,8 @@ impl StorageBackend for AzureBlobStorage {
                 Ok(None)
             }
             Err(e) => Err(StorageError::SerializationError {
-                message: format!("Failed to deserialize vault entry: {}", e)
-            })
+                message: format!("Failed to deserialize vault entry: {}", e),
+            }),
         }
     }
 
@@ -394,22 +399,23 @@ impl StorageBackend for AzureBlobStorage {
                 Ok(false)
             }
             Err(e) => Err(StorageError::ConnectionFailed {
-                message: format!("Failed to delete blob '{}': {}", blob_name, e)
-            })
+                message: format!("Failed to delete blob '{}': {}", blob_name, e),
+            }),
         }
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
         let mut entries = Vec::new();
         let max_results = params.limit.unwrap_or(1000).min(5000); // Cap at reasonable limit
-        let mut stream = self.container_client
+        let mut stream = self
+            .container_client
             .list_blobs()
             .max_results(NonZeroU32::new(max_results as u32).unwrap())
             .into_stream();
 
         while let Some(response) = stream.next().await {
             let response = response.map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to list blobs: {}", e)
+                message: format!("Failed to list blobs: {}", e),
             })?;
 
             for blob in response.blobs.blobs() {
@@ -450,7 +456,8 @@ impl StorageBackend for AzureBlobStorage {
 
                     // Tag filter
                     if !params.tags.is_empty() {
-                        let has_matching_tag = params.tags.iter().any(|tag| entry.tags.contains(tag));
+                        let has_matching_tag =
+                            params.tags.iter().any(|tag| entry.tags.contains(tag));
                         if !has_matching_tag {
                             include = false;
                         }
@@ -486,14 +493,15 @@ impl StorageBackend for AzureBlobStorage {
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         let mut count = 0u64;
-        let mut stream = self.container_client
+        let mut stream = self
+            .container_client
             .list_blobs()
             .max_results(NonZeroU32::new(5000).unwrap()) // Reasonable batch size
             .into_stream();
 
         while let Some(response) = stream.next().await {
             let response = response.map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to list blobs: {}", e)
+                message: format!("Failed to list blobs: {}", e),
             })?;
 
             for blob in response.blobs.blobs() {
@@ -530,7 +538,8 @@ impl StorageBackend for AzureBlobStorage {
                     }
 
                     if !params.tags.is_empty() {
-                        let has_matching_tag = params.tags.iter().any(|tag| entry.tags.contains(tag));
+                        let has_matching_tag =
+                            params.tags.iter().any(|tag| entry.tags.contains(tag));
                         if !has_matching_tag {
                             include = false;
                         }
@@ -560,8 +569,8 @@ impl StorageBackend for AzureBlobStorage {
                 Ok(false)
             }
             Err(e) => Err(StorageError::ConnectionFailed {
-                message: format!("Failed to check blob existence '{}': {}", blob_name, e)
-            })
+                message: format!("Failed to check blob existence '{}': {}", blob_name, e),
+            }),
         }
     }
 
@@ -573,7 +582,8 @@ impl StorageBackend for AzureBlobStorage {
         let start = std::time::Instant::now();
 
         // Test connectivity by listing blobs (lightweight operation)
-        let result = self.container_client
+        let result = self
+            .container_client
             .list_blobs()
             .max_results(NonZeroU32::new(1).unwrap())
             .into_stream()
@@ -608,14 +618,15 @@ impl StorageBackend for AzureBlobStorage {
 
         let today = chrono::Utc::now().date_naive();
 
-        let mut stream = self.container_client
+        let mut stream = self
+            .container_client
             .list_blobs()
             .max_results(NonZeroU32::new(5000).unwrap())
             .into_stream();
 
         while let Some(response) = stream.next().await {
             let response = response.map_err(|e| StorageError::ConnectionFailed {
-                message: format!("Failed to list blobs for stats: {}", e)
+                message: format!("Failed to list blobs for stats: {}", e),
             })?;
 
             for blob in response.blobs.blobs() {
@@ -634,7 +645,9 @@ impl StorageBackend for AzureBlobStorage {
                     total_size_bytes += data.len() as u64;
 
                     // Count by security level
-                    *entries_by_security_level.entry(entry.security_level).or_insert(0) += 1;
+                    *entries_by_security_level
+                        .entry(entry.security_level)
+                        .or_insert(0) += 1;
 
                     // Count entries created/updated today
                     if entry.created_at.date_naive() == today {

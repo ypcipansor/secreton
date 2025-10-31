@@ -488,7 +488,8 @@ mod tests {
     async fn test_register_standby() {
         let service = PerformanceStandbyService::new();
 
-        let _config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
+        let _config =
+            StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         let standby = service.register_standby(_config).await.unwrap();
         assert_eq!(standby.node_id, "standby-1");
@@ -499,7 +500,8 @@ mod tests {
     async fn test_standby_sync() {
         let service = PerformanceStandbyService::new();
 
-        let _config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
+        let _config =
+            StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         service.register_standby(_config).await.unwrap();
         service.start_standby("standby-1").await.unwrap();
@@ -517,7 +519,8 @@ mod tests {
     async fn test_read_with_caching() {
         let service = PerformanceStandbyService::new();
 
-        let _config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
+        let _config =
+            StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string());
 
         service.register_standby(_config).await.unwrap();
         service.start_standby("standby-1").await.unwrap();
@@ -558,8 +561,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_lag_detection() {
-        let _config = StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string())
-            .with_max_lag(10);
+        let _config =
+            StandbyConfig::new("standby-1".to_string(), "http://primary:8200".to_string())
+                .with_max_lag(10);
 
         let mut standby = StandbyNode::new(_config);
 

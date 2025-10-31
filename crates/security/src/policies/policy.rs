@@ -147,7 +147,7 @@ pub async fn evaluate_with_sentinel(
                     );
                 }
             } else {
-                                // HCL/dummy: if policy_code contains "allow", allow
+                // HCL/dummy: if policy_code contains "allow", allow
                 let allowed = pol.policy_code.contains("allow");
                 // Add audit logging
                 tracing::info!(
