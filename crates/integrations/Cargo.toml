@@ -4,8 +4,12 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "External integrations and third-party service connectors for Secreton"
-keywords = ["integrations", "connectors", "cloud", "kubernetes", "ci-cd"]
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 # Core dependencies

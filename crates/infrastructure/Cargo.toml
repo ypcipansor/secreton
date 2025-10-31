@@ -4,8 +4,12 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Infrastructure services and system components for Secreton"
-keywords = ["infrastructure", "observability", "monitoring", "api-gateway"]
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 # Core dependencies
