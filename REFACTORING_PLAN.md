@@ -53,9 +53,25 @@
 3. Handlers crate contains request/response handling
 4. Each secret engine in secrets crate
 
+### 5. Duplicate Authentication Implementations
+- **`crates/auth/`** - Older authentication crate with overlapping functionality
+- **`crates/auth-methods/`** - Newer, comprehensive authentication crate
+- Both have authentication method implementations (approle, aws, ldap, etc.)
+- **Action**: Deprecate `crates/auth`, migrate all to `crates/auth-methods`
+
 ## Implementation Order
 
-1. ✅ Phase 1: Remove duplicate directories (safe, high impact)
-2. Phase 2: Extract secret-graph crate
-3. Phase 3: Consolidate secret implementations
-4. Phase 4: Split api crate into handlers and services
+1. ✅ Phase 1: Remove duplicate directories (COMPLETE)
+   - ✅ Removed `storage_backends/secrets/` duplicate
+   - ✅ Created dedicated `secret-graph` crate
+   - ✅ Removed duplicate secret_dependency_graph implementations
+   
+2. 🔄 Phase 2: Consolidate Authentication (IN PROGRESS)
+   - Migrate all auth functionality to `auth-methods`
+   - Update dependencies to use `auth-methods` exclusively
+   - Remove deprecated `auth` crate
+   
+3. Phase 3: Additional Optimizations
+   - Review and consolidate remaining duplications
+   - Optimize import paths
+   - Improve crate documentation
