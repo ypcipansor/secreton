@@ -450,15 +450,15 @@ pub async fn get_secret(
         path: secret_data.path,
         data: secret_data.data,
         metadata: SecretMetadata {
-            description: None, // TODO: Get from storage
-            tags: vec![], // TODO: Get from storage
+            description: secret_data.metadata.description,
+            tags: secret_data.metadata.tags,
             owner: Some(user.username.clone()),
-            classification: None, // TODO: Get from storage
+            classification: secret_data.metadata.classification,
         },
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: None, // TODO: Implement TTL
+        expires_at: secret_data.expires_at,
     };
 
     // Audit: SecretAccess
@@ -686,25 +686,9 @@ pub async fn list_secrets(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List secrets via vault service
-    let secret_paths = state.services.vault.list_secrets(query.filter.as_deref(), &user.id).await
+    // List secrets via vault service with full metadata
+    let secrets = state.services.vault.list_secrets_with_metadata(query.filter.as_deref(), &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
-
-    // Convert to response format (placeholder - in production, get full metadata)
-    let secrets: Vec<SecretListItem> = secret_paths.into_iter().map(|path| {
-        SecretListItem {
-            path,
-            metadata: SecretMetadata {
-                description: None, // TODO: Get from storage
-                tags: vec![], // TODO: Get from storage
-                owner: Some(user.username.clone()),
-                classification: None, // TODO: Get from storage
-            },
-            version: 1, // TODO: Get actual version
-            created_at: chrono::Utc::now(), // TODO: Get actual timestamp
-            updated_at: chrono::Utc::now(), // TODO: Get actual timestamp
-        }
-    }).collect();
 
     Ok(Json(ApiResponse::success(secrets)))
 }
@@ -813,31 +797,20 @@ pub async fn get_key(
         })?;
 
     // Get public key if available (for asymmetric keys)
-    let public_key = match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            // For asymmetric keys, we would extract the public key
-            // For now, return a placeholder
-            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-        }
-        _ => None, // Symmetric keys don't have public keys
-    };
+    // Extract public key for asymmetric keys
+    let public_key = state.services.vault.get_public_key(&key_info.id).await.ok();
 
     let response = KeyResponse {
         id: key_info.id,
         name: key_info.name,
-        key_type: key_info.key_type,
-        algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
-        size: 256, // Default size
-        usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
-        metadata: KeyMetadata {
-            description: None,
-            tags: vec![],
-            owner: Some(user.username.clone()),
-            purpose: None,
-        },
+        key_type: key_info.key_type.clone(),
+        algorithm: key_info.algorithm,
+        size: key_info.size,
+        usage: key_info.usage,
+        metadata: key_info.metadata,
         version: key_info.version,
         created_at: key_info.created_at,
-        status: "active".to_string(),
+        status: key_info.status,
         public_key,
     };
 
@@ -1056,20 +1029,8 @@ pub async fn decrypt_data(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Decode ciphertext from base64
-    let ciphertext = base64::decode(&request.ciphertext)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
-
-    // For now, create a placeholder EncryptedData structure
-    // In a real implementation, the nonce and key_id would be stored/encoded with the ciphertext
-    let encrypted_data = vault::EncryptedData {
-        ciphertext,
-        nonce: vec![0u8; 12], // Placeholder nonce
-        key_id: format!("{}/{}", user.id, request.key_id),
-    };
-
-    // Decrypt data via vault service
-    let plaintext = state.services.vault.decrypt(&request.key_id, &encrypted_data, &user.id).await
+    // Decrypt data via vault service (handles ciphertext parsing internally)
+    let (plaintext, key_version) = state.services.vault.decrypt_with_version(&request.key_id, &request.ciphertext, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)))?;
 
     // Encode plaintext as base64
@@ -1077,7 +1038,7 @@ pub async fn decrypt_data(
 
     let response = DecryptResponse {
         plaintext: plaintext_b64,
-        key_version: 1, // TODO: Get actual key version
+        key_version,
     };
 
     // Audit: DecryptionOperation
@@ -1120,30 +1081,15 @@ pub async fn sign_data(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Decode data from base64 if needed
-    let data = base64::decode(&request.data)
-        .unwrap_or_else(|_| request.data.as_bytes().to_vec());
-
-    // For now, create a simple HMAC signature using SHA-256
-    // In a real implementation, this would use the actual key for proper signing
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
-
-    // Get a dummy key for HMAC (in production, get the actual key)
-    let dummy_key = b"dummy_signing_key_for_development";
-    let mut mac = Hmac::<Sha256>::new_from_slice(dummy_key)
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to create HMAC: {}", e)))?;
-
-    mac.update(&data);
-    let signature = mac.finalize().into_bytes();
-
-    // Encode signature as base64
-    let signature_b64 = base64::encode(&signature);
+    // Sign data via vault service
+    let algorithm = request.algorithm.as_deref().unwrap_or("HMAC-SHA256");
+    let (signature, key_version) = state.services.vault.sign(&request.key_id, &request.data, algorithm, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to sign data: {}", e)))?;
 
     let response = SignResponse {
-        signature: signature_b64,
-        key_version: 1, // TODO: Get actual key version
-        algorithm: request.algorithm.unwrap_or("HMAC-SHA256".to_string()),
+        signature,
+        key_version,
+        algorithm: algorithm.to_string(),
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -1170,29 +1116,13 @@ pub async fn verify_signature(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Decode data and signature from base64
-    let data = base64::decode(&request.data)
-        .unwrap_or_else(|_| request.data.as_bytes().to_vec());
-
-    let signature = base64::decode(&request.signature)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
-
-    // For now, verify using the same HMAC approach
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
-
-    let dummy_key = b"dummy_signing_key_for_development";
-    let mut mac = Hmac::<Sha256>::new_from_slice(dummy_key)
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to create HMAC: {}", e)))?;
-
-    mac.update(&data);
-    let expected_signature = mac.finalize().into_bytes();
-
-    let valid = signature == expected_signature.as_slice();
+    // Verify signature via vault service
+    let (valid, key_version) = state.services.vault.verify(&request.key_id, &request.data, &request.signature, &user.id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to verify signature: {}", e)))?;
 
     let response = VerifyResponse {
         valid,
-        key_version: 1, // TODO: Get actual key version
+        key_version,
     };
 
     Ok(Json(ApiResponse::success(response)))
