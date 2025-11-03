@@ -229,20 +229,30 @@ pub async fn generate_aws_credential(
     })
 }
 pub async fn generate_gcp_credential(role: &str) -> Result<DynamicGcpCredential, Box<dyn std::error::Error>> {
-    // Initialize GCP client
-    let gcp_client = google_cloud_storage::http::Client::default();
+    // Get GCP project ID from environment
+    let project_id = std::env::var("GCP_PROJECT_ID")
+        .unwrap_or_else(|_| "default-project".to_string());
     
-    // Generate service account key
-    // In production, use GCP IAM API to create service account and key
-    let service_account_email = format!("{}-sa@project.iam.gserviceaccount.com", role);
+    // Generate service account email
+    let service_account_email = format!("{}-sa@{}.iam.gserviceaccount.com", role, project_id);
     
-    // Create service account key JSON
-    // Note: In real implementation, call GCP IAM API's createKey method
+    // In production, use GCP IAM API to:
+    // 1. Create service account: iam.projects.serviceAccounts.create()
+    // 2. Generate key: iam.projects.serviceAccounts.keys.create()
+    // 3. Return the JSON key
+    //
+    // Example using google-cloud-rust SDK:
+    // let client = google_cloud_auth::project::create_token_source().await?;
+    // let iam_client = google_cloud_iam::client::Client::new(client);
+    // let key = iam_client.create_service_account_key(&service_account_email).await?;
+    
+    // For development/testing, generate a placeholder structure
+    // WARNING: This is for development only and will not authenticate with GCP
     let key_json = serde_json::json!({
         "type": "service_account",
-        "project_id": "project-id",
+        "project_id": project_id,
         "private_key_id": uuid::Uuid::new_v4().to_string(),
-        "private_key": "-----BEGIN PRIVATE KEY-----\ngenerated_key\n-----END PRIVATE KEY-----",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nDEVELOPMENT_ONLY_KEY\n-----END PRIVATE KEY-----",
         "client_email": service_account_email,
         "client_id": uuid::Uuid::new_v4().to_string(),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",

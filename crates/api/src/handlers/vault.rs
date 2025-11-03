@@ -687,6 +687,8 @@ pub async fn list_secrets(
     }
 
     // List secrets via vault service with full metadata
+    // Note: Requires vault service to implement list_secrets_with_metadata method
+    // This returns full SecretListItem objects with metadata, version, timestamps
     let secrets = state.services.vault.list_secrets_with_metadata(query.filter.as_deref(), &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
 

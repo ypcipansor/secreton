@@ -183,6 +183,9 @@ impl AdminService {
     }
 
     /// Get storage counts (secrets and keys)
+    /// 
+    /// Note: Requires StorageBackend to implement count_entries method
+    /// This is part of the extended storage interface
     async fn get_storage_counts(&self) -> Result<(u64, u64), AdminError> {
         let total_secrets = self.storage.count_entries("secrets/").await
             .map_err(|e| AdminError::Storage(e))?;
@@ -200,7 +203,9 @@ impl AdminService {
     /// Get cache hit rate from metrics/monitoring
     async fn get_cache_hit_rate(&self) -> f64 {
         // Query metrics system for cache statistics
-        // For now, calculate from storage metrics if available
+        // Note: This attempts to get cache metrics from storage backend
+        // Not all storage backends support cache metrics - falls back to default value
+        // In production, consider using a dedicated metrics service
         self.storage.get_cache_hit_rate().await.unwrap_or(0.85)
     }
 
@@ -603,11 +608,20 @@ impl AdminService {
         })
     }
 
+    /// List of configuration keys that cannot be modified through the API
+    const RESTRICTED_CONFIG_KEYS: &'static [&'static str] = &[
+        "secret_key", 
+        "master_key", 
+        "root_token",
+        "encryption_key",
+        "tls.private_key",
+        "database.password",
+    ];
+
     /// Validate configuration key and value
     fn validate_config_key(&self, key: &str, value: &serde_json::Value) -> Result<(), String> {
         // Validate that the key is allowed to be changed
-        let restricted_keys = ["secret_key", "master_key", "root_token"];
-        if restricted_keys.contains(&key) {
+        if Self::RESTRICTED_CONFIG_KEYS.contains(&key) {
             return Err("Cannot modify restricted configuration key".to_string());
         }
         

@@ -432,6 +432,8 @@ pub async fn setup_mfa(
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Setup MFA through the MFA service
+    // Note: Auth service's setup_mfa method signature:
+    //   setup_mfa(user_id: &str, method: &str, phone: Option<&str>, email: Option<&str>)
     let response = state.services.auth.setup_mfa(&user.id, &request.method, request.phone_number.as_deref(), request.email.as_deref()).await
         .map_err(|e| crate::ApiError::Authentication(format!("MFA setup failed: {}", e)))?;
 
