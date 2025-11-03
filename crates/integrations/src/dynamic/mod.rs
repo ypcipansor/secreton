@@ -247,12 +247,15 @@ pub async fn generate_gcp_credential(role: &str) -> Result<DynamicGcpCredential,
     // let key = iam_client.create_service_account_key(&service_account_email).await?;
     
     // For development/testing, generate a placeholder structure
-    // WARNING: This is for development only and will not authenticate with GCP
+    // ⚠️ CRITICAL WARNING: This is a NON-FUNCTIONAL placeholder for development only
+    // This will NOT authenticate with GCP and MUST NOT be used in production
+    // Production deployment MUST implement proper GCP IAM API integration
     let key_json = serde_json::json!({
         "type": "service_account",
         "project_id": project_id,
         "private_key_id": uuid::Uuid::new_v4().to_string(),
-        "private_key": "-----BEGIN PRIVATE KEY-----\nDEVELOPMENT_ONLY_KEY\n-----END PRIVATE KEY-----",
+        "private_key": format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----", 
+            "INVALID_KEY_FOR_DEVELOPMENT_TESTING_ONLY_DO_NOT_USE_IN_PRODUCTION"),
         "client_email": service_account_email,
         "client_id": uuid::Uuid::new_v4().to_string(),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
