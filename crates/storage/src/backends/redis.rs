@@ -6,29 +6,34 @@ use crate::{
 };
 use async_trait::async_trait;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
+use std::sync::Arc;
 use std::collections::HashMap;
 use uuid::Uuid;
+use tokio::sync::Mutex;
 
 /// Modern Redis storage backend with connection pooling
 pub struct RedisBackend {
-    manager: ConnectionManager,
+    manager: Arc<Mutex<ConnectionManager>>,
 }
 
 /// Redis transaction implementation using pipelines
 pub struct RedisTransaction {
-    operations: Vec<RedisOperation>,
+    manager: Arc<Mutex<ConnectionManager>>,
+    operations: Vec<RedisTransactionOp>,
     committed: bool,
 }
 
-enum RedisOperation {
-    Store(()),
-    Update(()),
-    Delete(()),
+#[derive(Clone)]
+enum RedisTransactionOp {
+    Store(VaultEntry),
+    Update(VaultEntry),
+    Delete(Uuid),
 }
 
 impl RedisTransaction {
-    pub fn new() -> Self {
+    pub fn new(manager: Arc<Mutex<ConnectionManager>>) -> Self {
         Self {
+            manager,
             operations: Vec::new(),
             committed: false,
         }
@@ -37,33 +42,33 @@ impl RedisTransaction {
 
 #[async_trait]
 impl StorageTransaction for RedisTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Store(()));
+        self.operations.push(RedisTransactionOp::Store(entry.clone()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Update(()));
+        self.operations.push(RedisTransactionOp::Update(entry.clone()));
         Ok(())
     }
 
-    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisOperation::Delete(()));
+        self.operations.push(RedisTransactionOp::Delete(id));
         Ok(true)
     }
 
@@ -74,8 +79,44 @@ impl StorageTransaction for RedisTransaction {
             });
         }
 
-        // TODO: Get Redis connection from backend
-        // For now, we just mark as committed since we don't have access to connection
+        // Get Redis connection from backend and execute all operations
+        let mut conn = self.manager.lock().await;
+        
+        for op in self.operations {
+            match op {
+                RedisTransactionOp::Store(entry) => {
+                    let key = format!("vault:entry:{}", entry.id);
+                    let value = serde_json::to_string(&entry).map_err(|e| StorageError::SerializationError {
+                        message: e.to_string(),
+                    })?;
+                    conn.set::<_, _, ()>(&key, &value)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to store entry in transaction: {}", e),
+                        })?;
+                }
+                RedisTransactionOp::Update(entry) => {
+                    let key = format!("vault:entry:{}", entry.id);
+                    let value = serde_json::to_string(&entry).map_err(|e| StorageError::SerializationError {
+                        message: e.to_string(),
+                    })?;
+                    conn.set::<_, _, ()>(&key, &value)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to update entry in transaction: {}", e),
+                        })?;
+                }
+                RedisTransactionOp::Delete(id) => {
+                    let key = format!("vault:entry:{}", id);
+                    conn.del::<_, ()>(&key)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to delete entry in transaction: {}", e),
+                        })?;
+                }
+            }
+        }
+        
         self.committed = true;
         Ok(())
     }
@@ -100,7 +141,7 @@ impl RedisBackend {
                     message: format!("Failed to create Redis connection manager: {}", e),
                 })?;
 
-        Ok(Self { manager })
+        Ok(Self { manager: Arc::new(Mutex::new(manager)) })
     }
 }
 
@@ -112,7 +153,7 @@ impl StorageBackend for RedisBackend {
             message: e.to_string(),
         })?;
 
-        let mut conn = self.manager.clone();
+        let mut conn = self.manager.lock().await;
         conn.set::<_, _, ()>(&key, value)
             .await
             .map_err(|e| StorageError::QueryFailed {
@@ -134,7 +175,7 @@ impl StorageBackend for RedisBackend {
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
         let key = format!("vault:entry:{}", id);
-        let mut conn = self.manager.clone();
+        let mut conn = self.manager.lock().await;
 
         let value: Option<String> =
             conn.get(&key)
@@ -158,7 +199,7 @@ impl StorageBackend for RedisBackend {
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
         let key = format!("vault:path:{}", path);
-        let mut conn = self.manager.clone();
+        let mut conn = self.manager.lock().await;
 
         let entry_id: Option<String> =
             conn.get(&key)
@@ -205,7 +246,7 @@ impl StorageBackend for RedisBackend {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        Ok(Box::new(RedisTransaction::new()))
+        Ok(Box::new(RedisTransaction::new(self.manager.clone())))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

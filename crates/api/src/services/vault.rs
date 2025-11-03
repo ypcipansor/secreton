@@ -284,10 +284,12 @@ impl VaultService {
         self.storage.store(&key_path, &metadata_bytes).await
             .map_err(|e| VaultError::Storage(e))?;
 
-        // For now, store the key data itself (in production, this would be encrypted and stored securely)
-        // TODO: Implement secure key storage with encryption
+        // Encrypt the key data before storing
+        let encrypted_key_data = self.crypto.encrypt_data(&key_data)
+            .map_err(|e| VaultError::Crypto(e))?;
+        
         let key_data_path = format!("key_data/{}/{}", user_id, key_name);
-        self.storage.store(&key_data_path, &key_data).await
+        self.storage.store(&key_data_path, &encrypted_key_data).await
             .map_err(|e| VaultError::Storage(e))?;
 
         // Log audit trail

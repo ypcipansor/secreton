@@ -13,7 +13,7 @@ use anyhow::Result;
 use crate::config::ApiConfig;
 use brankas_core::audit::AuditLogger;
 use brankas_crypto::{CryptoService, SecurityParams};
-use brankas_storage::StorageBackend;
+use brankas_storage::{StorageBackend, StorageFactory, StorageFactoryConfig, StorageBackendType};
 use brankas_core::storage::StorageBackend as CoreStorageBackend;
 
 /// Service container holding all application services
@@ -91,7 +91,7 @@ impl ServiceContainer {
     async fn create_storage_backend(
         config: &ApiConfig,
     ) -> Result<Arc<dyn StorageBackend + Send + Sync>> {
-        use brankas_storage::{MockStorageBackend, RaftStorageBackend, RaftConfig};
+        use brankas_storage::{RaftConfig, PostgresBackendConfig, RedisBackendConfig, FileBackendConfig};
         
         // Get storage backend type from config or environment
         let backend_type = std::env::var("BRANKAS_STORAGE_BACKEND")
@@ -99,9 +99,69 @@ impl ServiceContainer {
         
         tracing::info!("Initializing storage backend: {}", backend_type);
         
-        match backend_type.as_str() {
-            "raft" | "integrated" => {
-                // Create Raft configuration
+        let backend_type_enum = match backend_type.as_str() {
+            "raft" | "integrated" => StorageBackendType::Raft,
+            "postgres" | "postgresql" => StorageBackendType::Postgres,
+            "redis" => StorageBackendType::Redis,
+            "file" => StorageBackendType::File,
+            "memory" | "mock" => StorageBackendType::Memory,
+            "mysql" => StorageBackendType::MySQL,
+            "dynamodb" => StorageBackendType::DynamoDB,
+            "s3" => StorageBackendType::S3,
+            "etcd" => StorageBackendType::Etcd,
+            "consul" => StorageBackendType::Consul,
+            "cockroachdb" => StorageBackendType::CockroachDB,
+            "cassandra" => StorageBackendType::Cassandra,
+            "mongodb" => StorageBackendType::MongoDB,
+            _ => {
+                tracing::warn!("Unknown storage backend '{}', defaulting to memory", backend_type);
+                StorageBackendType::Memory
+            }
+        };
+        
+        // Build storage factory configuration
+        let mut factory_config = StorageFactoryConfig {
+            backend_type: backend_type_enum.clone(),
+            file_config: None,
+            postgres_config: None,
+            redis_config: None,
+            raft_config: None,
+            consul_config: None,
+            s3_config: None,
+            etcd_config: None,
+            dynamodb_config: None,
+            mysql_config: None,
+            cockroachdb_config: None,
+            cassandra_config: None,
+            mongodb_config: None,
+        };
+        
+        // Configure specific backends based on environment variables
+        match backend_type_enum {
+            StorageBackendType::Postgres | StorageBackendType::PostgreSQL => {
+                let connection_string = std::env::var("BRANKAS_POSTGRES_URL")
+                    .unwrap_or_else(|_| "postgresql://localhost:5432/secreton".to_string());
+                factory_config.postgres_config = Some(PostgresBackendConfig {
+                    connection_string,
+                });
+                tracing::info!("Configured PostgreSQL backend");
+            }
+            
+            StorageBackendType::Redis => {
+                let url = std::env::var("BRANKAS_REDIS_URL")
+                    .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+                factory_config.redis_config = Some(RedisBackendConfig { url });
+                tracing::info!("Configured Redis backend");
+            }
+            
+            StorageBackendType::File => {
+                let base_path = std::env::var("BRANKAS_FILE_STORAGE_PATH")
+                    .unwrap_or_else(|_| "./data/vault".to_string());
+                factory_config.file_config = Some(FileBackendConfig { base_path });
+                tracing::info!("Configured File backend");
+            }
+            
+            StorageBackendType::Raft => {
                 let raft_config = RaftConfig {
                     node_id: std::env::var("BRANKAS_NODE_ID")
                         .unwrap_or_else(|_| format!("secreton-node-{}", uuid::Uuid::new_v4())),
@@ -135,46 +195,27 @@ impl ServiceContainer {
                         .parse()
                         .unwrap_or(1),
                 };
-                
-                tracing::info!("Raft configuration: {:?}", raft_config);
-                
-                let backend = RaftStorageBackend::new(raft_config).await
-                    .map_err(|e| anyhow::anyhow!("Failed to create Raft storage backend: {}", e))?;
-                
-                // Initialize the Raft cluster
-                backend.initialize_cluster().await
-                    .map_err(|e| anyhow::anyhow!("Failed to initialize Raft cluster: {}", e))?;
-                
-                tracing::info!("Raft integrated storage backend initialized successfully");
-                Ok(Arc::new(backend))
+                factory_config.raft_config = Some(raft_config);
+                tracing::info!("Configured Raft backend");
             }
             
-            "memory" | "mock" => {
+            StorageBackendType::Memory => {
                 tracing::info!("Using in-memory mock storage backend");
-                Ok(Arc::new(MockStorageBackend::new()))
             }
             
-            // TODO: Add other backends (PostgreSQL, Redis, File)
-            "postgres" => {
-                tracing::warn!("PostgreSQL backend not yet implemented, falling back to memory");
-                Ok(Arc::new(MockStorageBackend::new()))
-            }
-            
-            "redis" => {
-                tracing::warn!("Redis backend not yet implemented, falling back to memory");
-                Ok(Arc::new(MockStorageBackend::new()))
-            }
-            
-            "file" => {
-                tracing::warn!("File backend not yet implemented, falling back to memory");
-                Ok(Arc::new(MockStorageBackend::new()))
-            }
-            
+            // Other backends - configured via environment
             _ => {
-                tracing::warn!("Unknown storage backend '{}', falling back to memory", backend_type);
-                Ok(Arc::new(MockStorageBackend::new()))
+                tracing::warn!("Backend type {:?} requires configuration", backend_type_enum);
             }
         }
+        
+        // Create backend using factory
+        let backend = StorageFactory::create(factory_config)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create storage backend: {}", e))?;
+        
+        tracing::info!("Storage backend {:?} initialized successfully", backend_type_enum);
+        Ok(backend)
     }
 }
 

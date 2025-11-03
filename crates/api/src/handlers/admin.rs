@@ -695,6 +695,17 @@ pub async fn get_system_metrics(
     let disk = get_disk_metrics().await;
     let network = get_network_metrics().await;
 
+    // Count total policies from storage
+    let total_policies = state.storage.list(&brankas_storage::QueryParams {
+        path: Some("policies".to_string()),
+        prefix: Some("policies/".to_string()),
+        limit: None,
+        offset: 0,
+        ..Default::default()
+    }).await
+    .map(|entries| entries.len() as u64)
+    .unwrap_or(0);
+
     let metrics = SystemMetrics {
         uptime: stats.uptime_seconds,
         memory_usage: memory,
@@ -704,7 +715,7 @@ pub async fn get_system_metrics(
         vault: VaultMetrics {
             total_secrets: stats.total_secrets,
             total_keys: stats.total_keys,
-            total_policies: 0, // TODO: Get from policy service
+            total_policies,
             active_sessions: stats.active_sessions,
             operations_per_second: stats.requests_per_minute,
         },

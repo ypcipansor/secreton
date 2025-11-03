@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use thiserror::Error;
 use uuid;
+use sha2::{Sha256, Digest};
 
 use brankas_core::audit::AuditLogger;
 use brankas_storage::StorageBackend;
@@ -198,36 +200,136 @@ impl AdminService {
 
     /// Create system backup
     pub async fn create_backup(&self) -> Result<BackupInfo, AdminError> {
-        // TODO: Implement backup creation
         let backup_id = uuid::Uuid::new_v4().to_string();
+        let backup_path = format!("backups/{}", backup_id);
         
-        Ok(BackupInfo {
+        // Get all vault entries to backup
+        let query_params = brankas_storage::QueryParams {
+            path: Some("".to_string()),
+            prefix: Some("".to_string()),
+            limit: None,
+            offset: 0,
+            ..Default::default()
+        };
+        
+        let entries = self.storage.list(&query_params).await
+            .map_err(|e| AdminError::Storage(e))?;
+        
+        // Serialize all entries
+        let backup_data = serde_json::to_string(&entries)
+            .map_err(|e| AdminError::Internal(e.into()))?;
+        
+        // Calculate checksum
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(backup_data.as_bytes());
+        let checksum = format!("sha256:{:x}", hasher.finalize());
+        
+        // Store backup metadata
+        let size_bytes = backup_data.len() as u64;
+        let mut metadata = HashMap::new();
+        metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        metadata.insert("type".to_string(), "full".to_string());
+        metadata.insert("entry_count".to_string(), entries.len().to_string());
+        metadata.insert("data".to_string(), backup_data);
+        
+        let backup_entry = brankas_storage::VaultEntry {
+            id: uuid::Uuid::new_v4(),
+            path: backup_path,
+            encrypted_data: Vec::new(),
+            encryption_metadata: brankas_storage::EncryptionMetadata {
+                algorithm: "none".to_string(),
+                key_id: "backup".to_string(),
+                iv: Vec::new(),
+                auth_tag: None,
+                aad: None,
+            },
+            security_level: brankas_storage::SecurityLevel::TopSecret,
+            metadata,
+            tags: vec!["backup".to_string(), "system".to_string()],
+            version: 1,
+            owner_id: uuid::Uuid::new_v4(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            expires_at: None,
+        };
+        
+        self.storage.store(&backup_entry).await
+            .map_err(|e| AdminError::Storage(e))?;
+        
+        let backup_info = BackupInfo {
             id: backup_id,
             created_at: chrono::Utc::now(),
-            size_bytes: 1_073_741_824, // 1GB
+            size_bytes,
             compressed: true,
             encrypted: true,
-            checksum: "sha256:abc123...".to_string(),
+            checksum,
             metadata: {
-                let mut metadata = HashMap::new();
-                metadata.insert("version".to_string(), "1.0.0".to_string());
-                metadata.insert("type".to_string(), "full".to_string());
-                metadata
+                let mut m = HashMap::new();
+                m.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+                m.insert("type".to_string(), "full".to_string());
+                m
             },
-        })
+        };
+        
+        Ok(backup_info)
     }
 
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
-        // TODO: Implement backup listing
-        Ok(vec![])
+        let query_params = brankas_storage::QueryParams {
+            path: Some("backups".to_string()),
+            prefix: Some("backups/".to_string()),
+            limit: None,
+            offset: 0,
+            ..Default::default()
+        };
+        
+        let entries = self.storage.list(&query_params).await
+            .map_err(|e| AdminError::Storage(e))?;
+        
+        let backups = entries.into_iter()
+            .filter_map(|entry| {
+                let backup_id = entry.path.split('/').last()?.to_string();
+                Some(BackupInfo {
+                    id: backup_id,
+                    created_at: entry.created_at,
+                    size_bytes: entry.metadata.get("data").map(|d| d.len() as u64).unwrap_or(0),
+                    compressed: true,
+                    encrypted: true,
+                    checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
+                    metadata: entry.metadata,
+                })
+            })
+            .collect();
+        
+        Ok(backups)
     }
 
     /// Restore from backup
     pub async fn restore_backup(&self, backup_id: &str) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
         
-        // TODO: Implement backup restoration
+        let backup_path = format!("backups/{}", backup_id);
+        let backup_entry = self.storage.get_by_path(&backup_path).await
+            .map_err(|e| AdminError::Storage(e))?
+            .ok_or_else(|| AdminError::NotFound(format!("Backup {} not found", backup_id)))?;
+        
+        // Get backup data
+        let backup_data = backup_entry.metadata.get("data")
+            .ok_or_else(|| AdminError::Internal(anyhow::anyhow!("Backup data not found")))?;
+        
+        // Parse entries
+        let entries: Vec<brankas_storage::VaultEntry> = serde_json::from_str(backup_data)
+            .map_err(|e| AdminError::Internal(e.into()))?;
+        
+        // Restore each entry (excluding backup entries themselves)
+        for entry in entries {
+            if !entry.path.starts_with("backups/") {
+                self.storage.store(&entry).await
+                    .map_err(|e| AdminError::Storage(e))?;
+            }
+        }
         
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
@@ -237,6 +339,9 @@ impl AdminService {
             details: {
                 let mut details = HashMap::new();
                 details.insert("backup_id".to_string(), serde_json::Value::String(backup_id.to_string()));
+                details.insert("entries_restored".to_string(), serde_json::Value::Number(
+                    serde_json::Number::from(entries.len() as u64)
+                ));
                 details
             },
         })
@@ -297,19 +402,94 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
-        // TODO: Implement audit log retrieval with filtering
-        Ok(vec![])
+        let query_params = brankas_storage::QueryParams {
+            path: Some("audit_logs".to_string()),
+            prefix: Some("audit_logs/".to_string()),
+            limit,
+            offset: 0,
+            ..Default::default()
+        };
+        
+        let entries = self.storage.list(&query_params).await
+            .map_err(|e| AdminError::Storage(e))?;
+        
+        let mut audit_logs: Vec<AuditLogEntry> = entries.into_iter()
+            .filter_map(|entry| {
+                entry.metadata.get("log_data").and_then(|data| {
+                    serde_json::from_str(data).ok()
+                })
+            })
+            .collect();
+        
+        // Apply filters
+        if let Some(start) = start_time {
+            audit_logs.retain(|log| log.timestamp >= start);
+        }
+        if let Some(end) = end_time {
+            audit_logs.retain(|log| log.timestamp <= end);
+        }
+        if let Some(user) = user_id {
+            audit_logs.retain(|log| log.user_id == user);
+        }
+        if let Some(act) = action {
+            audit_logs.retain(|log| log.action == act);
+        }
+        
+        // Sort by timestamp descending
+        audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        
+        Ok(audit_logs)
     }
 
-    /// Export audit logs
+    /// Export audit logs in specified format
     pub async fn export_audit_logs(
         &self,
         format: &str,
         start_time: Option<chrono::DateTime<chrono::Utc>>,
         end_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<String, AdminError> {
-        // TODO: Implement audit log export
-        Ok("exported_data_placeholder".to_string())
+        // Get all audit logs for the time range
+        let audit_logs = self.get_audit_logs(start_time, end_time, None, None, None).await?;
+        
+        match format.to_lowercase().as_str() {
+            "json" => {
+                serde_json::to_string_pretty(&audit_logs)
+                    .map_err(|e| AdminError::Internal(e.into()))
+            },
+            "csv" => {
+                let mut csv_content = String::from("timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n");
+                for log in audit_logs {
+                    csv_content.push_str(&format!(
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                        log.timestamp,
+                        log.user_id,
+                        log.action,
+                        log.resource,
+                        log.resource_id.unwrap_or_default(),
+                        log.ip_address,
+                        log.user_agent,
+                        log.success
+                    ));
+                }
+                Ok(csv_content)
+            },
+            "xml" => {
+                let mut xml_content = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
+                for log in audit_logs {
+                    xml_content.push_str(&format!(
+                        "  <entry>\n    <timestamp>{}</timestamp>\n    <user_id>{}</user_id>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
+                        log.timestamp,
+                        log.user_id,
+                        log.action,
+                        log.resource,
+                        log.success
+                    ));
+                }
+                xml_content.push_str("</audit_logs>");
+                Ok(xml_content)
+            },
+            _ => Err(AdminError::InvalidConfig(format!("Unsupported export format: {}", format)))
+        }
     }
 
     /// Run security scan
@@ -405,7 +585,78 @@ impl AdminService {
     ) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
         
-        // TODO: Validate and apply configuration updates
+        // Validate configuration updates
+        let mut invalid_keys = Vec::new();
+        for key in config_updates.keys() {
+            // Only allow specific configuration keys for security
+            if !matches!(key.as_str(),
+                "jwt_expiration" | "session_timeout" | "max_failed_attempts" |
+                "password_policy_min_length" | "password_policy_require_uppercase" |
+                "password_policy_require_numbers" | "password_policy_require_special" |
+                "rate_limit_requests_per_minute" | "enable_mfa" | "enable_audit_logging" |
+                "backup_retention_days" | "log_retention_days"
+            ) {
+                invalid_keys.push(key.clone());
+            }
+        }
+        
+        if !invalid_keys.is_empty() {
+            return Err(AdminError::InvalidConfig(
+                format!("Invalid configuration keys: {}", invalid_keys.join(", "))
+            ));
+        }
+        
+        // Store configuration in system config path
+        let config_path = "system/config";
+        let current_config = self.storage.get_by_path(config_path).await
+            .map_err(|e| AdminError::Storage(e))?;
+        
+        let mut config_data: HashMap<String, serde_json::Value> = current_config
+            .and_then(|entry| {
+                entry.metadata.get("config_data").and_then(|data| {
+                    serde_json::from_str(data).ok()
+                })
+            })
+            .unwrap_or_default();
+        
+        // Apply updates
+        let mut updated_count = 0;
+        for (key, value) in config_updates {
+            config_data.insert(key, value);
+            updated_count += 1;
+        }
+        
+        // Persist updated configuration
+        let config_json = serde_json::to_string(&config_data)
+            .map_err(|e| AdminError::Internal(e.into()))?;
+        
+        let mut metadata = HashMap::new();
+        metadata.insert("config_data".to_string(), config_json);
+        metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
+        
+        let config_entry = brankas_storage::VaultEntry {
+            id: uuid::Uuid::new_v4(),
+            path: config_path.to_string(),
+            encrypted_data: Vec::new(),
+            encryption_metadata: brankas_storage::EncryptionMetadata {
+                algorithm: "none".to_string(),
+                key_id: "config".to_string(),
+                iv: Vec::new(),
+                auth_tag: None,
+                aad: None,
+            },
+            security_level: brankas_storage::SecurityLevel::Secret,
+            metadata,
+            tags: vec!["system".to_string(), "config".to_string()],
+            version: 1,
+            owner_id: uuid::Uuid::new_v4(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            expires_at: None,
+        };
+        
+        self.storage.store(&config_entry).await
+            .map_err(|e| AdminError::Storage(e))?;
         
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
@@ -415,7 +666,10 @@ impl AdminService {
             details: {
                 let mut details = HashMap::new();
                 details.insert("updated_keys".to_string(), serde_json::Value::Array(
-                    config_updates.keys().map(|k| serde_json::Value::String(k.clone())).collect()
+                    config_data.keys().map(|k| serde_json::Value::String(k.clone())).collect()
+                ));
+                details.insert("update_count".to_string(), serde_json::Value::Number(
+                    serde_json::Number::from(updated_count as u64)
                 ));
                 details
             },
