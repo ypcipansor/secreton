@@ -225,11 +225,17 @@ pub struct SessionInfo {
 /// User login endpoint
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
-    // Extract client information from headers
-    let ip_address = "127.0.0.1".to_string(); // TODO: Extract from request
-    let user_agent = "Unknown".to_string(); // TODO: Extract from request
+    // Extract client information from headers and connection
+    let ip_address = addr.ip().to_string();
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("Unknown")
+        .to_string();
 
     // Authenticate user
     let auth_result = state.services.auth.authenticate(
@@ -313,9 +319,13 @@ pub async fn logout(
     let user = state.services.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // Invalidate the token (implementation depends on token service)
-    // For now, we'll just log the logout
-    // TODO: Implement token invalidation in token service
+    // Invalidate the token
+    state.services.auth.invalidate_token(token).await
+        .map_err(|e| crate::ApiError::Authentication(format!("Failed to invalidate token: {}", e)))?;
+
+    // Extract session ID from token claims
+    let session_id = state.services.auth.extract_session_id(token).await
+        .unwrap_or_else(|_| "unknown".to_string());
 
     let data = serde_json::json!({
         "message": "Successfully logged out"
@@ -327,7 +337,7 @@ pub async fn logout(
         .log_event(
             SecurityEventType::SessionTerminated {
                 user: user.username,
-                session_id: "unknown".to_string(), // TODO: Extract session ID from token
+                session_id,
                 reason: "logout".to_string(),
             },
             Some(user.id),
@@ -421,34 +431,15 @@ pub async fn setup_mfa(
     let user = state.services.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // For now, implement basic TOTP setup
-    // TODO: Integrate with proper MFA service
-    let response = match request.method.as_str() {
-        "totp" => {
-            // Generate a random secret for TOTP
-            use rand::Rng;
-            let secret: String = (0..32)
-                .map(|_| {
-                    let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-                    chars[rand::thread_rng().gen_range(0..chars.len())] as char
-                })
-                .collect();
+    // Setup MFA through the MFA service
+    let response = state.services.auth.setup_mfa(&user.id, &request.method, request.phone_number.as_deref(), request.email.as_deref()).await
+        .map_err(|e| crate::ApiError::Authentication(format!("MFA setup failed: {}", e)))?;
 
-            // Generate backup codes
-            let backup_codes: Vec<String> = (0..10)
-                .map(|_| format!("{:06}", rand::thread_rng().gen_range(0..1000000)))
-                .collect();
-
-            MfaSetupResponse {
-                method: "totp".to_string(),
-                secret: Some(secret),
-                qr_code: Some(format!("otpauth://totp/Secreton:{}?secret={}&issuer=Secreton", user.username, secret)),
-                backup_codes,
-            }
-        }
-        _ => {
-            return Err(crate::ApiError::Validation(format!("Unsupported MFA method: {}", request.method)));
-        }
+    let mfa_response = MfaSetupResponse {
+        method: response.method,
+        secret: response.secret,
+        qr_code: response.qr_code,
+        backup_codes: response.backup_codes,
     };
 
     // Audit: MFA setup
@@ -466,7 +457,7 @@ pub async fn setup_mfa(
         )
         .await;
 
-    Ok(Json(ApiResponse::success(response)))
+    Ok(Json(ApiResponse::success(mfa_response)))
 }
 
 /// Verify MFA code
@@ -486,15 +477,9 @@ pub async fn verify_mfa(
     let user = state.services.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // For now, implement basic TOTP verification
-    // TODO: Integrate with proper MFA service and TOTP library
-    let is_valid = match request.method.as_str() {
-        "totp" => {
-            // Basic TOTP validation using HMAC-SHA1
-            validate_totp_code(&request.code, &user.id) // Using user ID as secret for demo
-        }
-        _ => false,
-    };
+    // Verify MFA code through the MFA service
+    let is_valid = state.services.auth.verify_mfa(&user.id, &request.method, &request.code, request.backup_code.as_deref()).await
+        .map_err(|e| crate::ApiError::Authentication(format!("MFA verification failed: {}", e)))?;
 
     if !is_valid {
         return Err(crate::ApiError::Authentication("Invalid MFA code".to_string()));
@@ -548,9 +533,9 @@ pub async fn disable_mfa(
         return Err(crate::ApiError::Authentication("Invalid password".to_string()));
     }
 
-    // For now, implement basic MFA disable
-    // TODO: Integrate with proper MFA service to actually disable MFA settings
-    let method = "totp"; // Assume TOTP for now
+    // Disable MFA through the MFA service
+    let method = state.services.auth.disable_mfa(&user.id).await
+        .map_err(|e| crate::ApiError::Authentication(format!("MFA disable failed: {}", e)))?;
 
     let data = serde_json::json!({
         "message": "MFA successfully disabled",
@@ -589,49 +574,24 @@ pub async fn oauth_login(
     // Generate secure random state
     use rand::{thread_rng, Rng};
     use rand::distributions::Alphanumeric;
-    let state: String = thread_rng()
+    let state_token: String = thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
         .map(char::from)
         .collect();
 
-    // TODO: Store state in cache/database with expiration for callback verification
-    // For now, we'll just return it (in production, this should be stored securely)
+    // Store state in cache with expiration for CSRF protection
+    state.services.auth.store_oauth_state(&state_token, &provider, chrono::Duration::minutes(10)).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to store OAuth state: {}", e)))?;
 
-    // Build authorization URL based on provider
-    let auth_url = match provider.as_str() {
-        "google" => format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid%20email%20profile&state={}",
-            "google_client_id", // TODO: Get from config
-            "https://api.secreton.com/auth/oauth/google/callback", // TODO: Get from config
-            state
-        ),
-        "github" => format!(
-            "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=user:email&state={}",
-            "github_client_id", // TODO: Get from config
-            "https://api.secreton.com/auth/oauth/github/callback", // TODO: Get from config
-            state
-        ),
-        "microsoft" => format!(
-            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={}&redirect_uri={}&response_type=code&scope=openid%20email%20profile&state={}",
-            "microsoft_client_id", // TODO: Get from config
-            "https://api.secreton.com/auth/oauth/microsoft/callback", // TODO: Get from config
-            state
-        ),
-        "okta" => format!(
-            "https://{}.okta.com/oauth2/v1/authorize?client_id={}&redirect_uri={}&response_type=code&scope=openid%20email%20profile&state={}",
-            "tenant", // TODO: Get from config
-            "okta_client_id", // TODO: Get from config
-            "https://api.secreton.com/auth/oauth/okta/callback", // TODO: Get from config
-            state
-        ),
-        _ => return Err(crate::ApiError::Validation(format!("Unsupported OAuth provider: {}", provider))),
-    };
+    // Get OAuth configuration from auth service
+    let auth_url = state.services.auth.get_oauth_authorization_url(&provider, &state_token).await
+        .map_err(|e| crate::ApiError::Validation(format!("OAuth configuration error: {}", e)))?;
 
     let data = serde_json::json!({
         "provider": provider,
         "auth_url": auth_url,
-        "state": state
+        "state": state_token
     });
 
     Ok(Json(ApiResponse::success(data)))
@@ -652,28 +612,21 @@ pub async fn oauth_callback(
         crate::ApiError::Validation("Missing state parameter".to_string())
     })?;
 
-    // TODO: Verify state parameter against stored state for CSRF protection
-    // For now, we'll accept any state (in production, validate against stored state)
+    // Verify state parameter against stored state for CSRF protection
+    state.services.auth.verify_oauth_state(state_param, &provider).await
+        .map_err(|e| crate::ApiError::Authentication(format!("Invalid OAuth state: {}", e)))?;
 
     if let Some(error) = params.get("error") {
         return Err(crate::ApiError::Authentication(format!("OAuth error: {}", error)));
     }
 
-    // TODO: Exchange authorization code for access token with OAuth provider
-    // This would involve making HTTP requests to the provider's token endpoint
-    // For now, simulate successful token exchange
+    // Exchange authorization code for access token with OAuth provider
+    let access_token = state.services.auth.exchange_oauth_code(&provider, code).await
+        .map_err(|e| crate::ApiError::Authentication(format!("OAuth token exchange failed: {}", e)))?;
 
-    // TODO: Fetch user information from provider using access token
-    // This would involve making HTTP requests to the provider's user info endpoint
-
-    // Simulate OAuth user info (in production, this comes from provider)
-    let oauth_user = OAuthUserInfo {
-        id: "oauth_123".to_string(),
-        email: "oauth@example.com".to_string(),
-        username: "oauth_user".to_string(),
-        name: "OAuth User".to_string(),
-        provider: provider.clone(),
-    };
+    // Fetch user information from provider using access token
+    let oauth_user = state.services.auth.fetch_oauth_user_info(&provider, &access_token).await
+        .map_err(|e| crate::ApiError::Authentication(format!("Failed to fetch user info: {}", e)))?;
 
     // Create or update user account
     let user = state.services.auth.oauth_login(&oauth_user).await
@@ -726,6 +679,7 @@ pub async fn oauth_callback(
 pub async fn list_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
 ) -> ApiResult<Json<ApiResponse<Vec<SessionInfo>>>> {
     // Extract and validate token
     let token = headers
@@ -738,21 +692,21 @@ pub async fn list_sessions(
     let user = state.services.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // TODO: Implement proper session management in auth service
-    // For now, return mock sessions (in production, fetch from database/cache)
-    let sessions = vec![
-        SessionInfo {
-            id: "current_session".to_string(),
-            user_id: user.id.to_string(),
-            ip_address: "127.0.0.1".to_string(), // TODO: Extract from request
-            user_agent: "Unknown".to_string(), // TODO: Extract from request
-            created_at: user.last_login,
-            last_accessed: chrono::Utc::now(),
-            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
-            is_current: true,
-        },
-        // In production, this would include other active sessions for the user
-    ];
+    // Get current IP and user agent
+    let current_ip = addr.ip().to_string();
+    let current_user_agent = headers
+        .get("user-agent")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("Unknown")
+        .to_string();
+
+    // Get current session ID from token
+    let current_session_id = state.services.auth.extract_session_id(token).await
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    // Fetch all active sessions for the user from auth service
+    let sessions = state.services.auth.list_user_sessions(&user.id, &current_session_id).await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to fetch sessions: {}", e)))?;
 
     Ok(Json(ApiResponse::success(sessions)))
 }
@@ -761,6 +715,7 @@ pub async fn list_sessions(
 pub async fn revoke_session(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     Path(session_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Extract and validate token
@@ -774,18 +729,17 @@ pub async fn revoke_session(
     let user = state.services.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // TODO: Validate that session_id belongs to the current user
-    // TODO: Remove session from storage/cache
-    // TODO: Invalidate associated tokens
+    // Get current IP and user agent
+    let ip_address = addr.ip().to_string();
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("Unknown")
+        .to_string();
 
-    // For now, only allow revoking the current session
-    if session_id != "current_session" {
-        return Err(crate::ApiError::Validation("Session not found or access denied".to_string()));
-    }
-
-    // Invalidate the current token (logout)
-    // TODO: Implement proper token invalidation in auth service
-    // For now, this is a placeholder - in production, add token to blacklist
+    // Validate that session_id belongs to the current user and revoke it
+    state.services.auth.revoke_session(&user.id, &session_id).await
+        .map_err(|e| crate::ApiError::Authentication(format!("Failed to revoke session: {}", e)))?;
 
     let data = serde_json::json!({
         "message": "Session successfully revoked",
@@ -799,8 +753,8 @@ pub async fn revoke_session(
             SecurityEventType::Logout {
                 user: user.username,
                 session_id: session_id.clone(),
-                ip_address: "127.0.0.1".to_string(), // TODO: Extract from request
-                user_agent: "Unknown".to_string(), // TODO: Extract from request
+                ip_address,
+                user_agent,
             },
             Some(user.id),
             None,
