@@ -20,6 +20,7 @@ members = [
     "crates/auth",
     "crates/auth-methods",
     "crates/policies",
+    "crates/secret-graph",
     # "fuzz"
 ]
 
@@ -53,6 +54,7 @@ secreton-secrets = { path = "crates/secrets" }
 secreton-auth = { path = "crates/auth" }
 secreton-auth-methods = { path = "crates/auth-methods" }
 secreton-policies = { path = "crates/policies" }
+secreton-secret-graph = { path = "crates/secret-graph" }
 audit-log = { path = "crates/security", package = "secreton-security" }
 # granular-revocation now part of auth-methods crate
 # secret-versioning now part of enterprise crate

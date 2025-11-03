@@ -12,7 +12,7 @@ pub mod disaster_recovery;
 pub mod distributed_tracing;
 pub mod kubernetes_external_secrets;
 pub mod kubernetes_operator;
-pub mod secret_dependency_graph;
+// secret_dependency_graph moved to dedicated crate: secreton-secret-graph
 pub mod secret_discovery_classification;
 pub mod secret_federation;
 pub mod secret_lifecycle_management;

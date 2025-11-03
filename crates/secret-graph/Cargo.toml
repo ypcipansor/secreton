@@ -1,0 +1,30 @@
+[package]
+name = "secreton-secret-graph"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Secret dependency tracking and impact analysis for Secreton"
+keywords = ["security", "secrets", "dependency-graph", "impact-analysis"]
+categories = ["cryptography", "security-tools"]
+
+[dependencies]
+# Core dependencies
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+
+# Storage
+secreton-storage = { workspace = true }
+secreton-errors = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
