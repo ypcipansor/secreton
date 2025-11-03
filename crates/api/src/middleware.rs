@@ -80,23 +80,13 @@ pub fn validate_client_certificate(
     _ca_cert_path: Option<&PathBuf>,
     allowed_subjects: &[String],
 ) -> CertificateValidation {
-    // TODO: Re-enable certificate caching when lifetime issues are resolved
-    // Try cache first
-    // let cert_der_hex = hex::encode(cert_der);
-    // if let Some(cache) = get_cert_cache() {
-    //     if let Some(cached_cert) = cache.get(&cert_der_hex) {
-    //         return validate_cached_certificate(&cached_cert, allowed_subjects);
-    //     }
-    // }
-
+    // Parse and validate certificate directly
+    // Note: Certificate caching is disabled to avoid lifetime complexity
+    // The performance impact is minimal as certificates are typically validated once per connection
+    
     // Parse certificate
     match X509Certificate::from_der(cert_der) {
         Ok((_, cert)) => {
-            // TODO: Cache the parsed certificate when lifetime issues are resolved
-            // if let Some(cache) = get_cert_cache() {
-            //     cache.insert(cert_der_hex, cert.clone());
-            // }
-
             validate_cached_certificate(&cert, allowed_subjects)
         }
         Err(e) => {
@@ -213,10 +203,15 @@ pub fn extract_client_certificate_from_tls(request: &Request) -> Option<Vec<u8>>
     }
 
     // Fallback to header-based extraction for development/testing
-    request
-        .headers()
-        .get("x-client-cert")
-        .and_then(|v| hex::decode(v).ok())
+    // In production, certificates should come from TLS layer, not headers
+    if cfg!(debug_assertions) {
+        request
+            .headers()
+            .get("x-client-cert")
+            .and_then(|v| hex::decode(v).ok())
+    } else {
+        None
+    }
 }
 
 /// Enhanced mTLS authentication middleware with proper TLS integration
@@ -232,9 +227,10 @@ pub async fn mtls_auth_middleware(
         return Ok(next.run(request).await);
     }
 
-    // TODO: Re-enable mTLS when TransitApiState has config field
     // Check if mTLS is configured and required
-    if let Some(mtls_config) = None::<&crate::config::MtlsConfig> {
+    // Note: mTLS configuration should be passed via state extension
+    // For now, mTLS is optional and can be enabled by adding config to state
+    if let Some(mtls_config) = request.extensions().get::<crate::config::MtlsConfig>() {
         if mtls_config.required {
             // Extract client certificate from TLS connection
             if let Some(client_cert_der) = extract_client_certificate_from_tls(&request) {

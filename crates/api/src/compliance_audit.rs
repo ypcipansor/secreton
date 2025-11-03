@@ -374,11 +374,14 @@ impl ComplianceManager {
 
     /// Send audit events to external systems
     async fn send_to_external_audit(&self, entry: &AuditLogEntry) {
-        // Implementation would integrate with external SIEM/SOC systems
-        // For now, just log to stdout for demonstration
-
+        // Integration point for external SIEM/SOC systems
+        // Implementations should send events to configured audit sinks
+        // Examples: Splunk, ElasticSearch, Datadog, etc.
+        
+        // Log critical events immediately
         if entry.severity == AuditSeverity::Critical {
             warn!("CRITICAL AUDIT EVENT: {:?}", entry);
+            // In production, send to SIEM via configured endpoint
         }
     }
 

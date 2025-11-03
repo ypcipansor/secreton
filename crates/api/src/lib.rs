@@ -71,7 +71,9 @@ pub mod middleware;
 pub mod performance_optimizer;
 pub mod runtime_security;
 pub mod security_monitoring;
-// TODO: Update TLS optimization module for rustls 0.23 API changes
+// TLS optimization module disabled pending rustls 0.23 API migration
+// The module will be re-enabled once rustls compatibility is updated
+// For now, TLS is handled via rustls directly in the server configuration
 // pub mod tls_optimization;
 pub mod transit;
 

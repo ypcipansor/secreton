@@ -153,7 +153,7 @@ pub fn create_kv_router() -> Router<()> {
 pub async fn list_secrets(
     Extension(state): Extension<ApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    // For now, list all secrets from root
+    // List all secrets from root path
     match state.kv.storage.list_secrets("").await {
         Ok(keys) => {
             info!("Listed {} secret paths", keys.len());
