@@ -4,7 +4,10 @@ members = [
     "crates/common",
     "crates/errors",
     "crates/config",
+    "crates/performance",
     "crates/core",
+    # "crates/token",  # Merged into auth crate
+    "crates/monitoring",
     "crates/agent",
     "crates/ui",
     "crates/crypto",
@@ -16,21 +19,23 @@ members = [
     "crates/integrations",
     "crates/infrastructure",
     "crates/enterprise",
+    "crates/secrets-pki",
+    "crates/secrets-database",
     "crates/secrets",
     "crates/auth",
-    "crates/auth-methods",
-    "crates/policies",
-    # "fuzz"
+    # "crates/policies",  # Merged into auth crate
+    # "crates/graphql",  # Temporarily disabled
+    # "crates/grpc",  # Temporarily disabled
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "0.1.0"
 edition = "2024"
-authors = ["SIMPelv2 Team <security@kejaksaan.go.id>"]
+authors = ["Irhas <zynqrs@gmail.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/analisaperlengkapan/simpel2"
-homepage = "https://simpel.kejaksaan.go.id"
-description = "Advanced Security Vault System with Quantum-Safe Cryptography for SIMPelv2"
+repository = "https://github.com/analisaperlengkapan/secreton"
+homepage = "https://github.com/analisaperlengkapan/secreton"
+description = "Advanced Security System with Quantum-Safe Cryptography"
 keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
 rust-version = "1.90"
@@ -40,22 +45,29 @@ rust-version = "1.90"
 secreton-common = { path = "crates/common" }
 secreton-errors = { path = "crates/errors" }
 secreton-config = { path = "crates/config" }
+secreton-performance = { path = "crates/performance" }
 secreton-core = { path = "crates/core" }
+# secreton-token = { path = "crates/token" }  # Merged into auth crate
+secreton-monitoring = { path = "crates/monitoring" }
 secreton-crypto = { path = "crates/crypto" }
 secreton-storage = { path = "crates/storage" }
 secreton-replication = { path = "crates/replication" }
 secreton-api = { path = "crates/api" }
+secreton-graphql = { path = "crates/graphql" }
+secreton-grpc = { path = "crates/grpc" }
 secreton-security = { path = "crates/security" }
 secreton-integrations = { path = "crates/integrations" }
 secreton-infrastructure = { path = "crates/infrastructure" }
 secreton-enterprise = { path = "crates/enterprise" }
+secreton-secrets-pki = { path = "crates/secrets-pki" }
+secreton-secrets-database = { path = "crates/secrets-database" }
 secreton-secrets = { path = "crates/secrets" }
 secreton-auth = { path = "crates/auth" }
-secreton-auth-methods = { path = "crates/auth-methods" }
-secreton-policies = { path = "crates/policies" }
+# secreton-policies = { path = "crates/policies" }  # Merged into auth crate
 audit-log = { path = "crates/security", package = "secreton-security" }
-# granular-revocation now part of auth-methods crate
+# granular-revocation now part of auth crate
 # secret-versioning now part of enterprise crate
+# token crate merged into auth crate
 # Core dependencies
 tokio = { version = "1.47.1", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -70,6 +82,10 @@ bincode = "1.3.3"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "aarch64"] }
 redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
 
+# System monitoring dependencies
+sysinfo = "0.30"
+nix = "0.27"
+
 # Testing dependencies
 criterion = { version = "0.7", features = ["html_reports"] }
 rmp-serde = "1.1"
@@ -80,6 +96,7 @@ proptest = { version = "1.5", default-features = false, features = ["std"] }
 async-trait = "0.1.89"
 futures = "0.3.31"
 futures-util = "0.3.31"
+tokio-stream = "0.1"
 
 # Cryptography - Pure Rust, Audited by Security Experts
 # Using RustCrypto suite - audited, memory-safe, zero C dependencies
@@ -101,6 +118,7 @@ argon2 = "0.5.3"  # Argon2 (winner of Password Hashing Competition)
 pbkdf2 = "0.12.2"  # PBKDF2
 scrypt = "0.11.0"  # scrypt
 bcrypt = "0.17.1"  # bcrypt
+password-hash = "0.5"
 
 # RustCrypto Hashing (audited)
 sha2 = "0.10.9"  # SHA-2 family
@@ -124,6 +142,17 @@ getrandom = "0.3.3"  # OS randomness
 
 # Regex (pure Rust)
 regex = "1.12.1"
+
+# Configuration
+config = { version = "0.14", default-features = false, features = ["toml", "json", "yaml"] }
+toml = "0.8"
+time = "0.3"
+
+# Database
+mongodb = "3.0"
+
+# Threshold cryptography
+threshold-secret-sharing = "0.1.1"
 
 # Parser (pure Rust)
 pest = "2.7"
@@ -163,8 +192,15 @@ subtle = "2.6.1"  # Constant-time operations
 
 # Network and HTTP
 axum = { version = "0.8", features = ["macros", "multipart", "json", "tracing"] }
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
 hyper = { version = "1.7.0", features = ["full"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+web-sys = { version = "0.3.70", features = ["console", "Storage", "Window", "Location"] }
+wasm-bindgen-futures = "0.4"
+rust-embed = "8.0"
+mime_guess = "2.0"
+rpassword = "7.3"
 tonic = { version = "0.10", features = ["tls"] }
 tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression-full"] }
@@ -173,18 +209,18 @@ prost = "0.12"
 # AWS SDK
 aws-config = "1.8.8"
 aws-sdk-iam = "1.91.0"
-aws-sdk-sts = "1.88.0"
+aws-sdk-sts = "1.91.0"
 aws-sdk-ec2 = "1.95.0"
 aws-sdk-secretsmanager = "1.91.0"
 
 # Authentication protocols
-jsonwebtoken = "9.3"
-oauth2 = "4.4"
+jsonwebtoken = { version = "9.3", workspace = true }
+oauth2 = { version = "4.4" }
 openidconnect = "3.5"
 saml = "0.4"
 
 # LDAP
-ldap3 = "0.11"
+ldap3 = { version = "0.12.1" }
 
 # RADIUS
 radius-rust = "0.4.4"
@@ -209,13 +245,15 @@ tokio-postgres-rustls = "0.13.0"  # Pure Rust TLS for PostgreSQL
 # SQLx with PostgreSQL-only (removing RSA vulnerability from MySQL) - temporarily disabled
 # sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
 
-# API Documentation
-aide = { version = "0.15", features = ["axum", "macros"] }
+# GraphQL
+async-graphql = { version = "7.0", features = ["chrono", "uuid", "tracing"] }
+async-graphql-axum = "7.0"
 
-# Configuration
-toml = "0.9.8"
-config = "0.14"
+# CLI
 clap = { version = "4.4", features = ["derive"] }
+clap_complete = "4.4"
+dirs = "5.0"
+comfy-table = "7.1"
 
 # Metrics and monitoring
 prometheus = "0.14.0"  # Updated to address protobuf vulnerability
@@ -257,15 +295,33 @@ urlencoding = "2.1.3"  # URL encoding
 libloading = "0.8.5"  # Dynamic library loading
 flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
 
+# API and HTTP
+http-body-util = "0.1"
+lazy_static = "1.4"
+lru = "0.12"
+governor = "0.6"
+headers = "0.4"
+utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+mockito = "1.4"
+bollard = "0.16"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tokio-rustls = "0.26"
+tonic-build = "0.10"
+
 # Authentication and crypto utilities (audited)
 # jwt-simple = "0.12"  # JWT (pure Rust, no RSA dependency) - removed due to rsa dependency
 totp-rs = { version = "5.6.0", default-features = false, features = ["otpauth", "qr"] }  # TOTP
 qrcode = "0.14.1"  # QR code generation
 
 # LDAP (with rustls for TLS)
+# ldap3 = { version = "0.12.1" }  # Already defined above
+
+# Database
+mysql_async = { version = "0.36", default-features = false, features = ["default-rustls"] }
 
 # WebAssembly (pure Rust, audited)
-wasmtime = "34.0.2"  # WASM runtime (pinned for stability)
+# wasmtime = "35.0.0"  # Removed to avoid old ring
 wasmi = "0.32.5"  # Alternative WASM interpreter (lighter)
 
 # HTTP frameworks
@@ -273,13 +329,13 @@ warp = "0.3"  # Alternative HTTP framework
 
 # PQC (Post-Quantum Cryptography) - NIST standardized algorithms
 # Pure Rust implementations, actively maintained
-pqcrypto-traits = "0.3.5"
-pqcrypto-mldsa = "0.1.2"  # ML-DSA (NIST FIPS 204)
-pqcrypto-mlkem = "0.1.1"  # ML-KEM (NIST FIPS 203)
-pqcrypto-falcon = "0.4.1"  # Falcon signatures
+# pqcrypto-traits = "0.3.5"
+# pqcrypto-mldsa = "0.1.2"  # ML-DSA (NIST FIPS 204)
+# pqcrypto-mlkem = "0.1.1"  # ML-KEM (NIST FIPS 203)
+# pqcrypto-falcon = "0.4.1"  # Falcon signatures
 
 # Numeric utilities (pure Rust)
-num-bigint = "0.4.6"  # Big integers
+num-bigint = { version = "0.4.6", features = ["rand"] }  # Big integers
 num-traits = "0.2.19"  # Numeric traits
 num-integer = "0.1.46"  # Integer utilities
 
@@ -292,16 +348,10 @@ aws-sdk-s3 = "1.108.0"
 aws-smithy-types = "1.2.7"
 aws-types = "1.3.3"
 aws-smithy-runtime = "1.7.2"
-# Azure (pure Rust)
-azure_storage = "0.20.0"
-azure_storage_blobs = "0.20.0"
-azure_core = "0.20.0"
 # GCP (pure Rust)
-google-cloud-storage = "1.1.0"
+# google-cloud-storage = "1.1.0"
 
 # Database drivers
-mysql_async = "0.34"  # MySQL async
-mongodb = "3.3"  # MongoDB
 mysql = { version = "26.0", features = ["chrono"] }  # MySQL sync
 
 # Additional security utilities

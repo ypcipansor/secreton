@@ -1,35 +1,44 @@
-use leptos::*;
+use leptos::prelude::*;
 use reqwest::Client;
 use serde_json::Value;
+use std::sync::Arc;
+use wasm_bindgen_futures::spawn_local;
 
 #[component]
-pub fn Secrets(cx: Scope) -> impl IntoView {
+pub fn secrets() -> impl IntoView {
     let token = web_sys::window()
         .unwrap()
         .local_storage()
         .unwrap()
         .unwrap()
         .get_item("token")
+        .unwrap()
         .unwrap_or_default();
-    let secrets = create_resource(cx, || (), move |_| async move {
-        let client = Client::new();
-        let resp = client
-            .get("http://localhost:8080/v1/secrets")
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .ok()?;
-        resp.json::<Vec<String>>().await.ok()
-    });
-    let path = create_signal(cx, String::new());
-    let data = create_signal(cx, String::new());
-    let error = create_signal(cx, String::new());
+    let token = Arc::new(token);
+    let token_for_resource = Arc::clone(&token);
+    let token_for_on_add = Arc::clone(&token);
+    let secrets = Resource::new(
+        move || Arc::clone(&token_for_resource),
+        |token| async move {
+            let client = Client::new();
+            let resp = client
+                .get("http://localhost:8080/v1/secrets")
+                .header("Authorization", format!("Bearer {}", *token))
+                .send()
+                .await
+                .ok()?;
+            resp.json::<Vec<String>>().await.ok()
+        },
+    );
+    let path = RwSignal::new(String::new());
+    let data = RwSignal::new(String::new());
+    let error = RwSignal::new(String::new());
     let on_add = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let path = path.get().to_string();
         let data = data.get().to_string();
-        let error = error.clone();
-        let token = token.clone();
+        let error_clone = error.clone();
+        let token = Arc::clone(&token_for_on_add);
         let secrets = secrets.clone();
         spawn_local(async move {
             let client = Client::new();
@@ -37,33 +46,33 @@ pub fn Secrets(cx: Scope) -> impl IntoView {
             if let Ok(json_data) = parsed {
                 let resp = client
                     .post(format!("http://localhost:8080/v1/secrets/{}", path))
-                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Authorization", format!("Bearer {}", *token))
                     .json(&serde_json::json!({"data": json_data}))
                     .send()
                     .await;
                 match resp {
                     Ok(r) if r.status().is_success() => {
-                        error.set(String::new());
+                        error_clone.set(String::new());
                         secrets.refetch();
                     }
                     Ok(r) => {
-                        error.set(format!("Error: {}", r.status()));
+                        error_clone.set(format!("Error: {}", r.status()));
                     }
-                    Err(e) => error.set(format!("Network error: {}", e)),
+                    Err(e) => error_clone.set(format!("Network error: {}", e)),
                 }
             } else {
-                error.set("Invalid JSON data".to_string());
+                error_clone.set("Invalid JSON data".to_string());
             }
         });
     };
-    view! { cx,
+    view! {
         <h2>"Secrets"</h2>
         <ul>
-            {move || secrets.read().map(|list| list.as_ref().map(|secrets| secrets.iter().map(|s| view! { cx,
+            {move || secrets.get().map(|list| list.as_ref().map(|secrets| secrets.iter().map(|s| view! {
                 <li>
-                    <a href={format!("/secrets/{}", s)}>{s}</a>
+                    <a href={format!("/secrets/{}", s)}>{s.clone()}</a>
                 </li>
-            }).collect_view(cx)).unwrap_or_default())}
+            }).collect_view()).unwrap_or_default())}
         </ul>
         <h3>"Add Secret"</h3>
         <form on:submit=on_add>
@@ -76,28 +85,34 @@ pub fn Secrets(cx: Scope) -> impl IntoView {
 }
 
 #[component]
-pub fn SecretDetail(cx: Scope) -> impl IntoView {
-    let path = leptos_router::use_params_map(cx)
-        .with(|params| params.get("path").cloned().unwrap_or_default());
+pub fn secret_detail() -> impl IntoView {
+    // let path = leptos_router::use_params_map(cx)
+    //     .with(|params| params.get("path").cloned().unwrap_or_default());
+    let path = Arc::new("dummy".to_string()); // Placeholder
     let token = web_sys::window()
         .unwrap()
         .local_storage()
         .unwrap()
         .unwrap()
         .get_item("token")
+        .unwrap()
         .unwrap_or_default();
-    let secret = create_resource(cx, move || path.clone(), move |path| async move {
-        let client = Client::new();
-        let resp = client
-            .get(format!("http://localhost:8080/v1/secrets/{}", path))
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .ok()?;
-        resp.json::<Value>().await.ok()
-    });
-    view! { cx,
+    let token = Arc::new(token);
+    let secret = Resource::new(
+        move || (Arc::clone(&path), Arc::clone(&token)),
+        |(path, token)| async move {
+            let client = Client::new();
+            let resp = client
+                .get(format!("http://localhost:8080/v1/secrets/{}", *path))
+                .header("Authorization", format!("Bearer {}", *token))
+                .send()
+                .await
+                .ok()?;
+            resp.json::<Value>().await.ok()
+        },
+    );
+    view! {
         <h2>"Secret Detail"</h2>
-        <div>{move || secret.read().map(|s| s.as_ref().map(|s| s.to_string()).unwrap_or("-".to_string()))}</div>
+        <div>{move || secret.get().map(|s| s.as_ref().map(|s| s.to_string()).unwrap_or("-".to_string()))}</div>
     }
-} 
+}

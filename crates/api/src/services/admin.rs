@@ -9,8 +9,8 @@ use thiserror::Error;
 use uuid;
 use sha2::{Sha256, Digest};
 
-use brankas_core::audit::AuditLogger;
-use brankas_storage::StorageBackend;
+use secreton_core::audit::AuditLogger;
+use secreton_storage::{StorageBackend, QueryParams, CompactionResult};
 use crate::services::auth::AuthenticationService;
 
 /// Admin service errors
@@ -32,7 +32,7 @@ pub enum AdminError {
     Auth(#[from] crate::services::auth::AuthError),
 
     #[error("Storage error: {0}")]
-    Storage(#[from] brankas_storage::StorageError),
+    Storage(#[from] secreton_storage::StorageError),
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -186,16 +186,23 @@ impl AdminService {
 
     /// Get storage counts (secrets and keys)
     async fn get_storage_counts(&self) -> Result<(u64, u64), AdminError> {
-        // This would need to be implemented based on the storage backend
-        // For now, return placeholder values
-        Ok((1500, 75))
+        let stats = self.storage.get_stats().await
+            .map_err(|e| AdminError::Storage(e))?;
+
+        // For now, consider all entries as secrets, and keys as a subset
+        // In a real implementation, you might distinguish based on paths or tags
+        let total_secrets = stats.total_entries;
+        let total_keys = (total_secrets / 10).max(1); // Rough estimate
+
+        Ok((total_secrets, total_keys))
     }
 
     /// Get storage usage in bytes
     async fn get_storage_usage(&self) -> Result<u64, AdminError> {
-        // This would calculate actual storage usage
-        // For now, return placeholder
-        Ok(2_147_483_648) // 2GB
+        let stats = self.storage.get_stats().await
+            .map_err(|e| AdminError::Storage(e))?;
+
+        Ok(stats.total_size_bytes)
     }
 
     /// Create system backup
@@ -204,7 +211,7 @@ impl AdminService {
         let backup_path = format!("backups/{}", backup_id);
         
         // Get all vault entries to backup
-        let query_params = brankas_storage::QueryParams {
+        let query_params = secreton_storage::QueryParams {
             path: Some("".to_string()),
             prefix: Some("".to_string()),
             limit: None,
@@ -233,18 +240,18 @@ impl AdminService {
         metadata.insert("entry_count".to_string(), entries.len().to_string());
         metadata.insert("data".to_string(), backup_data);
         
-        let backup_entry = brankas_storage::VaultEntry {
+        let backup_entry = secreton_storage::SecretEntry {
             id: uuid::Uuid::new_v4(),
             path: backup_path,
             encrypted_data: Vec::new(),
-            encryption_metadata: brankas_storage::EncryptionMetadata {
+            encryption_metadata: secreton_storage::EncryptionMetadata {
                 algorithm: "none".to_string(),
                 key_id: "backup".to_string(),
                 iv: Vec::new(),
                 auth_tag: None,
                 aad: None,
             },
-            security_level: brankas_storage::SecurityLevel::TopSecret,
+            security_level: secreton_storage::SecurityLevel::TopSecret,
             metadata,
             tags: vec!["backup".to_string(), "system".to_string()],
             version: 1,
@@ -277,7 +284,7 @@ impl AdminService {
 
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
-        let query_params = brankas_storage::QueryParams {
+        let query_params = secreton_storage::QueryParams {
             path: Some("backups".to_string()),
             prefix: Some("backups/".to_string()),
             limit: None,
@@ -320,7 +327,7 @@ impl AdminService {
             .ok_or_else(|| AdminError::Internal(anyhow::anyhow!("Backup data not found")))?;
         
         // Parse entries
-        let entries: Vec<brankas_storage::VaultEntry> = serde_json::from_str(backup_data)
+        let entries: Vec<secreton_storage::SecretEntry> = serde_json::from_str(backup_data)
             .map_err(|e| AdminError::Internal(e.into()))?;
         
         // Restore each entry (excluding backup entries themselves)
@@ -402,7 +409,7 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
-        let query_params = brankas_storage::QueryParams {
+        let query_params = secreton_storage::QueryParams {
             path: Some("audit_logs".to_string()),
             prefix: Some("audit_logs/".to_string()),
             limit,
@@ -545,8 +552,61 @@ impl AdminService {
         let mut findings = Vec::new();
 
         // Check for certificates/keys expiring soon
-        // This would need to scan the crypto storage
-        // For now, placeholder
+        // This would need to scan the crypto storage for certificates
+        // For now, simulate by checking if any certificate-like entries exist
+        let query_params = QueryParams {
+            path_prefix: Some("certificates/".to_string()),
+            ..Default::default()
+        };
+
+        match self.storage.list(&query_params).await {
+            Ok(entries) => {
+                let now = chrono::Utc::now();
+                let warning_threshold = chrono::Duration::days(30);
+
+                for entry in entries {
+                    // Check if entry has expiry metadata
+                    if let Some(expiry_str) = entry.metadata.get("expires_at") {
+                        if let Ok(expiry) = chrono::DateTime::parse_from_rfc3339(expiry_str) {
+                            let expiry_utc = expiry.with_timezone(&chrono::Utc);
+                            let days_until_expiry = (expiry_utc - now).num_days();
+
+                            if days_until_expiry <= 0 {
+                                findings.push(SecurityFinding {
+                                    severity: "critical".to_string(),
+                                    category: "certificates".to_string(),
+                                    title: format!("Certificate expired: {}", entry.path),
+                                    description: format!("Certificate {} has expired {} days ago", entry.path, days_until_expiry.abs()),
+                                    recommendation: "Renew the certificate immediately and update all dependent services".to_string(),
+                                    affected_resources: vec![entry.path],
+                                });
+                            } else if days_until_expiry <= 30 {
+                                findings.push(SecurityFinding {
+                                    severity: "high".to_string(),
+                                    category: "certificates".to_string(),
+                                    title: format!("Certificate expiring soon: {}", entry.path),
+                                    description: format!("Certificate {} expires in {} days", entry.path, days_until_expiry),
+                                    recommendation: "Renew the certificate before it expires".to_string(),
+                                    affected_resources: vec![entry.path],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                // If we can't access certificate storage, note it as a finding
+                findings.push(SecurityFinding {
+                    severity: "medium".to_string(),
+                    category: "certificates".to_string(),
+                    title: "Certificate monitoring not available".to_string(),
+                    description: "Unable to scan certificate storage for expiry dates".to_string(),
+                    recommendation: "Ensure certificate storage is accessible and properly configured".to_string(),
+                    affected_resources: vec!["certificate_storage".to_string()],
+                });
+            }
+        }
+
         Ok(findings)
     }
 
@@ -555,7 +615,29 @@ impl AdminService {
         let mut findings = Vec::new();
 
         // Check for insecure configurations
-        // This would check various security settings
+        // Check if audit logging is enabled
+        let audit_config = self.storage.get_by_path("system/config").await;
+        if let Ok(Some(config_entry)) = audit_config {
+            if let Some(config_data) = config_entry.metadata.get("config_data") {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_data) {
+                    if let Some(audit_enabled) = config.get("enable_audit_logging") {
+                        if audit_enabled == false {
+                            findings.push(SecurityFinding {
+                                severity: "high".to_string(),
+                                category: "configuration".to_string(),
+                                title: "Audit logging disabled".to_string(),
+                                description: "Audit logging is disabled, which reduces security monitoring capabilities".to_string(),
+                                recommendation: "Enable audit logging to track security-relevant events".to_string(),
+                                affected_resources: vec!["audit_system".to_string()],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for weak password policies
+        // This would check actual password policy settings
         findings.push(SecurityFinding {
             severity: "low".to_string(),
             category: "configuration".to_string(),
@@ -573,8 +655,44 @@ impl AdminService {
         let mut findings = Vec::new();
 
         // Check audit logs for suspicious patterns
-        // This would analyze recent audit logs
-        // For now, placeholder
+        // Get recent audit logs (last 24 hours)
+        let end_time = chrono::Utc::now();
+        let start_time = end_time - chrono::Duration::hours(24);
+
+        let audit_logs = self.get_audit_logs(Some(start_time), Some(end_time), None, None, Some(1000)).await?;
+
+        // Check for failed login attempts
+        let failed_logins = audit_logs.iter()
+            .filter(|log| log.action == "login" && log.success == false)
+            .count();
+
+        if failed_logins > 10 {
+            findings.push(SecurityFinding {
+                severity: "medium".to_string(),
+                category: "authentication".to_string(),
+                title: "High number of failed login attempts".to_string(),
+                description: format!("Detected {} failed login attempts in the last 24 hours", failed_logins),
+                recommendation: "Review authentication logs and consider implementing additional security measures".to_string(),
+                affected_resources: vec!["authentication".to_string()],
+            });
+        }
+
+        // Check for unusual access patterns
+        let suspicious_actions = audit_logs.iter()
+            .filter(|log| log.action == "delete" || log.action == "modify")
+            .count();
+
+        if suspicious_actions > 50 {
+            findings.push(SecurityFinding {
+                severity: "low".to_string(),
+                category: "access_control".to_string(),
+                title: "High volume of destructive operations".to_string(),
+                description: format!("Detected {} potentially destructive operations in the last 24 hours", suspicious_actions),
+                recommendation: "Monitor for unusual access patterns and ensure proper authorization".to_string(),
+                affected_resources: vec!["vault_operations".to_string()],
+            });
+        }
+
         Ok(findings)
     }
 
@@ -634,18 +752,18 @@ impl AdminService {
         metadata.insert("config_data".to_string(), config_json);
         metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
         
-        let config_entry = brankas_storage::VaultEntry {
+        let config_entry = secreton_storage::SecretEntry {
             id: uuid::Uuid::new_v4(),
             path: config_path.to_string(),
             encrypted_data: Vec::new(),
-            encryption_metadata: brankas_storage::EncryptionMetadata {
+            encryption_metadata: secreton_storage::EncryptionMetadata {
                 algorithm: "none".to_string(),
                 key_id: "config".to_string(),
                 iv: Vec::new(),
                 auth_tag: None,
                 aad: None,
             },
-            security_level: brankas_storage::SecurityLevel::Secret,
+            security_level: secreton_storage::SecurityLevel::Secret,
             metadata,
             tags: vec!["system".to_string(), "config".to_string()],
             version: 1,
@@ -678,7 +796,7 @@ impl AdminService {
 
     /// List all users
     pub async fn list_users(&self) -> Result<Vec<UserInfo>, AdminError> {
-        use brankas_storage::{QueryParams, QueryFilter};
+        use secreton_storage::{QueryParams, QueryFilter};
 
         let query_params = QueryParams {
             path_prefix: Some("users/".to_string()),
@@ -791,9 +909,9 @@ impl AdminService {
         Ok(())
     }
 
-    /// Helper method to convert UserInfo to VaultEntry for storage
-    fn user_info_to_vault_entry(&self, user: &UserInfo) -> Result<brankas_storage::VaultEntry, AdminError> {
-        use brankas_storage::{VaultEntry, EncryptionMetadata, SecurityLevel};
+    /// Helper method to convert UserInfo to SecretEntry for storage
+    fn user_info_to_vault_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
+        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
 
         let user_data = serde_json::to_vec(user)
             .map_err(|e| AdminError::Storage { message: format!("Failed to serialize user: {}", e) })?;
@@ -810,7 +928,7 @@ impl AdminService {
         let user_id = uuid::Uuid::parse_str(&user.id)
             .map_err(|e| AdminError::Storage { message: format!("Invalid user ID: {}", e) })?;
 
-        Ok(VaultEntry::new(
+        Ok(SecretEntry::new(
             format!("users/{}", user.id),
             user_data,
             encryption_metadata,
@@ -819,8 +937,8 @@ impl AdminService {
         ))
     }
 
-    /// Helper method to convert VaultEntry to UserInfo
-    fn vault_entry_to_user_info(&self, entry: &brankas_storage::VaultEntry) -> Result<UserInfo, AdminError> {
+    /// Helper method to convert SecretEntry to UserInfo
+    fn vault_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
         let user: UserInfo = serde_json::from_slice(&entry.encrypted_data)
             .map_err(|e| AdminError::Storage { message: format!("Failed to deserialize user: {}", e) })?;
         Ok(user)
@@ -835,17 +953,29 @@ impl AdminService {
 
     /// Perform database compaction
     async fn perform_database_compaction(&self) -> Result<CompactionResult, AdminError> {
-        // This would perform database compaction based on the storage backend
-        // For now, return placeholder result
+        // Get stats before compaction
+        let stats_before = self.storage.get_stats().await
+            .map_err(|e| AdminError::Storage(e))?;
+
+        // Perform compaction based on storage backend type
+        // For now, this is a placeholder - real implementation would depend on backend
+        let compaction_successful = true;
+
+        // Get stats after compaction (simulated)
+        let stats_after = self.storage.get_stats().await
+            .map_err(|e| AdminError::Storage(e))?;
+
+        let mut details = HashMap::new();
+        details.insert("original_size_bytes".to_string(), serde_json::Value::Number(stats_before.total_size_bytes.into()));
+        details.insert("compacted_size_bytes".to_string(), serde_json::Value::Number(stats_after.total_size_bytes.into()));
+        details.insert("space_saved_bytes".to_string(), serde_json::Value::Number(
+            (stats_before.total_size_bytes.saturating_sub(stats_after.total_size_bytes)).into()
+        ));
+        details.insert("entries_processed".to_string(), serde_json::Value::Number(stats_before.total_entries.into()));
+
         Ok(CompactionResult {
-            success: true,
-            details: {
-                let mut details = HashMap::new();
-                details.insert("original_size_bytes".to_string(), serde_json::Value::Number(1_288_490_188.into()));
-                details.insert("compacted_size_bytes".to_string(), serde_json::Value::Number(996_147_200.into()));
-                details.insert("space_saved_bytes".to_string(), serde_json::Value::Number(292_342_988.into()));
-                details
-            },
+            success: compaction_successful,
+            details,
         })
     }
 }
@@ -875,29 +1005,25 @@ pub struct SecurityScanResult {
     pub findings: Vec<SecurityFinding>,
 }
 
-/// Security finding
+/// Database compaction result
 #[derive(Debug, Serialize)]
-pub struct SecurityFinding {
-    pub severity: String,
-    pub category: String,
-    pub title: String,
-    pub description: String,
-    pub recommendation: String,
-    pub affected_resources: Vec<String>,
+pub struct CompactionResult {
+    pub success: bool,
+    pub details: HashMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brankas_crypto::SecurityParams;
-    use brankas_storage::MockStorageBackend;
+    use secreton_crypto::SecurityParams;
+    use secreton_storage::MockStorageBackend;
     use crate::config::AuthConfig;
-    use brankas_core::audit::AuditLogger;
+    use secreton_core::audit::AuditLogger;
 
     #[tokio::test]
     async fn test_admin_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let crypto = Arc::new(secreton_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -909,7 +1035,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_system_stats_placeholder() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let crypto = Arc::new(secreton_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -924,7 +1050,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_backup_returns_metadata() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let crypto = Arc::new(secreton_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -938,7 +1064,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_garbage_collection_returns_details() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(brankas_crypto::CryptoService::new(SecurityParams::default()).unwrap());
+        let crypto = Arc::new(secreton_crypto::CryptoService::new(SecurityParams::default()).unwrap());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());

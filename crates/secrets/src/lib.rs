@@ -33,7 +33,7 @@ pub mod model;
 pub mod service;
 
 pub use backend::{
-    AwsBackend, MongodbBackend, MysqlBackend, OciBackend, PostgresBackend, VaultBackend,
+    AwsBackend, MongodbBackend, MysqlBackend, OciBackend, PostgresBackend, SecretBackend,
 };
 pub use engine::{
     AwsEngine, DatabaseEngine, KvEngine, LdapEngine, MongodbEngine, OciEngine, PkiEngine,

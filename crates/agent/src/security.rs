@@ -1,7 +1,7 @@
-//! Security enforcement module for the Brankas agent
+//! Security enforcement module for the Secreton agent
 
-use crate::config::SecurityConfig;
-use secreton_core::{CoreError, CoreResult};
+use secreton_config::SecurityConfig;
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -198,7 +198,7 @@ impl SecurityEnforcer {
     }
 
     /// Start security enforcement
-    pub async fn start(&mut self) -> CoreResult<()> {
+    pub async fn start(&mut self) -> Result<(), SecretonError> {
         tracing::info!("Starting security enforcer");
 
         self.running
@@ -207,7 +207,7 @@ impl SecurityEnforcer {
         // Initialize security databases
         self.initialize_databases().await?;
 
-        let scan_interval = Duration::from_secs(self.config.scan_interval_seconds);
+        let scan_interval = Duration::from_secs(self.config.agent.scan_interval_seconds);
 
         while self.running.load(std::sync::atomic::Ordering::SeqCst) {
             // Perform security scans
@@ -223,7 +223,7 @@ impl SecurityEnforcer {
     }
 
     /// Stop security enforcement
-    pub async fn stop(&mut self) -> CoreResult<()> {
+    pub async fn stop(&mut self) -> Result<(), SecretonError> {
         tracing::info!("Stopping security enforcer");
         self.running
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -231,7 +231,7 @@ impl SecurityEnforcer {
     }
 
     /// Initialize security databases
-    async fn initialize_databases(&mut self) -> CoreResult<()> {
+    async fn initialize_databases(&mut self) -> Result<(), SecretonError> {
         tracing::info!("Initializing security databases");
 
         // Load malware signatures
@@ -247,7 +247,7 @@ impl SecurityEnforcer {
     }
 
     /// Load malware signatures
-    async fn load_malware_signatures(&mut self) -> CoreResult<()> {
+    async fn load_malware_signatures(&mut self) -> Result<(), SecretonError> {
         // In a real implementation, this would load from a file or database
         self.malware_signatures
             .insert("d41d8cd98f00b204e9800998ecf8427e".to_string()); // Example MD5
@@ -262,7 +262,7 @@ impl SecurityEnforcer {
     }
 
     /// Load vulnerability database
-    async fn load_vulnerability_database(&mut self) -> CoreResult<()> {
+    async fn load_vulnerability_database(&mut self) -> Result<(), SecretonError> {
         // In a real implementation, this would load from CVE database or similar
         self.vulnerability_db.insert(
             "CVE-2023-1234".to_string(),
@@ -281,7 +281,7 @@ impl SecurityEnforcer {
     }
 
     /// Load compliance rules
-    async fn load_compliance_rules(&mut self) -> CoreResult<()> {
+    async fn load_compliance_rules(&mut self) -> Result<(), SecretonError> {
         let rules = vec![
             ComplianceRule {
                 id: "PCI-DSS-3.4".to_string(),
@@ -315,26 +315,26 @@ impl SecurityEnforcer {
     }
 
     /// Perform comprehensive security scan
-    async fn perform_security_scan(&mut self) -> CoreResult<()> {
+    async fn perform_security_scan(&mut self) -> Result<(), SecretonError> {
         tracing::debug!("Performing security scan");
 
         // Intrusion detection
-        if self.config.intrusion_detection_enabled {
+        if self.config.agent.intrusion_detection_enabled {
             self.detect_intrusions().await?;
         }
 
         // Malware scanning
-        if self.config.malware_scan_enabled {
+        if self.config.agent.malware_scan_enabled {
             self.scan_for_malware().await?;
         }
 
         // Vulnerability scanning
-        if self.config.vulnerability_scan_enabled {
+        if self.config.agent.vulnerability_scan_enabled {
             self.scan_for_vulnerabilities().await?;
         }
 
         // Compliance checking
-        if self.config.compliance_check_enabled {
+        if self.config.agent.compliance_check_enabled {
             self.check_compliance().await?;
         }
 
@@ -342,7 +342,7 @@ impl SecurityEnforcer {
     }
 
     /// Detect intrusion attempts
-    async fn detect_intrusions(&mut self) -> CoreResult<()> {
+    async fn detect_intrusions(&mut self) -> Result<(), SecretonError> {
         tracing::debug!("Detecting intrusions");
 
         // Check for suspicious network activity
@@ -368,7 +368,7 @@ impl SecurityEnforcer {
                 };
 
                 // Auto-block if configured
-                if self.config.auto_block_ips {
+                if self.config.agent.auto_block_ips {
                     self.block_ip(
                         ip,
                         "Intrusion attempt detected".to_string(),
@@ -411,7 +411,9 @@ impl SecurityEnforcer {
     }
 
     /// Detect suspicious network activity
-    async fn detect_suspicious_network_activity(&self) -> CoreResult<Option<Vec<IpAddr>>> {
+    async fn detect_suspicious_network_activity(
+        &self,
+    ) -> Result<Option<Vec<IpAddr>>, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would analyze network logs, connection patterns, etc.
 
@@ -427,7 +429,7 @@ impl SecurityEnforcer {
     }
 
     /// Detect suspicious file activity
-    async fn detect_suspicious_file_activity(&self) -> CoreResult<Option<Vec<PathBuf>>> {
+    async fn detect_suspicious_file_activity(&self) -> Result<Option<Vec<PathBuf>>, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would monitor file system changes, check for suspicious executables, etc.
 
@@ -441,7 +443,7 @@ impl SecurityEnforcer {
     }
 
     /// Scan for malware
-    async fn scan_for_malware(&mut self) -> CoreResult<()> {
+    async fn scan_for_malware(&mut self) -> Result<(), SecretonError> {
         tracing::debug!("Scanning for malware");
 
         // Scan common directories for malware
@@ -488,7 +490,7 @@ impl SecurityEnforcer {
                     };
 
                     // Auto-quarantine if configured
-                    if self.config.auto_quarantine {
+                    if self.config.agent.auto_quarantine {
                         self.quarantine_file(
                             file_info.path.clone(),
                             "Malware detected".to_string(),
@@ -508,7 +510,7 @@ impl SecurityEnforcer {
     async fn scan_directory_for_malware(
         &self,
         _path: &PathBuf,
-    ) -> CoreResult<Option<Vec<MalwareFileInfo>>> {
+    ) -> Result<Option<Vec<MalwareFileInfo>>, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would calculate file hashes and compare against signature database
 
@@ -524,7 +526,7 @@ impl SecurityEnforcer {
     }
 
     /// Scan for vulnerabilities
-    async fn scan_for_vulnerabilities(&mut self) -> CoreResult<()> {
+    async fn scan_for_vulnerabilities(&mut self) -> Result<(), SecretonError> {
         tracing::debug!("Scanning for vulnerabilities");
 
         // Check installed packages for known vulnerabilities
@@ -574,7 +576,9 @@ impl SecurityEnforcer {
     }
 
     /// Scan installed packages for vulnerabilities
-    async fn scan_installed_packages(&self) -> CoreResult<Option<Vec<VulnerabilityInfo>>> {
+    async fn scan_installed_packages(
+        &self,
+    ) -> Result<Option<Vec<VulnerabilityInfo>>, SecretonError> {
         #[derive(Debug)]
         struct VulnerabilityInfo {
             cve_id: String,
@@ -591,7 +595,7 @@ impl SecurityEnforcer {
     }
 
     /// Scan system configuration for vulnerabilities
-    async fn scan_system_configuration(&self) -> CoreResult<()> {
+    async fn scan_system_configuration(&self) -> Result<(), SecretonError> {
         // Check common configuration issues
         // - Weak SSH configuration
         // - Open ports without proper firewall rules
@@ -603,7 +607,7 @@ impl SecurityEnforcer {
     }
 
     /// Check compliance with security standards
-    async fn check_compliance(&mut self) -> CoreResult<()> {
+    async fn check_compliance(&mut self) -> Result<(), SecretonError> {
         tracing::debug!("Checking compliance");
 
         for rule in &self.compliance_rules.clone() {
@@ -652,7 +656,7 @@ impl SecurityEnforcer {
     }
 
     /// Check a specific compliance rule
-    async fn check_compliance_rule(&self, rule: &ComplianceRule) -> CoreResult<bool> {
+    async fn check_compliance_rule(&self, rule: &ComplianceRule) -> Result<bool, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would execute specific checks based on the rule
 
@@ -668,7 +672,7 @@ impl SecurityEnforcer {
     }
 
     /// Check encryption compliance
-    async fn check_encryption_compliance(&self) -> CoreResult<bool> {
+    async fn check_encryption_compliance(&self) -> Result<bool, SecretonError> {
         // Check if sensitive data is encrypted at rest
         // This is a simplified implementation - in reality would check:
         // - Database encryption settings
@@ -677,11 +681,11 @@ impl SecurityEnforcer {
         // - Environment variable encryption
 
         // For now, return true if encryption is enabled in config
-        Ok(self.config.encryption_enabled)
+        Ok(self.config.agent.encryption_enabled)
     }
 
     /// Check access control compliance
-    async fn check_access_control_compliance(&self) -> CoreResult<bool> {
+    async fn check_access_control_compliance(&self) -> Result<bool, SecretonError> {
         // Check if proper access controls are in place
         // This would check:
         // - User authentication systems
@@ -689,11 +693,11 @@ impl SecurityEnforcer {
         // - Role-based access control
         // - Least privilege principles
 
-        Ok(self.config.access_control_enabled)
+        Ok(self.config.agent.access_control_enabled)
     }
 
     /// Check data protection compliance
-    async fn check_data_protection_compliance(&self) -> CoreResult<bool> {
+    async fn check_data_protection_compliance(&self) -> Result<bool, SecretonError> {
         // Check if data protection measures are in place
         // This would check:
         // - Data policies
@@ -701,7 +705,7 @@ impl SecurityEnforcer {
         // - Data backup procedures
         // - Data disposal procedures
 
-        Ok(self.config.data_protection_enabled)
+        Ok(self.config.agent.data_protection_enabled)
     }
 
     /// Block an IP address
@@ -710,7 +714,7 @@ impl SecurityEnforcer {
         ip: IpAddr,
         reason: String,
         duration: Option<Duration>,
-    ) -> CoreResult<()> {
+    ) -> Result<(), SecretonError> {
         let blocked_ip = BlockedIp {
             ip,
             blocked_at: SystemTime::now(),
@@ -735,7 +739,11 @@ impl SecurityEnforcer {
     }
 
     /// Quarantine a file
-    async fn quarantine_file(&mut self, path: PathBuf, reason: String) -> CoreResult<()> {
+    async fn quarantine_file(
+        &mut self,
+        path: PathBuf,
+        reason: String,
+    ) -> Result<(), SecretonError> {
         // Calculate file hash
         let hash = self
             .calculate_file_hash(&path)
@@ -764,10 +772,10 @@ impl SecurityEnforcer {
     }
 
     /// Calculate file hash
-    async fn calculate_file_hash(&self, path: &PathBuf) -> CoreResult<String> {
+    async fn calculate_file_hash(&self, path: &PathBuf) -> Result<String, SecretonError> {
         // Open file for reading
         let file = File::open(path).await.map_err(|e| {
-            CoreError::Io(std::io::Error::other(format!(
+            SecretonError::Io(std::io::Error::other(format!(
                 "Failed to open file for hashing: {}",
                 e
             )))
@@ -780,7 +788,7 @@ impl SecurityEnforcer {
         // Read file in chunks and update hash
         loop {
             let bytes_read = reader.read(&mut buffer).await.map_err(|e| {
-                CoreError::Io(std::io::Error::other(format!(
+                SecretonError::Io(std::io::Error::other(format!(
                     "Failed to read file for hashing: {}",
                     e
                 )))
@@ -798,7 +806,7 @@ impl SecurityEnforcer {
     }
 
     /// Clean up expired actions
-    async fn cleanup_expired_actions(&mut self) -> CoreResult<()> {
+    async fn cleanup_expired_actions(&mut self) -> Result<(), SecretonError> {
         let now = SystemTime::now();
 
         // Remove expired IP blocks
@@ -823,12 +831,12 @@ impl SecurityEnforcer {
     }
 
     /// Send security event
-    async fn send_security_event(&self, event: SecurityEvent) -> CoreResult<()> {
+    async fn send_security_event(&self, event: SecurityEvent) -> Result<(), SecretonError> {
         if let Err(e) = self.event_sender.send(event.clone()) {
             tracing::error!("Failed to send security event: {}", e);
-            return Err(Box::new(CoreError::Internal {
+            return Err(SecretonError::Internal {
                 message: format!("Failed to send security event: {}", e),
-            }));
+            });
         }
 
         tracing::info!(
@@ -850,7 +858,7 @@ impl SecurityEnforcer {
     }
 
     /// Unblock IP address
-    pub async fn unblock_ip(&mut self, ip: &IpAddr) -> CoreResult<()> {
+    pub async fn unblock_ip(&mut self, ip: &IpAddr) -> Result<(), SecretonError> {
         if self.blocked_ips.remove(ip).is_some() {
             // Update firewall rules to unblock the IP
             if let Err(e) = self.update_firewall_rules(ip, false).await {
@@ -864,21 +872,21 @@ impl SecurityEnforcer {
             }
             Ok(())
         } else {
-            Err(Box::new(CoreError::NotFound {
+            Err(SecretonError::NotFound {
                 resource: format!("IP address not blocked: {}", ip),
-            }))
+            })
         }
     }
 
     /// Release quarantined file
-    pub fn release_quarantined_file(&mut self, path: &PathBuf) -> CoreResult<()> {
+    pub fn release_quarantined_file(&mut self, path: &PathBuf) -> Result<(), SecretonError> {
         if self.quarantined_files.remove(path).is_some() {
             tracing::info!("Released quarantined file: {:?}", path);
             Ok(())
         } else {
-            Err(Box::new(CoreError::NotFound {
+            Err(SecretonError::NotFound {
                 resource: format!("quarantined-file:{:?}", path),
-            }))
+            })
         }
     }
 
@@ -888,7 +896,7 @@ impl SecurityEnforcer {
     }
 
     /// Update firewall rules for IP blocking/unblocking
-    async fn update_firewall_rules(&self, ip: &IpAddr, block: bool) -> CoreResult<()> {
+    async fn update_firewall_rules(&self, ip: &IpAddr, block: bool) -> Result<(), SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would:
         // 1. Use iptables/nftables commands for Linux

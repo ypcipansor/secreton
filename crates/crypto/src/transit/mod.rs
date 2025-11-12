@@ -1,6 +1,6 @@
 //! Transit Engine - Encryption as a Service
 //!
-//! This module provides a comprehensive transit encryption service similar to HashiCorp Vault's
+//! This module provides a comprehensive transit encryption service similar to HashiCorp Secret's
 //! transit secrets engine, with enhanced RustCrypto integration for cryptographic operations.
 //!
 //! Key features:

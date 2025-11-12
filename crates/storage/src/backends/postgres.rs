@@ -1,8 +1,8 @@
 //! PostgreSQL storage backend implementation using tokio-postgres
 
 use crate::{
-    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
@@ -39,7 +39,7 @@ impl PostgresBackend {
 
 #[async_trait]
 impl StorageBackend for PostgresBackend {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let client = self
             .pool
             .get()
@@ -93,7 +93,7 @@ impl StorageBackend for PostgresBackend {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let client = self
             .pool
             .get()
@@ -124,7 +124,7 @@ impl StorageBackend for PostgresBackend {
         Ok(Some(entry))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let client = self
             .pool
             .get()
@@ -155,7 +155,7 @@ impl StorageBackend for PostgresBackend {
         Ok(Some(entry))
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let client = self
             .pool
             .get()
@@ -205,7 +205,7 @@ impl StorageBackend for PostgresBackend {
         Ok(entries)
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         let client = self
             .pool
             .get()
@@ -257,7 +257,7 @@ impl StorageBackend for PostgresBackend {
 
         if rows_affected == 0 {
             return Err(StorageError::NotFound {
-                resource_type: "VaultEntry".to_string(),
+                resource_type: "SecretEntry".to_string(),
                 id: entry.id.to_string(),
             });
         }
@@ -488,7 +488,7 @@ impl StorageBackend for PostgresBackend {
 }
 
 impl PostgresBackend {
-    fn row_to_vault_entry(&self, row: &Row) -> StorageResult<VaultEntry> {
+    fn row_to_vault_entry(&self, row: &Row) -> StorageResult<SecretEntry> {
         let encryption_metadata_value: serde_json::Value = row.get("encryption_metadata");
         let encryption_metadata =
             serde_json::from_value(encryption_metadata_value).map_err(|e| {
@@ -514,7 +514,7 @@ impl PostgresBackend {
             _ => SecurityLevel::Internal,
         };
 
-        Ok(VaultEntry {
+        Ok(SecretEntry {
             id: row.get("id"),
             path: row.get("path"),
             encrypted_data: row.get("encrypted_data"),
@@ -539,8 +539,8 @@ pub struct PostgresTransaction {
 }
 
 enum PostgresOperation {
-    Store(VaultEntry),
-    Update(VaultEntry),
+    Store(SecretEntry),
+    Update(SecretEntry),
     Delete(Uuid),
 }
 
@@ -668,7 +668,7 @@ impl PostgresTransaction {
 
 #[async_trait]
 impl StorageTransaction for PostgresTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -679,7 +679,7 @@ impl StorageTransaction for PostgresTransaction {
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),

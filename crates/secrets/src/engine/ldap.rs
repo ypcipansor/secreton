@@ -24,25 +24,36 @@ impl LdapEngine {
         }
     }
 
-    /// Establish LDAP connection
+    /// Establish LDAP connection using ldap-utils
     async fn connect(&mut self) -> SecretResult<()> {
         if self.connection_pool.is_some() {
             return Ok(());
         }
 
-        let (conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url)
-            .await
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP connection failed: {}", e)))?;
+        // TODO: Implement LDAP connection when secreton_ldap_utils is available
+        // For now, return an error indicating the feature is not yet implemented
+        Err(SecretError::BackendConnectionFailed(
+            "LDAP connection requires secreton_ldap_utils dependency (not yet implemented)"
+                .to_string(),
+        ))
 
-        let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("LDAP bind failed: {}", e)))?;
-
-        bind_result.success()
-            .map_err(|e| SecretError::BackendOperationFailed(format!("LDAP bind verification failed: {}", e)))?;
-
-        self.connection_pool = Some(conn);
-        Ok(())
+        // Commented out until secreton_ldap_utils is available:
+        // use secreton_ldap_utils::LdapConfig as UtilsConfig;
+        // use secreton_ldap_utils::LdapConnection;
+        //
+        // let utils_config = UtilsConfig {
+        //     url: self.config.url.clone(),
+        //     bind_dn: self.config.bind_dn.clone(),
+        //     bind_password: self.config.bind_password.clone(),
+        //     tls_enabled: self.config.tls_enabled,
+        //     ca_cert: None,
+        // };
+        //
+        // let (_conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url).await?;
+        // let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password).await?;
+        // bind_result.success()?;
+        // self.connection_pool = Some(_conn);
+        // Ok(())
     }
 }
 
@@ -146,6 +157,20 @@ impl SecretEngine for LdapEngine {
 }
 
 impl LdapEngine {
+    /// Generate a secure random password
+    fn generate_password(&self, length: usize) -> String {
+        use rand::Rng;
+        const CHARSET: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        let mut rng = rand::thread_rng();
+        (0..length)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
+    }
+
     /// Generate LDAP credentials for existing user
     async fn generate_ldap_credentials(
         &mut self,
@@ -172,10 +197,7 @@ impl LdapEngine {
             "username".to_string(),
             Value::String(format!("cn={},{}", username, self.config.user_dn)),
         );
-        creds_data.insert(
-            "password".to_string(),
-            Value::String(password),
-        );
+        creds_data.insert("password".to_string(), Value::String(password));
         creds_data.insert(
             "dn".to_string(),
             Value::String(format!("cn={},{}", username, self.config.user_dn)),
@@ -202,41 +224,26 @@ impl LdapEngine {
             .and_then(|v| v.as_str())
             .ok_or_else(|| SecretError::InvalidSecretData("username is required".to_string()))?;
 
-        let password = data
+        let _password = data
             .get("password")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| self.generate_password(12));
 
         // Construct user DN
-        let user_dn = format!("cn={},{}", username, self.config.user_dn);
+        let _user_dn = format!("cn={},{}", username, self.config.user_dn);
 
-        // LDAP user attributes
-        let _attrs = vec![
-            ("objectClass", vec!["top", "person", "organizationalPerson", "user"]),
-            ("cn", vec![username]),
-            ("sn", vec![username]), // surname
-            ("userPrincipalName", vec![&format!("{}@domain.com", username)]),
-            ("userAccountControl", vec!["512"]), // normal account
-            ("unicodePwd", vec![&self.encode_password(&password)]),
-        ];
+        // TODO: Implement user creation when secreton_ldap_utils is available
+        // For now, return an error
+        return Err(SecretError::BackendOperationFailed(
+            "LDAP user creation requires secreton_ldap_utils dependency (not yet implemented)"
+                .to_string(),
+        ));
 
-        // In a real implementation, you would execute the LDAP add operation
-        // For now, we'll simulate success
-        tracing::info!("LDAP user creation simulated for DN: {}", user_dn);
-
-        Ok(())
-    }
-
-    /// Encode password for LDAP (UTF-16LE with quotes)
-    fn encode_password(&self, password: &str) -> String {
-        // LDAP requires passwords to be UTF-16LE encoded and wrapped in quotes
-        format!("\"{}\"", password)
-    }
-
-    /// Generate secure password
-    fn generate_password(&self, length: usize) -> String {
-        use secreton_common::utils::password::generate_password;
-        generate_password(length)
+        // Commented out until secreton_ldap_utils is available:
+        // use secreton_ldap_utils::{LdapConfig, LdapConnection, LdapOperations, LdapSchema};
+        // let utils_config = LdapConfig { ... };
+        // let mut conn = LdapConnection::new(&utils_config).await?;
+        // LdapOperations::create_user(&mut conn, &user_dn, username, &password, LdapSchema::OpenLDAP).await?;
     }
 }

@@ -1,10 +1,10 @@
-use brankas_core::security::{
+use secreton_core::security::{
     AdvancedSecurityOrchestrator, BankingGradeConfig, GovernmentGradeConfig
 };
 use std::{sync::Arc, time::Instant};
 use tokio::time::{timeout, Duration};
 
-/// Performance benchmarks and load testing for Brankas security system
+/// Performance benchmarks and load testing for Secreton security system
 #[cfg(test)]
 mod performance_tests {
     use super::*;

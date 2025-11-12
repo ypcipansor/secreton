@@ -1,6 +1,6 @@
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
@@ -42,7 +42,7 @@ impl Default for MySQLStorageConfig {
 pub struct MySQLStorage {
     config: MySQLStorageConfig,
     pool: mysql::Pool,
-    cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// MySQL transaction implementation
@@ -68,7 +68,7 @@ impl MySQLTransaction {
 
 #[async_trait]
 impl StorageTransaction for MySQLTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -78,7 +78,7 @@ impl StorageTransaction for MySQLTransaction {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -251,7 +251,7 @@ impl MySQLStorage {
     }
 
     /// Build MySQL query for inserting/updating entries
-    fn build_upsert_query(&self, _entry: &VaultEntry) -> String {
+    fn build_upsert_query(&self, _entry: &SecretEntry) -> String {
         format!(
             r#"
             INSERT INTO {} (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
@@ -301,7 +301,7 @@ impl MySQLStorage {
 
 #[async_trait]
 impl StorageBackend for MySQLStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let mut conn = self
             .pool
             .get_conn()
@@ -359,13 +359,13 @@ impl StorageBackend for MySQLStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // For MySQL, we need to query by path first to find the entry
         // This is a limitation of the current design
         Ok(None)
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -400,7 +400,7 @@ impl StorageBackend for MySQLStorage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -433,7 +433,7 @@ impl StorageBackend for MySQLStorage {
         Ok(conn.affected_rows() > 0)
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut conn = self
             .pool
             .get_conn()
@@ -562,8 +562,8 @@ impl StorageBackend for MySQLStorage {
 }
 
 impl MySQLStorage {
-    /// Convert MySQL row to VaultEntry
-    fn row_to_vault_entry(&self, row: &mysql::Row) -> Result<VaultEntry, StorageError> {
+    /// Convert MySQL row to SecretEntry
+    fn row_to_vault_entry(&self, row: &mysql::Row) -> Result<SecretEntry, StorageError> {
         let id: String = row.get(0).ok_or_else(|| StorageError::SerializationError {
             message: "Missing id field".to_string(),
         })?;
@@ -643,7 +643,7 @@ impl MySQLStorage {
         let expires_at_dt =
             expires_at.map(|dt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
-        Ok(VaultEntry {
+        Ok(SecretEntry {
             id,
             path,
             encrypted_data,
@@ -682,7 +682,7 @@ mod tests {
             cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/path".to_string(),
             vec![1, 2, 3],
             crate::EncryptionMetadata {

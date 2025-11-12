@@ -8,15 +8,47 @@ use crate::models::plugin::PluginCatalogEntry;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use deadpool_postgres::Pool;
-use secreton_auth::{Token, TokenType};
-use secreton_auth_methods::model::MfaMethod;
-use secreton_policies::{Policy, PolicyEffect, PolicyRule, PolicyType};
+use secreton_auth::{token::Token, token::TokenStatus, token::TokenType};
+// TODO: Uncomment when secreton_auth_methods crate is available
+// use secreton_auth_methods::model::MfaMethod;
+// TODO: Uncomment when secreton_policies crate is available
+// use secreton_policies::{Policy, PolicyEffect, PolicyRule, PolicyType};
+use secreton_auth::policies::{Policy, PolicyEffect, PolicyRule, PolicyType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
+use std::str::FromStr;
+use uuid::Uuid;
 
-// Re-export storage modules
+impl FromStr for MfaMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "totp" => Ok(MfaMethod::Totp),
+            "sms" => Ok(MfaMethod::Sms),
+            "push" => Ok(MfaMethod::Push),
+            "hardware" => Ok(MfaMethod::Hardware),
+            "webauthn" => Ok(MfaMethod::WebAuthn),
+            "email" => Ok(MfaMethod::Email),
+            "recovery" => Ok(MfaMethod::Recovery),
+            _ => Err(format!("Unknown MFA method: {}", s)),
+        }
+    }
+}
+
+// Stub types until the crates are available
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum MfaMethod {
+    Totp,
+    Sms,
+    Push,
+    Hardware,
+    WebAuthn,
+    Email,
+    Recovery,
+}
 pub mod mfa;
 pub mod secret;
 pub mod secure;
@@ -337,24 +369,24 @@ impl PostgresStorage {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#,
                 &[
-                    &t.id,
-                    &t.token,
+                    &t.id.to_string(),
+                    &t.accessor,
                     &serde_json::to_string(&t.token_type)?,
                     &policies_json,
-                    &t.entity_id,
-                    &t.display_name,
-                    &t.created_at,
-                    &t.expires_at,
-                    &t.renewed_at,
-                    &(t.renew_count as i32),
-                    &t.max_renewals.map(|x| x as i32),
-                    &(t.ttl as i32),
-                    &(t.max_ttl as i32),
-                    &t.parent_id,
-                    &(t.num_uses as i32),
+                    &t.entity_id.map(|id| id.to_string()),
+                    &"token-display-name".to_string(), // Placeholder
+                    &t.creation_time,
+                    &t.expiry_time,
+                    &t.last_renewal_time,
+                    &0i32, // renew_count placeholder
+                    &None::<i32>, // max_renewals placeholder
+                    &3600i32, // ttl placeholder (1 hour)
+                    &86400i32, // max_ttl placeholder (24 hours)
+                    &None::<String>, // parent_id placeholder
+                    &t.num_uses.map(|n| n as i32),
                     &metadata_json,
-                    &t.revoked,
-                    &t.revoked_at,
+                    &(t.status == TokenStatus::Revoked),
+                    &None::<DateTime<Utc>>, // revoked_at placeholder
                 ],
             )
             .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
@@ -426,44 +458,46 @@ impl PostgresStorage {
             let token_val: String = row.get(1);
             let token_type_str: String = row.get(2);
             let policies_json: serde_json::Value = row.get(3);
-            let entity_id: Option<String> = row.get(4);
-            let display_name: String = row.get(5);
+            let _entity_id: Option<String> = row.get(4);
+            let _display_name: String = row.get(5);
             let created_at: DateTime<Utc> = row.get(6);
             let expires_at: Option<DateTime<Utc>> = row.get(7);
             let renewed_at: Option<DateTime<Utc>> = row.get(8);
-            let renew_count: i32 = row.get(9);
-            let max_renewals: Option<i32> = row.get(10);
-            let ttl: i32 = row.get(11);
-            let max_ttl: i32 = row.get(12);
-            let parent_id: Option<String> = row.get(13);
+            let _renew_count: i32 = row.get(9);
+            let _max_renewals: Option<i32> = row.get(10);
+            let _ttl: i32 = row.get(11);
+            let _max_ttl: i32 = row.get(12);
+            let _parent_id: Option<String> = row.get(13);
             let num_uses: i32 = row.get(14);
             let metadata_json: serde_json::Value = row.get(15);
             let revoked: bool = row.get(16);
-            let revoked_at: Option<DateTime<Utc>> = row.get(17);
+            let _revoked_at: Option<DateTime<Utc>> = row.get(17);
 
             let token_type: TokenType = serde_json::from_str(&token_type_str)?;
             let policies: Vec<String> = serde_json::from_value(policies_json)?;
             let metadata: HashMap<String, String> = serde_json::from_value(metadata_json)?;
 
             Ok(Some(Token {
-                id,
-                token: token_val,
+                id: Uuid::parse_str(&id).map_err(|_| CoreError::Database {
+                    message: "Invalid UUID".to_string(),
+                })?,
+                accessor: token_val.clone(),
+                entity_id: None, // Not stored in this schema
                 token_type,
                 policies,
-                entity_id,
-                display_name,
-                created_at,
-                expires_at,
-                renewed_at,
-                renew_count: renew_count as u32,
-                max_renewals: max_renewals.map(|x| x as u32),
-                ttl: ttl as u32,
-                max_ttl: max_ttl as u32,
-                parent_id,
-                num_uses: num_uses as u32,
                 metadata,
-                revoked,
-                revoked_at,
+                creation_time: created_at,
+                expiry_time: expires_at,
+                last_renewal_time: renewed_at,
+                status: if revoked {
+                    TokenStatus::Revoked
+                } else {
+                    TokenStatus::Active
+                },
+                renewable: true,        // Default assumption
+                explicit_max_ttl: None, // Not stored
+                num_uses: Some(num_uses as u32),
+                remaining_uses: None, // Not tracked in this schema
             }))
         } else {
             Ok(None)

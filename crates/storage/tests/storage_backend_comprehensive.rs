@@ -1,10 +1,8 @@
 use uuid::Uuid;
 
 use secreton_storage::{
-    EncryptionMetadata, SecurityLevel, StorageBackend, VaultEntry,
-    backends::{
-        AzureBlobStorage, CassandraStorage, CockroachDBStorage, GoogleCloudStorage, MongoDBStorage,
-    },
+    EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend,
+    backends::{CassandraStorage, CockroachDBStorage, MongoDBStorage},
 };
 
 #[tokio::test]
@@ -24,7 +22,7 @@ async fn test_cockroachdb_storage_basic_operations() {
 
     // Create test entry
     let owner_id = Uuid::new_v4();
-    let entry = VaultEntry::new(
+    let entry = SecretEntry::new(
         "test/cockroachdb/path".to_string(),
         vec![1, 2, 3, 4, 5],
         EncryptionMetadata {
@@ -102,7 +100,7 @@ async fn test_cassandra_storage_basic_operations() {
 
     // Create test entry
     let owner_id = Uuid::new_v4();
-    let entry = VaultEntry::new(
+    let entry = SecretEntry::new(
         "test/cassandra/path".to_string(),
         vec![1, 2, 3, 4, 5],
         EncryptionMetadata {
@@ -180,7 +178,7 @@ async fn test_mongodb_storage_basic_operations() {
 
     // Create test entry
     let owner_id = Uuid::new_v4();
-    let entry = VaultEntry::new(
+    let entry = SecretEntry::new(
         "test/mongodb/path".to_string(),
         vec![1, 2, 3, 4, 5],
         EncryptionMetadata {
@@ -241,174 +239,6 @@ async fn test_mongodb_storage_basic_operations() {
     );
 }
 
-#[tokio::test]
-async fn test_azure_blob_storage_basic_operations() {
-    // Test configuration
-    let config = secreton_storage::backends::AzureBlobConfig {
-        account_name: "testaccount".to_string(),
-        account_key: Some("testkey".to_string()),
-        container_name: "testcontainer".to_string(),
-        endpoint: None,
-        use_emulator: true,
-        sas_token: None,
-    };
-
-    // Create storage instance
-    let storage = match AzureBlobStorage::new(config).await {
-        Ok(storage) => storage,
-        Err(_) => {
-            // Skip test if Azure Blob Storage is not available
-            println!("Skipping Azure Blob test - not available");
-            return;
-        }
-    };
-
-    // Create test entry
-    let owner_id = Uuid::new_v4();
-    let entry = VaultEntry::new(
-        "test/azure/path".to_string(),
-        vec![1, 2, 3, 4, 5],
-        EncryptionMetadata {
-            algorithm: "aes-256-gcm".to_string(),
-            key_id: "test-key".to_string(),
-            iv: vec![0; 12],
-            auth_tag: Some(vec![0; 16]),
-            aad: None,
-            kdf_params: None,
-        },
-        SecurityLevel::Secret,
-        owner_id,
-    );
-
-    // Test store
-    storage.store(&entry).await.expect("Failed to store entry");
-
-    // Test retrieve by path
-    let retrieved = storage
-        .get_by_path("test/azure/path")
-        .await
-        .expect("Failed to retrieve entry")
-        .expect("Entry not found");
-
-    assert_eq!(retrieved.path, entry.path);
-    assert_eq!(retrieved.encrypted_data, entry.encrypted_data);
-    assert_eq!(retrieved.security_level, entry.security_level);
-
-    // Test exists
-    assert!(
-        storage
-            .exists("test/azure/path")
-            .await
-            .expect("Failed to check existence")
-    );
-
-    // Test list
-    let entries = storage
-        .list(&Default::default())
-        .await
-        .expect("Failed to list entries");
-    assert!(!entries.is_empty());
-
-    // Test delete
-    assert!(
-        storage
-            .delete_by_path("test/azure/path")
-            .await
-            .expect("Failed to delete")
-    );
-
-    // Verify deletion
-    assert!(
-        !storage
-            .exists("test/azure/path")
-            .await
-            .expect("Failed to check existence")
-    );
-}
-
-#[tokio::test]
-async fn test_gcs_storage_basic_operations() {
-    // Test configuration
-    let config = secreton_storage::backends::GcsConfig {
-        project_id: "test-project".to_string(),
-        bucket_name: "test-bucket".to_string(),
-        credentials_path: None,
-        service_account_key: None,
-    };
-
-    // Create storage instance
-    let storage = match GoogleCloudStorage::new(config).await {
-        Ok(storage) => storage,
-        Err(_) => {
-            // Skip test if Google Cloud Storage is not available
-            println!("Skipping GCS test - not available");
-            return;
-        }
-    };
-
-    // Create test entry
-    let owner_id = Uuid::new_v4();
-    let entry = VaultEntry::new(
-        "test/gcs/path".to_string(),
-        vec![1, 2, 3, 4, 5],
-        EncryptionMetadata {
-            algorithm: "aes-256-gcm".to_string(),
-            key_id: "test-key".to_string(),
-            iv: vec![0; 12],
-            auth_tag: Some(vec![0; 16]),
-            aad: None,
-            kdf_params: None,
-        },
-        SecurityLevel::TopSecret,
-        owner_id,
-    );
-
-    // Test store
-    storage.store(&entry).await.expect("Failed to store entry");
-
-    // Test retrieve by path
-    let retrieved = storage
-        .get_by_path("test/gcs/path")
-        .await
-        .expect("Failed to retrieve entry")
-        .expect("Entry not found");
-
-    assert_eq!(retrieved.path, entry.path);
-    assert_eq!(retrieved.encrypted_data, entry.encrypted_data);
-    assert_eq!(retrieved.security_level, entry.security_level);
-
-    // Test exists
-    assert!(
-        storage
-            .exists("test/gcs/path")
-            .await
-            .expect("Failed to check existence")
-    );
-
-    // Test list
-    let entries = storage
-        .list(&Default::default())
-        .await
-        .expect("Failed to list entries");
-    assert!(!entries.is_empty());
-
-    // Test delete
-    assert!(
-        storage
-            .delete_by_path("test/gcs/path")
-            .await
-            .expect("Failed to delete")
-    );
-
-    // Verify deletion
-    assert!(
-        !storage
-            .exists("test/gcs/path")
-            .await
-            .expect("Failed to check existence")
-    );
-}
-
 #[test]
 fn test_storage_backend_config_defaults() {
     // Test CockroachDB config default
@@ -451,7 +281,7 @@ fn test_vault_entry_with_all_security_levels() {
     ];
 
     for security_level in security_levels {
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             format!("test/security/{:?}", security_level).to_lowercase(),
             vec![1, 2, 3],
             EncryptionMetadata {
@@ -474,7 +304,7 @@ fn test_vault_entry_with_all_security_levels() {
 #[test]
 fn test_vault_entry_metadata_and_tags() {
     let owner_id = Uuid::new_v4();
-    let mut entry = VaultEntry::new(
+    let mut entry = SecretEntry::new(
         "test/metadata".to_string(),
         vec![1, 2, 3],
         EncryptionMetadata {

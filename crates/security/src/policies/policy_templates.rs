@@ -347,7 +347,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             PolicyTemplateError::MissingParameter(name) => assert_eq!(name, "required"),
-            _ => panic!("Expected MissingParameter error"),
+            _ => assert!(false, "Expected MissingParameter error"),
         }
     }
 

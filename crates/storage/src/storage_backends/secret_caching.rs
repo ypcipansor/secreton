@@ -165,7 +165,7 @@ impl SecretCachingService {
                 metrics.misses += 1;
                 metrics.entry_count = metrics.entry_count.saturating_sub(1);
 
-                return Err("Entry expired".into());
+                return Err("Entry expired".to_string().into());
             }
 
             // Update access
@@ -191,7 +191,7 @@ impl SecretCachingService {
         metrics.misses += 1;
         metrics.calculate_hit_rate();
 
-        Err(format!("Cache miss for key: {}", _key).into())
+        Err(format!("Cache miss for key: {}", _key).to_string().into())
     }
 
     /// Set value in cache
@@ -199,7 +199,11 @@ impl SecretCachingService {
         let ttl = ttl_secs.unwrap_or(self._config.default_ttl_secs);
 
         if ttl > self._config.max_ttl_secs {
-            return Err(format!("TTL {} exceeds max {}", ttl, self._config.max_ttl_secs).into());
+            return Err(
+                format!("TTL {} exceeds max {}", ttl, self._config.max_ttl_secs)
+                    .to_string()
+                    .into(),
+            );
         }
 
         let entry = CacheEntry::new(_key.clone(), value, ttl);
@@ -250,7 +254,7 @@ impl SecretCachingService {
 
             Ok(())
         } else {
-            Err(format!("Cache miss for key: {}", _key).into())
+            Err(format!("Cache miss for key: {}", _key).to_string().into())
         }
     }
 

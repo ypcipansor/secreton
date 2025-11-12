@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use secreton_storage::{
-    EncryptionMetadata, MockStorageBackend, QueryParams, SecurityLevel, StorageBackend, VaultEntry,
+    EncryptionMetadata, MockStorageBackend, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -26,7 +26,7 @@ mod storage_backend_tests {
 
         // Store data
         for (key, value) in &test_data {
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 key.to_string(),
                 value.to_vec(),
                 EncryptionMetadata {
@@ -90,7 +90,7 @@ mod storage_backend_tests {
             let storage_clone: Arc<MockStorageBackend> = Arc::clone(&storage);
             let handle = tokio::spawn(async move {
                 let key = format!("concurrent_key_{}", i);
-                let entry = VaultEntry::new(
+                let entry = SecretEntry::new(
                     key.clone(),
                     format!("concurrent_value_{}", i).as_bytes().to_vec(),
                     EncryptionMetadata {
@@ -135,7 +135,7 @@ mod storage_backend_tests {
         let storage = MockStorageBackend::new();
 
         let binary_data = vec![0u8, 1, 2, 255, 254, 253];
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "binary_test".to_string(),
             binary_data.clone(),
             EncryptionMetadata {
@@ -158,7 +158,7 @@ mod storage_backend_tests {
 
         // Test with large data
         let large_data = vec![42u8; 1024 * 1024]; // 1MB
-        let large_entry = VaultEntry::new(
+        let large_entry = SecretEntry::new(
             "large_test".to_string(),
             large_data.clone(),
             EncryptionMetadata {
@@ -206,7 +206,7 @@ mod storage_backend_tests {
         let write_start = Instant::now();
         for i in 0..num_operations {
             let key = format!("perf_key_{}", i);
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 key.clone(),
                 format!("perf_value_{}", i).as_bytes().to_vec(),
                 EncryptionMetadata {
@@ -258,7 +258,7 @@ mod storage_backend_tests {
     async fn test_storage_metadata_handling() -> Result<()> {
         let storage = MockStorageBackend::new();
 
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "metadata_test".to_string(),
             b"test_value".to_vec(),
             EncryptionMetadata {
@@ -298,7 +298,7 @@ mod storage_backend_tests {
         ];
 
         for (key, value) in test_data {
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 key.to_string(),
                 value.as_bytes().to_vec(),
                 EncryptionMetadata {
@@ -346,7 +346,7 @@ mod storage_backend_tests {
 
         // Test with very long keys
         let long_key = "a".repeat(1000);
-        let long_key_entry = VaultEntry::new(
+        let long_key_entry = SecretEntry::new(
             long_key,
             b"value".to_vec(),
             EncryptionMetadata {
@@ -363,7 +363,7 @@ mod storage_backend_tests {
         storage.store(&long_key_entry).await?;
 
         // Test with empty key
-        let empty_key_entry = VaultEntry::new(
+        let empty_key_entry = SecretEntry::new(
             "".to_string(),
             b"empty_key_value".to_vec(),
             EncryptionMetadata {
@@ -382,7 +382,7 @@ mod storage_backend_tests {
 
         // Test with unicode keys
         let unicode_key = "こんにちは世界";
-        let unicode_entry = VaultEntry::new(
+        let unicode_entry = SecretEntry::new(
             unicode_key.to_string(),
             b"unicode_value".to_vec(),
             EncryptionMetadata {
@@ -413,7 +413,7 @@ mod storage_backend_tests {
         let storage = MockStorageBackend::new();
 
         // Store a value
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "tx_key".to_string(),
             b"test_value".to_vec(),
             EncryptionMetadata {

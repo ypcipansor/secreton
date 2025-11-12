@@ -3,11 +3,9 @@
 //! This module provides enterprise-grade disaster recovery capabilities
 //! including cross-region replication, automated failover, and recovery testing.
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -200,24 +198,30 @@ impl DisasterRecoveryManager {
     /// Create a new disaster recovery manager
     pub fn new(config: DisasterRecoveryConfig) -> Self {
         let mut regions = HashMap::new();
-        regions.insert(config.primary_region.clone(), RegionState {
-            region_id: config.primary_region.clone(),
-            status: RegionStatus::Healthy,
-            last_health_check: Utc::now(),
-            failed_checks: 0,
-            priority: 0,
-            capacity: 100.0,
-        });
-
-        for region in &config.secondary_regions {
-            regions.insert(region.clone(), RegionState {
-                region_id: region.clone(),
+        regions.insert(
+            config.primary_region.clone(),
+            RegionState {
+                region_id: config.primary_region.clone(),
                 status: RegionStatus::Healthy,
                 last_health_check: Utc::now(),
                 failed_checks: 0,
-                priority: 1,
+                priority: 0,
                 capacity: 100.0,
-            });
+            },
+        );
+
+        for region in &config.secondary_regions {
+            regions.insert(
+                region.clone(),
+                RegionState {
+                    region_id: region.clone(),
+                    status: RegionStatus::Healthy,
+                    last_health_check: Utc::now(),
+                    failed_checks: 0,
+                    priority: 1,
+                    capacity: 100.0,
+                },
+            );
         }
 
         Self {
@@ -228,7 +232,9 @@ impl DisasterRecoveryManager {
     }
 
     /// Perform disaster recovery replication
-    pub async fn perform_replication(&self) -> Result<ReplicationResult, DisasterRecoveryError> {
+    pub async fn perform_replication(
+        &self,
+    ) -> std::result::Result<ReplicationResult, DisasterRecoveryError> {
         if !self.config.enabled {
             return Ok(ReplicationResult {
                 success: true,
@@ -253,15 +259,18 @@ impl DisasterRecoveryManager {
 
                     // Update metrics
                     let mut metrics = self.replication_metrics.write().await;
-                    let region_metrics = metrics.entry(region.clone()).or_insert_with(|| ReplicationMetrics {
-                        total_replicated: 0,
-                        lag_seconds: 0,
-                        operations_count: 0,
-                        failed_operations: 0,
-                        avg_throughput: 0.0,
-                        last_success: None,
-                        last_error: None,
-                    });
+                    let region_metrics =
+                        metrics
+                            .entry(region.clone())
+                            .or_insert_with(|| ReplicationMetrics {
+                                total_replicated: 0,
+                                lag_seconds: 0,
+                                operations_count: 0,
+                                failed_operations: 0,
+                                avg_throughput: 0.0,
+                                last_success: None,
+                                last_error: None,
+                            });
 
                     region_metrics.total_replicated += data_size;
                     region_metrics.operations_count += 1;
@@ -292,7 +301,10 @@ impl DisasterRecoveryManager {
     }
 
     /// Replicate data to a specific region
-    async fn replicate_to_region(&self, region: &str) -> Result<u64, DisasterRecoveryError> {
+    async fn replicate_to_region(
+        &self,
+        _region: &str,
+    ) -> std::result::Result<u64, DisasterRecoveryError> {
         // In a real implementation, this would:
         // 1. Connect to the target region's storage
         // 2. Identify data that needs replication
@@ -320,7 +332,9 @@ impl DisasterRecoveryManager {
     }
 
     /// Check region health and update status
-    pub async fn check_region_health(&self) -> Result<Vec<RegionHealthCheck>, DisasterRecoveryError> {
+    pub async fn check_region_health(
+        &self,
+    ) -> std::result::Result<Vec<RegionHealthCheck>, DisasterRecoveryError> {
         let mut health_checks = Vec::new();
 
         for (region_id, region_state) in self.regions.read().await.iter() {
@@ -335,7 +349,11 @@ impl DisasterRecoveryManager {
     }
 
     /// Perform health check for a specific region
-    async fn perform_health_check(&self, region_id: &str, region_state: &RegionState) -> Result<RegionHealthCheck, DisasterRecoveryError> {
+    async fn perform_health_check(
+        &self,
+        region_id: &str,
+        _region_state: &RegionState,
+    ) -> std::result::Result<RegionHealthCheck, DisasterRecoveryError> {
         // In a real implementation, this would:
         // 1. Ping the region's endpoints
         // 2. Check storage connectivity
@@ -349,16 +367,27 @@ impl DisasterRecoveryManager {
         let is_healthy = rand::random::<f32>() > 0.1;
 
         Ok(RegionHealthCheck {
-            region_id: region_id.clone(),
+            region_id: region_id.to_string(),
             timestamp: Utc::now(),
-            status: if is_healthy { RegionStatus::Healthy } else { RegionStatus::Unhealthy },
+            status: if is_healthy {
+                RegionStatus::Healthy
+            } else {
+                RegionStatus::Unhealthy
+            },
             response_time_ms: 50,
-            error_message: if !is_healthy { Some("Simulated health check failure".to_string()) } else { None },
+            error_message: if !is_healthy {
+                Some(String::from("Simulated health check failure"))
+            } else {
+                None
+            },
         })
     }
 
     /// Update region states based on health checks
-    async fn update_region_states(&self, health_checks: Vec<RegionHealthCheck>) -> Result<(), DisasterRecoveryError> {
+    async fn update_region_states(
+        &self,
+        health_checks: Vec<RegionHealthCheck>,
+    ) -> std::result::Result<(), DisasterRecoveryError> {
         let mut regions = self.regions.write().await;
 
         for health_check in health_checks {
@@ -381,28 +410,38 @@ impl DisasterRecoveryManager {
     }
 
     /// Initiate failover to a secondary region
-    pub async fn initiate_failover(&self, target_region: &str) -> Result<FailoverResult, DisasterRecoveryError> {
+    pub async fn initiate_failover(
+        &self,
+        target_region: &str,
+    ) -> std::result::Result<FailoverResult, DisasterRecoveryError> {
         if target_region == self.config.primary_region {
             return Err(DisasterRecoveryError::InvalidOperation(
-                "Cannot failover to primary region".to_string()
+                "Cannot failover to primary region".to_string(),
             ));
         }
 
-        if !self.config.secondary_regions.contains(&target_region.to_string()) {
-            return Err(DisasterRecoveryError::InvalidOperation(
-                format!("Region {} is not a configured secondary region", target_region)
-            ));
+        if !self
+            .config
+            .secondary_regions
+            .contains(&target_region.to_string())
+        {
+            return Err(DisasterRecoveryError::InvalidOperation(format!(
+                "Region {} is not a configured secondary region",
+                target_region
+            )));
         }
 
         // Check if target region is healthy
         let regions = self.regions.read().await;
-        let target_region_state = regions.get(target_region)
+        let target_region_state = regions
+            .get(target_region)
             .ok_or_else(|| DisasterRecoveryError::RegionNotFound(target_region.to_string()))?;
 
         if target_region_state.status != RegionStatus::Healthy {
-            return Err(DisasterRecoveryError::InvalidOperation(
-                format!("Target region {} is not healthy", target_region)
-            ));
+            return Err(DisasterRecoveryError::InvalidOperation(format!(
+                "Target region {} is not healthy",
+                target_region
+            )));
         }
 
         // In a real implementation, this would:
@@ -518,13 +557,17 @@ impl SnapshotManager {
     }
 
     /// Create a new snapshot
-    pub async fn create_snapshot(&self, name: Option<String>) -> Result<String, SnapshotError> {
+    pub async fn create_snapshot(
+        &self,
+        name: Option<String>,
+    ) -> std::result::Result<String, SnapshotError> {
         if !self.config.enabled {
             return Err(SnapshotError::SnapshotsDisabled);
         }
 
         let snapshot_id = Uuid::new_v4().to_string();
-        let snapshot_name = name.unwrap_or_else(|| format!("snapshot-{}", Utc::now().format("%Y%m%d-%H%M%S")));
+        let snapshot_name =
+            name.unwrap_or_else(|| format!("snapshot-{}", Utc::now().format("%Y%m%d-%H%M%S")));
 
         // Execute pre-snapshot hooks
         for hook in &self.config.pre_hooks {
@@ -538,7 +581,11 @@ impl SnapshotManager {
         // 4. Update snapshot metadata
 
         let snapshot_size = 1024 * 1024 * 100; // 100MB for demonstration
-        let mut components = vec!["secrets".to_string(), "policies".to_string(), "audit_logs".to_string()];
+        let mut components = vec![
+            "secrets".to_string(),
+            "policies".to_string(),
+            "audit_logs".to_string(),
+        ];
         if self.config.include_metrics {
             components.push("metrics".to_string());
         }
@@ -559,7 +606,10 @@ impl SnapshotManager {
             },
         };
 
-        self.snapshots.write().await.insert(snapshot_id.clone(), snapshot);
+        self.snapshots
+            .write()
+            .await
+            .insert(snapshot_id.clone(), snapshot);
 
         // Execute post-snapshot hooks
         for hook in &self.config.post_hooks {
@@ -573,15 +623,20 @@ impl SnapshotManager {
     }
 
     /// Restore from a snapshot
-    pub async fn restore_snapshot(&self, snapshot_id: &str) -> Result<(), SnapshotError> {
+    pub async fn restore_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> std::result::Result<(), SnapshotError> {
         let snapshots = self.snapshots.read().await;
-        let snapshot = snapshots.get(snapshot_id)
+        let snapshot = snapshots
+            .get(snapshot_id)
             .ok_or_else(|| SnapshotError::SnapshotNotFound(snapshot_id.to_string()))?;
 
         if snapshot.status != SnapshotStatus::Available {
-            return Err(SnapshotError::InvalidSnapshotState(
-                format!("Snapshot {} is not available for restore", snapshot_id)
-            ));
+            return Err(SnapshotError::InvalidSnapshotState(format!(
+                "Snapshot {} is not available for restore",
+                snapshot_id
+            )));
         }
 
         // In a real implementation, this would:
@@ -604,9 +659,13 @@ impl SnapshotManager {
     }
 
     /// Delete a snapshot
-    pub async fn delete_snapshot(&self, snapshot_id: &str) -> Result<(), SnapshotError> {
+    pub async fn delete_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> std::result::Result<(), SnapshotError> {
         let mut snapshots = self.snapshots.write().await;
-        snapshots.remove(snapshot_id)
+        snapshots
+            .remove(snapshot_id)
             .ok_or_else(|| SnapshotError::SnapshotNotFound(snapshot_id.to_string()))?;
 
         // In a real implementation, this would also delete from storage
@@ -614,7 +673,7 @@ impl SnapshotManager {
     }
 
     /// Execute a hook script
-    async fn execute_hook(&self, hook: &str) -> Result<(), SnapshotError> {
+    async fn execute_hook(&self, hook: &str) -> std::result::Result<(), SnapshotError> {
         // In a real implementation, this would execute the hook script
         // For demonstration, we'll just log it
         println!("Executing hook: {}", hook);
@@ -622,17 +681,20 @@ impl SnapshotManager {
     }
 
     /// Cleanup old snapshots based on retention policy
-    async fn cleanup_old_snapshots(&self) -> Result<(), SnapshotError> {
+    async fn cleanup_old_snapshots(&self) -> std::result::Result<(), SnapshotError> {
         let mut snapshots = self.snapshots.write().await;
-        let mut snapshot_list: Vec<_> = snapshots.iter().collect();
-        snapshot_list.sort_by_key(|(_, s)| s.created_at);
+        let mut snapshot_list: Vec<(String, DateTime<Utc>)> = snapshots
+            .iter()
+            .map(|(id, s)| (id.clone(), s.created_at))
+            .collect();
+        snapshot_list.sort_by_key(|(_, dt)| *dt);
 
         // Keep only the most recent snapshots based on retention count
         if snapshot_list.len() > self.config.retention_count as usize {
             let to_remove = snapshot_list.len() - self.config.retention_count as usize;
 
-            for (id, _) in snapshot_list.iter().take(to_remove) {
-                snapshots.remove(*id);
+            for (id, _) in snapshot_list.into_iter().take(to_remove) {
+                snapshots.remove(&id);
             }
         }
 
@@ -666,4 +728,65 @@ pub enum SnapshotError {
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+}
+
+use secreton_errors::SecretonError;
+
+/// Convert DisasterRecoveryError to SecretonError for ? operator
+impl From<DisasterRecoveryError> for SecretonError {
+    fn from(err: DisasterRecoveryError) -> Self {
+        match err {
+            DisasterRecoveryError::RegionNotFound(region) => SecretonError::NotFound {
+                resource: format!("region: {}", region),
+            },
+            DisasterRecoveryError::InvalidOperation(msg) => SecretonError::Validation {
+                message: format!("Invalid disaster recovery operation: {}", msg),
+            },
+            DisasterRecoveryError::ReplicationFailed(msg) => SecretonError::Replication {
+                message: format!("Replication failed: {}", msg),
+            },
+            DisasterRecoveryError::NetworkError(msg) => SecretonError::Network {
+                message: format!("Network error: {}", msg),
+            },
+            DisasterRecoveryError::StorageError(msg) => SecretonError::Database {
+                message: format!("Storage error: {}", msg),
+            },
+            DisasterRecoveryError::ConfigurationError(msg) => SecretonError::Configuration {
+                message: format!("Configuration error: {}", msg),
+            },
+            DisasterRecoveryError::TimeoutError(msg) => SecretonError::Timeout {
+                operation: format!("disaster recovery operation: {}", msg),
+            },
+            DisasterRecoveryError::IoError(err) => SecretonError::Io(err),
+            DisasterRecoveryError::JsonError(err) => SecretonError::Serialization(err),
+        }
+    }
+}
+
+/// Convert SnapshotError to SecretonError for ? operator
+impl From<SnapshotError> for SecretonError {
+    fn from(err: SnapshotError) -> Self {
+        match err {
+            SnapshotError::SnapshotsDisabled => SecretonError::Configuration {
+                message: "Snapshots are disabled".to_string(),
+            },
+            SnapshotError::SnapshotNotFound(id) => SecretonError::NotFound {
+                resource: format!("snapshot: {}", id),
+            },
+            SnapshotError::InvalidSnapshotState(msg) => SecretonError::Validation {
+                message: format!("Invalid snapshot state: {}", msg),
+            },
+            SnapshotError::CreationFailed(msg) => SecretonError::Snapshot {
+                message: format!("Snapshot creation failed: {}", msg),
+            },
+            SnapshotError::RestorationFailed(msg) => SecretonError::Snapshot {
+                message: format!("Snapshot restoration failed: {}", msg),
+            },
+            SnapshotError::StorageError(msg) => SecretonError::Database {
+                message: format!("Snapshot storage error: {}", msg),
+            },
+            SnapshotError::IoError(err) => SecretonError::Io(err),
+            SnapshotError::JsonError(err) => SecretonError::Serialization(err),
+        }
+    }
 }

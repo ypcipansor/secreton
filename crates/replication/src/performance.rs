@@ -365,7 +365,7 @@ mod tests {
     fn create_test_replica(name: &str) -> ClusterNode {
         ClusterNode {
             node_id: uuid::Uuid::new_v4().to_string(),
-            address: format!("https://{}.vault.example.com", name),
+            address: format!("https://{}.secreton.local:8200", name),
             is_primary: false,
             last_heartbeat: Utc::now(),
             replication_lag: Some(0),

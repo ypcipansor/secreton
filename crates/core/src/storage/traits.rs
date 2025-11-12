@@ -5,7 +5,8 @@
 use crate::CoreError;
 use crate::models::plugin::PluginCatalogEntry;
 use async_trait::async_trait;
-use secreton_auth_methods::model::MfaMethod;
+// TODO: Uncomment when secreton_auth_methods crate is available
+// use secreton_auth_methods::model::MfaMethod;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
@@ -13,10 +14,19 @@ use std::collections::HashMap;
 // Import the actual types from their respective crates
 use crate::models::pki::{PkiCa, PkiCert};
 use crate::models::sentinel::SentinelPolicy;
-use secreton_auth_methods::token::token::Token;
+// TODO: Uncomment when secreton_auth_methods crate is available
+// use secreton_auth_methods::token::token::Token;
+use secreton_auth::token::Token;
 use secreton_security::policies::audit::AuditDevice;
 use secreton_security::policies::policy::Policy;
 use secreton_storage::models::lease::Lease;
+
+// Stub type for MfaMethod until secreton_auth_methods is available
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MfaMethod {
+    pub method_type: String,
+    pub enabled: bool,
+}
 
 use super::types::StorageEntry;
 
@@ -117,7 +127,7 @@ pub trait StorageBackend: Send + Sync {
         limit: usize,
     ) -> Result<Vec<super::types::AuditLog>, CoreError>;
 
-    // Vault state management methods
+    // Secret state management methods
     async fn is_sealed(&self) -> Result<bool, CoreError>;
     async fn seal(&self) -> Result<(), CoreError>;
     async fn unseal(&self, key: &str) -> Result<bool, CoreError>;

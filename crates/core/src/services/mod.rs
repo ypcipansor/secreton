@@ -1,3 +1,4 @@
 // Service modules organized by functional areas
 
-// Dynamic backends
+// Audit service
+pub mod audit;

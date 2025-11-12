@@ -1,4 +1,4 @@
-//! Error handling for the Brankas API.
+//! Error handling for the Secreton API.
 
 use axum::{
     http::StatusCode,

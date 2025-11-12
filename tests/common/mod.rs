@@ -1,4 +1,4 @@
-//! Common test utilities and helper functions for Brankas tests
+//! Common test utilities and helper functions for Secreton tests
 
 use std::{sync::Arc, time::Duration};
 use serde_json::{json, Value};

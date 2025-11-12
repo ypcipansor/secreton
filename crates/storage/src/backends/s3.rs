@@ -1,6 +1,6 @@
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
@@ -51,7 +51,7 @@ impl Default for S3StorageConfig {
 pub struct S3Storage {
     config: S3StorageConfig,
     client: aws_sdk_s3::Client,
-    cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// S3 transaction implementation
@@ -77,7 +77,7 @@ impl S3Transaction {
 
 #[async_trait]
 impl StorageTransaction for S3Transaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -87,7 +87,7 @@ impl StorageTransaction for S3Transaction {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -280,15 +280,15 @@ impl S3Storage {
         )
     }
 
-    /// Convert VaultEntry to S3 object data
-    fn vault_entry_to_bytes(&self, entry: &VaultEntry) -> Result<Vec<u8>, StorageError> {
+    /// Convert SecretEntry to S3 object data
+    fn vault_entry_to_bytes(&self, entry: &SecretEntry) -> Result<Vec<u8>, StorageError> {
         serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to serialize entry: {}", e),
         })
     }
 
-    /// Convert S3 object data to VaultEntry
-    fn bytes_to_vault_entry(&self, data: &[u8]) -> Result<VaultEntry, StorageError> {
+    /// Convert S3 object data to SecretEntry
+    fn bytes_to_vault_entry(&self, data: &[u8]) -> Result<SecretEntry, StorageError> {
         serde_json::from_slice(data).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to deserialize entry: {}", e),
         })
@@ -297,7 +297,7 @@ impl S3Storage {
 
 #[async_trait]
 impl StorageBackend for S3Storage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let key = self.build_versioned_key(&entry.path, entry.version);
         let data = self.vault_entry_to_bytes(entry)?;
 
@@ -335,14 +335,14 @@ impl StorageBackend for S3Storage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // For S3, we need to scan all objects to find by ID
         // This is not efficient, but necessary for the interface
         let entries = self.list(&QueryParams::default()).await?;
         Ok(entries.into_iter().find(|e| e.id == id))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -418,7 +418,7 @@ impl StorageBackend for S3Storage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -470,7 +470,7 @@ impl StorageBackend for S3Storage {
         Ok(true)
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut entries = Vec::new();
 
         // List objects with prefix
@@ -671,7 +671,7 @@ mod tests {
     fn test_vault_entry_to_bytes() {
         let _config = S3StorageConfig::default();
 
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/path".to_string(),
             vec![1, 2, 3],
             crate::EncryptionMetadata::default(),
@@ -683,7 +683,7 @@ mod tests {
         let bytes = serde_json::to_vec(&entry).unwrap();
         assert!(!bytes.is_empty());
 
-        let deserialized: VaultEntry = serde_json::from_slice(&bytes).unwrap();
+        let deserialized: SecretEntry = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(deserialized.path, entry.path);
     }
 }

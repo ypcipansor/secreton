@@ -37,7 +37,7 @@ pub struct ExternalSecret {
     pub refresh_interval_seconds: u64,
     pub labels: HashMap<String, String>,
     pub annotations: HashMap<String, String>,
-    pub data_keys: Vec<String>, // Keys to extract from Vault secret
+    pub data_keys: Vec<String>, // Keys to extract from Secret secret
 }
 
 /// Kubernetes Secret
@@ -145,7 +145,7 @@ impl KubernetesExternalSecrets {
         Ok(())
     }
 
-    /// Sync secret from Vault to Kubernetes
+    /// Sync secret from Secret to Kubernetes
     pub async fn sync_secret(&self, namespace: &str, name: &str) -> Result<SecretSync> {
         let external_secrets = self.external_secrets.read().await;
         let key = format!("{}/{}", namespace, name);
@@ -157,7 +157,7 @@ impl KubernetesExternalSecrets {
 
         drop(external_secrets);
 
-        // Mock: Fetch secret from Vault
+        // Mock: Fetch secret from Secret
         let vault_data = self
             .mock_fetch_from_vault(&external_secret.vault_path)
             .await?;
@@ -291,7 +291,7 @@ impl KubernetesExternalSecrets {
     }
 
     async fn mock_fetch_from_vault(&self, _vault_path: &str) -> Result<HashMap<String, String>> {
-        // Mock Vault fetch
+        // Mock Secret fetch
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
         data.insert("password".to_string(), "secret123".to_string());

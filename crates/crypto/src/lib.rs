@@ -1,4 +1,4 @@
-//! Brankas Cryptographic Library
+//! Secreton Cryptographic Library
 //!
 //! High-performance, secure cryptographic primitives and protocols
 //! with comprehensive RustCrypto integration and transit engine support.
@@ -21,7 +21,7 @@ pub mod key_manager;
 pub mod kmip;
 pub mod kv_engine;
 pub mod policy_enforced_crypto;
-pub mod pqc;
+// pub mod pqc; // Disabled for now
 pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod transit;
@@ -55,7 +55,7 @@ pub use policy_enforced_crypto::{
     PolicyEnforcedCryptoOperations, PolicyEnforcedEncryptionRequest, PolicyEnforcementError,
     RemediationStatus, ViolationType,
 };
-pub use pqc::*;
+pub use quantum_safe_crypto::*;
 pub use secure_multi_party_computation::{
     ComputationRequest, ComputationResult, DKGResult, PartialSignature, Participant, SMPCError,
     SMPCProtocol, SMPCSession, SMPCSystem, SecretShare, SessionState, ThresholdSignature,

@@ -1,8 +1,8 @@
-use tokio::time::{self, Duration};
 use crate::error::CryptoError;
 use rand::RngCore;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::time::{self, Duration};
 use tracing::{error, info};
 
 // Simple key-value storage trait for key manager
@@ -31,28 +31,41 @@ impl InMemoryKeyStorage {
 #[async_trait::async_trait]
 impl KeyStorage for InMemoryKeyStorage {
     async fn store_key(&self, key_id: &str, key_data: &[u8]) -> Result<(), CryptoError> {
-        let mut keys = self.keys.lock().map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
+        let mut keys = self
+            .keys
+            .lock()
+            .map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
         keys.insert(key_id.to_string(), key_data.to_vec());
         Ok(())
     }
 
     async fn get_key(&self, key_id: &str) -> Result<Vec<u8>, CryptoError> {
-        let keys = self.keys.lock().map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
+        let keys = self
+            .keys
+            .lock()
+            .map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
         keys.get(key_id)
             .cloned()
             .ok_or_else(|| CryptoError::KeyNotFound(key_id.to_string()))
     }
 
     async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, CryptoError> {
-        let keys = self.keys.lock().map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
-        Ok(keys.keys()
+        let keys = self
+            .keys
+            .lock()
+            .map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
+        Ok(keys
+            .keys()
             .filter(|k| k.starts_with(prefix))
             .cloned()
             .collect())
     }
 
     async fn delete_key(&self, key_id: &str) -> Result<(), CryptoError> {
-        let mut keys = self.keys.lock().map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
+        let mut keys = self
+            .keys
+            .lock()
+            .map_err(|_| CryptoError::Internal("Lock poisoned".to_string()))?;
         keys.remove(key_id);
         Ok(())
     }
@@ -112,12 +125,17 @@ impl KeyManager {
 
             // For this implementation, we'll just mark the data as needing re-encryption
             // In a full implementation, this would decrypt with old key and re-encrypt with new key
-            info!("Marking {} for re-encryption with key {}", key_path, new_key_id);
+            info!(
+                "Marking {} for re-encryption with key {}",
+                key_path, new_key_id
+            );
 
             // Store re-encryption marker
             let marker_key = format!("reencrypt_{}", key_path);
             let marker_data = format!("new_key:{}", new_key_id);
-            self.storage.store_key(&marker_key, marker_data.as_bytes()).await?;
+            self.storage
+                .store_key(&marker_key, marker_data.as_bytes())
+                .await?;
         }
 
         Ok(())
@@ -125,7 +143,9 @@ impl KeyManager {
 
     async fn update_active_key(&self, new_key_id: &str) -> Result<(), CryptoError> {
         // Store the active key reference
-        self.storage.store_key("active_key_ref", new_key_id.as_bytes()).await?;
+        self.storage
+            .store_key("active_key_ref", new_key_id.as_bytes())
+            .await?;
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -53,7 +53,7 @@ impl Default for EtcdStorageConfig {
 pub struct EtcdStorage {
     config: EtcdStorageConfig,
     client: reqwest::Client,
-    cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// etcd transaction implementation
@@ -79,7 +79,7 @@ impl EtcdTransaction {
 
 #[async_trait]
 impl StorageTransaction for EtcdTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -89,7 +89,7 @@ impl StorageTransaction for EtcdTransaction {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -202,7 +202,7 @@ impl EtcdStorage {
 
 #[async_trait]
 impl StorageBackend for EtcdStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let key = &entry.path;
         let full_key = self.build_key(key);
         let url = self.build_url("kv/put");
@@ -242,13 +242,13 @@ impl StorageBackend for EtcdStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // For etcd, we need to list all entries and find by ID
         let entries = self.list(&QueryParams::default()).await?;
         Ok(entries.into_iter().find(|e| e.id == id))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -308,7 +308,7 @@ impl StorageBackend for EtcdStorage {
                     }
                 })?;
 
-                let entry: VaultEntry = serde_json::from_slice(&decoded).map_err(|e| {
+                let entry: SecretEntry = serde_json::from_slice(&decoded).map_err(|e| {
                     StorageError::SerializationError {
                         message: format!("Failed to deserialize entry: {}", e),
                     }
@@ -325,7 +325,7 @@ impl StorageBackend for EtcdStorage {
         Ok(None)
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -369,7 +369,7 @@ impl StorageBackend for EtcdStorage {
         Ok(response.status().is_success())
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let prefix = params.path_prefix.as_deref().unwrap_or("");
         let full_prefix = self.build_key(prefix);
         let url = self.build_url("kv/range");
@@ -426,7 +426,7 @@ impl StorageBackend for EtcdStorage {
                     }
                 })?;
 
-                let entry: VaultEntry = serde_json::from_slice(&decoded).map_err(|e| {
+                let entry: SecretEntry = serde_json::from_slice(&decoded).map_err(|e| {
                     StorageError::SerializationError {
                         message: format!("Failed to deserialize entry: {}", e),
                     }

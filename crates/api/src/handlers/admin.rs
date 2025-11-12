@@ -245,7 +245,7 @@ pub struct SystemMetrics {
     pub cpu_usage: CpuMetrics,
     pub disk_usage: DiskMetrics,
     pub network: NetworkMetrics,
-    pub vault: VaultMetrics,
+    pub vault: SecretMetrics,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,7 +280,7 @@ pub struct NetworkMetrics {
 }
 
 #[derive(Debug, Serialize)]
-pub struct VaultMetrics {
+pub struct SecretMetrics {
     pub total_secrets: u64,
     pub total_keys: u64,
     pub total_policies: u64,
@@ -696,7 +696,7 @@ pub async fn get_system_metrics(
     let network = get_network_metrics().await;
 
     // Count total policies from storage
-    let total_policies = state.storage.list(&brankas_storage::QueryParams {
+    let total_policies = state.storage.list(&secreton_storage::QueryParams {
         path: Some("policies".to_string()),
         prefix: Some("policies/".to_string()),
         limit: None,
@@ -712,7 +712,7 @@ pub async fn get_system_metrics(
         cpu_usage: cpu,
         disk_usage: disk,
         network,
-        vault: VaultMetrics {
+        vault: SecretMetrics {
             total_secrets: stats.total_secrets,
             total_keys: stats.total_keys,
             total_policies,

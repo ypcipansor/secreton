@@ -1,15 +1,15 @@
 //! Modern Redis storage backend implementation using redis v1.0.0-alpha.1
 
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
-use std::sync::Arc;
 use std::collections::HashMap;
-use uuid::Uuid;
+use std::sync::Arc;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Modern Redis storage backend with connection pooling
 pub struct RedisBackend {
@@ -25,8 +25,8 @@ pub struct RedisTransaction {
 
 #[derive(Clone)]
 enum RedisTransactionOp {
-    Store(VaultEntry),
-    Update(VaultEntry),
+    Store(SecretEntry),
+    Update(SecretEntry),
     Delete(Uuid),
 }
 
@@ -42,23 +42,25 @@ impl RedisTransaction {
 
 #[async_trait]
 impl StorageTransaction for RedisTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisTransactionOp::Store(entry.clone()));
+        self.operations
+            .push(RedisTransactionOp::Store(entry.clone()));
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(RedisTransactionOp::Update(entry.clone()));
+        self.operations
+            .push(RedisTransactionOp::Update(entry.clone()));
         Ok(())
     }
 
@@ -81,30 +83,34 @@ impl StorageTransaction for RedisTransaction {
 
         // Get Redis connection from backend and execute all operations
         let mut conn = self.manager.lock().await;
-        
+
         for op in self.operations {
             match op {
                 RedisTransactionOp::Store(entry) => {
                     let key = format!("vault:entry:{}", entry.id);
-                    let value = serde_json::to_string(&entry).map_err(|e| StorageError::SerializationError {
-                        message: e.to_string(),
+                    let value = serde_json::to_string(&entry).map_err(|e| {
+                        StorageError::SerializationError {
+                            message: e.to_string(),
+                        }
                     })?;
-                    conn.set::<_, _, ()>(&key, &value)
-                        .await
-                        .map_err(|e| StorageError::QueryFailed {
+                    conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
+                        StorageError::QueryFailed {
                             message: format!("Failed to store entry in transaction: {}", e),
-                        })?;
+                        }
+                    })?;
                 }
                 RedisTransactionOp::Update(entry) => {
                     let key = format!("vault:entry:{}", entry.id);
-                    let value = serde_json::to_string(&entry).map_err(|e| StorageError::SerializationError {
-                        message: e.to_string(),
+                    let value = serde_json::to_string(&entry).map_err(|e| {
+                        StorageError::SerializationError {
+                            message: e.to_string(),
+                        }
                     })?;
-                    conn.set::<_, _, ()>(&key, &value)
-                        .await
-                        .map_err(|e| StorageError::QueryFailed {
+                    conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
+                        StorageError::QueryFailed {
                             message: format!("Failed to update entry in transaction: {}", e),
-                        })?;
+                        }
+                    })?;
                 }
                 RedisTransactionOp::Delete(id) => {
                     let key = format!("vault:entry:{}", id);
@@ -116,7 +122,7 @@ impl StorageTransaction for RedisTransaction {
                 }
             }
         }
-        
+
         self.committed = true;
         Ok(())
     }
@@ -141,13 +147,15 @@ impl RedisBackend {
                     message: format!("Failed to create Redis connection manager: {}", e),
                 })?;
 
-        Ok(Self { manager: Arc::new(Mutex::new(manager)) })
+        Ok(Self {
+            manager: Arc::new(Mutex::new(manager)),
+        })
     }
 }
 
 #[async_trait]
 impl StorageBackend for RedisBackend {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let key = format!("vault:entry:{}", entry.id);
         let value = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
             message: e.to_string(),
@@ -173,7 +181,7 @@ impl StorageBackend for RedisBackend {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let key = format!("vault:entry:{}", id);
         let mut conn = self.manager.lock().await;
 
@@ -197,7 +205,7 @@ impl StorageBackend for RedisBackend {
         }
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let key = format!("vault:path:{}", path);
         let mut conn = self.manager.lock().await;
 
@@ -220,7 +228,7 @@ impl StorageBackend for RedisBackend {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         // For updates, we use the same store logic
         self.store(entry).await
     }
@@ -233,7 +241,7 @@ impl StorageBackend for RedisBackend {
         Ok(false)
     }
 
-    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         Ok(Vec::new())
     }
 

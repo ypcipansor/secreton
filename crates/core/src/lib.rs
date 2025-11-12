@@ -1,46 +1,51 @@
-//! # Brankas Core
+//! # Secreton Core
 //!
-//! Core types, traits, and utilities shared across the Brankas security system.
+//! Core types, traits, and utilities shared across the Secreton security system.
 //! Provides foundational abstractions for security levels, audit logging,
 //! error handling, and common data structures.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub mod api;
+pub mod auth;
+pub mod crypto;
+pub mod disaster_recovery;
+// pub mod graphql_api;  // Moved to secreton-graphql crate
+pub mod metrics;
 pub mod models;
 pub mod sdk_libraries;
+pub mod secrets;
+pub mod secrets_sync;
 pub mod security;
+pub mod server;
 pub mod services;
 pub mod storage;
+pub mod telemetry;
 pub mod types;
+pub mod utils;
 
 // Re-export shared crates with specific imports to avoid conflicts
 pub use secreton_common::{Result as CommonResult, SecurityLevel};
-pub use secreton_config::{
-    AuthConfig, Config, ConsulStorageConfig as ConfigConsulStorageConfig, DatabaseConfig,
-    DynamoDBStorageConfig as ConfigDynamoDBStorageConfig,
-    EtcdStorageConfig as ConfigEtcdStorageConfig, MySQLStorageConfig as ConfigMySQLStorageConfig,
-    RaftConfig as ConfigRaftConfig, S3StorageConfig as ConfigS3StorageConfig, ServerConfig,
-    StorageBackendType as ConfigStorageBackendType, StorageConfig as ConfigStorageConfig,
-    TlsConfig,
-};
-pub use secreton_errors::*;
-pub use secreton_replication::{DisasterRecoveryService, PerformanceReplication};
-pub use secreton_storage::{
-    QueryParams as StorageQueryParams, RaftConfig as StorageRaftConfig, StorageBackend,
-    StorageBackendType as StorageStorageBackendType, StorageConfig as StorageStorageConfig,
-    StorageResult, VaultEntry,
+pub use secreton_errors::{Result, SecretonError};
+
+// Re-export auth types that were previously expected from secreton_common
+pub use secreton_auth::{
+    AuthCredentials, AuthResult, LoginRequest as LoginResult, RefreshTokenRequest as RefreshResult,
+    User, UserInfo,
 };
 
 // Re-export for backward compatibility
 pub type CoreError = SecretonError;
 pub type CoreResult<T> = secreton_common::Result<T>;
+
+// Export AppError and AppState for use in other modules
+pub use server::AppState;
+pub use utils::error::AppError;
+
 // Commented out imports that don't exist yet
 // pub use auth::mfa::MfaMethod;
 // pub use graphql_api::{create_graphql_schema, GraphQLConfig, DefaultSecretsManager as GraphQLSecretsManager};
 // pub use grpc_api::{GrpcConfig, SecretsGrpcService};
-// pub use utils::error::AppError;
 
 // Re-export commonly used models
 // Auth models now exported from auth-methods crate
@@ -49,7 +54,7 @@ pub type CoreResult<T> = secreton_common::Result<T>;
 //     RefreshTokenRequest, UserInfo,
 // };
 // Use security crate for policy types
-pub use secreton_security::policies::policy::{ControlGroup, Policy, PolicyRule};
+pub use secreton_security::policies::control_groups::ControlGroup;
 // User and Token models now exported from auth-methods crate
 // pub use models::user::{Token, User};
 

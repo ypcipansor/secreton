@@ -1,5 +1,7 @@
 use anyhow::Result;
-use secreton_auth_methods::model::MfaMethod;
+// TODO: Uncomment when secreton_auth_methods crate is available
+// use secreton_auth_methods::model::MfaMethod;
+use super::MfaMethod; // Use stub from parent module
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

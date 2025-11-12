@@ -1,20 +1,19 @@
-//! Authentication and authorization for the Brankas API
+//! Authentication and authorization for the Secreton API
 //!
 //! Provides JWT-based authentication, role-based access control,
 //! and integration with external identity providers.
 
 use axum::{
-    Json,
-    http::{HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    http::{HeaderValue},
 };
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use tracing::{error, warn};
+use tracing::warn;
 use uuid::Uuid;
+use secreton_errors::SecretonError;
 
 /// JWT claims structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,7 +58,7 @@ impl Default for AuthConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum UserRole {
     Admin,
-    VaultAdmin,
+    SecretAdmin,
     KeyManager,
     CryptoUser,
     ReadOnly,
@@ -69,7 +68,7 @@ impl UserRole {
     pub fn as_string(&self) -> String {
         match self {
             UserRole::Admin => "admin".to_string(),
-            UserRole::VaultAdmin => "vault-admin".to_string(),
+            UserRole::SecretAdmin => "vault-admin".to_string(),
             UserRole::KeyManager => "key-manager".to_string(),
             UserRole::CryptoUser => "crypto-user".to_string(),
             UserRole::ReadOnly => "read-only".to_string(),
@@ -79,7 +78,7 @@ impl UserRole {
     pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(UserRole::Admin),
-            "vault-admin" => Some(UserRole::VaultAdmin),
+            "vault-admin" => Some(UserRole::SecretAdmin),
             "key-manager" => Some(UserRole::KeyManager),
             "crypto-user" => Some(UserRole::CryptoUser),
             "read-only" => Some(UserRole::ReadOnly),
@@ -156,7 +155,7 @@ impl JwtAuthService {
         name: &str,
         email: &str,
         roles: Vec<String>,
-    ) -> Result<String, AuthError> {
+    ) -> AuthResult<String> {
         let now = Utc::now();
         let exp = now + Duration::hours(self.config.jwt_expiration_hours);
 
@@ -180,23 +179,27 @@ impl JwtAuthService {
     }
 
     /// Validate and decode JWT token
-    pub fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
+    pub fn validate_token(&self, token: &str) -> AuthResult<Claims> {
         let claims = self.verify_jwt(token)?;
 
         // Check issuer
         if claims.iss != self.config.issuer {
-            return Err(AuthError::TokenValidation("Invalid issuer".to_string()));
+            return Err(SecretonError::TokenInvalid {
+                reason: "Invalid issuer".to_string(),
+            });
         }
 
         // Check audience
         if claims.aud != self.config.audience {
-            return Err(AuthError::TokenValidation("Invalid audience".to_string()));
+            return Err(SecretonError::TokenInvalid {
+                reason: "Invalid audience".to_string(),
+            });
         }
 
         // Check expiration
         let now = Utc::now().timestamp() as u64;
         if claims.exp < now {
-            return Err(AuthError::TokenValidation("Token expired".to_string()));
+            return Err(SecretonError::TokenExpired);
         }
 
         Ok(claims)
@@ -248,7 +251,7 @@ impl JwtAuthService {
                         Permission::AccessAuditLogs.as_string(),
                     ]);
                 }
-                Some(UserRole::VaultAdmin) => {
+                Some(UserRole::SecretAdmin) => {
                     permissions.extend(vec![
                         Permission::CreateKey.as_string(),
                         Permission::RotateKey.as_string(),
@@ -306,18 +309,22 @@ impl JwtAuthService {
     }
 
     /// Create JWT token
-    fn create_jwt(&self, claims: &Claims) -> Result<String, AuthError> {
+    fn create_jwt(&self, claims: &Claims) -> AuthResult<String> {
         let header = r#"{"alg":"HS256","typ":"JWT"}"#;
         let header_b64 = general_purpose::URL_SAFE_NO_PAD.encode(header);
 
         let payload =
-            serde_json::to_string(claims).map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+            serde_json::to_string(claims).map_err(|e| SecretonError::Cryptographic {
+                message: format!("Failed to serialize claims: {}", e),
+            })?;
         let payload_b64 = general_purpose::URL_SAFE_NO_PAD.encode(payload);
 
         let message = format!("{}.{}", header_b64, payload_b64);
 
         let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
-            .map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+            .map_err(|e| SecretonError::Cryptographic {
+                message: format!("Failed to create HMAC: {}", e),
+            })?;
         mac.update(message.as_bytes());
         let signature = mac.finalize().into_bytes();
         let signature_b64 = general_purpose::URL_SAFE_NO_PAD.encode(signature);
@@ -326,12 +333,12 @@ impl JwtAuthService {
     }
 
     /// Verify JWT token
-    fn verify_jwt(&self, token: &str) -> Result<Claims, AuthError> {
+    fn verify_jwt(&self, token: &str) -> AuthResult<Claims> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
-            return Err(AuthError::TokenValidation(
-                "Invalid token format".to_string(),
-            ));
+            return Err(SecretonError::TokenInvalid {
+                reason: "Invalid token format".to_string(),
+            });
         }
 
         let header_b64 = parts[0];
@@ -342,21 +349,31 @@ impl JwtAuthService {
 
         let signature = general_purpose::URL_SAFE_NO_PAD
             .decode(signature_b64)
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+            .map_err(|e| SecretonError::TokenInvalid {
+                reason: format!("Failed to decode signature: {}", e),
+            })?;
 
         let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+            .map_err(|e| SecretonError::Cryptographic {
+                message: format!("Failed to initialize HMAC: {}", e),
+            })?;
         mac.update(message.as_bytes());
 
         mac.verify_slice(&signature)
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+            .map_err(|e| SecretonError::TokenInvalid {
+                reason: format!("Token signature verification failed: {}", e),
+            })?;
 
         let payload = general_purpose::URL_SAFE_NO_PAD
             .decode(payload_b64)
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+            .map_err(|e| SecretonError::TokenInvalid {
+                reason: format!("Failed to decode payload: {}", e),
+            })?;
 
         let claims: Claims = serde_json::from_slice(&payload)
-            .map_err(|e| AuthError::TokenValidation(e.to_string()))?;
+            .map_err(|e| SecretonError::TokenInvalid {
+                reason: format!("Failed to parse claims: {}", e),
+            })?;
 
         Ok(claims)
     }
@@ -370,55 +387,8 @@ pub fn extract_bearer_token(auth_header: &HeaderValue) -> Option<String> {
         .map(|stripped| stripped.to_string())
 }
 
-/// Authentication errors
-#[derive(Debug, thiserror::Error)]
-pub enum AuthError {
-    #[error("Token generation failed: {0}")]
-    TokenGeneration(String),
-
-    #[error("Token validation failed: {0}")]
-    TokenValidation(String),
-
-    #[error("Missing authorization header")]
-    MissingAuthHeader,
-
-    #[error("Invalid authorization header format")]
-    InvalidAuthHeader,
-
-    #[error("Missing credentials")]
-    MissingCredentials,
-
-    #[error("Permission denied")]
-    PermissionDenied,
-
-    #[error("User not found")]
-    UserNotFound,
-
-    #[error("Invalid credentials")]
-    InvalidCredentials,
-}
-
-impl IntoResponse for AuthError {
-    fn into_response(self) -> Response {
-        let (status, message) = match self {
-            AuthError::MissingAuthHeader | AuthError::InvalidAuthHeader => {
-                (StatusCode::UNAUTHORIZED, self.to_string())
-            }
-            AuthError::PermissionDenied => (StatusCode::FORBIDDEN, self.to_string()),
-            AuthError::UserNotFound | AuthError::InvalidCredentials => {
-                (StatusCode::UNAUTHORIZED, self.to_string())
-            }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-        };
-
-        let body = Json(serde_json::json!({
-            "error": message,
-            "status": status.as_u16()
-        }));
-
-        (status, body).into_response()
-    }
-}
+/// Authentication result type - uses unified SecretonError
+pub type AuthResult<T> = Result<T, secreton_errors::SecretonError>;
 
 // Use canonical types from secreton_core::models
 // LoginRequest, LoginResponse, UserInfo are now imported at the top
@@ -505,7 +475,7 @@ mod tests {
         let token = auth_service
             .generate_token(
                 "vault-admin",
-                "Vault Admin",
+                "Secret Admin",
                 "vault.admin@example.com",
                 vec!["vault-admin".to_string()],
             )

@@ -1,6 +1,6 @@
 //! Disaster Recovery Replication Service
 //!
-//! Handles disaster recovery replication across Vault clusters.
+//! Handles disaster recovery replication across Secret clusters.
 //! In DR mode, all data is replicated but the secondary cluster remains sealed.
 
 use std::sync::{Arc, Mutex};

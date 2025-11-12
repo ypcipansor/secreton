@@ -18,7 +18,6 @@ pub mod secret_federation;
 pub mod secret_lifecycle_management;
 pub mod secret_marketplace;
 pub mod secret_migration;
-pub mod secret_performance_optimizer;
 pub mod secret_usage_analytics;
 pub mod secrets_federation;
 pub mod service_mesh_integration;

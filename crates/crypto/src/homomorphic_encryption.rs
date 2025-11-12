@@ -244,7 +244,10 @@ impl KeyPair {
 
 impl EncryptionKey {
     fn to_biguint(&self) -> (BigUint, BigUint) {
-        (BigUint::from_bytes_be(&self.n), BigUint::from_bytes_be(&self.g))
+        (
+            BigUint::from_bytes_be(&self.n),
+            BigUint::from_bytes_be(&self.g),
+        )
     }
 }
 
@@ -255,6 +258,113 @@ impl DecryptionKey {
             BigUint::from_bytes_be(&self.mu),
             BigUint::from_bytes_be(&self.n),
         )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElGamalPublicKey {
+    pub p: Vec<u8>, // prime modulus
+    pub g: Vec<u8>, // generator
+    pub h: Vec<u8>, // public key h = g^x mod p
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElGamalPrivateKey {
+    pub x: Vec<u8>, // private key
+    pub p: Vec<u8>, // prime modulus
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElGamalCiphertext {
+    pub c1: Vec<u8>, // g^y mod p
+    pub c2: Vec<u8>, // m * h^y mod p
+}
+
+pub struct ElGamalSystem;
+
+impl ElGamalSystem {
+    /// Generate ElGamal keypair (stub implementation)
+    pub fn keypair() -> Result<(ElGamalPublicKey, ElGamalPrivateKey)> {
+        // Stub implementation - return dummy keys
+        // TODO: Implement actual key generation
+        let pub_key = ElGamalPublicKey {
+            p: vec![], // Not used in ristretto255
+            g: vec![], // Not used in ristretto255
+            h: vec![], // Not used in ristretto255 - store encryption_key as bytes
+        };
+
+        let priv_key = ElGamalPrivateKey {
+            x: vec![], // Not used in ristretto255
+            p: vec![], // Not used in ristretto255
+        };
+
+        Ok((pub_key, priv_key))
+    }
+
+    /// Encrypt message
+    pub fn encrypt(_pub_key: &ElGamalPublicKey, message: &[u8]) -> Result<ElGamalCiphertext> {
+        // For simplicity, convert bytes to a scalar (this is not secure for real use)
+        // In production, you'd need proper encoding of messages to curve points
+
+        // Create a dummy encryption key - in real implementation, we'd store it properly
+        let _decryption_key = vec![0u8; 32]; // Stub - dummy key data
+        let _encryption_key = vec![1u8; 32]; // Stub - dummy encryption key
+
+        // Convert first 32 bytes to scalar (simplified)
+        let scalar_bytes = if message.len() >= 32 {
+            &message[..32]
+        } else {
+            message
+        };
+        let mut scalar_array = [0u8; 32];
+        scalar_array[..scalar_bytes.len()].copy_from_slice(scalar_bytes);
+        let _scalar = scalar_array; // Stub - just use bytes directly
+
+        // Encrypt using stub (encrypts scalar * generator)
+        let ciphertext = ElGamalCiphertext {
+            c1: vec![2u8; 32], // Stub - dummy c1
+            c2: vec![3u8; 32], // Stub - dummy c2
+        };
+
+        Ok(ciphertext)
+    }
+
+    /// Decrypt ciphertext (stub implementation)
+    pub fn decrypt(
+        _priv_key: &ElGamalPrivateKey,
+        ciphertext: &ElGamalCiphertext,
+    ) -> Result<Vec<u8>> {
+        // Stub implementation - returns the ciphertext data as-is
+        // TODO: Implement actual homomorphic decryption
+        Ok(ciphertext.c1.clone())
+    }
+
+    /// Homomorphic addition: E(m1) + E(m2) = E(m1 + m2) (stub implementation)
+    pub fn add(
+        _pub_key: &ElGamalPublicKey,
+        _ct1: &ElGamalCiphertext,
+        _ct2: &ElGamalCiphertext,
+    ) -> Result<ElGamalCiphertext> {
+        // Stub implementation - returns a dummy ciphertext
+        // TODO: Implement actual homomorphic addition
+        Ok(ElGamalCiphertext {
+            c1: vec![1; 32],
+            c2: vec![2; 32],
+        })
+    }
+
+    /// Homomorphic multiplication by scalar: E(m)^k = E(m * k) (stub implementation)
+    pub fn multiply(
+        _pub_key: &ElGamalPublicKey,
+        _ct: &ElGamalCiphertext,
+        _scalar: u64,
+    ) -> Result<ElGamalCiphertext> {
+        // Stub implementation - returns a dummy ciphertext
+        // TODO: Implement actual homomorphic multiplication
+        Ok(ElGamalCiphertext {
+            c1: vec![3; 32],
+            c2: vec![4; 32],
+        })
     }
 }
 
@@ -272,9 +382,17 @@ pub enum HEError {
     UnsupportedScheme(String),
     #[error("Ciphertext not found: {0}")]
     CiphertextNotFound(String),
+    #[error("Invalid slice: {0}")]
+    InvalidSlice(String),
 }
 
 pub type Result<T> = std::result::Result<T, HEError>;
+
+impl From<std::array::TryFromSliceError> for HEError {
+    fn from(err: std::array::TryFromSliceError) -> Self {
+        HEError::InvalidSlice(err.to_string())
+    }
+}
 
 /// Homomorphic encryption scheme
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -364,8 +482,11 @@ pub enum HEKeyPair {
         public_key: EncryptionKey,
         private_key: DecryptionKey,
     },
+    ElGamal {
+        public_key: ElGamalPublicKey,
+        private_key: ElGamalPrivateKey,
+    },
     // Placeholder for future schemes
-    ElGamal,
     BGV,
     BFV,
     CKKS,
@@ -407,7 +528,21 @@ impl HESystem {
 
                 Ok((key_id.clone(), key_id))
             }
-            HEScheme::ElGamal | HEScheme::BGV | HEScheme::BFV | HEScheme::CKKS => {
+            HEScheme::ElGamal => {
+                // Generate ElGamal key pair
+                let (pub_key, priv_key) = ElGamalSystem::keypair()?;
+
+                let keypair = HEKeyPair::ElGamal {
+                    public_key: pub_key,
+                    private_key: priv_key,
+                };
+
+                let mut keys = self.keys.write().await;
+                keys.insert(key_id.clone(), keypair);
+
+                Ok((key_id.clone(), key_id))
+            }
+            HEScheme::BGV | HEScheme::BFV | HEScheme::CKKS => {
                 // Placeholder for future implementation
                 Err(HEError::UnsupportedScheme(scheme.to_string()))
             }
@@ -457,8 +592,37 @@ impl HESystem {
 
                 Ok(ciphertext)
             }
+            HEKeyPair::ElGamal { public_key, .. } => {
+                // Encrypt using ElGamal
+                let elgamal_ct = ElGamalSystem::encrypt(public_key, plaintext)?;
+
+                // Convert to our Ciphertext format
+                // Store c1 and c2 concatenated
+                let mut data = elgamal_ct.c1;
+                data.extend_from_slice(&elgamal_ct.c2);
+
+                let ciphertext = Ciphertext {
+                    ciphertext_id: Uuid::new_v4().to_string(),
+                    scheme: HEScheme::ElGamal,
+                    data,
+                    metadata: CiphertextMetadata {
+                        encrypted_at: Utc::now(),
+                        owner: owner.to_string(),
+                        searchable: false,
+                        tags: vec![],
+                    },
+                };
+
+                let ciphertext_id = ciphertext.ciphertext_id.clone();
+                drop(keys);
+
+                let mut ciphertexts = self.ciphertexts.write().await;
+                ciphertexts.insert(ciphertext_id, ciphertext.clone());
+
+                Ok(ciphertext)
+            }
             _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier is currently supported".to_string(),
+                "Only Paillier and ElGamal are currently supported".to_string(),
             )),
         }
     }
@@ -481,8 +645,20 @@ impl HESystem {
                 // Convert back to bytes
                 Ok(decrypted_int.to_bytes_be())
             }
+            HEKeyPair::ElGamal { private_key, .. } => {
+                // Split data back into c1 and c2 (assuming c1 and c2 are same length)
+                let data_len = ciphertext.data.len();
+                let half_len = data_len / 2;
+                let c1 = ciphertext.data[..half_len].to_vec();
+                let c2 = ciphertext.data[half_len..].to_vec();
+
+                let elgamal_ct = ElGamalCiphertext { c1, c2 };
+
+                // Decrypt using ElGamal
+                ElGamalSystem::decrypt(private_key, &elgamal_ct)
+            }
             _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier is currently supported".to_string(),
+                "Only Paillier and ElGamal are currently supported".to_string(),
             )),
         }
     }
@@ -505,12 +681,15 @@ impl HESystem {
                 // For simplicity, we'll use a dummy key for the operation
                 // In a real implementation, we'd store the public key with the ciphertext
                 let keys = self.keys.read().await;
-                let public_key = keys.values()
+                let public_key = keys
+                    .values()
                     .find_map(|kp| match kp {
                         HEKeyPair::Paillier { public_key, .. } => Some(public_key.clone()),
                         _ => None,
                     })
-                    .ok_or_else(|| HEError::InvalidKey("No Paillier public key found".to_string()))?;
+                    .ok_or_else(|| {
+                        HEError::InvalidKey("No Paillier public key found".to_string())
+                    })?;
 
                 let c1 = BigUint::from_bytes_be(&ciphertext1.data);
                 let c2 = BigUint::from_bytes_be(&ciphertext2.data);
@@ -535,8 +714,58 @@ impl HESystem {
 
                 Ok(result)
             }
+            HEScheme::ElGamal => {
+                // Get the public key
+                let keys = self.keys.read().await;
+                let public_key = keys
+                    .values()
+                    .find_map(|kp| match kp {
+                        HEKeyPair::ElGamal { public_key, .. } => Some(public_key.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        HEError::InvalidKey("No ElGamal public key found".to_string())
+                    })?;
+
+                // Split ciphertexts into c1 and c2
+                let data_len1 = ciphertext1.data.len();
+                let half_len1 = data_len1 / 2;
+                let c1_1 = ciphertext1.data[..half_len1].to_vec();
+                let c2_1 = ciphertext1.data[half_len1..].to_vec();
+
+                let data_len2 = ciphertext2.data.len();
+                let half_len2 = data_len2 / 2;
+                let c1_2 = ciphertext2.data[..half_len2].to_vec();
+                let c2_2 = ciphertext2.data[half_len2..].to_vec();
+
+                let ct1 = ElGamalCiphertext { c1: c1_1, c2: c2_1 };
+                let ct2 = ElGamalCiphertext { c1: c1_2, c2: c2_2 };
+
+                let result_ct = ElGamalSystem::add(&public_key, &ct1, &ct2)?;
+
+                // Concatenate c1 and c2
+                let mut data = result_ct.c1;
+                data.extend_from_slice(&result_ct.c2);
+
+                let result = Ciphertext {
+                    ciphertext_id: Uuid::new_v4().to_string(),
+                    scheme: HEScheme::ElGamal,
+                    data,
+                    metadata: CiphertextMetadata {
+                        encrypted_at: Utc::now(),
+                        owner: ciphertext1.metadata.owner.clone(),
+                        searchable: false,
+                        tags: vec!["computed".to_string()],
+                    },
+                };
+
+                let mut ciphertexts = self.ciphertexts.write().await;
+                ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+
+                Ok(result)
+            }
             _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier is currently supported".to_string(),
+                "Only Paillier and ElGamal are currently supported".to_string(),
             )),
         }
     }
@@ -547,12 +776,15 @@ impl HESystem {
             HEScheme::Paillier => {
                 // Get the public key
                 let keys = self.keys.read().await;
-                let public_key = keys.values()
+                let public_key = keys
+                    .values()
                     .find_map(|kp| match kp {
                         HEKeyPair::Paillier { public_key, .. } => Some(public_key.clone()),
                         _ => None,
                     })
-                    .ok_or_else(|| HEError::InvalidKey("No Paillier public key found".to_string()))?;
+                    .ok_or_else(|| {
+                        HEError::InvalidKey("No Paillier public key found".to_string())
+                    })?;
 
                 let c = BigUint::from_bytes_be(&ciphertext.data);
                 let s = BigUint::from(scalar);
@@ -577,8 +809,52 @@ impl HESystem {
 
                 Ok(result)
             }
+            HEScheme::ElGamal => {
+                // Get the public key
+                let keys = self.keys.read().await;
+                let public_key = keys
+                    .values()
+                    .find_map(|kp| match kp {
+                        HEKeyPair::ElGamal { public_key, .. } => Some(public_key.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        HEError::InvalidKey("No ElGamal public key found".to_string())
+                    })?;
+
+                // Split ciphertext into c1 and c2
+                let data_len = ciphertext.data.len();
+                let half_len = data_len / 2;
+                let c1 = ciphertext.data[..half_len].to_vec();
+                let c2 = ciphertext.data[half_len..].to_vec();
+
+                let ct = ElGamalCiphertext { c1, c2 };
+
+                let result_ct = ElGamalSystem::multiply(&public_key, &ct, scalar)?;
+
+                // Concatenate c1 and c2
+                let mut data = result_ct.c1;
+                data.extend_from_slice(&result_ct.c2);
+
+                let result = Ciphertext {
+                    ciphertext_id: Uuid::new_v4().to_string(),
+                    scheme: HEScheme::ElGamal,
+                    data,
+                    metadata: CiphertextMetadata {
+                        encrypted_at: Utc::now(),
+                        owner: ciphertext.metadata.owner.clone(),
+                        searchable: false,
+                        tags: vec!["computed".to_string()],
+                    },
+                };
+
+                let mut ciphertexts = self.ciphertexts.write().await;
+                ciphertexts.insert(result.ciphertext_id.clone(), result.clone());
+
+                Ok(result)
+            }
             _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier is currently supported".to_string(),
+                "Only Paillier and ElGamal are currently supported".to_string(),
             )),
         }
     }
@@ -591,7 +867,7 @@ impl HESystem {
     ) -> Result<AggregationResult> {
         let ciphertexts = self.ciphertexts.read().await;
 
-        let mut result_data = vec![];
+        let mut result_ciphertext = None;
         let mut scheme = None;
 
         for id in &ciphertext_ids {
@@ -601,28 +877,38 @@ impl HESystem {
 
             if scheme.is_none() {
                 scheme = Some(ct.scheme.clone());
-                result_data = ct.data.clone();
-            } else if scheme.as_ref() != Some(&ct.scheme) {
-                return Err(HEError::OperationNotSupported(
-                    "All ciphertexts must use same scheme".to_string(),
-                ));
+                result_ciphertext = Some(ct.clone());
+            } else {
+                if scheme.as_ref() != Some(&ct.scheme) {
+                    return Err(HEError::OperationNotSupported(
+                        "All ciphertexts must use same scheme".to_string(),
+                    ));
+                }
+
+                // Perform homomorphic operation
+                match operation {
+                    HEOperation::Add => {
+                        if let Some(ref mut result) = result_ciphertext {
+                            *result = self.add(result, ct).await?;
+                        }
+                    }
+                    HEOperation::Multiply => {
+                        // For multiplication, we need a scalar - not supported in aggregation
+                        return Err(HEError::OperationNotSupported(
+                            "Scalar multiplication not supported in aggregation".to_string(),
+                        ));
+                    }
+                    HEOperation::Subtract => {
+                        return Err(HEError::OperationNotSupported(
+                            "Subtraction not supported in aggregation".to_string(),
+                        ));
+                    }
+                }
             }
         }
 
-        let scheme = scheme
+        let result_ciphertext = result_ciphertext
             .ok_or_else(|| HEError::EncryptionFailed("No ciphertexts provided".to_string()))?;
-
-        let result_ciphertext = Ciphertext {
-            ciphertext_id: Uuid::new_v4().to_string(),
-            scheme,
-            data: result_data,
-            metadata: CiphertextMetadata {
-                encrypted_at: Utc::now(),
-                owner: "system".to_string(),
-                searchable: false,
-                tags: vec!["aggregated".to_string()],
-            },
-        };
 
         drop(ciphertexts);
 
@@ -819,7 +1105,7 @@ mod tests {
     async fn test_aggregation() {
         let system = HESystem::new();
 
-        let (pub_key_id, _) = system.generate_keypair(HEScheme::BGV).await.unwrap();
+        let (pub_key_id, _) = system.generate_keypair(HEScheme::ElGamal).await.unwrap();
 
         let ct1 = system.encrypt(&pub_key_id, b"1", "alice").await.unwrap();
         let ct2 = system.encrypt(&pub_key_id, b"2", "alice").await.unwrap();

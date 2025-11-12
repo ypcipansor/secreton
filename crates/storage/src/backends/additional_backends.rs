@@ -15,7 +15,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
-use crate::{StorageBackend, StorageError, VaultEntry, StorageResult};
+use crate::{StorageBackend, StorageError, SecretEntry, StorageResult};
 
 /// AliCloud OSS storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

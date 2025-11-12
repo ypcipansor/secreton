@@ -633,7 +633,7 @@ mod tests {
             OCSPStatus::Revoked { reason, .. } => {
                 assert_eq!(reason, RevocationReason::KeyCompromise);
             }
-            _ => panic!("Expected Revoked _status"),
+            _ => assert!(false, "Expected Revoked _status"),
         }
     }
 

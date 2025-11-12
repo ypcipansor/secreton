@@ -376,25 +376,54 @@ impl CAManagement {
         false
     }
 
-    fn mock_generate_cert(&self, subject: &str, issuer: &str) -> String {
-        format!(
-            "-----BEGIN CERTIFICATE-----\nSubject: {}\nIssuer: {}\n-----END CERTIFICATE-----",
-            subject, issuer
-        )
+    fn mock_generate_cert(&self, subject: &str, _issuer: &str) -> String {
+        // Use rcgen to generate a real certificate
+        use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, date_time_ymd};
+
+        let mut params = CertificateParams::default();
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, subject);
+        params.distinguished_name = dn;
+        params.not_before = date_time_ymd(2023, 1, 1);
+        params.not_after = date_time_ymd(2030, 1, 1);
+
+        // Generate key pair
+        let key_pair = KeyPair::generate().unwrap();
+
+        // Generate certificate
+        let cert = params.self_signed(&key_pair).unwrap();
+
+        // Return PEM format
+        cert.pem()
     }
 
     fn mock_generate_signed_cert(&self, common_name: &str) -> String {
-        format!(
-            "-----BEGIN CERTIFICATE-----\nCN={}\n-----END CERTIFICATE-----",
-            common_name
-        )
+        // Use rcgen to generate a real signed certificate
+        use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, date_time_ymd};
+
+        let mut params = CertificateParams::default();
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, common_name);
+        params.distinguished_name = dn;
+        params.not_before = date_time_ymd(2023, 1, 1);
+        params.not_after = date_time_ymd(2025, 1, 1);
+
+        // Generate key pair
+        let key_pair = KeyPair::generate().unwrap();
+
+        // Generate self-signed certificate (in real implementation, this would be signed by CA)
+        let cert = params.self_signed(&key_pair).unwrap();
+
+        // Return PEM format
+        cert.pem()
     }
 
-    fn mock_generate_private_key(&self, key_type: &KeyType, key_bits: u32) -> String {
-        format!(
-            "-----BEGIN PRIVATE KEY-----\nType: {:?}\nBits: {}\n-----END PRIVATE KEY-----",
-            key_type, key_bits
-        )
+    fn mock_generate_private_key(&self, _key_type: &KeyType, _key_bits: u32) -> String {
+        // Use rcgen to generate a real private key
+        use rcgen::KeyPair;
+
+        let key_pair = KeyPair::generate().unwrap();
+        key_pair.serialize_pem()
     }
 }
 
@@ -414,7 +443,7 @@ mod tests {
 
         let ca = ca_mgmt
             .create_root_ca(
-                "CN=Root CA,O=Vault,C=US".to_string(),
+                "CN=Root CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 4096,
                 10,
@@ -435,7 +464,7 @@ mod tests {
 
         let root_ca = ca_mgmt
             .create_root_ca(
-                "CN=Root CA,O=Vault,C=US".to_string(),
+                "CN=Root CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 4096,
                 10,
@@ -446,7 +475,7 @@ mod tests {
         let intermediate = ca_mgmt
             .generate_intermediate_ca(
                 &root_ca.ca_id,
-                "CN=Intermediate CA,O=Vault,C=US".to_string(),
+                "CN=Intermediate CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 2048,
                 5,
@@ -493,7 +522,7 @@ mod tests {
 
         let ca = ca_mgmt
             .create_root_ca(
-                "CN=Root CA,O=Vault,C=US".to_string(),
+                "CN=Root CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 4096,
                 10,
@@ -541,7 +570,7 @@ mod tests {
 
         let ca = ca_mgmt
             .create_root_ca(
-                "CN=Root CA,O=Vault,C=US".to_string(),
+                "CN=Root CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 4096,
                 10,
@@ -594,7 +623,7 @@ mod tests {
 
         let ca = ca_mgmt
             .create_root_ca(
-                "CN=Root CA,O=Vault,C=US".to_string(),
+                "CN=Root CA,O=Secret,C=US".to_string(),
                 KeyType::RSA,
                 4096,
                 10,

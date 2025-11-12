@@ -1,5 +1,9 @@
+#![cfg(feature = "kubernetes")]
+
 // Kubernetes Secrets Operator - CRD-based secret injection and rotation
 use chrono::{DateTime, Duration, Utc};
+use k8s_openapi::api::core::v1::{Pod, Secret};
+use kube::{Client, api::Api};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -90,20 +94,30 @@ pub struct KubernetesOperator {
     secrets: Arc<RwLock<HashMap<String, K8sSecret>>>,
     injections: Arc<RwLock<Vec<PodInjection>>>,
     rotation_schedules: Arc<RwLock<Vec<RotationSchedule>>>,
+    client: Client, // K8s API client
 }
 
 impl KubernetesOperator {
-    pub fn new(config: KubernetesConfig, operator_config: SecretOperatorConfig) -> Self {
-        Self {
+    /// Create a new operator with async client initialization
+    pub async fn new(
+        config: KubernetesConfig,
+        operator_config: SecretOperatorConfig,
+    ) -> Result<Self> {
+        let client = Client::try_default().await.map_err(|e| {
+            K8sOperatorError::ConfigError(format!("Failed to create K8s client: {}", e))
+        })?;
+
+        Ok(Self {
             _config: Arc::new(RwLock::new(config)),
             operator_config: Arc::new(RwLock::new(operator_config)),
             secrets: Arc::new(RwLock::new(HashMap::new())),
             injections: Arc::new(RwLock::new(Vec::new())),
             rotation_schedules: Arc::new(RwLock::new(Vec::new())),
-        }
+            client,
+        })
     }
 
-    /// Create Kubernetes secret from Vault
+    /// Create Kubernetes secret from Secret
     pub async fn create_k8s_secret(
         &self,
         name: &str,
@@ -129,9 +143,9 @@ impl KubernetesOperator {
             annotations,
         };
 
-        // Mock K8s API call to create secret
-        // Real implementation would use kube-rs crate
-        self.mock_k8s_create_secret(&secret).await?;
+        // Create Kubernetes secret
+        // Real implementation uses kube-rs crate
+        self.create_k8s_secret_internal(&secret).await?;
 
         let mut secrets = self.secrets.write().await;
         let key = format!("{}/{}", namespace, name);
@@ -201,12 +215,12 @@ impl KubernetesOperator {
                 let key = format!("{}/{}", schedule.namespace, schedule.secret_name);
 
                 if let Some(secret) = secrets.get_mut(&key) {
-                    // Mock rotation - in real implementation would fetch from Vault
+                    // Mock rotation - in real implementation would fetch from Secret
                     secret.version += 1;
                     secret.last_rotation = Some(now);
 
                     // Update K8s secret
-                    self.mock_k8s_update_secret(secret).await?;
+                    self.update_k8s_secret(secret).await?;
 
                     schedule.last_rotation = Some(now);
                     schedule.next_rotation = now + Duration::hours(schedule.interval_hours as i64);
@@ -219,15 +233,15 @@ impl KubernetesOperator {
         Ok(rotated)
     }
 
-    /// Sync secret from Vault to Kubernetes
+    /// Sync secret from Secret to Kubernetes
     pub async fn sync_from_vault(
         &self,
         vault_path: &str,
         k8s_name: &str,
         namespace: &str,
     ) -> Result<()> {
-        // Mock fetching from Vault
-        // Real implementation would call Vault API
+        // Mock fetching from Secret
+        // Real implementation would call Secret API
         let vault_data = self.mock_fetch_from_vault(vault_path).await?;
 
         let key = format!("{}/{}", namespace, k8s_name);
@@ -239,7 +253,7 @@ impl KubernetesOperator {
             secret.last_rotation = Some(Utc::now());
 
             // Update K8s secret
-            self.mock_k8s_update_secret(secret).await?;
+            self.update_k8s_secret(secret).await?;
         } else {
             return Err(K8sOperatorError::SecretNotFound(k8s_name.to_string()));
         }
@@ -255,8 +269,8 @@ impl KubernetesOperator {
         let annotation = operator_config.pod_annotation.clone();
         drop(operator_config);
 
-        // Mock: return pods that need injection
-        let pods_needing_injection = self.mock_list_pods_with_annotation(&annotation).await?;
+        // List pods that need injection
+        let pods_needing_injection = self.list_pods_with_annotation(&annotation).await?;
 
         Ok(pods_needing_injection)
     }
@@ -323,8 +337,8 @@ impl KubernetesOperator {
             .remove(&key)
             .ok_or_else(|| K8sOperatorError::SecretNotFound(name.to_string()))?;
 
-        // Mock K8s API call to delete secret
-        self.mock_k8s_delete_secret(name, namespace).await?;
+        // Delete K8s secret
+        self.delete_k8s_secret(name, namespace).await?;
 
         Ok(())
     }
@@ -340,19 +354,106 @@ impl KubernetesOperator {
             .collect()
     }
 
-    // Mock K8s API methods
-    async fn mock_k8s_create_secret(&self, _secret: &K8sSecret) -> Result<()> {
-        // Mock successful creation
+    // Real K8s API methods using kube-rs
+    async fn create_k8s_secret_internal(&self, secret: &K8sSecret) -> Result<()> {
+        use k8s_openapi::api::core::v1::Secret as K8sSecretType;
+        use std::collections::BTreeMap;
+
+        let mut data = BTreeMap::new();
+        for (key, value) in &secret.data {
+            data.insert(key.clone(), base64::encode(value).into_bytes());
+        }
+
+        let mut labels = BTreeMap::new();
+        for (key, value) in &secret.labels {
+            labels.insert(key.clone(), value.clone());
+        }
+
+        let mut annotations = BTreeMap::new();
+        for (key, value) in &secret.annotations {
+            annotations.insert(key.clone(), value.clone());
+        }
+
+        let k8s_secret = K8sSecretType {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(secret.name.clone()),
+                namespace: Some(secret.namespace.clone()),
+                labels: Some(labels),
+                annotations: Some(annotations),
+                ..Default::default()
+            },
+            data: Some(data),
+            type_: Some("Opaque".to_string()),
+            ..Default::default()
+        };
+
+        let secrets: Api<K8sSecretType> = Api::namespaced(self.client.clone(), &secret.namespace);
+        secrets
+            .create(&Default::default(), &k8s_secret)
+            .await
+            .map_err(|e| K8sOperatorError::K8sError(format!("Failed to create secret: {}", e)))?;
+
         Ok(())
     }
 
-    async fn mock_k8s_update_secret(&self, _secret: &K8sSecret) -> Result<()> {
-        // Mock successful update
+    async fn update_k8s_secret(&self, secret: &K8sSecret) -> Result<()> {
+        use k8s_openapi::api::core::v1::Secret as K8sSecretType;
+        use std::collections::BTreeMap;
+
+        let mut data = BTreeMap::new();
+        for (key, value) in &secret.data {
+            data.insert(key.clone(), base64::encode(value).into_bytes());
+        }
+
+        let secrets: Api<K8sSecretType> = Api::namespaced(self.client.clone(), &secret.namespace);
+
+        // Get existing secret first
+        let existing = secrets
+            .get(&secret.name)
+            .await
+            .map_err(|e| K8sOperatorError::K8sError(format!("Failed to get secret: {}", e)))?;
+
+        let mut labels = BTreeMap::new();
+        for (key, value) in &secret.labels {
+            labels.insert(key.clone(), value.clone());
+        }
+
+        let mut annotations = BTreeMap::new();
+        for (key, value) in &secret.annotations {
+            annotations.insert(key.clone(), value.clone());
+        }
+
+        let updated_secret = K8sSecretType {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(secret.name.clone()),
+                namespace: Some(secret.namespace.clone()),
+                resource_version: existing.metadata.resource_version,
+                labels: Some(labels),
+                annotations: Some(annotations),
+                ..Default::default()
+            },
+            data: Some(data),
+            type_: Some("Opaque".to_string()),
+            ..Default::default()
+        };
+
+        secrets
+            .replace(&secret.name, &Default::default(), &updated_secret)
+            .await
+            .map_err(|e| K8sOperatorError::K8sError(format!("Failed to update secret: {}", e)))?;
+
         Ok(())
     }
 
-    async fn mock_k8s_delete_secret(&self, _name: &str, _namespace: &str) -> Result<()> {
-        // Mock successful deletion
+    async fn delete_k8s_secret(&self, name: &str, namespace: &str) -> Result<()> {
+        use k8s_openapi::api::core::v1::Secret as K8sSecretType;
+
+        let secrets: Api<K8sSecretType> = Api::namespaced(self.client.clone(), namespace);
+        secrets
+            .delete(name, &Default::default())
+            .await
+            .map_err(|e| K8sOperatorError::K8sError(format!("Failed to delete secret: {}", e)))?;
+
         Ok(())
     }
 
@@ -368,16 +469,33 @@ impl KubernetesOperator {
     }
 
     async fn mock_fetch_from_vault(&self, _path: &str) -> Result<HashMap<String, String>> {
-        // Mock fetching from Vault
+        // Mock fetching from Secret
         let mut data = HashMap::new();
         data.insert("username".to_string(), "updated_user".to_string());
         data.insert("password".to_string(), "updated_pass".to_string());
         Ok(data)
     }
 
-    async fn mock_list_pods_with_annotation(&self, _annotation: &str) -> Result<Vec<String>> {
-        // Mock listing pods
-        Ok(vec!["pod-1".to_string(), "pod-2".to_string()])
+    async fn list_pods_with_annotation(&self, annotation: &str) -> Result<Vec<String>> {
+        let pods: Api<Pod> = Api::all(self.client.clone());
+
+        let pod_list = pods
+            .list(&Default::default())
+            .await
+            .map_err(|e| K8sOperatorError::K8sError(format!("Failed to list pods: {}", e)))?;
+
+        let mut pod_names = Vec::new();
+        for pod in pod_list.items {
+            if let Some(annotations) = &pod.metadata.annotations {
+                if annotations.contains_key(annotation) {
+                    if let Some(name) = pod.metadata.name {
+                        pod_names.push(name);
+                    }
+                }
+            }
+        }
+
+        Ok(pod_names)
     }
 }
 
@@ -398,7 +516,11 @@ impl Default for KubernetesOperator {
             auto_rotate: true,
         };
 
-        Self::new(config, operator_config)
+        // For default, we'll create a basic client - in real usage, async new should be used
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(Self::new(config, operator_config))
+            .unwrap()
     }
 }
 
@@ -506,7 +628,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Sync from Vault (mock will return updated data)
+        // Sync from Secret (mock will return updated data)
         operator
             .sync_from_vault("/secret/data/sync", "sync-secret", "default")
             .await

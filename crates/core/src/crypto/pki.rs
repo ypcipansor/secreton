@@ -1,3 +1,5 @@
+use chrono::{Duration, Utc};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, KeyUsagePurpose};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -39,38 +41,61 @@ impl fmt::Display for SignatureAlgorithm {
 
 impl PrivateKey {
     pub fn generate_rsa(key_bits: u32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation - in production, use actual crypto library
+        let key_pair = match key_bits {
+            2048 => KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256),
+            3072 => KeyPair::generate_for(&rcgen::PKCS_RSA_SHA384),
+            4096 => KeyPair::generate_for(&rcgen::PKCS_RSA_SHA512),
+            _ => return Err("Unsupported RSA key size. Use 2048, 3072, or 4096 bits.".into()),
+        }?;
+
+        let pem_data = key_pair.serialize_pem();
+
         Ok(PrivateKey {
             key_type: "RSA".to_string(),
             key_bits,
-            pem_data: format!("-----BEGIN RSA PRIVATE KEY-----\n[RSA-{} placeholder key data]\n-----END RSA PRIVATE KEY-----", key_bits),
+            pem_data,
         })
     }
 
     pub fn generate_ec(key_bits: u32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation - in production, use actual crypto library
-        Ok(PrivateKey {
-            key_type: "EC".to_string(),
-            key_bits,
-            pem_data: format!("-----BEGIN EC PRIVATE KEY-----\n[EC-{} placeholder key data]\n-----END EC PRIVATE KEY-----", key_bits),
-        })
+        match key_bits {
+            256 => {
+                let key_pair = KeyPair::generate_for(&rcgen::PKCS_ED25519)?;
+                let pem_data = key_pair.serialize_pem();
+                Ok(PrivateKey {
+                    key_type: "Ed25519".to_string(),
+                    key_bits: 256,
+                    pem_data,
+                })
+            }
+            384 => {
+                let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)?;
+                let pem_data = key_pair.serialize_pem();
+                Ok(PrivateKey {
+                    key_type: "ECDSA".to_string(),
+                    key_bits: 384,
+                    pem_data,
+                })
+            }
+            _ => return Err("Unsupported EC key size. Use 256 or 384 bits.".into()),
+        }
     }
 
     pub fn generate_ed25519() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation - in production, use actual crypto library
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ED25519)?;
+        let pem_data = key_pair.serialize_pem();
+
         Ok(PrivateKey {
             key_type: "Ed25519".to_string(),
             key_bits: 256,
-            pem_data: "-----BEGIN Ed25519 PRIVATE KEY-----\n[Ed25519 placeholder key data]\n-----END Ed25519 PRIVATE KEY-----".to_string(),
+            pem_data,
         })
     }
 
     pub fn public_key(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Extract public key from private key (placeholder implementation)
-        Ok(format!(
-            "-----BEGIN PUBLIC KEY-----\n[Public key for {}]\n-----END PUBLIC KEY-----",
-            self.key_type
-        ))
+        let key_pair = KeyPair::from_pem(&self.pem_data)?;
+        let public_key_pem = key_pair.public_key_pem();
+        Ok(public_key_pem)
     }
 
     pub fn to_pem(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -96,6 +121,13 @@ pub struct CertificateBuilder {
     common_name: Option<String>,
     alt_names: Vec<String>,
     serial_number: Option<String>,
+    organization: Option<Vec<String>>,
+    country: Option<Vec<String>>,
+    not_before: Option<String>,
+    not_after: Option<String>,
+    public_key_pem: Option<String>,
+    key_usage_server: bool,
+    key_usage_client: bool,
 }
 
 impl Default for CertificateBuilder {
@@ -110,6 +142,13 @@ impl CertificateBuilder {
             common_name: None,
             alt_names: Vec::new(),
             serial_number: None,
+            organization: None,
+            country: None,
+            not_before: None,
+            not_after: None,
+            public_key_pem: None,
+            key_usage_server: false,
+            key_usage_client: false,
         }
     }
 
@@ -138,92 +177,201 @@ impl CertificateBuilder {
 
     pub fn subject_organization(
         &mut self,
-        _org: &[String],
+        org: &[String],
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.organization = Some(org.to_vec());
         Ok(self)
     }
 
     pub fn subject_country(
         &mut self,
-        _country: &[String],
+        country: &[String],
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.country = Some(country.to_vec());
         Ok(self)
     }
 
     pub fn validity_period(
         &mut self,
-        _not_before: &str,
-        _not_after: &str,
+        not_before: &str,
+        not_after: &str,
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.not_before = Some(not_before.to_string());
+        self.not_after = Some(not_after.to_string());
         Ok(self)
     }
 
     pub fn public_key(
         &mut self,
-        _public_key: &str,
+        public_key: &str,
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.public_key_pem = Some(public_key.to_string());
         Ok(self)
     }
 
     pub fn key_usage_server(
         &mut self,
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.key_usage_server = true;
         Ok(self)
     }
 
     pub fn key_usage_client(
         &mut self,
     ) -> Result<&mut Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Placeholder implementation
+        self.key_usage_client = true;
         Ok(self)
     }
 
     pub fn sign(
         &mut self,
-        _ca_private_key: &str,
+        ca_private_key: &str,
         _algorithm: SignatureAlgorithm,
     ) -> Result<Certificate, Box<dyn std::error::Error + Send + Sync>> {
-        let cn = self.common_name.as_deref().unwrap_or("localhost");
-        let serial = self.serial_number.as_deref().unwrap_or("1");
+        let ca_key_pair = KeyPair::from_pem(ca_private_key)?;
 
-        let pem_data = format!(
-            "-----BEGIN CERTIFICATE-----\n[Certificate for {} with serial {} - placeholder data]\n-----END CERTIFICATE-----",
-            cn, serial
-        );
+        let mut params = CertificateParams::new(vec![])?;
+        let mut dn = DistinguishedName::new();
+
+        if let Some(cn) = &self.common_name {
+            dn.push(DnType::CommonName, cn);
+        } else {
+            dn.push(DnType::CommonName, "localhost");
+        }
+
+        params.distinguished_name = dn;
+        params.serial_number = self
+            .serial_number
+            .as_ref()
+            .map(|s| rcgen::SerialNumber::from(s.as_bytes().to_vec()));
+
+        // Add subject alternative names
+        if !self.alt_names.is_empty() {
+            params.subject_alt_names = self
+                .alt_names
+                .iter()
+                .map(|name| {
+                    if name.contains("@") {
+                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
+                    } else if name.parse::<std::net::IpAddr>().is_ok() {
+                        if let Ok(ip) = name.parse::<std::net::IpAddr>() {
+                            Ok(rcgen::SanType::IpAddress(ip))
+                        } else {
+                            rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                        }
+                    } else {
+                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "Invalid subject alternative name")?;
+        }
+
+        // Set validity period (default 1 year if not specified)
+        let now = Utc::now();
+        let not_before = now;
+        let not_after = now + Duration::days(365);
+        // Convert chrono DateTime to time::OffsetDateTime for rcgen
+        params.not_before = time::OffsetDateTime::from_unix_timestamp(not_before.timestamp())
+            .map_err(|e| format!("Invalid timestamp: {}", e))?;
+        params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after.timestamp())
+            .map_err(|e| format!("Invalid timestamp: {}", e))?;
+
+        // Set key usage
+        params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+        ];
+
+        // Sign the certificate
+        let cert = params.self_signed(&ca_key_pair)?;
 
         Ok(Certificate {
-            pem_data,
-            serial_number: serial.to_string(),
-            subject: format!("CN={}", cn),
-            issuer: "CN=Secreton CA".to_string(),
+            pem_data: cert.pem(),
+            serial_number: self
+                .serial_number
+                .clone()
+                .unwrap_or_else(|| "1".to_string()),
+            subject: format!("CN={}", self.common_name.as_deref().unwrap_or("localhost")),
+            issuer: format!("CN={}", self.common_name.as_deref().unwrap_or("localhost")),
         })
     }
 
     pub fn build(
         &self,
-        _private_key: &PrivateKey,
+        private_key: &PrivateKey,
     ) -> Result<Certificate, Box<dyn std::error::Error + Send + Sync>> {
-        let localhost_default = "localhost".to_string();
-        let serial_default = "1".to_string();
-        let cn = self.common_name.as_ref().unwrap_or(&localhost_default);
-        let serial = self.serial_number.as_ref().unwrap_or(&serial_default);
+        let key_pair = KeyPair::from_pem(&private_key.pem_data)?;
 
-        // Placeholder implementation - in production, use actual crypto library
-        let pem_data = format!(
-            "-----BEGIN CERTIFICATE-----\n[Certificate for {} with serial {} - placeholder data]\n-----END CERTIFICATE-----",
-            cn, serial
-        );
+        let mut params = CertificateParams::new(vec![])?;
+        let mut dn = DistinguishedName::new();
+
+        let cn = self.common_name.as_deref().unwrap_or("localhost");
+        dn.push(DnType::CommonName, cn);
+
+        params.distinguished_name = dn;
+        params.serial_number = self
+            .serial_number
+            .as_ref()
+            .map(|s| rcgen::SerialNumber::from(s.as_bytes().to_vec()));
+
+        // Add subject alternative names
+        if !self.alt_names.is_empty() {
+            params.subject_alt_names = self
+                .alt_names
+                .iter()
+                .map(|name| {
+                    if name.contains("@") {
+                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
+                    } else if name.parse::<std::net::IpAddr>().is_ok() {
+                        if let Ok(ip) = name.parse::<std::net::IpAddr>() {
+                            Ok(rcgen::SanType::IpAddress(ip))
+                        } else {
+                            rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                        }
+                    } else {
+                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "Invalid subject alternative name")?;
+        }
+
+        // Set validity period (default 1 year)
+        let now = Utc::now();
+        let not_before = now;
+        let not_after = now + Duration::days(365);
+        // Convert chrono DateTime to time::OffsetDateTime for rcgen
+        params.not_before = time::OffsetDateTime::from_unix_timestamp(not_before.timestamp())
+            .map_err(|e| format!("Invalid timestamp: {}", e))?;
+        params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after.timestamp())
+            .map_err(|e| format!("Invalid timestamp: {}", e))?;
+
+        // Set key usage
+        params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+        ];
+
+        // Sign the certificate
+        let cert = params.self_signed(&key_pair)?;
 
         Ok(Certificate {
-            pem_data,
-            serial_number: serial.clone(),
+            pem_data: cert.pem(),
+            serial_number: self
+                .serial_number
+                .clone()
+                .unwrap_or_else(|| "1".to_string()),
             subject: format!("CN={}", cn),
-            issuer: "CN=Secreton CA".to_string(),
+            issuer: format!("CN={}", cn),
         })
     }
 }

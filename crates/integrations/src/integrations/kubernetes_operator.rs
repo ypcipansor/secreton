@@ -103,7 +103,7 @@ impl KubernetesOperator {
         }
     }
 
-    /// Create Kubernetes _secret from Vault
+    /// Create Kubernetes _secret from Secret
     pub async fn create_k8s_secret(
         &self,
         _name: &str,
@@ -204,7 +204,7 @@ impl KubernetesOperator {
                 let _key = format!("{}/{}", schedule.namespace, schedule._secret_name);
 
                 if let Some(_secret) = secrets.get_mut(&_key) {
-                    // Mock rotation - in real implementation would fetch from Vault
+                    // Mock rotation - in real implementation would fetch from Secret
                     _secret.version += 1;
                     _secret.last_rotation = Some(now);
 
@@ -222,15 +222,15 @@ impl KubernetesOperator {
         Ok(rotated)
     }
 
-    /// Sync _secret from Vault to Kubernetes
+    /// Sync _secret from Secret to Kubernetes
     pub async fn sync_from_vault(
         &self,
         _vault_path: &str,
         k8s_name: &str,
         namespace: &str,
     ) -> Result<()> {
-        // Mock fetching from Vault
-        // Real implementation would call Vault API
+        // Mock fetching from Secret
+        // Real implementation would call Secret API
         let vault_data = self.mock_fetch_from_vault(_vault_path).await?;
 
         let _key = format!("{}/{}", namespace, k8s_name);
@@ -371,7 +371,7 @@ impl KubernetesOperator {
     }
 
     async fn mock_fetch_from_vault(&self, _path: &str) -> Result<HashMap<String, String>> {
-        // Mock fetching from Vault
+        // Mock fetching from Secret
         let mut _data = HashMap::new();
         _data.insert("_username".to_string(), "updated_user".to_string());
         _data.insert("_password".to_string(), "updated_pass".to_string());
@@ -509,7 +509,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Sync from Vault (mock will return updated _data)
+        // Sync from Secret (mock will return updated _data)
         operator
             .sync_from_vault("/_secret/_data/sync", "sync-_secret", "default")
             .await

@@ -1,12 +1,40 @@
-//! # Secreton Config
+//! # Secreton Unified Configuration
 //!
-//! Shared configuration patterns and utilities for all Secreton crates.
-//! Provides consistent configuration loading, validation, and management.
+//! Centralized configuration management for all Secreton components.
+//! Provides unified configuration structures, loading, validation, and management.
+//!
+//! ## Features
+//!
+//! - **Unified Config Structures**: All configuration consolidated into logical groups
+//! - **Layered Loading**: Environment variables, config files, and defaults
+//! - **Validation**: Comprehensive configuration validation
+//! - **Hot Reloading**: Support for runtime configuration updates
+//! - **Type Safety**: Strongly typed configuration with compile-time guarantees
+//!
+//! ## Configuration Hierarchy
+//!
+//! 1. **Core Config**: Server, storage, security fundamentals
+//! 2. **Auth Config**: Authentication and authorization settings
+//! 3. **Monitoring Config**: Alerting, logging, and monitoring configuration
+//! 4. **Service Configs**: Component-specific configurations
+//!
+//! ## Usage
+//!
+//! ```rust
+//! use secreton_config_unified::{Config, CoreConfig};
+//!
+//! // Load configuration with layered sources
+//! let config = CoreConfig::load()?;
+//!
+//! // Access specific configuration sections
+//! let server_config = &config.server;
+//! let auth_config = &config.auth;
+//! ```
 
+use secreton_common::utils::password::PasswordPolicy;
 use secreton_errors::{Result as SecretonResult, SecretonError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::Path;
 
@@ -39,7 +67,7 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
     /// Load configuration with layered sources (file + env + defaults)
     fn load() -> SecretonResult<Self> {
         let settings = config::Config::builder()
-            .add_source(config::File::with_name("config/default"))
+            .add_source(config::File::with_name("config/default").required(false))
             .add_source(config::File::with_name("config/local").required(false))
             .add_source(config::Environment::with_prefix("SECRETON"))
             .build()
@@ -73,33 +101,112 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
     }
 }
 
-/// Server configuration - shared across multiple crates
+/// Core configuration - shared across all components
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoreConfig {
+    /// Server configuration
+    pub server: ServerConfig,
+
+    /// Storage configuration
+    pub storage: StorageConfig,
+
+    /// Security configuration
+    pub security: SecurityConfig,
+
+    /// Logging configuration
+    pub logging: LoggingConfig,
+
+    /// Metrics configuration
+    pub metrics: MetricsConfig,
+}
+
+impl Default for CoreConfig {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            storage: StorageConfig::default(),
+            security: SecurityConfig::default(),
+            logging: LoggingConfig::default(),
+            metrics: MetricsConfig::default(),
+        }
+    }
+}
+
+impl Config for CoreConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        self.server.validate()?;
+        self.storage.validate()?;
+        self.security.validate()?;
+        self.logging.validate()?;
+        self.metrics.validate()?;
+        Ok(())
+    }
+}
+
+/// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// Server host
     pub host: String,
+
     /// Server port
     pub port: u16,
+
     /// TLS configuration
     pub tls: Option<TlsConfig>,
+
     /// Request timeout in seconds
     pub request_timeout: u64,
+
     /// Maximum request body size in bytes
     pub max_body_size: usize,
+
     /// CORS configuration
     pub cors: Option<CorsConfig>,
+
+    /// Rate limiting configuration
+    pub rate_limiting: Option<RateLimitConfig>,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            host: "127.0.0.1".to_string(),
+            host: "0.0.0.0".to_string(),
             port: 8200,
             tls: None,
             request_timeout: 30,
             max_body_size: 10 * 1024 * 1024, // 10MB
             cors: Some(CorsConfig::default()),
+            rate_limiting: Some(RateLimitConfig::default()),
         }
+    }
+}
+
+impl Config for ServerConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.port == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Server port cannot be zero".to_string(),
+            });
+        }
+
+        if self.request_timeout == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Request timeout cannot be zero".to_string(),
+            });
+        }
+
+        if self.max_body_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max body size cannot be zero".to_string(),
+            });
+        }
+
+        if let Some(tls) = &self.tls {
+            tls.validate()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -108,12 +215,15 @@ impl Default for ServerConfig {
 pub struct TlsConfig {
     /// Path to certificate file
     pub cert_path: String,
+
     /// Path to private key file
     pub key_path: String,
-    /// Client certificate authentication
-    pub client_auth: bool,
-    /// CA certificate path for client auth
-    pub ca_cert_path: Option<String>,
+
+    /// Minimum TLS version
+    pub min_version: String,
+
+    /// Cipher suites
+    pub cipher_suites: Vec<String>,
 }
 
 impl Default for TlsConfig {
@@ -121,9 +231,30 @@ impl Default for TlsConfig {
         Self {
             cert_path: "certs/server.crt".to_string(),
             key_path: "certs/server.key".to_string(),
-            client_auth: false,
-            ca_cert_path: None,
+            min_version: "1.2".to_string(),
+            cipher_suites: vec![
+                "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384".to_string(),
+                "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384".to_string(),
+            ],
         }
+    }
+}
+
+impl Config for TlsConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.cert_path.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Certificate path cannot be empty".to_string(),
+            });
+        }
+
+        if self.key_path.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Key path cannot be empty".to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -132,13 +263,17 @@ impl Default for TlsConfig {
 pub struct CorsConfig {
     /// Allowed origins
     pub allowed_origins: Vec<String>,
+
     /// Allowed headers
     pub allowed_headers: Vec<String>,
+
     /// Allowed methods
     pub allowed_methods: Vec<String>,
+
     /// Allow credentials
     pub allow_credentials: bool,
-    /// Max age for preflight requests
+
+    /// Max age in seconds
     pub max_age: Option<u64>,
 }
 
@@ -147,16 +282,15 @@ impl Default for CorsConfig {
         Self {
             allowed_origins: vec!["*".to_string()],
             allowed_headers: vec![
-                "Content-Type".to_string(),
-                "Authorization".to_string(),
-                "X-Vault-Token".to_string(),
+                "authorization".to_string(),
+                "content-type".to_string(),
+                "x-requested-with".to_string(),
             ],
             allowed_methods: vec![
                 "GET".to_string(),
                 "POST".to_string(),
                 "PUT".to_string(),
                 "DELETE".to_string(),
-                "PATCH".to_string(),
                 "OPTIONS".to_string(),
             ],
             allow_credentials: true,
@@ -165,390 +299,56 @@ impl Default for CorsConfig {
     }
 }
 
-/// Database configuration - shared across storage crates
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseConfig {
-    /// Database URL
-    pub url: String,
-    /// Connection pool size
-    pub max_connections: u32,
-    /// Connection timeout in seconds
-    pub connect_timeout: u64,
-    /// Query timeout in seconds
-    pub query_timeout: u64,
-    /// Enable SSL/TLS
-    pub ssl_mode: String,
-    /// Database schema/migrations
-    pub schema: Option<String>,
+impl Config for CorsConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.allowed_origins.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "At least one allowed origin must be specified".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
-impl Default for DatabaseConfig {
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    /// Requests per second
+    pub requests_per_second: u32,
+
+    /// Burst size
+    pub burst_size: u32,
+
+    /// Time window in seconds
+    pub time_window_seconds: u64,
+}
+
+impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            url: "postgres://localhost/secreton".to_string(),
-            max_connections: 10,
-            connect_timeout: 30,
-            query_timeout: 30,
-            ssl_mode: "prefer".to_string(),
-            schema: Some("public".to_string()),
+            requests_per_second: 100,
+            burst_size: 20,
+            time_window_seconds: 60,
         }
     }
 }
 
-/// Authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    /// JWT secret key
-    pub jwt_secret: String,
-    /// JWT expiration time in seconds
-    pub jwt_expiration: u64,
-    /// Enable MFA
-    pub mfa_enabled: bool,
-    /// MFA issuer name
-    pub mfa_issuer: String,
-    /// Session timeout in seconds
-    pub session_timeout: u64,
-    /// Maximum login attempts
-    pub max_login_attempts: u32,
-    /// Lockout duration in seconds
-    pub lockout_duration: u64,
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            jwt_secret: "change-this-in-production".to_string(),
-            jwt_expiration: 3600, // 1 hour
-            mfa_enabled: true,
-            mfa_issuer: "Secreton".to_string(),
-            session_timeout: 28800, // 8 hours
-            max_login_attempts: 5,
-            lockout_duration: 900, // 15 minutes
+impl Config for RateLimitConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.requests_per_second == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Requests per second cannot be zero".to_string(),
+            });
         }
-    }
-}
 
-/// Metrics and monitoring configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MetricsConfig {
-    /// Enable metrics collection
-    pub enabled: bool,
-    /// Metrics endpoint port
-    pub port: u16,
-    /// Enable Prometheus metrics
-    pub prometheus_enabled: bool,
-    /// Prometheus endpoint path
-    pub prometheus_path: String,
-    /// Enable health checks
-    pub health_checks_enabled: bool,
-    /// Health check interval in seconds
-    pub health_check_interval: u64,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            port: 9090,
-            prometheus_enabled: true,
-            prometheus_path: "/metrics".to_string(),
-            health_checks_enabled: true,
-            health_check_interval: 30,
+        if self.time_window_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Time window cannot be zero".to_string(),
+            });
         }
-    }
-}
 
-/// Security configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityConfig {
-    /// Master encryption key for data encryption
-    pub encryption_key: String,
-    /// Enable audit logging
-    pub audit_enabled: bool,
-    /// TLS configuration
-    pub tls: Option<TlsConfig>,
-}
-
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            encryption_key: "default-encryption-key-32-chars-long".to_string(),
-            audit_enabled: true,
-            tls: Some(TlsConfig::default()),
-        }
-    }
-}
-
-/// Logging configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingConfig {
-    /// Log level (debug, info, warn, error)
-    pub level: String,
-    /// Log format (json, text)
-    pub format: String,
-    /// Enable file logging
-    pub file_enabled: bool,
-    /// Log file path
-    pub file_path: Option<String>,
-    /// Maximum log file size in MB
-    pub max_file_size: u64,
-    /// Maximum number of log files to keep
-    pub max_files: u32,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            format: "json".to_string(),
-            file_enabled: true,
-            file_path: Some("logs/secreton.log".to_string()),
-            max_file_size: 100,
-            max_files: 10,
-        }
-    }
-}
-
-/// Authentication methods configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthMethodsConfig {
-    /// AppRole authentication configuration
-    pub approle: Option<AppRoleConfig>,
-    /// LDAP authentication configuration
-    pub ldap: Option<LdapConfig>,
-    /// OIDC authentication configuration
-    pub oidc: Option<OidcConfig>,
-    /// OAuth2 authentication configuration
-    pub oauth2: Option<OAuth2Config>,
-    /// Kubernetes authentication configuration
-    pub kubernetes: Option<KubernetesConfig>,
-    /// AWS IAM authentication configuration
-    pub aws: Option<AwsConfig>,
-    /// RADIUS authentication configuration
-    pub radius: Option<RadiusConfig>,
-}
-
-impl Default for AuthMethodsConfig {
-    fn default() -> Self {
-        Self {
-            approle: None,
-            ldap: None,
-            oidc: None,
-            oauth2: None,
-            kubernetes: None,
-            aws: None,
-            radius: None,
-        }
-    }
-}
-
-/// AppRole authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppRoleConfig {
-    pub role_id: String,
-    pub secret_id: Option<String>,
-    pub policies: Vec<String>,
-    pub token_ttl: Option<u64>,
-    pub token_max_ttl: Option<u64>,
-    pub secret_id_ttl: Option<u64>,
-    pub secret_id_num_uses: Option<u32>,
-    pub token_num_uses: Option<u32>,
-    pub bind_secret_id: bool,
-    pub bound_cidr_list: Option<Vec<String>>,
-}
-
-impl Default for AppRoleConfig {
-    fn default() -> Self {
-        Self {
-            role_id: String::new(),
-            secret_id: None,
-            policies: vec![],
-            token_ttl: None,
-            token_max_ttl: None,
-            secret_id_ttl: None,
-            secret_id_num_uses: None,
-            token_num_uses: None,
-            bind_secret_id: true,
-            bound_cidr_list: None,
-        }
-    }
-}
-
-/// LDAP authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LdapConfig {
-    pub url: String,
-    pub bind_dn: Option<String>,
-    pub bind_password: Option<String>,
-    pub user_dn: String,
-    pub user_attr: String,
-    pub group_dn: Option<String>,
-    pub group_attr: Option<String>,
-    pub certificate: Option<String>,
-    pub insecure_tls: bool,
-    pub starttls: bool,
-    pub discover_dn: bool,
-    pub deny_null_bind: bool,
-    pub username_as_alias: bool,
-}
-
-impl Default for LdapConfig {
-    fn default() -> Self {
-        Self {
-            url: String::new(),
-            bind_dn: None,
-            bind_password: None,
-            user_dn: String::new(),
-            user_attr: "cn".to_string(),
-            group_dn: None,
-            group_attr: None,
-            certificate: None,
-            insecure_tls: false,
-            starttls: false,
-            discover_dn: false,
-            deny_null_bind: true,
-            username_as_alias: false,
-        }
-    }
-}
-
-/// OIDC authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OidcConfig {
-    pub issuer: String,
-    pub client_id: String,
-    pub client_secret: String,
-    pub redirect_uri: String,
-    pub scopes: Vec<String>,
-    pub default_role: String,
-}
-
-impl Default for OidcConfig {
-    fn default() -> Self {
-        Self {
-            issuer: String::new(),
-            client_id: String::new(),
-            client_secret: String::new(),
-            redirect_uri: String::new(),
-            scopes: vec!["openid".to_string()],
-            default_role: String::new(),
-        }
-    }
-}
-
-/// OAuth2 authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuth2Config {
-    pub provider: String,
-    pub client_id: String,
-    pub client_secret: String,
-    pub redirect_uri: String,
-    pub scopes: Vec<String>,
-    pub authorization_url: String,
-    pub token_url: String,
-    pub user_info_url: Option<String>,
-    pub default_role: String,
-}
-
-impl Default for OAuth2Config {
-    fn default() -> Self {
-        Self {
-            provider: String::new(),
-            client_id: String::new(),
-            client_secret: String::new(),
-            redirect_uri: String::new(),
-            scopes: vec![],
-            authorization_url: String::new(),
-            token_url: String::new(),
-            user_info_url: None,
-            default_role: String::new(),
-        }
-    }
-}
-
-/// Kubernetes authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KubernetesConfig {
-    pub kubernetes_host: String,
-    pub kubernetes_ca_cert: Option<String>,
-    pub token_reviewer_jwt: Option<String>,
-    pub pem_keys: Option<Vec<String>>,
-    pub issuer: Option<String>,
-    pub disable_iss_validation: bool,
-    pub disable_local_ca_jwt: bool,
-}
-
-impl Default for KubernetesConfig {
-    fn default() -> Self {
-        Self {
-            kubernetes_host: "https://kubernetes.default.svc".to_string(),
-            kubernetes_ca_cert: None,
-            token_reviewer_jwt: None,
-            pem_keys: None,
-            issuer: None,
-            disable_iss_validation: false,
-            disable_local_ca_jwt: false,
-        }
-    }
-}
-
-/// AWS IAM authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AwsConfig {
-    pub identity_document_url: Option<String>,
-    pub role_arn: Option<String>,
-    pub allowed_account_ids: Option<Vec<String>>,
-    pub disallowed_account_ids: Option<Vec<String>>,
-    pub allowed_role_arns: Option<Vec<String>>,
-    pub disallowed_role_arns: Option<Vec<String>>,
-    pub allowed_ec2_endpoints: Option<Vec<String>>,
-    pub disallowed_ec2_endpoints: Option<Vec<String>>,
-    pub iam_server_id_header_value: Option<String>,
-    pub max_retries: Option<i32>,
-    pub region: Option<String>,
-}
-
-impl Default for AwsConfig {
-    fn default() -> Self {
-        Self {
-            identity_document_url: None,
-            role_arn: None,
-            allowed_account_ids: None,
-            disallowed_account_ids: None,
-            allowed_role_arns: None,
-            disallowed_role_arns: None,
-            allowed_ec2_endpoints: None,
-            disallowed_ec2_endpoints: None,
-            iam_server_id_header_value: None,
-            max_retries: Some(3),
-            region: None,
-        }
-    }
-}
-
-/// RADIUS authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RadiusConfig {
-    pub host: String,
-    pub port: Option<u16>,
-    pub secret: String,
-    pub nas_identifier: Option<String>,
-    pub nas_port: Option<u32>,
-    pub dial_timeout: Option<u32>,
-    pub read_timeout: Option<u32>,
-}
-
-impl Default for RadiusConfig {
-    fn default() -> Self {
-        Self {
-            host: String::new(),
-            port: Some(1812),
-            secret: String::new(),
-            nas_identifier: None,
-            nas_port: None,
-            dial_timeout: Some(10),
-            read_timeout: Some(10),
-        }
+        Ok(())
     }
 }
 
@@ -556,601 +356,281 @@ impl Default for RadiusConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     /// Storage backend type
-    pub backend_type: StorageBackendType,
-    /// File backend configuration
-    pub file: Option<FileBackendConfig>,
-    /// PostgreSQL backend configuration
-    pub postgres: Option<PostgresBackendConfig>,
-    /// Redis backend configuration
-    pub redis: Option<RedisBackendConfig>,
-    /// Raft backend configuration
-    pub raft: Option<RaftConfig>,
-    /// Consul backend configuration
-    pub consul: Option<ConsulStorageConfig>,
-    /// S3 backend configuration
-    pub s3: Option<S3StorageConfig>,
-    /// etcd backend configuration
-    pub etcd: Option<EtcdStorageConfig>,
-    /// DynamoDB backend configuration
-    pub dynamodb: Option<DynamoDBStorageConfig>,
-    /// MySQL backend configuration
-    pub mysql: Option<MySQLStorageConfig>,
-    /// CockroachDB backend configuration
-    pub cockroachdb: Option<CockroachDBConfig>,
-    /// Cassandra backend configuration
-    pub cassandra: Option<CassandraConfig>,
-    /// MongoDB backend configuration
-    pub mongodb: Option<MongoDBConfig>,
+    pub backend: StorageBackendType,
+
+    /// File storage configuration
+    pub file: Option<FileStorageConfig>,
+
+    /// Database storage configuration
+    pub database: Option<DatabaseStorageConfig>,
+
+    /// Cloud storage configuration
+    pub cloud: Option<CloudStorageConfig>,
+
+    /// Encryption configuration
+    pub encryption: EncryptionConfig,
+
+    /// Connection pool configuration
+    pub connection_pool: ConnectionPoolConfig,
 }
 
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            backend_type: StorageBackendType::Memory,
-            file: None,
-            postgres: None,
-            redis: None,
-            raft: None,
-            consul: None,
-            s3: None,
-            etcd: None,
-            dynamodb: None,
-            mysql: None,
-            cockroachdb: None,
-            cassandra: None,
-            mongodb: None,
+            backend: StorageBackendType::File,
+            file: Some(FileStorageConfig::default()),
+            database: None,
+            cloud: None,
+            encryption: EncryptionConfig::default(),
+            connection_pool: ConnectionPoolConfig::default(),
         }
     }
 }
 
-/// Storage backend type enumeration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+impl Config for StorageConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        match self.backend {
+            StorageBackendType::File => {
+                if self.file.is_none() {
+                    return Err(SecretonError::Configuration {
+                        message: "File storage config required for file backend".to_string(),
+                    });
+                }
+                self.file.as_ref().unwrap().validate()?;
+            }
+            StorageBackendType::Database => {
+                if self.database.is_none() {
+                    return Err(SecretonError::Configuration {
+                        message: "Database storage config required for database backend"
+                            .to_string(),
+                    });
+                }
+                self.database.as_ref().unwrap().validate()?;
+            }
+            StorageBackendType::Cloud => {
+                if self.cloud.is_none() {
+                    return Err(SecretonError::Configuration {
+                        message: "Cloud storage config required for cloud backend".to_string(),
+                    });
+                }
+                self.cloud.as_ref().unwrap().validate()?;
+            }
+        }
+
+        self.encryption.validate()?;
+        self.connection_pool.validate()?;
+
+        Ok(())
+    }
+}
+
+/// Storage backend types
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StorageBackendType {
-    /// File-based storage
     File,
-    /// In-memory storage (for testing)
-    Memory,
-    /// PostgreSQL database
-    Postgres,
-    /// Redis cache
-    Redis,
-    /// Raft distributed storage
-    Raft,
-    /// Consul KV storage
-    Consul,
-    /// PostgreSQL storage (new implementation)
-    PostgreSQL,
-    /// etcd storage
-    Etcd,
-    /// Amazon S3
-    S3,
-    /// AWS DynamoDB
-    DynamoDB,
-    /// MySQL database
-    MySQL,
-    /// CockroachDB storage
-    CockroachDB,
-    /// Cassandra storage
-    Cassandra,
-    /// MongoDB storage
-    MongoDB,
+    Database,
+    Cloud,
 }
 
-/// File backend configuration
+/// File storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileBackendConfig {
+pub struct FileStorageConfig {
+    /// Base directory for storage
     pub base_path: String,
+
+    /// Maximum file size in bytes
+    pub max_file_size: u64,
+
+    /// File permissions
+    pub file_permissions: u32,
+
+    /// Directory permissions
+    pub dir_permissions: u32,
 }
 
-impl Default for FileBackendConfig {
+impl Default for FileStorageConfig {
     fn default() -> Self {
         Self {
-            base_path: "./data".to_string(),
+            base_path: "./data/storage".to_string(),
+            max_file_size: 100 * 1024 * 1024, // 100MB
+            file_permissions: 0o600,
+            dir_permissions: 0o700,
         }
     }
 }
 
-/// PostgreSQL backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostgresBackendConfig {
-    pub connection_string: String,
-}
-
-impl Default for PostgresBackendConfig {
-    fn default() -> Self {
-        Self {
-            connection_string: "postgres://localhost/secreton".to_string(),
+impl Config for FileStorageConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.base_path.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Base path cannot be empty".to_string(),
+            });
         }
+
+        if self.max_file_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max file size cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
 
-/// Redis backend configuration
+/// Database storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedisBackendConfig {
+pub struct DatabaseStorageConfig {
+    /// Database URL
     pub url: String,
-}
 
-impl Default for RedisBackendConfig {
-    fn default() -> Self {
-        Self {
-            url: "redis://localhost:6379".to_string(),
-        }
-    }
-}
+    /// Database type
+    pub db_type: DatabaseType,
 
-/// Raft backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RaftConfig {
-    pub node_id: String,
-    pub peers: Vec<String>,
-    pub log_dir: String,
-    pub snapshot_dir: String,
-    pub max_log_entries: u64,
-    pub heartbeat_timeout: u64,
-    pub election_timeout_min: u64,
-    pub election_timeout_max: u64,
-}
-
-impl Default for RaftConfig {
-    fn default() -> Self {
-        Self {
-            node_id: "node1".to_string(),
-            peers: vec![],
-            log_dir: "./raft/logs".to_string(),
-            snapshot_dir: "./raft/snapshots".to_string(),
-            max_log_entries: 10000,
-            heartbeat_timeout: 1000,
-            election_timeout_min: 1500,
-            election_timeout_max: 3000,
-        }
-    }
-}
-
-/// Consul backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConsulStorageConfig {
-    pub address: String,
-    pub token: Option<String>,
-    pub path: String,
-    pub scheme: String,
-    pub ca_cert: Option<String>,
-    pub client_cert: Option<String>,
-    pub client_key: Option<String>,
-    pub tls_skip_verify: bool,
-}
-
-impl Default for ConsulStorageConfig {
-    fn default() -> Self {
-        Self {
-            address: "127.0.0.1:8500".to_string(),
-            token: None,
-            path: "secreton".to_string(),
-            scheme: "http".to_string(),
-            ca_cert: None,
-            client_cert: None,
-            client_key: None,
-            tls_skip_verify: false,
-        }
-    }
-}
-
-/// S3 backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct S3StorageConfig {
-    pub access_key: String,
-    pub secret_key: String,
-    pub region: String,
-    pub bucket: String,
-    pub endpoint: Option<String>,
-    pub kms_key_id: Option<String>,
-    pub sse_algorithm: Option<String>,
-    pub disable_ssl: bool,
-    pub force_path_style: bool,
-}
-
-impl Default for S3StorageConfig {
-    fn default() -> Self {
-        Self {
-            access_key: String::new(),
-            secret_key: String::new(),
-            region: "us-east-1".to_string(),
-            bucket: String::new(),
-            endpoint: None,
-            kms_key_id: None,
-            sse_algorithm: None,
-            disable_ssl: false,
-            force_path_style: false,
-        }
-    }
-}
-
-/// etcd backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EtcdStorageConfig {
-    pub endpoints: Vec<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub ca_cert: Option<String>,
-    pub client_cert: Option<String>,
-    pub client_key: Option<String>,
-    pub tls_skip_verify: bool,
-    pub prefix: String,
-}
-
-impl Default for EtcdStorageConfig {
-    fn default() -> Self {
-        Self {
-            endpoints: vec!["http://localhost:2379".to_string()],
-            username: None,
-            password: None,
-            ca_cert: None,
-            client_cert: None,
-            client_key: None,
-            tls_skip_verify: false,
-            prefix: "secreton".to_string(),
-        }
-    }
-}
-
-/// DynamoDB backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DynamoDBStorageConfig {
-    pub access_key: String,
-    pub secret_key: String,
-    pub region: String,
-    pub table_name: String,
-    pub endpoint: Option<String>,
-    pub max_retries: Option<i32>,
-    pub read_capacity: Option<i64>,
-    pub write_capacity: Option<i64>,
-}
-
-impl Default for DynamoDBStorageConfig {
-    fn default() -> Self {
-        Self {
-            access_key: String::new(),
-            secret_key: String::new(),
-            region: "us-east-1".to_string(),
-            table_name: "secreton".to_string(),
-            endpoint: None,
-            max_retries: Some(3),
-            read_capacity: Some(5),
-            write_capacity: Some(5),
-        }
-    }
-}
-
-/// MySQL backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MySQLStorageConfig {
-    pub connection_string: String,
-    pub max_connections: Option<u32>,
-    pub connect_timeout: Option<u64>,
-    pub query_timeout: Option<u64>,
-}
-
-impl Default for MySQLStorageConfig {
-    fn default() -> Self {
-        Self {
-            connection_string: "mysql://root:password@localhost/secreton".to_string(),
-            max_connections: Some(10),
-            connect_timeout: Some(30),
-            query_timeout: Some(30),
-        }
-    }
-}
-
-/// CockroachDB backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CockroachDBConfig {
-    pub connection_string: String,
-    pub max_connections: Option<u32>,
-    pub connect_timeout: Option<u64>,
-    pub query_timeout: Option<u64>,
-}
-
-impl Default for CockroachDBConfig {
-    fn default() -> Self {
-        Self {
-            connection_string: "postgresql://root@localhost:26257/secreton".to_string(),
-            max_connections: Some(10),
-            connect_timeout: Some(30),
-            query_timeout: Some(30),
-        }
-    }
-}
-
-/// Cassandra backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CassandraConfig {
-    pub contact_points: Vec<String>,
-    pub port: Option<u16>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub keyspace: String,
-    pub consistency: Option<String>,
-    pub tls_ca_cert: Option<String>,
-    pub tls_cert: Option<String>,
-    pub tls_key: Option<String>,
-}
-
-impl Default for CassandraConfig {
-    fn default() -> Self {
-        Self {
-            contact_points: vec!["localhost:9042".to_string()],
-            port: Some(9042),
-            username: None,
-            password: None,
-            keyspace: "secreton".to_string(),
-            consistency: Some("LOCAL_QUORUM".to_string()),
-            tls_ca_cert: None,
-            tls_cert: None,
-            tls_key: None,
-        }
-    }
-}
-
-/// MongoDB backend configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MongoDBConfig {
-    pub connection_string: String,
-    pub database: String,
-    pub collection: String,
-    pub max_connections: Option<u32>,
-    pub connect_timeout: Option<u64>,
-}
-
-impl Default for MongoDBConfig {
-    fn default() -> Self {
-        Self {
-            connection_string: "mongodb://localhost:27017".to_string(),
-            database: "secreton".to_string(),
-            collection: "secrets".to_string(),
-            max_connections: Some(10),
-            connect_timeout: Some(30),
-        }
-    }
-}
-
-/// Infrastructure configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InfrastructureConfig {
-    /// Monitoring configuration
-    pub monitoring: Option<MonitoringConfig>,
-    /// Connection pooling configuration
-    pub connection_pooling: Option<PoolConfig>,
-    /// Plugin system configuration
-    pub plugin_system: Option<SandboxConfig>,
-    /// Log streaming configuration
-    pub log_streaming: Option<LogStreamConfig>,
-    /// Rotation scheduler configuration
-    pub rotation_scheduler: Option<RotationConfig>,
-    /// Webhooks configuration
-    pub webhooks: Option<WebhookSystemConfig>,
-    /// Distributed tracing configuration
-    pub distributed_tracing: Option<TracingConfig>,
-}
-
-impl Default for InfrastructureConfig {
-    fn default() -> Self {
-        Self {
-            monitoring: None,
-            connection_pooling: None,
-            plugin_system: None,
-            log_streaming: None,
-            rotation_scheduler: None,
-            webhooks: None,
-            distributed_tracing: None,
-        }
-    }
-}
-
-/// Monitoring configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonitoringConfig {
-    pub enabled: bool,
-    pub metrics_port: u16,
-    pub health_check_port: u16,
-    pub prometheus_endpoint: String,
-    pub collection_interval: u64,
-    pub retention_period: u64,
-}
-
-impl Default for MonitoringConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            metrics_port: 9090,
-            health_check_port: 8080,
-            prometheus_endpoint: "/metrics".to_string(),
-            collection_interval: 60,
-            retention_period: 86400,
-        }
-    }
-}
-
-/// Connection pooling configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolConfig {
+    /// Connection pool size
     pub max_connections: u32,
-    pub min_connections: u32,
-    pub connect_timeout: u64,
-    pub idle_timeout: u64,
-    pub max_lifetime: u64,
+
+    /// Connection timeout in seconds
+    pub connection_timeout: u64,
+
+    /// Query timeout in seconds
+    pub query_timeout: u64,
 }
 
-impl Default for PoolConfig {
+impl Default for DatabaseStorageConfig {
     fn default() -> Self {
         Self {
+            url: "postgresql://localhost:5432/secreton".to_string(),
+            db_type: DatabaseType::PostgreSQL,
             max_connections: 10,
-            min_connections: 1,
-            connect_timeout: 30,
-            idle_timeout: 300,
-            max_lifetime: 3600,
+            connection_timeout: 30,
+            query_timeout: 60,
         }
     }
 }
 
-/// Plugin system sandbox configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxConfig {
-    pub enabled: bool,
-    pub memory_limit: String,
-    pub cpu_limit: String,
-    pub network_access: bool,
-    pub file_access: bool,
-    pub allowed_paths: Vec<String>,
+impl Config for DatabaseStorageConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.url.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Database URL cannot be empty".to_string(),
+            });
+        }
+
+        if self.max_connections == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max connections cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
-impl Default for SandboxConfig {
+/// Database types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DatabaseType {
+    PostgreSQL,
+    MySQL,
+    SQLite,
+}
+
+/// Cloud storage configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudStorageConfig {
+    /// Cloud provider
+    pub provider: CloudProvider,
+
+    /// Bucket/container name
+    pub bucket: String,
+
+    /// Region
+    pub region: String,
+
+    /// Access key/credentials
+    pub credentials: CloudCredentials,
+
+    /// Endpoint (for S3-compatible services)
+    pub endpoint: Option<String>,
+}
+
+impl Default for CloudStorageConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            memory_limit: "128Mi".to_string(),
-            cpu_limit: "100m".to_string(),
-            network_access: false,
-            file_access: false,
-            allowed_paths: vec![],
+            provider: CloudProvider::AWS,
+            bucket: "secreton-storage".to_string(),
+            region: "us-east-1".to_string(),
+            credentials: CloudCredentials::default(),
+            endpoint: None,
         }
     }
 }
 
-/// Log streaming configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogStreamConfig {
-    pub enabled: bool,
-    pub endpoint: String,
-    pub batch_size: usize,
-    pub flush_interval: u64,
-    pub compression: bool,
+impl Config for CloudStorageConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.bucket.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Bucket name cannot be empty".to_string(),
+            });
+        }
+
+        if self.region.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Region cannot be empty".to_string(),
+            });
+        }
+
+        self.credentials.validate()?;
+
+        Ok(())
+    }
 }
 
-impl Default for LogStreamConfig {
+/// Cloud providers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CloudProvider {
+    AWS,
+    GCP,
+    Azure,
+}
+
+/// Cloud credentials
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudCredentials {
+    /// Access key ID
+    pub access_key_id: String,
+
+    /// Secret access key
+    pub secret_access_key: String,
+
+    /// Session token (optional)
+    pub session_token: Option<String>,
+}
+
+impl Default for CloudCredentials {
     fn default() -> Self {
         Self {
-            enabled: false,
-            endpoint: String::new(),
-            batch_size: 100,
-            flush_interval: 30,
-            compression: true,
+            access_key_id: String::new(),
+            secret_access_key: String::new(),
+            session_token: None,
         }
     }
 }
 
-/// Rotation scheduler configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RotationConfig {
-    pub enabled: bool,
-    pub interval: u64,
-    pub max_age: u64,
-    pub backup_count: u32,
-}
-
-impl Default for RotationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            interval: 86400,
-            max_age: 604800,
-            backup_count: 7,
+impl Config for CloudCredentials {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.access_key_id.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Access key ID cannot be empty".to_string(),
+            });
         }
-    }
-}
 
-/// Webhooks system configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebhookSystemConfig {
-    pub enabled: bool,
-    pub max_retries: u32,
-    pub retry_interval: u64,
-    pub timeout: u64,
-    pub webhooks: Vec<WebhookConfig>,
-}
-
-impl Default for WebhookSystemConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_retries: 3,
-            retry_interval: 60,
-            timeout: 30,
-            webhooks: vec![],
+        if self.secret_access_key.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Secret access key cannot be empty".to_string(),
+            });
         }
-    }
-}
 
-/// Webhook configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebhookConfig {
-    pub url: String,
-    pub events: Vec<String>,
-    pub headers: HashMap<String, String>,
-    pub secret: Option<String>,
-}
-
-impl Default for WebhookConfig {
-    fn default() -> Self {
-        Self {
-            url: String::new(),
-            events: vec![],
-            headers: HashMap::new(),
-            secret: None,
-        }
-    }
-}
-
-/// Distributed tracing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TracingConfig {
-    pub enabled: bool,
-    pub service_name: String,
-    pub collector_endpoint: String,
-    pub sampling_rate: f64,
-    pub jaeger_enabled: bool,
-    pub zipkin_enabled: bool,
-}
-
-impl Default for TracingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            service_name: "secreton".to_string(),
-            collector_endpoint: "http://localhost:14268/api/traces".to_string(),
-            sampling_rate: 1.0,
-            jaeger_enabled: false,
-            zipkin_enabled: false,
-        }
-    }
-}
-
-/// Crypto configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CryptoConfig {
-    /// Integration configuration
-    pub integration: Option<CryptoIntegrationConfig>,
-    /// KMIP server configuration
-    pub kmip: Option<KmipConfig>,
-    /// Transform engine configuration
-    pub transform: Option<TransformConfig>,
-    /// Post-quantum cryptography configuration
-    pub pqc: Option<PQCConfig>,
-    /// Key rotation configuration
-    pub key_rotation: Option<KeyRotationConfig>,
-    /// Barrier encryption configuration
-    pub barrier: Option<BarrierConfig>,
-}
-
-impl Default for CryptoConfig {
-    fn default() -> Self {
-        Self {
-            integration: None,
-            kmip: None,
-            transform: None,
-            pqc: None,
-            key_rotation: None,
-            barrier: None,
-        }
+        Ok(())
     }
 }
 
@@ -1159,7 +639,7 @@ impl Default for CryptoConfig {
 pub struct CryptoIntegrationConfig {
     pub api: ApiConfig,
     pub storage: CryptoStorageConfig,
-    pub rate_limit: RateLimitConfig,
+    pub rate_limit: CryptoRateLimitConfig,
     pub performance: PerformanceConfig,
 }
 
@@ -1168,9 +648,19 @@ impl Default for CryptoIntegrationConfig {
         Self {
             api: ApiConfig::default(),
             storage: CryptoStorageConfig::default(),
-            rate_limit: RateLimitConfig::default(),
+            rate_limit: CryptoRateLimitConfig::default(),
             performance: PerformanceConfig::default(),
         }
+    }
+}
+
+impl Config for CryptoIntegrationConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        self.api.validate()?;
+        self.storage.validate()?;
+        self.rate_limit.validate()?;
+        self.performance.validate()?;
+        Ok(())
     }
 }
 
@@ -1188,11 +678,22 @@ impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             port: 8080,
-            host: "127.0.0.1".to_string(),
+            host: "0.0.0.0".to_string(),
             tls_enabled: false,
             cert_path: None,
             key_path: None,
         }
+    }
+}
+
+impl Config for ApiConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.port == 0 {
+            return Err(SecretonError::Configuration {
+                message: "API port cannot be zero".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1214,21 +715,43 @@ impl Default for CryptoStorageConfig {
     }
 }
 
-/// Rate limiting configuration for crypto
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateLimitConfig {
-    pub enabled: bool,
-    pub requests_per_minute: u32,
-    pub burst_limit: u32,
+impl Config for CryptoStorageConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.path.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Crypto storage path cannot be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
-impl Default for RateLimitConfig {
+/// Rate limiting configuration for crypto integration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CryptoRateLimitConfig {
+    pub requests_per_second: u32,
+    pub burst_size: u32,
+    pub time_window_seconds: u32,
+}
+
+impl Default for CryptoRateLimitConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            requests_per_minute: 1000,
-            burst_limit: 100,
+            requests_per_second: 10,
+            burst_size: 100,
+            time_window_seconds: 60,
         }
+    }
+}
+
+impl Config for CryptoRateLimitConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.requests_per_second == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Requests per second cannot be zero".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1250,6 +773,22 @@ impl Default for PerformanceConfig {
     }
 }
 
+impl Config for PerformanceConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.thread_pool_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Thread pool size cannot be zero".to_string(),
+            });
+        }
+        if self.queue_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Queue size cannot be zero".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// KMIP server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KmipConfig {
@@ -1266,7 +805,7 @@ impl Default for KmipConfig {
     fn default() -> Self {
         Self {
             port: 5696,
-            host: "127.0.0.1".to_string(),
+            host: "0.0.0.0".to_string(),
             tls_enabled: true,
             cert_path: Some("certs/kmip.crt".to_string()),
             key_path: Some("certs/kmip.key".to_string()),
@@ -1276,215 +815,936 @@ impl Default for KmipConfig {
     }
 }
 
-/// Transform engine configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransformConfig {
-    pub enabled: bool,
-    pub transformations: Vec<String>,
-    pub key_derivation: String,
-}
-
-impl Default for TransformConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            transformations: vec![],
-            key_derivation: "pbkdf2".to_string(),
+impl Config for KmipConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.port == 0 {
+            return Err(SecretonError::Configuration {
+                message: "KMIP port cannot be zero".to_string(),
+            });
         }
+        if self.tls_enabled {
+            if self.cert_path.is_none() || self.key_path.is_none() {
+                return Err(SecretonError::Configuration {
+                    message: "Certificate and key paths required when TLS is enabled".to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
-/// Post-quantum cryptography configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PQCConfig {
+pub struct EncryptionConfig {
     pub enabled: bool,
-    pub algorithms: Vec<String>,
-    pub key_size: usize,
-    pub signature_scheme: String,
+    pub algorithm: EncryptionAlgorithm,
+    pub kdf: KeyDerivationFunction,
+    pub key_size: u32,
+    pub master_key: MasterKeyConfig,
 }
 
-impl Default for PQCConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            algorithms: vec!["kyber512".to_string()],
-            key_size: 512,
-            signature_scheme: "dilithium2".to_string(),
-        }
-    }
-}
-
-/// Key rotation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyRotationConfig {
-    pub enabled: bool,
-    pub interval_days: u32,
-    pub max_versions: u32,
-    pub auto_rotate: bool,
-}
-
-impl Default for KeyRotationConfig {
+impl Default for EncryptionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_days: 90,
-            max_versions: 10,
-            auto_rotate: true,
+            algorithm: EncryptionAlgorithm::AES256GCM,
+            kdf: KeyDerivationFunction::Argon2,
+            key_size: 256,
+            master_key: MasterKeyConfig::default(),
         }
     }
 }
 
-/// Barrier encryption configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BarrierConfig {
-    pub enabled: bool,
-    pub algorithm: String,
-    pub key_size: usize,
-    pub iterations: u32,
+impl Config for EncryptionConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled {
+            if self.key_size == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Key size cannot be zero".to_string(),
+                });
+            }
+
+            self.master_key.validate()?;
+        }
+
+        Ok(())
+    }
 }
 
-impl Default for BarrierConfig {
+/// Encryption algorithms
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EncryptionAlgorithm {
+    AES256GCM,
+    ChaCha20Poly1305,
+}
+
+/// Key derivation functions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum KeyDerivationFunction {
+    Argon2,
+    PBKDF2,
+}
+
+/// Master key configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MasterKeyConfig {
+    /// Key source
+    pub source: KeySource,
+
+    /// Key rotation interval in days
+    pub rotation_interval_days: u32,
+
+    /// Minimum key version to keep
+    pub min_versions: usize,
+}
+
+impl Default for MasterKeyConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            algorithm: "aes256-gcm".to_string(),
-            key_size: 32,
-            iterations: 10000,
+            source: KeySource::Generated,
+            rotation_interval_days: 90,
+            min_versions: 3,
         }
+    }
+}
+
+impl Config for MasterKeyConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.rotation_interval_days == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Rotation interval cannot be zero".to_string(),
+            });
+        }
+
+        if self.min_versions == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Minimum versions cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Key sources
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum KeySource {
+    Generated,
+    External,
+    HSM,
+}
+
+/// Connection pool configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionPoolConfig {
+    /// Maximum connections
+    pub max_connections: u32,
+
+    /// Minimum idle connections
+    pub min_idle: u32,
+
+    /// Connection timeout in seconds
+    pub connection_timeout: u64,
+
+    /// Idle timeout in seconds
+    pub idle_timeout: u64,
+
+    /// Maximum lifetime in seconds
+    pub max_lifetime: u64,
+}
+
+impl Default for ConnectionPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_connections: 10,
+            min_idle: 1,
+            connection_timeout: 30,
+            idle_timeout: 300,
+            max_lifetime: 3600,
+        }
+    }
+}
+
+impl Config for ConnectionPoolConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.max_connections == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max connections cannot be zero".to_string(),
+            });
+        }
+
+        if self.min_idle > self.max_connections {
+            return Err(SecretonError::Configuration {
+                message: "Min idle cannot be greater than max connections".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Agent security enforcement configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSecurityConfig {
+    /// Security scan interval in seconds
+    pub scan_interval_seconds: u64,
+
+    /// Enable intrusion detection
+    pub intrusion_detection_enabled: bool,
+
+    /// Enable malware scanning
+    pub malware_scan_enabled: bool,
+
+    /// Enable vulnerability scanning
+    pub vulnerability_scan_enabled: bool,
+
+    /// Enable compliance checking
+    pub compliance_check_enabled: bool,
+
+    /// Auto-block suspicious IPs
+    pub auto_block_ips: bool,
+
+    /// Auto-quarantine infected files
+    pub auto_quarantine: bool,
+
+    /// Enable encryption compliance checks
+    pub encryption_enabled: bool,
+
+    /// Enable access control compliance checks
+    pub access_control_enabled: bool,
+
+    /// Enable data protection compliance checks
+    pub data_protection_enabled: bool,
+}
+
+impl Default for AgentSecurityConfig {
+    fn default() -> Self {
+        Self {
+            scan_interval_seconds: 300, // 5 minutes
+            intrusion_detection_enabled: true,
+            malware_scan_enabled: true,
+            vulnerability_scan_enabled: true,
+            compliance_check_enabled: true,
+            auto_block_ips: true,
+            auto_quarantine: true,
+            encryption_enabled: true,
+            access_control_enabled: true,
+            data_protection_enabled: true,
+        }
+    }
+}
+
+impl Config for AgentSecurityConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.scan_interval_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Security scan interval cannot be zero".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
 /// Security configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityPoliciesConfig {
-    /// Rate limiting configuration
-    pub rate_limiting: Option<RateLimitConfig>,
-    /// Seal configuration
-    pub seal: Option<SealConfig>,
-    /// Secret scanning configuration
-    pub secret_scanning: Option<ScanConfig>,
-    /// Control groups configuration
-    pub control_groups: Option<ControlGroupConfig>,
-    /// Audit streaming configuration
-    pub audit_streaming: Option<StreamConfig>,
-    /// Quotas configuration
-    pub quotas: Option<QuotaConfig>,
+pub struct SecurityConfig {
+    /// JWT configuration
+    pub jwt: JwtConfig,
+
+    /// MFA configuration
+    pub mfa: MfaConfig,
+
+    /// Password policy
+    pub password_policy: secreton_common::utils::password::PasswordPolicy,
+
+    /// Session configuration
+    pub session: SessionConfig,
+
+    /// Audit logging configuration
+    pub audit: AuditConfig,
+
+    /// Rate limiting
+    pub rate_limiting: RateLimitConfig,
+
+    /// Agent security enforcement settings
+    pub agent: AgentSecurityConfig,
 }
 
-impl Default for SecurityPoliciesConfig {
+impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
-            rate_limiting: None,
-            seal: None,
-            secret_scanning: None,
-            control_groups: None,
-            audit_streaming: None,
-            quotas: None,
+            jwt: JwtConfig::default(),
+            mfa: MfaConfig::default(),
+            password_policy: PasswordPolicy::default(),
+            session: SessionConfig::default(),
+            audit: AuditConfig::default(),
+            rate_limiting: RateLimitConfig::default(),
+            agent: AgentSecurityConfig::default(),
         }
     }
 }
 
-/// Seal configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SealConfig {
-    pub seal_type: String,
-    pub key_shares: u32,
-    pub key_threshold: u32,
-    pub pgp_keys: Option<Vec<String>>,
-    pub nonce: Option<String>,
+impl Config for SecurityConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        self.jwt.validate()?;
+        self.mfa.validate()?;
+        self.password_policy
+            .validate()
+            .map_err(|e| SecretonError::Configuration {
+                message: format!("Password policy validation failed: {}", e),
+            })?;
+        self.session.validate()?;
+        self.audit.validate()?;
+        Ok(())
+    }
 }
 
-impl Default for SealConfig {
+/// JWT configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtConfig {
+    /// JWT secret key
+    pub secret: String,
+
+    /// Refresh token secret
+    pub refresh_secret: Option<String>,
+
+    /// Access token expiration in seconds
+    pub expiration: u64,
+
+    /// Refresh token expiration in seconds
+    pub refresh_expiration: Option<u64>,
+
+    /// JWT issuer
+    pub issuer: String,
+
+    /// JWT audience
+    pub audience: String,
+
+    /// Algorithm
+    pub algorithm: JwtAlgorithm,
+}
+
+impl Default for JwtConfig {
     fn default() -> Self {
         Self {
-            seal_type: "shamir".to_string(),
-            key_shares: 5,
-            key_threshold: 3,
-            pgp_keys: None,
-            nonce: None,
+            secret: "change-this-in-production".to_string(),
+            refresh_secret: None,
+            expiration: 3600,                 // 1 hour
+            refresh_expiration: Some(604800), // 7 days
+            issuer: "secreton".to_string(),
+            audience: "secreton-api".to_string(),
+            algorithm: JwtAlgorithm::HS256,
         }
     }
 }
 
-/// Secret scanning configuration
+impl Config for JwtConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.secret.is_empty() || self.secret == "change-this-in-production" {
+            return Err(SecretonError::Configuration {
+                message: "JWT secret must be set and not use default value".to_string(),
+            });
+        }
+
+        if self.expiration == 0 {
+            return Err(SecretonError::Configuration {
+                message: "JWT expiration cannot be zero".to_string(),
+            });
+        }
+
+        if self.issuer.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "JWT issuer cannot be empty".to_string(),
+            });
+        }
+
+        if self.audience.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "JWT audience cannot be empty".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// JWT algorithms
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanConfig {
+pub enum JwtAlgorithm {
+    HS256,
+    HS384,
+    HS512,
+    RS256,
+    RS384,
+    RS512,
+    ES256,
+    ES384,
+    ES512,
+}
+
+/// MFA configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MfaConfig {
+    /// Enable MFA globally
     pub enabled: bool,
-    pub scan_interval: u64,
-    pub patterns: Vec<String>,
-    pub exclude_paths: Vec<String>,
+
+    /// Required MFA methods
+    pub required_methods: Vec<MfaMethod>,
+
+    /// MFA issuer name
+    pub issuer: String,
+
+    /// TOTP configuration
+    pub totp: TotpConfig,
+
+    /// SMS configuration
+    pub sms: SmsConfig,
+
+    /// Email configuration
+    pub email: EmailConfig,
+
+    /// Backup codes count
+    pub backup_codes_count: usize,
 }
 
-impl Default for ScanConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            scan_interval: 3600,
-            patterns: vec![],
-            exclude_paths: vec![],
-        }
-    }
-}
-
-/// Control groups configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlGroupConfig {
-    pub enabled: bool,
-    pub max_requests: u32,
-    pub max_time: u64,
-    pub groups: Vec<String>,
-}
-
-impl Default for ControlGroupConfig {
+impl Default for MfaConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            max_requests: 100,
-            max_time: 60,
-            groups: vec![],
+            required_methods: vec![MfaMethod::TOTP],
+            issuer: "Secreton".to_string(),
+            totp: TotpConfig::default(),
+            sms: SmsConfig::default(),
+            email: EmailConfig::default(),
+            backup_codes_count: 10,
         }
     }
 }
 
-/// Audit streaming configuration
+impl Config for MfaConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled {
+            if self.required_methods.is_empty() {
+                return Err(SecretonError::Configuration {
+                    message: "At least one MFA method must be required when MFA is enabled"
+                        .to_string(),
+                });
+            }
+
+            if self.issuer.is_empty() {
+                return Err(SecretonError::Configuration {
+                    message: "MFA issuer cannot be empty".to_string(),
+                });
+            }
+        }
+
+        if self.backup_codes_count == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Backup codes count cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// MFA methods
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamConfig {
+pub enum MfaMethod {
+    TOTP,
+    SMS,
+    Email,
+}
+
+/// TOTP configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotpConfig {
+    /// Algorithm
+    pub algorithm: TotpAlgorithm,
+
+    /// Digits
+    pub digits: u8,
+
+    /// Period in seconds
+    pub period: u32,
+
+    /// Skew (allowance for clock drift)
+    pub skew: u32,
+}
+
+impl Default for TotpConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: TotpAlgorithm::SHA1,
+            digits: 6,
+            period: 30,
+            skew: 1,
+        }
+    }
+}
+
+/// TOTP algorithms
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TotpAlgorithm {
+    SHA1,
+    SHA256,
+    SHA512,
+}
+
+/// SMS configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmsConfig {
+    /// SMS provider
+    pub provider: SmsProvider,
+
+    /// Account SID (for Twilio)
+    pub account_sid: String,
+
+    /// Auth token
+    pub auth_token: String,
+
+    /// From number
+    pub from_number: String,
+
+    /// Rate limiting
+    pub rate_limit: SmsRateLimit,
+}
+
+impl Default for SmsConfig {
+    fn default() -> Self {
+        Self {
+            provider: SmsProvider::Twilio,
+            account_sid: String::new(),
+            auth_token: String::new(),
+            from_number: String::new(),
+            rate_limit: SmsRateLimit::default(),
+        }
+    }
+}
+
+/// SMS providers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SmsProvider {
+    Twilio,
+    AWS,
+    GCP,
+}
+
+/// SMS rate limiting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmsRateLimit {
+    /// Messages per minute
+    pub per_minute: u32,
+
+    /// Messages per hour
+    pub per_hour: u32,
+
+    /// Messages per day
+    pub per_day: u32,
+}
+
+impl Default for SmsRateLimit {
+    fn default() -> Self {
+        Self {
+            per_minute: 10,
+            per_hour: 100,
+            per_day: 500,
+        }
+    }
+}
+
+/// Email configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailConfig {
+    /// SMTP server
+    pub smtp_server: String,
+
+    /// SMTP port
+    pub smtp_port: u16,
+
+    /// SMTP username
+    pub smtp_username: String,
+
+    /// SMTP password
+    pub smtp_password: String,
+
+    /// From address
+    pub from_address: String,
+
+    /// To addresses (for notifications)
+    pub to_addresses: Vec<String>,
+
+    /// Use TLS
+    pub use_tls: bool,
+
+    /// Use STARTTLS
+    pub use_starttls: bool,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            smtp_server: "localhost".to_string(),
+            smtp_port: 587,
+            smtp_username: String::new(),
+            smtp_password: String::new(),
+            from_address: "noreply@secreton.local".to_string(),
+            to_addresses: Vec::new(),
+            use_tls: false,
+            use_starttls: true,
+        }
+    }
+}
+
+/// Session configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// Session timeout in seconds
+    pub timeout_seconds: u64,
+
+    /// Maximum concurrent sessions per user
+    pub max_concurrent_sessions: usize,
+
+    /// Enable session persistence
+    pub persistence_enabled: bool,
+
+    /// Session cleanup interval in seconds
+    pub cleanup_interval_seconds: u64,
+
+    /// Session cookie configuration
+    pub cookie: SessionCookieConfig,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_seconds: 3600, // 1 hour
+            max_concurrent_sessions: 5,
+            persistence_enabled: true,
+            cleanup_interval_seconds: 300, // 5 minutes
+            cookie: SessionCookieConfig::default(),
+        }
+    }
+}
+
+impl Config for SessionConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.timeout_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Session timeout cannot be zero".to_string(),
+            });
+        }
+
+        if self.max_concurrent_sessions == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max concurrent sessions cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Session cookie configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCookieConfig {
+    /// Cookie name
+    pub name: String,
+
+    /// Domain
+    pub domain: Option<String>,
+
+    /// Path
+    pub path: String,
+
+    /// Secure flag
+    pub secure: bool,
+
+    /// HttpOnly flag
+    pub http_only: bool,
+
+    /// SameSite attribute
+    pub same_site: SameSite,
+}
+
+impl Default for SessionCookieConfig {
+    fn default() -> Self {
+        Self {
+            name: "secreton_session".to_string(),
+            domain: None,
+            path: "/".to_string(),
+            secure: true,
+            http_only: true,
+            same_site: SameSite::Strict,
+        }
+    }
+}
+
+/// SameSite cookie attribute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SameSite {
+    Strict,
+    Lax,
+    None,
+}
+
+/// Audit configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditConfig {
+    /// Enable audit logging
     pub enabled: bool,
-    pub endpoint: String,
+
+    /// Audit log level
+    pub level: AuditLevel,
+
+    /// Storage backend for audit logs
+    pub storage: AuditStorage,
+
+    /// Retention period in days
+    pub retention_days: u32,
+
+    /// Maximum audit entries per batch
+    pub max_batch_size: usize,
+
+    /// Audit filters
+    pub filters: Vec<AuditFilter>,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: AuditLevel::Detailed,
+            storage: AuditStorage::File,
+            retention_days: 365,
+            max_batch_size: 100,
+            filters: Vec::new(),
+        }
+    }
+}
+
+impl Config for AuditConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled {
+            if self.retention_days == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Audit retention days cannot be zero".to_string(),
+                });
+            }
+
+            if self.max_batch_size == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Max batch size cannot be zero".to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Audit log levels
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuditLevel {
+    Minimal,
+    Standard,
+    Detailed,
+}
+
+/// Audit storage backends
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuditStorage {
+    File,
+    Database,
+    Syslog,
+    External,
+}
+
+/// Audit filters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditFilter {
+    /// Filter name
+    pub name: String,
+
+    /// Filter rules
+    pub rules: Vec<AuditRule>,
+}
+
+/// Audit rules
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditRule {
+    /// Field to filter on
+    pub field: String,
+
+    /// Operator
+    pub operator: AuditOperator,
+
+    /// Value to match
+    pub value: String,
+}
+
+/// Audit operators
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuditOperator {
+    Equals,
+    NotEquals,
+    Contains,
+    NotContains,
+    Regex,
+}
+
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Log level
+    pub level: String,
+
+    /// Log format
     pub format: String,
-    pub buffer_size: usize,
-    pub flush_interval: u64,
+
+    /// Enable file logging
+    pub file_enabled: bool,
+
+    /// Log file path
+    pub file_path: String,
+
+    /// Maximum log file size in MB
+    pub max_file_size_mb: u64,
+
+    /// Number of log files to retain
+    pub max_files: u32,
+
+    /// Enable structured logging
+    pub structured: bool,
+
+    /// Enable console logging
+    pub console_enabled: bool,
+
+    /// Enable syslog
+    pub syslog_enabled: bool,
+
+    /// Syslog facility
+    pub syslog_facility: Option<String>,
 }
 
-impl Default for StreamConfig {
+impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            endpoint: String::new(),
+            level: "info".to_string(),
             format: "json".to_string(),
-            buffer_size: 1000,
-            flush_interval: 30,
+            file_enabled: true,
+            file_path: "/var/log/secreton.log".to_string(),
+            max_file_size_mb: 100,
+            max_files: 10,
+            structured: true,
+            console_enabled: true,
+            syslog_enabled: false,
+            syslog_facility: Some("local0".to_string()),
         }
     }
 }
 
-/// Quotas configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuotaConfig {
-    pub enabled: bool,
-    pub max_secrets: u32,
-    pub max_versions: u32,
-    pub rate_limit: u32,
+impl Config for LoggingConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.file_enabled && self.file_path.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Log file path cannot be empty when file logging is enabled".to_string(),
+            });
+        }
+
+        if self.max_file_size_mb == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max file size cannot be zero".to_string(),
+            });
+        }
+
+        if self.max_files == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max files cannot be zero".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
-impl Default for QuotaConfig {
+/// Metrics configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    /// Enable metrics collection
+    pub enabled: bool,
+
+    /// Metrics collection interval in seconds
+    pub collection_interval_seconds: u64,
+
+    /// Enable Prometheus metrics
+    pub prometheus_enabled: bool,
+
+    /// Prometheus metrics port
+    pub prometheus_port: u16,
+
+    /// Prometheus metrics path
+    pub prometheus_path: String,
+
+    /// Enable StatsD metrics
+    pub statsd_enabled: bool,
+
+    /// StatsD server address
+    pub statsd_address: String,
+
+    /// Metrics retention period in seconds
+    pub retention_seconds: u64,
+
+    /// Enable health check metrics
+    pub health_metrics_enabled: bool,
+
+    /// Enable performance metrics
+    pub performance_metrics_enabled: bool,
+
+    /// Enable security metrics
+    pub security_metrics_enabled: bool,
+}
+
+impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            max_secrets: 1000,
-            max_versions: 100,
-            rate_limit: 100,
+            enabled: true,
+            collection_interval_seconds: 60,
+            prometheus_enabled: true,
+            prometheus_port: 9090,
+            prometheus_path: "/metrics".to_string(),
+            statsd_enabled: false,
+            statsd_address: "localhost:8125".to_string(),
+            retention_seconds: 86400 * 7, // 7 days
+            health_metrics_enabled: true,
+            performance_metrics_enabled: true,
+            security_metrics_enabled: true,
         }
+    }
+}
+
+impl Config for MetricsConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled {
+            if self.collection_interval_seconds == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Collection interval cannot be zero".to_string(),
+                });
+            }
+
+            if self.prometheus_enabled && self.prometheus_port == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Prometheus port cannot be zero".to_string(),
+                });
+            }
+
+            if self.retention_seconds == 0 {
+                return Err(SecretonError::Configuration {
+                    message: "Retention seconds cannot be zero".to_string(),
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1503,28 +1763,6 @@ pub struct IntegrationsConfig {
     pub secret_migration: Option<BackendConfig>,
     /// Plugin system
     pub plugin: Option<PluginConfig>,
-    /// Kubernetes external secrets
-    pub kubernetes_external_secrets: Option<ExternalSecretsConfig>,
-    /// AWS secrets manager
-    pub aws_secrets_manager: Option<AWSSecretsConfig>,
-    /// Smart secret recommendations
-    pub smart_recommendations: Option<RecommendationConfig>,
-    /// Service mesh integration
-    pub service_mesh: Option<ServiceMeshConfig>,
-    /// Disaster recovery
-    pub disaster_recovery: Option<DRConfig>,
-    /// Secret performance optimizer
-    pub performance_optimizer: Option<CacheConfig>,
-    /// Secret discovery and classification
-    pub discovery_classification: Option<ScanConfig>,
-    /// ACME PKI
-    pub acme_pki: Option<ACMEConfig>,
-    /// Azure Key Vault backend
-    pub azure_key_vault: Option<AzureKeyVaultConfig>,
-    /// Certificate revocation
-    pub certificate_revocation: Option<CRLConfig>,
-    /// Consul service mesh
-    pub consul_service_mesh: Option<ConsulConfig>,
 }
 
 impl Default for IntegrationsConfig {
@@ -1536,18 +1774,23 @@ impl Default for IntegrationsConfig {
             distributed_tracing: None,
             secret_migration: None,
             plugin: None,
-            kubernetes_external_secrets: None,
-            aws_secrets_manager: None,
-            smart_recommendations: None,
-            service_mesh: None,
-            disaster_recovery: None,
-            performance_optimizer: None,
-            discovery_classification: None,
-            acme_pki: None,
-            azure_key_vault: None,
-            certificate_revocation: None,
-            consul_service_mesh: None,
         }
+    }
+}
+
+impl Config for IntegrationsConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        // Validate individual configs if present
+        if let Some(general) = &self.general {
+            general.validate()?;
+        }
+        if let Some(backup) = &self.backup_recovery {
+            backup.validate()?;
+        }
+        if let Some(pipeline) = &self.cicd_pipeline {
+            pipeline.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -1568,6 +1811,17 @@ impl Default for IntegrationConfig {
             retry_count: 3,
             retry_delay: 5,
         }
+    }
+}
+
+impl Config for IntegrationConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.timeout == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Integration timeout cannot be zero".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1593,6 +1847,17 @@ impl Default for BackupConfig {
     }
 }
 
+impl Config for BackupConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled && self.retention_days == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Backup retention days cannot be zero".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// CI/CD pipeline configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
@@ -1610,6 +1875,17 @@ impl Default for PipelineConfig {
             webhook_url: String::new(),
             secret_prefix: "SECRETON_".to_string(),
         }
+    }
+}
+
+impl Config for PipelineConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled && self.webhook_url.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Webhook URL required when CI/CD pipeline is enabled".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1633,6 +1909,22 @@ impl Default for BackendConfig {
     }
 }
 
+impl Config for BackendConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.batch_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Batch size cannot be zero".to_string(),
+            });
+        }
+        if self.concurrency == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Concurrency cannot be zero".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Plugin configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
@@ -1653,417 +1945,196 @@ impl Default for PluginConfig {
     }
 }
 
-/// Kubernetes external secrets configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalSecretsConfig {
-    pub enabled: bool,
-    pub namespace: String,
-    pub service_account: String,
-    pub cluster_role: String,
-}
-
-impl Default for ExternalSecretsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            namespace: "external-secrets-system".to_string(),
-            service_account: "external-secrets-sa".to_string(),
-            cluster_role: "external-secrets-role".to_string(),
-        }
-    }
-}
-
-/// AWS secrets manager configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AWSSecretsConfig {
-    pub enabled: bool,
-    pub region: String,
-    pub access_key: Option<String>,
-    pub secret_key: Option<String>,
-    pub rotation: AwsSecretsRotationConfig,
-}
-
-impl Default for AWSSecretsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            region: "us-east-1".to_string(),
-            access_key: None,
-            secret_key: None,
-            rotation: AwsSecretsRotationConfig::default(),
-        }
-    }
-}
-
-/// AWS secrets rotation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AwsSecretsRotationConfig {
-    pub enabled: bool,
-    pub interval_days: u32,
-    pub max_versions: u32,
-}
-
-impl Default for AwsSecretsRotationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            interval_days: 90,
-            max_versions: 10,
-        }
-    }
-}
-
-/// Smart secret recommendations configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecommendationConfig {
-    pub enabled: bool,
-    pub min_confidence: f64,
-    pub max_suggestions: usize,
-    pub categories: Vec<String>,
-}
-
-impl Default for RecommendationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            min_confidence: 0.8,
-            max_suggestions: 10,
-            categories: vec!["security".to_string(), "performance".to_string()],
-        }
-    }
-}
-
-/// Service mesh configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceMeshConfig {
-    pub enabled: bool,
-    pub provider: String,
-    pub spiffe: SPIFFEConfig,
-}
-
-impl Default for ServiceMeshConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            provider: "istio".to_string(),
-            spiffe: SPIFFEConfig::default(),
-        }
-    }
-}
-
-/// SPIFFE configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SPIFFEConfig {
-    pub trust_domain: String,
-    pub workload_api_socket: String,
-    pub svid_ttl: u64,
-}
-
-impl Default for SPIFFEConfig {
-    fn default() -> Self {
-        Self {
-            trust_domain: "example.org".to_string(),
-            workload_api_socket: "unix:///tmp/spire-agent/public/api.sock".to_string(),
-            svid_ttl: 3600,
-        }
-    }
-}
-
-/// Disaster recovery configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DRConfig {
-    pub enabled: bool,
-    pub primary_cluster: String,
-    pub secondary_clusters: Vec<String>,
-    pub replication_interval: u64,
-}
-
-impl Default for DRConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            primary_cluster: String::new(),
-            secondary_clusters: vec![],
-            replication_interval: 60,
-        }
-    }
-}
-
-/// Cache configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheConfig {
-    pub enabled: bool,
-    pub ttl: u64,
-    pub max_size: usize,
-    pub eviction_policy: String,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            ttl: 3600,
-            max_size: 10000,
-            eviction_policy: "lru".to_string(),
-        }
-    }
-}
-
-/// ACME PKI configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ACMEConfig {
-    pub enabled: bool,
-    pub directory_url: String,
-    pub email: String,
-    pub dns_provider: String,
-}
-
-impl Default for ACMEConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            directory_url: "https://acme-v02.api.letsencrypt.org/directory".to_string(),
-            email: String::new(),
-            dns_provider: "route53".to_string(),
-        }
-    }
-}
-
-/// Azure Key Vault configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AzureKeyVaultConfig {
-    pub enabled: bool,
-    pub vault_url: String,
-    pub client_id: String,
-    pub client_secret: String,
-    pub tenant_id: String,
-    pub sync: SyncConfig,
-}
-
-impl Default for AzureKeyVaultConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            vault_url: String::new(),
-            client_id: String::new(),
-            client_secret: String::new(),
-            tenant_id: String::new(),
-            sync: SyncConfig::default(),
-        }
-    }
-}
-
-/// Sync configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncConfig {
-    pub enabled: bool,
-    pub interval: u64,
-    pub batch_size: usize,
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            interval: 300,
-            batch_size: 100,
-        }
-    }
-}
-
-/// Certificate revocation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CRLConfig {
-    pub enabled: bool,
-    pub expiry: u64,
-    pub disable: bool,
-    pub ocsp_disable: bool,
-    pub ocsp_expiry: u64,
-}
-
-impl Default for CRLConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            expiry: 168,
-            disable: false,
-            ocsp_disable: false,
-            ocsp_expiry: 168,
-        }
-    }
-}
-
-/// Consul service mesh configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConsulConfig {
-    pub enabled: bool,
-    pub address: String,
-    pub token: Option<String>,
-    pub datacenter: String,
-    pub scheme: String,
-}
-
-impl Default for ConsulConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            address: "127.0.0.1:8500".to_string(),
-            token: None,
-            datacenter: "dc1".to_string(),
-            scheme: "http".to_string(),
-        }
-    }
-}
-
-/// Main application configuration (extended)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    /// Server configuration
-    pub server: ServerConfig,
-    /// Database configuration
-    pub database: DatabaseConfig,
-    /// Authentication configuration
-    pub auth: AuthConfig,
-    /// Security configuration
-    pub security: SecurityConfig,
-    /// Logging configuration
-    pub logging: LoggingConfig,
-    /// Metrics configuration
-    pub metrics: MetricsConfig,
-    /// Authentication methods configuration
-    pub auth_methods: AuthMethodsConfig,
-    /// Storage configuration
-    pub storage: StorageConfig,
-    /// Infrastructure configuration
-    pub infrastructure: InfrastructureConfig,
-    /// Crypto configuration
-    pub crypto: CryptoConfig,
-    /// Security policies configuration
-    pub security_policies: SecurityPoliciesConfig,
-    /// Integrations configuration
-    pub integrations: IntegrationsConfig,
-    /// Additional custom configuration
-    pub custom: HashMap<String, serde_json::Value>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            database: DatabaseConfig::default(),
-            auth: AuthConfig::default(),
-            security: SecurityConfig::default(),
-            logging: LoggingConfig::default(),
-            metrics: MetricsConfig::default(),
-            auth_methods: AuthMethodsConfig::default(),
-            storage: StorageConfig::default(),
-            infrastructure: InfrastructureConfig::default(),
-            crypto: CryptoConfig::default(),
-            security_policies: SecurityPoliciesConfig::default(),
-            integrations: IntegrationsConfig::default(),
-            custom: HashMap::new(),
-        }
-    }
-}
-
-impl Config for AppConfig {
+impl Config for PluginConfig {
     fn validate(&self) -> SecretonResult<()> {
-        // Validate server config
-        if self.server.port == 0 {
-            return Err(SecretonError::Validation {
-                message: "Server port cannot be 0".to_string(),
+        if self.enabled && self.directory.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Plugin directory cannot be empty when plugins are enabled".to_string(),
             });
         }
-
-        // Validate database config
-        if self.database.url.is_empty() {
-            return Err(SecretonError::Validation {
-                message: "Database URL cannot be empty".to_string(),
-            });
-        }
-
-        // Validate auth config
-        if self.auth.jwt_secret.len() < 32 {
-            return Err(SecretonError::Validation {
-                message: "JWT secret must be at least 32 characters".to_string(),
-            });
-        }
-
-        // Validate security config
-        if self.security.encryption_key.len() < 32 {
-            return Err(SecretonError::Validation {
-                message: "Encryption key must be at least 32 characters".to_string(),
-            });
-        }
-
         Ok(())
     }
 }
 
-/// Configuration utilities
-pub mod utils {
-    use super::*;
+/// Distributed tracing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TracingConfig {
+    pub enabled: bool,
+    pub service_name: String,
+    pub collector_endpoint: String,
+    pub sampling_rate: f64,
+}
 
-    /// Load configuration from multiple sources with precedence
-    pub fn load_config<T: Config>(config_paths: &[&str]) -> SecretonResult<T> {
-        let mut builder = config::Config::builder();
-
-        // Add default configuration
-        builder = builder.add_source(config::File::from_str(
-            &toml::to_string(&T::default()).unwrap(),
-            config::FileFormat::Toml,
-        ));
-
-        // Add configuration files in order
-        for path in config_paths {
-            builder = builder.add_source(config::File::with_name(path).required(false));
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            service_name: "secreton".to_string(),
+            collector_endpoint: "http://localhost:14268/api/traces".to_string(),
+            sampling_rate: 0.1,
         }
-
-        // Add environment variables
-        builder = builder.add_source(config::Environment::with_prefix("SECRETON").separator("_"));
-
-        let settings = builder.build().map_err(|e| SecretonError::Configuration {
-            message: format!("Failed to build configuration: {}", e),
-        })?;
-
-        let config: T = settings
-            .try_deserialize()
-            .map_err(|e| SecretonError::Configuration {
-                message: format!("Failed to deserialize configuration: {}", e),
-            })?;
-
-        config.validate()?;
-        Ok(config)
     }
+}
 
-    /// Save configuration to a file
-    pub fn save_config<T: Config>(config: &T, path: &str) -> SecretonResult<()> {
-        let toml_string =
-            toml::to_string_pretty(config).map_err(|e| SecretonError::TomlSerialization(e))?;
-
-        fs::write(path, toml_string).map_err(|e| SecretonError::Io(e))?;
-
+impl Config for TracingConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.enabled {
+            if self.service_name.is_empty() {
+                return Err(SecretonError::Configuration {
+                    message: "Service name is required for tracing".to_string(),
+                });
+            }
+            if self.collector_endpoint.is_empty() {
+                return Err(SecretonError::Configuration {
+                    message: "Collector endpoint is required for tracing".to_string(),
+                });
+            }
+            if self.sampling_rate < 0.0 || self.sampling_rate > 1.0 {
+                return Err(SecretonError::Configuration {
+                    message: "Sampling rate must be between 0.0 and 1.0".to_string(),
+                });
+            }
+        }
         Ok(())
     }
+}
 
-    /// Get configuration value from environment or default
-    pub fn get_env_or_default(key: &str, default: &str) -> String {
-        env::var(key).unwrap_or_else(|_| default.to_string())
+/// Alerting configuration for monitoring system
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertingConfig {
+    /// Processing interval in seconds
+    pub processing_interval_seconds: u64,
+
+    /// Maximum alert history size
+    pub max_history_size: usize,
+
+    /// Deduplication window in seconds
+    pub deduplication_window_seconds: u64,
+
+    /// Email notification configuration
+    pub email: EmailConfig,
+
+    /// Webhook notification configuration
+    pub webhook: WebhookConfig,
+
+    /// Slack notification configuration
+    pub slack: SlackConfig,
+
+    /// SMS notification configuration
+    pub sms: SmsConfig,
+}
+
+impl Default for AlertingConfig {
+    fn default() -> Self {
+        Self {
+            processing_interval_seconds: 60,
+            max_history_size: 1000,
+            deduplication_window_seconds: 300, // 5 minutes
+            email: EmailConfig::default(),
+            webhook: WebhookConfig::default(),
+            slack: SlackConfig::default(),
+            sms: SmsConfig::default(),
+        }
     }
+}
 
-    /// Get configuration value from environment as u16 or default
-    pub fn get_env_u16_or_default(key: &str, default: u16) -> u16 {
-        env::var(key)
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(default)
+impl Config for AlertingConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.processing_interval_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Processing interval cannot be zero".to_string(),
+            });
+        }
+        if self.max_history_size == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Max history size cannot be zero".to_string(),
+            });
+        }
+        if self.deduplication_window_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Deduplication window cannot be zero".to_string(),
+            });
+        }
+        Ok(())
     }
+}
 
-    /// Get configuration value from environment as bool or default
-    pub fn get_env_bool_or_default(key: &str, default: bool) -> bool {
-        env::var(key)
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(default)
+/// Webhook notification configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookConfig {
+    /// Webhook URL
+    pub url: String,
+
+    /// Request timeout in seconds
+    pub timeout_seconds: u64,
+
+    /// Custom headers
+    pub headers: HashMap<String, String>,
+
+    /// Retry configuration
+    pub retry_count: u32,
+}
+
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            timeout_seconds: 30,
+            headers: HashMap::new(),
+            retry_count: 3,
+        }
+    }
+}
+
+impl Config for WebhookConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if !self.url.is_empty() && self.timeout_seconds == 0 {
+            return Err(SecretonError::Configuration {
+                message: "Webhook timeout cannot be zero".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Slack notification configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackConfig {
+    /// Slack webhook URL
+    pub webhook_url: String,
+
+    /// Default channel
+    pub channel: String,
+
+    /// Bot username
+    pub username: String,
+
+    /// Icon emoji
+    pub icon_emoji: String,
+
+    /// Mention users for critical alerts
+    pub mention_users: Vec<String>,
+}
+
+impl Default for SlackConfig {
+    fn default() -> Self {
+        Self {
+            webhook_url: String::new(),
+            channel: "#alerts".to_string(),
+            username: "Secreton Alert Bot".to_string(),
+            icon_emoji: ":warning:".to_string(),
+            mention_users: Vec::new(),
+        }
+    }
+}
+
+impl Config for SlackConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if !self.webhook_url.is_empty() && self.channel.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "Slack channel cannot be empty when webhook URL is set".to_string(),
+            });
+        }
+        Ok(())
     }
 }

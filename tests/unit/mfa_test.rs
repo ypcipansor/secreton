@@ -15,14 +15,14 @@ mod mfa_unit_tests {
         let storage = create_test_storage();
         
         let config = MfaManagerConfig {
-            rate_limit: brankas_core::auth::mfa::RateLimitConfig {
+            rate_limit: secreton_core::auth::mfa::RateLimitConfig {
                 max_attempts: 5,
                 window: Duration::from_secs(300),
                 use_exponential_backoff: true,
                 base_backoff: Duration::from_secs(60),
                 max_backoff: Duration::from_secs(3600),
             },
-            recovery_codes: brankas_core::auth::mfa::RecoveryCodeSettings {
+            recovery_codes: secreton_core::auth::mfa::RecoveryCodeSettings {
                 count: 10,
                 length: 16,
                 group_size: 4,
@@ -237,7 +237,7 @@ mod mfa_integration_tests {
         let user_id = "workflow_test_user";
         
         // Step 1: Setup TOTP
-        let setup_result = manager.setup_totp(user_id, "Brankas Production").await?;
+        let setup_result = manager.setup_totp(user_id, "Secreton Production").await?;
         assert!(!setup_result.secret.is_empty());
         assert!(!setup_result.recovery_codes.is_empty());
         
@@ -270,7 +270,7 @@ mod mfa_integration_tests {
         // Session 1: Setup MFA
         {
             let manager = create_test_manager();
-            let _setup_result = manager.setup_totp(user_id, "Brankas Test").await?;
+            let _setup_result = manager.setup_totp(user_id, "Secreton Test").await?;
         }
         
         // Session 2: Verify MFA persists

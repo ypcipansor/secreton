@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Authentication and identity management services for Secreton"
+description = "Authentication methods and login flows for Secreton system"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
@@ -22,48 +22,84 @@ uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-
-# Cryptography
-secreton-crypto.workspace = true
-
-# Storage
-secreton-storage.workspace = true
-
-# Security utilities
-secrecy.workspace = true
-totp-rs.workspace = true
-qrcode.workspace = true
-oauth2.workspace = true
+futures.workspace = true
+regex.workspace = true
 
 # Shared crates
 secreton-common.workspace = true
 secreton-errors.workspace = true
 secreton-config.workspace = true
+secreton-crypto.workspace = true
 
-# Additional dependencies for auth services
-rand.workspace = true
-argon2.workspace = true
-md5.workspace = true
-base64.workspace = true
-glob.workspace = true
+# HTTP client for OAuth/OIDC
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+
+# URL encoding
 urlencoding.workspace = true
-
-# Security policies
-secreton-security.workspace = true
-
-# JWT support
-jsonwebtoken = "9.3"
 
 # LDAP support
 ldap3 = { workspace = true, optional = true }
 
-# Database (optional features)
-tokio-postgres = { workspace = true, optional = true }
-deadpool-postgres = { workspace = true, optional = true }
-redis = { workspace = true, features = ["aio", "tokio-comp"], optional = true }
+# JWT support for OIDC/OAuth
+jsonwebtoken.workspace = true
+
+# Password hashing for userpass
+argon2.workspace = true
+password-hash.workspace = true
+
+# OAuth2 support
+oauth2 = { workspace = true, optional = true }
+
+# Kubernetes support
+k8s-openapi = { workspace = true, optional = true }
+kube = { workspace = true, optional = true }
+
+# AWS support
+aws-config = { workspace = true, optional = true }
+aws-sdk-sts = { workspace = true, optional = true }
+aws-sdk-iam = { workspace = true, optional = true }
+
+# SAML XML parsing
+xml = { workspace = true, optional = true }
+
+# Compression for SAML
+flate2.workspace = true
+
+# RADIUS support
+radius-rust = { workspace = true, optional = true }
+
+# X.509 certificate parsing
+x509-parser.workspace = true
+
+# MD5 for RADIUS
+md5.workspace = true
+
+# Base64 encoding
+base64.workspace = true
+
+# Random number generation
+rand.workspace = true
+
+# Hex encoding
+hex.workspace = true
+
+# Base32 encoding for TOTP
+base32.workspace = true
+
+# HMAC and SHA1 for TOTP
+hmac.workspace = true
+sha1.workspace = true
+
+# Policy evaluation
+pest.workspace = true
+pest_derive.workspace = true
 
 [features]
-default = []
-postgres = ["tokio-postgres", "deadpool-postgres"]
-redis = ["dep:redis"]
-ldap = ["ldap3"]
+default = ["ldap", "oidc", "oauth2", "saml"]
+ldap = ["dep:ldap3"]
+radius = ["dep:radius-rust"]
+oidc = ["dep:oauth2"]
+oauth2 = ["dep:oauth2"]
+saml = ["dep:xml"]
+kubernetes = ["dep:k8s-openapi", "dep:kube"]
+aws = ["dep:aws-config", "dep:aws-sdk-sts", "dep:aws-sdk-iam"]

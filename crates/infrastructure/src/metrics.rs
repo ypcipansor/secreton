@@ -404,7 +404,7 @@ mod tests {
         if let MetricValue::Gauge(value) = metric.value {
             assert!((value - 12.0).abs() < 0.01);
         } else {
-            panic!("Expected gauge value");
+            assert!(false, "Expected gauge value");
         }
     }
 
@@ -427,7 +427,7 @@ mod tests {
         if let MetricValue::Histogram(values) = metric.value {
             assert_eq!(values.len(), 3);
         } else {
-            panic!("Expected histogram value");
+            assert!(false, "Expected histogram value");
         }
     }
 

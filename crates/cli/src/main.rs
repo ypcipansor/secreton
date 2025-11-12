@@ -7,13 +7,14 @@ use tracing_subscriber::FmtSubscriber;
 mod config;
 
 use config::CliConfig;
+use secreton_config::Config;
 
 #[derive(Parser)]
 #[command(
     name = "secreton-cli",
     about = "Command line interface for Secreton system",
     version = "1.0.0",
-    author = "Brankas Team"
+    author = "Secreton Team"
 )]
 struct Cli {
     #[arg(short, long, global = true)]
@@ -98,7 +99,7 @@ async fn main() -> Result<()> {
     // Load configuration
     let mut config = CliConfig::default();
     if let Some(config_path) = &cli.config {
-        config = CliConfig::load_from_file(config_path).await?;
+        config = CliConfig::load_from_file(config_path)?;
     }
 
     // Override server URL if provided via command line

@@ -46,17 +46,6 @@ impl DatabaseEngine {
             SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name))
         })?;
 
-        // Generate random username and password using shared utility
-        let _password = secreton_common::generate_password()?;
-
-        // Generate random username
-        use rand::{Rng, distributions::Alphanumeric};
-        let _username: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-
         // Determine database type from connection URL
         let db_type = self.detect_database_type(&self.config.connection_url)?;
 

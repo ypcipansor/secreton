@@ -27,7 +27,7 @@ ring.workspace = true
 aes.workspace = true
 aes-gcm.workspace = true
 chacha20poly1305.workspace = true
-cbc = "0.1"
+cbc.workspace = true
 argon2.workspace = true
 sha2.workspace = true
 sha3.workspace = true
@@ -41,13 +41,15 @@ base64.workspace = true
 rand.workspace = true
 regex.workspace = true
 
+bincode.workspace = true
+
 # Elliptic curve cryptography
 p256.workspace = true
 p384.workspace = true
 k256.workspace = true
 x25519-dalek.workspace = true
 ed25519-dalek.workspace = true
-signature = "2.2"
+signature.workspace = true
 
 # Workspace dependencies
 # secreton-storage.workspace = true  # TODO: Resolve cyclic dependency
@@ -55,25 +57,23 @@ generic-array.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 
-# Post-Quantum Cryptography
-pqcrypto-mldsa = "0.1.2"
-pqcrypto-mlkem = "0.1.1"
-pqcrypto-falcon = "0.4.1"
-pqcrypto-traits = "0.3"
-
 # Homomorphic Encryption
-# kzen-paillier = "0.4.3"  # Removed due to curve25519-dalek vulnerability
-bgv = "0.6.0"
-ckks-engine = "4.0.0"
+# rust-elgamal = "0.4.0"  # ElGamal over ristretto255 curve - replaced with stub
+# curve25519-dalek = "4.0"  # Replaced with stub implementation
+
+# Threshold Cryptography
+# threshold_crypto = "0.4.0"  # Removed due to vulnerable failure crate dependency
+threshold-secret-sharing.workspace = true  # Shamir secret sharing
 
 # Shamir Secret Sharing
-num-bigint = { version = "0.4", features = ["rand", "serde"] }
-num-integer = "0.1"
-num-traits = "0.2"
+num-bigint.workspace = true
+num-integer.workspace = true
+num-traits.workspace = true
 
 # Async utilities
 async-trait.workspace = true
-num_cpus = "1.16"
+num_cpus.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

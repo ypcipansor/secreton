@@ -23,30 +23,30 @@ pub type Result<T> = std::result::Result<T, OCIError>;
 /// OCI configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OCIConfig {
-    pub user_ocid: String,           // ocid1.user.oc1..aaaaaa...
-    pub tenancy_ocid: String,        // ocid1.tenancy.oc1..aaaaaa...
-    pub region: String,              // e.g., us-phoenix-1
-    pub fingerprint: String,         // RSA key fingerprint (MD5)
-    pub private_key_path: String,    // Path to PEM private key
-    pub compartment_id: String,      // ocid1.compartment.oc1..aaaaaa...
+    pub user_ocid: String,        // ocid1.user.oc1..aaaaaa...
+    pub tenancy_ocid: String,     // ocid1.tenancy.oc1..aaaaaa...
+    pub region: String,           // e.g., us-phoenix-1
+    pub fingerprint: String,      // RSA key fingerprint (MD5)
+    pub private_key_path: String, // Path to PEM private key
+    pub compartment_id: String,   // ocid1.compartment.oc1..aaaaaa...
 }
 
 /// OCI role type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RoleType {
-    User,          // IAM user
-    Group,         // IAM group
-    DynamicGroup,  // Dynamic group (for compute instances)
+    User,         // IAM user
+    Group,        // IAM group
+    DynamicGroup, // Dynamic group (for compute instances)
 }
 
 /// Policy statement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyStatement {
-    pub verb: String,           // Allow or Deny
-    pub subject: String,        // group, user, dynamic-group
-    pub resource: String,       // resource type
-    pub permission: String,     // manage, use, read, inspect
-    pub location: String,       // compartment, tenancy
+    pub verb: String,       // Allow or Deny
+    pub subject: String,    // group, user, dynamic-group
+    pub resource: String,   // resource type
+    pub permission: String, // manage, use, read, inspect
+    pub location: String,   // compartment, tenancy
     pub condition: Option<String>,
 }
 
@@ -64,9 +64,9 @@ pub struct OCIRole {
 /// OCI credential
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OCICredential {
-    pub user_ocid: String,         // ocid1.user.oc1..{60-char}
+    pub user_ocid: String,           // ocid1.user.oc1..{60-char}
     pub api_key_fingerprint: String, // MD5 fingerprint
-    pub private_key: String,       // PEM format
+    pub private_key: String,         // PEM format
     pub tenancy_ocid: String,
     pub compartment_id: String,
     pub region: String,
@@ -160,12 +160,12 @@ impl OCISecretsEngine {
             RoleType::Group => {
                 return Err(OCIError::CredentialError(
                     "Group credentials not yet implemented".to_string(),
-                ))
+                ));
             }
             RoleType::DynamicGroup => {
                 return Err(OCIError::CredentialError(
                     "Dynamic group credentials not yet implemented".to_string(),
-                ))
+                ));
             }
         };
 
@@ -178,10 +178,7 @@ impl OCISecretsEngine {
     /// Create OCI IAM user
     async fn create_oci_user(&self, config: &OCIConfig, role: &OCIRole) -> Result<OCICredential> {
         // Generate user OCID (mock)
-        let user_ocid = format!(
-            "ocid1.user.oc1..{}",
-            self.generate_random_string(60)
-        );
+        let user_ocid = format!("ocid1.user.oc1..{}", self.generate_random_string(60));
 
         let user_name = format!("vault-{}", self.generate_random_string(8));
 
@@ -189,7 +186,7 @@ impl OCISecretsEngine {
         let user = OCIUser {
             user_ocid: user_ocid.clone(),
             name: user_name,
-            description: format!("Vault-generated user for role {}", role.name),
+            description: format!("Secret-generated user for role {}", role.name),
             compartment_id: config.compartment_id.clone(),
             email: None,
             created_at: Utc::now(),
@@ -232,21 +229,29 @@ impl OCISecretsEngine {
         // Mock MD5 fingerprint (format: xx:xx:xx:xx:...)
         let fingerprint = format!(
             "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-            self.random_hex(2), self.random_hex(2), self.random_hex(2), self.random_hex(2),
-            self.random_hex(2), self.random_hex(2), self.random_hex(2), self.random_hex(2),
-            self.random_hex(2), self.random_hex(2), self.random_hex(2), self.random_hex(2),
-            self.random_hex(2), self.random_hex(2), self.random_hex(2), self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
+            self.random_hex(2),
         );
 
         Ok((private_key, fingerprint))
     }
 
     /// Attach policies to user
-    async fn attach_policies(
-        &self,
-        _user_ocid: &str,
-        _policies: &[PolicyStatement],
-    ) -> Result<()> {
+    async fn attach_policies(&self, _user_ocid: &str, _policies: &[PolicyStatement]) -> Result<()> {
         // Mock policy attachment
         // Real implementation would call OCI IAM API
         Ok(())
@@ -329,7 +334,10 @@ impl OCISecretsEngine {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         (0..bytes)
-            .map(|_| format!("{:02x}", rng.gen::<u8>()))
+            .map(|_| {
+                let byte: u8 = rng.r#gen();
+                format!("{:02x}", byte)
+            })
             .collect::<Vec<_>>()
             .join("")
     }

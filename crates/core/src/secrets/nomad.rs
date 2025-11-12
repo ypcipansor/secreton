@@ -45,18 +45,18 @@ pub struct NomadConfig {
 pub struct NomadRole {
     pub name: String,
     pub token_type: TokenType,
-    pub policies: Vec<String>,       // ACL policies to attach
-    pub global: bool,                // Global token or regional
-    pub ttl: Duration,               // Token time-to-live
-    pub max_ttl: Duration,           // Maximum TTL
+    pub policies: Vec<String>, // ACL policies to attach
+    pub global: bool,          // Global token or regional
+    pub ttl: Duration,         // Token time-to-live
+    pub max_ttl: Duration,     // Maximum TTL
 }
 
 /// Generated Nomad token
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NomadToken {
-    pub accessor_id: String,         // Token accessor ID
-    pub secret_id: String,           // Actual token secret
-    pub name: String,                // Token name
+    pub accessor_id: String, // Token accessor ID
+    pub secret_id: String,   // Actual token secret
+    pub name: String,        // Token name
     pub token_type: TokenType,
     pub policies: Vec<String>,
     pub global: bool,
@@ -83,9 +83,7 @@ impl NomadEngine {
     /// Configure Nomad connection
     pub async fn configure(&self, config: NomadConfig) -> Result<()> {
         if config.address.is_empty() {
-            return Err(NomadError::ConfigError(
-                "Address is required".to_string(),
-            ));
+            return Err(NomadError::ConfigError("Address is required".to_string()));
         }
         if config.token.is_empty() {
             return Err(NomadError::ConfigError("Token is required".to_string()));
@@ -132,9 +130,7 @@ impl NomadEngine {
     pub async fn generate_credentials(&self, role_name: &str) -> Result<NomadToken> {
         let config = self.config.read().await;
         if config.is_none() {
-            return Err(NomadError::ConfigError(
-                "Nomad not configured".to_string(),
-            ));
+            return Err(NomadError::ConfigError("Nomad not configured".to_string()));
         }
 
         let roles = self.roles.read().await;
@@ -168,9 +164,7 @@ impl NomadEngine {
     pub async fn revoke_token(&self, accessor_id: &str) -> Result<()> {
         let config = self.config.read().await;
         if config.is_none() {
-            return Err(NomadError::ConfigError(
-                "Nomad not configured".to_string(),
-            ));
+            return Err(NomadError::ConfigError("Nomad not configured".to_string()));
         }
 
         // Delete from Nomad API (mock)

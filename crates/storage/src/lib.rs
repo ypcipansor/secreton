@@ -1,4 +1,4 @@
-//! Brankas Storage Abstraction Layer
+//! Secreton Storage Abstraction Layer
 //!
 //! Provides unified interface for different storage backends including
 //! PostgreSQL, Redis, file-based storage, and Raft integrated storage.
@@ -14,11 +14,7 @@ use uuid::Uuid;
 pub mod backends;
 pub mod cache;
 pub mod factory;
-pub mod integrated_storage;
-pub mod lease;
 pub mod models;
-pub mod secret_caching;
-pub mod secrets;
 pub mod storage_backends;
 
 // Re-export common backends
@@ -66,9 +62,9 @@ pub enum SecurityLevel {
     TopSecret = 4,
 }
 
-/// Vault entry for storing secrets
+/// Secret entry for storing secrets
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VaultEntry {
+pub struct SecretEntry {
     /// Unique identifier for the entry
     pub id: Uuid,
     /// Path to the secret
@@ -95,7 +91,7 @@ pub struct VaultEntry {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-impl VaultEntry {
+impl SecretEntry {
     /// Create a new vault entry
     pub fn new(
         path: String,
@@ -266,23 +262,23 @@ pub enum StorageError {
     MigrationError { message: String },
 }
 
-impl From<azure_storage::Error> for StorageError {
-    fn from(error: azure_storage::Error) -> Self {
-        StorageError::BackendError {
-            backend: "Azure Blob Storage".to_string(),
-            message: error.to_string(),
-        }
-    }
-}
+// impl From<azure_storage::Error> for StorageError {
+//     fn from(error: azure_storage::Error) -> Self {
+//         StorageError::BackendError {
+//             backend: "Azure Blob Storage".to_string(),
+//             message: error.to_string(),
+//         }
+//     }
+// }
 
-impl From<google_cloud_storage::Error> for StorageError {
-    fn from(error: google_cloud_storage::Error) -> Self {
-        StorageError::BackendError {
-            backend: "Google Cloud Storage".to_string(),
-            message: error.to_string(),
-        }
-    }
-}
+// impl From<google_cloud_storage::Error> for StorageError {
+//     fn from(error: google_cloud_storage::Error) -> Self {
+//         StorageError::BackendError {
+//             backend: "Google Cloud Storage".to_string(),
+//             message: error.to_string(),
+//         }
+//     }
+// }
 
 /// Type alias for Results with StorageError
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -291,16 +287,16 @@ pub type StorageResult<T> = Result<T, StorageError>;
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     /// Store a vault entry
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()>;
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()>;
 
     /// Retrieve a vault entry by ID
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>>;
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>>;
 
     /// Retrieve a vault entry by path
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>>;
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>>;
 
     /// Update an existing vault entry
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()>;
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()>;
 
     /// Delete a vault entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
@@ -309,7 +305,7 @@ pub trait StorageBackend: Send + Sync {
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool>;
 
     /// List vault entries with filtering
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>>;
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>>;
 
     /// Count vault entries matching query
     async fn count(&self, params: &QueryParams) -> StorageResult<u64>;
@@ -334,10 +330,10 @@ pub trait StorageBackend: Send + Sync {
 #[async_trait]
 pub trait StorageTransaction: Send + Sync {
     /// Store entry within transaction
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()>;
+    async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()>;
 
     /// Update entry within transaction
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()>;
+    async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()>;
 
     /// Delete entry within transaction
     async fn delete(&mut self, id: Uuid) -> StorageResult<bool>;
@@ -422,7 +418,7 @@ impl Default for PoolSettings {
 /// Simple in-memory mock storage backend for testing and development
 #[derive(Debug, Clone)]
 pub struct MockStorageBackend {
-    data: Arc<std::sync::RwLock<HashMap<String, VaultEntry>>>,
+    data: Arc<std::sync::RwLock<HashMap<String, SecretEntry>>>,
     id_index: Arc<std::sync::RwLock<HashMap<Uuid, String>>>,
 }
 
@@ -443,7 +439,7 @@ impl MockStorageBackend {
 
 #[async_trait]
 impl StorageBackend for MockStorageBackend {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let mut data = self.data.write().unwrap();
         let mut id_index = self.id_index.write().unwrap();
 
@@ -453,7 +449,7 @@ impl StorageBackend for MockStorageBackend {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let id_index = self.id_index.read().unwrap();
         if let Some(path) = id_index.get(&id) {
             let data = self.data.read().unwrap();
@@ -463,19 +459,19 @@ impl StorageBackend for MockStorageBackend {
         }
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let data = self.data.read().unwrap();
         Ok(data.get(path).cloned())
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         let mut data = self.data.write().unwrap();
         if data.contains_key(&entry.path) {
             data.insert(entry.path.clone(), entry.clone());
             Ok(())
         } else {
             Err(StorageError::NotFound {
-                resource_type: "VaultEntry".to_string(),
+                resource_type: "SecretEntry".to_string(),
                 id: entry.id.to_string(),
             })
         }
@@ -508,9 +504,9 @@ impl StorageBackend for MockStorageBackend {
         }
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let data = self.data.read().unwrap();
-        let mut results: Vec<VaultEntry> = data
+        let mut results: Vec<SecretEntry> = data
             .values()
             .filter(|entry| {
                 // Simple filtering logic
@@ -594,11 +590,11 @@ pub struct MockTransaction;
 
 #[async_trait]
 impl StorageTransaction for MockTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         Ok(())
     }
 
@@ -623,7 +619,7 @@ mod tests {
     #[test]
     fn test_vault_entry_initialization_defaults() {
         let owner = Uuid::new_v4();
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "secret/path".to_string(),
             vec![1, 2, 3],
             EncryptionMetadata {
@@ -650,7 +646,7 @@ mod tests {
     #[test]
     fn test_vault_entry_tag_and_metadata_helpers() {
         let owner = Uuid::new_v4();
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "secret/path".to_string(),
             vec![],
             EncryptionMetadata {

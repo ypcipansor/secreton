@@ -313,7 +313,7 @@ impl AgentTemplatingService {
         }
     }
 
-    /// Get _secret value from Vault
+    /// Get _secret value from Secret
     async fn get_secret_value(&self, _path: &str, _context: &RenderContext) -> Result<String> {
         // Check _context first
         if let Some(_data) = _context.vault_secrets.get(_path) {
@@ -431,28 +431,28 @@ mod tests {
             CTLFunction::Secret { _path } => {
                 assert_eq!(_path, "_secret/_data/app");
             }
-            _ => panic!("Expected Secret function"),
+            _ => assert!(false, "Expected Secret function"),
         }
 
         match &expressions[1].function {
             CTLFunction::With { _path } => {
                 assert_eq!(_path, "_secret/_data/db");
             }
-            _ => panic!("Expected With function"),
+            _ => assert!(false, "Expected With function"),
         }
 
         match &expressions[2].function {
             CTLFunction::Variable { _path } => {
                 assert_eq!(_path, ".Data.host");
             }
-            _ => panic!("Expected Variable reference"),
+            _ => assert!(false, "Expected Variable reference"),
         }
 
         match &expressions[3].function {
             CTLFunction::End => {
                 // Expected end control structure
             }
-            _ => panic!("Expected End control structure"),
+            _ => assert!(false, "Expected End control structure"),
         }
     }
 
@@ -576,7 +576,7 @@ mod tests {
                 assert_eq!(params.get("common_name"), Some(&"test.com".to_string()));
                 assert_eq!(params.get("ttl"), Some(&"24h".to_string()));
             }
-            _ => panic!("Expected PkiCert function"),
+            _ => assert!(false, "Expected PkiCert function"),
         }
     }
 }

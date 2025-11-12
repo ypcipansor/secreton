@@ -424,7 +424,7 @@ mod tests {
             .await
             .unwrap();
 
-        let new_cert = mesh.rotate_certificate(&old_cert.cert_id).await.unwrap();
+        let _new_cert = mesh.rotate_certificate(&old_cert.cert_id).await.unwrap();
 
         let old_cert_status = mesh.get_certificate(&old_cert.cert_id).await.unwrap();
         // Old cert should be revoked or still active (implementation dependent)

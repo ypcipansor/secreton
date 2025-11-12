@@ -1,6 +1,6 @@
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use aws_sdk_dynamodb::types::AttributeValue;
@@ -55,7 +55,7 @@ impl Default for DynamoDBStorageConfig {
 pub struct DynamoDBStorage {
     config: DynamoDBStorageConfig,
     client: aws_sdk_dynamodb::Client,
-    cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// DynamoDB transaction implementation
@@ -81,25 +81,23 @@ impl DynamoDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for DynamoDBTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(DynamoDBOperation::Store(()));
+        self.operations.push(DynamoDBOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(DynamoDBOperation::Update(()));
+        self.operations.push(DynamoDBOperation::Update(()));
         Ok(())
     }
 
@@ -274,8 +272,8 @@ impl DynamoDBStorage {
         Ok(())
     }
 
-    /// Convert VaultEntry to DynamoDB item
-    fn vault_entry_to_item(&self, entry: &VaultEntry) -> HashMap<String, AttributeValue> {
+    /// Convert SecretEntry to DynamoDB item
+    fn vault_entry_to_item(&self, entry: &SecretEntry) -> HashMap<String, AttributeValue> {
         let mut item = HashMap::new();
 
         item.insert(
@@ -333,11 +331,11 @@ impl DynamoDBStorage {
         item
     }
 
-    /// Convert DynamoDB item to VaultEntry
+    /// Convert DynamoDB item to SecretEntry
     fn item_to_vault_entry(
         &self,
         item: &HashMap<String, AttributeValue>,
-    ) -> Result<VaultEntry, StorageError> {
+    ) -> Result<SecretEntry, StorageError> {
         let path = item
             .get(&self.config.partition_key)
             .and_then(|v| v.as_s().ok())
@@ -437,7 +435,7 @@ impl DynamoDBStorage {
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
-        Ok(VaultEntry {
+        Ok(SecretEntry {
             id,
             path: path.to_string(),
             encrypted_data,
@@ -456,7 +454,7 @@ impl DynamoDBStorage {
 
 #[async_trait]
 impl StorageBackend for DynamoDBStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let item = self.vault_entry_to_item(entry);
 
         self.client
@@ -477,14 +475,14 @@ impl StorageBackend for DynamoDBStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // For DynamoDB, we need to scan the table to find by ID
         // This is not efficient, but necessary for the interface
         let entries = self.list(&QueryParams::default()).await?;
         Ok(entries.into_iter().find(|e| e.id == id))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -518,7 +516,7 @@ impl StorageBackend for DynamoDBStorage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -553,7 +551,7 @@ impl StorageBackend for DynamoDBStorage {
         Ok(true) // DynamoDB delete_item doesn't return affected rows
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut entries = Vec::new();
 
         // Query by partition key prefix if provided
@@ -729,7 +727,7 @@ mod tests {
             cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/path".to_string(),
             vec![1, 2, 3],
             crate::EncryptionMetadata {

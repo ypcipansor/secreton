@@ -1,8 +1,194 @@
-//! Data models and DTOs for the Brankas API.
+//! Data models and DTOs for the Secreton API.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use secreton_common::ApiResponse;
+
+/// HTTP status codes for responses
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum HttpStatus {
+    Ok = 200,
+    Created = 201,
+    Accepted = 202,
+    NoContent = 204,
+    BadRequest = 400,
+    Unauthorized = 401,
+    Forbidden = 403,
+    NotFound = 404,
+    Conflict = 409,
+    UnprocessableEntity = 422,
+    TooManyRequests = 429,
+    InternalServerError = 500,
+    NotImplemented = 501,
+    BadGateway = 502,
+    ServiceUnavailable = 503,
+    GatewayTimeout = 504,
+}
+
+impl HttpStatus {
+    /// Get the numeric status code
+    pub fn code(&self) -> u16 {
+        *self as u16
+    }
+
+    /// Check if status is successful (2xx)
+    pub fn is_success(&self) -> bool {
+        self.code() >= 200 && self.code() < 300
+    }
+
+    /// Check if status is client error (4xx)
+    pub fn is_client_error(&self) -> bool {
+        self.code() >= 400 && self.code() < 500
+    }
+
+    /// Check if status is server error (5xx)
+    pub fn is_server_error(&self) -> bool {
+        self.code() >= 500
+    }
+}
+
+/// Enhanced API response with HTTP status information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpApiResponse<T> {
+    /// HTTP status code
+    pub status_code: u16,
+
+    /// Response data
+    #[serde(flatten)]
+    pub response: ApiResponse<T>,
+
+    /// Request ID for tracing
+    pub request_id: Option<String>,
+
+    /// Response timestamp
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+
+    /// API version
+    pub version: String,
+}
+
+impl<T> HttpApiResponse<T> {
+    /// Create a success response
+    pub fn success(data: T, status_code: HttpStatus) -> Self {
+        Self {
+            status_code: status_code.code(),
+            response: ApiResponse::success(data),
+            request_id: None,
+            timestamp: chrono::Utc::now(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+
+    /// Create an error response
+    pub fn error(message: impl Into<String>, status_code: HttpStatus) -> Self {
+        Self {
+            status_code: status_code.code(),
+            response: ApiResponse::error(message),
+            request_id: None,
+            timestamp: chrono::Utc::now(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+
+    /// Create an error response with metadata
+    pub fn error_with_metadata(
+        message: impl Into<String>,
+        status_code: HttpStatus,
+        metadata: HashMap<String, serde_json::Value>,
+    ) -> Self {
+        Self {
+            status_code: status_code.code(),
+            response: ApiResponse::error_with_metadata(message, metadata),
+            request_id: None,
+            timestamp: chrono::Utc::now(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+
+    /// Set request ID
+    pub fn with_request_id(mut self, request_id: String) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
+}
+
+/// Pagination metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationMeta {
+    /// Current page number (1-based)
+    pub page: usize,
+
+    /// Number of items per page
+    pub per_page: usize,
+
+    /// Total number of items
+    pub total: usize,
+
+    /// Total number of pages
+    pub total_pages: usize,
+
+    /// Whether there are more items
+    pub has_more: bool,
+
+    /// Links to other pages
+    pub links: Option<PaginationLinks>,
+}
+
+/// Pagination links
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationLinks {
+    /// Link to first page
+    pub first: Option<String>,
+
+    /// Link to previous page
+    pub prev: Option<String>,
+
+    /// Link to next page
+    pub next: Option<String>,
+
+    /// Link to last page
+    pub last: Option<String>,
+}
+
+/// Paginated API response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedApiResponse<T> {
+    /// The response data
+    #[serde(flatten)]
+    pub response: ApiResponse<Vec<T>>,
+
+    /// Pagination metadata
+    pub pagination: PaginationMeta,
+
+    /// Request ID for tracing
+    pub request_id: Option<String>,
+
+    /// Response timestamp
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+
+    /// API version
+    pub version: String,
+}
+
+impl<T> PaginatedApiResponse<T> {
+    /// Create a paginated success response
+    pub fn success(items: Vec<T>, pagination: PaginationMeta) -> Self {
+        Self {
+            response: ApiResponse::success(items),
+            pagination,
+            request_id: None,
+            timestamp: chrono::Utc::now(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+
+    /// Set request ID
+    pub fn with_request_id(mut self, request_id: String) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
+}
 
 /// Pagination parameters for list operations
 #[derive(Debug, Deserialize)]

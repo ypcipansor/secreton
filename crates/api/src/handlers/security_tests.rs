@@ -476,7 +476,7 @@ mod security_penetration_tests {
         // Verify audit logs still exist
         let response = server.get("/audit").await;
         if response.status_code() == StatusCode::OK {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             assert!(body.success);
             let audit_entries = body.data.unwrap();
 

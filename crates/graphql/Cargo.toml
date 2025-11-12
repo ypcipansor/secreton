@@ -1,0 +1,29 @@
+[package]
+name = "secreton-graphql"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "GraphQL API implementation for Secreton"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core dependencies
+secreton-common.workspace = true
+secreton-errors.workspace = true
+secreton-config.workspace = true
+secreton-core.workspace = true
+secreton-auth.workspace = true
+secreton-policies.workspace = true
+secreton-secrets.workspace = true
+secreton-storage.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+axum.workspace = true

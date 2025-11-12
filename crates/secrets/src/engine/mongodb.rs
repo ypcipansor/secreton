@@ -4,7 +4,8 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
-use mongodb::Client;
+// TODO: Add mongodb dependency to Cargo.toml to enable this feature
+// use mongodb::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -13,7 +14,8 @@ use uuid::Uuid;
 pub struct MongodbEngine {
     config: MongodbConfig,
     enabled: bool,
-    client: Option<Client>,
+    // TODO: Uncomment when mongodb dependency is available
+    // client: Option<Client>,
 }
 
 impl MongodbEngine {
@@ -21,7 +23,7 @@ impl MongodbEngine {
         Self {
             config,
             enabled: false,
-            client: None,
+            // client: None,
         }
     }
 }
@@ -117,132 +119,84 @@ impl SecretEngine for MongodbEngine {
 
     fn disable(&mut self) {
         self.enabled = false;
-        self.client = None;
+        // self.client = None;
     }
 }
 
 impl MongodbEngine {
     /// Connect to MongoDB
     async fn connect(&mut self) -> SecretResult<()> {
-        if self.client.is_some() {
-            return Ok(());
-        }
+        // TODO: Implement when mongodb dependency is available
+        Err(SecretError::BackendConnectionFailed(
+            "MongoDB support requires mongodb dependency (not yet added to Cargo.toml)".to_string(),
+        ))
 
-        let client = Client::with_uri_str(&self.config.connection_uri)
-            .await
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("MongoDB connection failed: {}", e)))?;
-
-        // Test the connection
-        if self.config.verify_connection {
-            client
-                .database("admin")
-                .run_command(mongodb::bson::doc! { "ping": 1 })
-                .await
-                .map_err(|e| SecretError::BackendConnectionFailed(format!("MongoDB ping failed: {}", e)))?;
-        }
-
-        self.client = Some(client);
-        Ok(())
+        // Commented out until mongodb dependency is added:
+        // if self.client.is_some() {
+        //     return Ok(());
+        // }
+        // let client = Client::with_uri_str(&self.config.connection_uri).await?;
+        // if self.config.verify_connection {
+        //     client.database("admin").run_command(mongodb::bson::doc! { "ping": 1 }).await?;
+        // }
+        // self.client = Some(client);
+        // Ok(())
     }
     /// Generate MongoDB credentials
     async fn generate_mongodb_credentials(
         &self,
-        data: &HashMap<String, Value>,
+        _data: &HashMap<String, Value>,
     ) -> SecretResult<HashMap<String, Value>> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| SecretError::BackendConnectionFailed("MongoDB client not connected".to_string()))?;
+        // TODO: Implement when mongodb dependency is available
+        return Err(SecretError::BackendOperationFailed(
+            "MongoDB credential generation requires mongodb dependency".to_string(),
+        ));
 
-        // Extract database name from request data or use default
-        let database_name = data
-            .get("database")
-            .and_then(|v| v.as_str())
-            .unwrap_or("mydb");
+        // Commented out until mongodb dependency is added:
+        // let client = self.client.as_ref()
+        //     .ok_or_else(|| SecretError::BackendConnectionFailed("MongoDB client not connected".to_string()))?;
 
-        let roles = data
-            .get("roles")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec!["readWrite"]);
-
-        // Generate unique username
-        let username = self.generate_username("vault_user");
-
-        // Generate secure password
-        let password = self.generate_password(16);
-
-        // Create user in MongoDB
-        self.create_mongodb_user(client, &username, &password, database_name, &roles).await?;
-
-        // Build connection string
-        let connection_string = format!(
-            "mongodb://{}:{}@localhost:27017/{}",
-            username, password, database_name
-        );
-
-        let mut creds_data = HashMap::new();
-        creds_data.insert("username".to_string(), Value::String(username));
-        creds_data.insert("password".to_string(), Value::String(password));
-        creds_data.insert("connection_string".to_string(), Value::String(connection_string));
-        creds_data.insert("database".to_string(), Value::String(database_name.to_string()));
-
-        Ok(creds_data)
-    }
-
-    /// Generate secure password
-    fn generate_password(&self, length: usize) -> String {
-        use secreton_common::utils::password::generate_password;
-        generate_password(length)
+        // let database_name = data.get("database").and_then(|v| v.as_str()).unwrap_or("mydb");
+        // let roles = data.get("roles").and_then(|v| v.as_array())
+        //     .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        //     .unwrap_or_else(|| vec!["readWrite"]);
+        // let username = self.generate_username("vault_user");
+        // let password = self.generate_password(16);
+        // self.create_mongodb_user(client, &username, &password, database_name, &roles).await?;
+        // let connection_string = format!("mongodb://{}:{}@localhost:27017/{}", username, password, database_name);
+        // let mut creds_data = HashMap::new();
+        // creds_data.insert("username".to_string(), Value::String(username));
+        // creds_data.insert("password".to_string(), Value::String(password));
+        // creds_data.insert("connection_string".to_string(), Value::String(connection_string));
+        // creds_data.insert("database".to_string(), Value::String(database_name.to_string()));
+        // Ok(creds_data)
     }
 
     /// Generate unique username for MongoDB
+    #[allow(dead_code)]
     fn generate_username(&self, base_username: &str) -> String {
         let timestamp = chrono::Utc::now().timestamp();
         format!("{}_{}", base_username, timestamp)
     }
 
-    /// Create user in MongoDB
+    /// Create user in MongoDB (stub - requires mongodb dependency)
+    #[allow(dead_code)]
     async fn create_mongodb_user(
         &self,
-        client: &Client,
-        username: &str,
-        password: &str,
-        database: &str,
-        roles: &[&str],
+        _client: &str, // Changed from &Client to &str as stub
+        _username: &str,
+        _password: &str,
+        _database: &str,
+        _roles: &[&str],
     ) -> SecretResult<()> {
-        let db = client.database(database);
-
-        // Convert roles to MongoDB role documents
-        let role_docs: Vec<mongodb::bson::Document> = roles
-            .iter()
-            .map(|role| {
-                if role.contains('.') {
-                    // Role with database specification like "readWrite.myapp"
-                    let parts: Vec<&str> = role.split('.').collect();
-                    mongodb::bson::doc! {
-                        "role": parts[0],
-                        "db": parts[1]
-                    }
-                } else {
-                    // Simple role name
-                    mongodb::bson::doc! {
-                        "role": role,
-                        "db": database
-                    }
-                }
-            })
-            .collect();
-
-        // Create user command
-        let create_user_cmd = mongodb::bson::doc! {
-            "createUser": username,
-            "pwd": password,
-            "roles": role_docs
-        };
-
-        db.run_command(create_user_cmd)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to create MongoDB user: {}", e)))?;
-
-        Ok(())
+        Err(SecretError::BackendOperationFailed(
+            "MongoDB user creation requires mongodb dependency".to_string(),
+        ))
+        // Commented out until mongodb dependency is added:
+        // let db = client.database(database);
+        // let role_docs: Vec<mongodb::bson::Document> = roles.iter().map(...).collect();
+        // let create_user_cmd = mongodb::bson::doc! { "createUser": username, "pwd": password, "roles": role_docs };
+        // db.run_command(create_user_cmd).await?;
+        // Ok(())
     }
 }

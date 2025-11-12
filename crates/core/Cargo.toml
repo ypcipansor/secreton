@@ -21,9 +21,13 @@ tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 config.workspace = true
+time = { workspace = true }
 
-# API Documentation
-aide.workspace = true
+# JWT and crypto is now in auth crate
+# secreton-token.workspace = true
+
+# API Documentation - not used
+# aide.workspace = true
 
 # Async
 tokio.workspace = true
@@ -34,21 +38,20 @@ futures.workspace = true
 secreton-storage.workspace = true
 secreton-crypto.workspace = true
 secreton-security.workspace = true
-secreton-policies.workspace = true
+# secreton-policies.workspace = true  # Now part of auth crate
 secreton-auth.workspace = true
-secreton-auth-methods.workspace = true
 
 # Shared crates
 secreton-common.workspace = true
 secreton-errors.workspace = true
 secreton-config.workspace = true
 secreton-replication.workspace = true
+secreton-integrations.workspace = true
 
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
 # Using tokio-postgres-rustls for pure Rust TLS (no OpenSSL)\ntokio-postgres-rustls = { workspace = true, optional = true }
 mysql_async.workspace = true
-mongodb.workspace = true
 redis = { workspace = true, features = ["aio", "tokio-comp"] }
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
@@ -108,7 +111,7 @@ glob.workspace = true
 tower-http.workspace = true
 hyper.workspace = true
 tracing-subscriber.workspace = true
-wasmtime.workspace = true
+# wasmtime.workspace = true
 
 # Certificate validation
 x509-parser.workspace = true

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,25 +52,23 @@ impl CassandraTransaction {
 
 #[async_trait]
 impl StorageTransaction for CassandraTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(CassandraOperation::Store(()));
+        self.operations.push(CassandraOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(CassandraOperation::Update(()));
+        self.operations.push(CassandraOperation::Update(()));
         Ok(())
     }
 
@@ -119,7 +117,7 @@ impl CassandraStorage {
 
 #[async_trait]
 impl StorageBackend for CassandraStorage {
-    async fn store(&self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, _entry: &SecretEntry) -> StorageResult<()> {
         // In a real implementation, you would:
         // 1. Prepare an INSERT statement
         // 2. Bind the values
@@ -129,7 +127,7 @@ impl StorageBackend for CassandraStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // In a real implementation, you would:
         // 1. Prepare a SELECT statement with WHERE id = ?
         // 2. Execute the query
@@ -139,7 +137,7 @@ impl StorageBackend for CassandraStorage {
         Ok(None)
     }
 
-    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<SecretEntry>> {
         // In a real implementation, you would:
         // 1. Prepare a SELECT statement with WHERE path = ?
         // 2. Execute the query
@@ -149,7 +147,7 @@ impl StorageBackend for CassandraStorage {
         Ok(None)
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -171,7 +169,7 @@ impl StorageBackend for CassandraStorage {
         Ok(false)
     }
 
-    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         // In a real implementation, you would:
         // 1. Build a SELECT query based on the parameters
         // 2. Execute the query

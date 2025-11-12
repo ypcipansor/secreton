@@ -1,7 +1,7 @@
 //! Auto-Unseal System
 //!
 //! Automatic unsealing using cloud KMS for _key encryption.
-//! Supports AWS KMS, GCP KMS, and Azure Key Vault.
+//! Supports AWS KMS, GCP KMS, and Azure Key Secret.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -46,8 +46,8 @@ pub enum KmsProvider {
         crypto_key: String,
     },
 
-    /// Azure Key Vault
-    AzureKeyVault {
+    /// Azure Key Secret
+    AzureKeySecret {
         vault_name: String,
         key_name: String,
         tenant_id: String,
@@ -160,7 +160,7 @@ impl AutoUnsealService {
                 self.encrypt_with_gcp_kms(master_key, project, location, key_ring, crypto_key)
                     .await?
             }
-            KmsProvider::AzureKeyVault {
+            KmsProvider::AzureKeySecret {
                 vault_name,
                 key_name,
                 ..
@@ -215,7 +215,7 @@ impl AutoUnsealService {
                 )
                 .await?
             }
-            KmsProvider::AzureKeyVault {
+            KmsProvider::AzureKeySecret {
                 vault_name,
                 key_name,
                 ..
@@ -284,7 +284,7 @@ impl AutoUnsealService {
         base64::decode(encoded).map_err(|_e| AutoUnsealError::KmsOperationFailed(_e.to_string()))
     }
 
-    /// Simulate Azure Key Vault encryption
+    /// Simulate Azure Key Secret encryption
     async fn encrypt_with_azure_kv(
         &self,
         plaintext: &[u8],
@@ -296,7 +296,7 @@ impl AutoUnsealService {
         Ok(format!("azure_kv:{}", encoded))
     }
 
-    /// Simulate Azure Key Vault decryption
+    /// Simulate Azure Key Secret decryption
     async fn decrypt_with_azure_kv(
         &self,
         ciphertext: &str,

@@ -1,4 +1,4 @@
-use brankas_core::security::{
+use secreton_core::security::{
     AdvancedSecurityOrchestrator, BankingGradeConfig, GovernmentGradeConfig
 };
 use std::sync::Arc;

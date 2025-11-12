@@ -6,8 +6,8 @@ use tokio_postgres::{Client, NoTls};
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 
 /// Configuration for CockroachDB storage backend
@@ -50,25 +50,23 @@ impl CockroachDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for CockroachDBTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(CockroachDBOperation::Store(()));
+        self.operations.push(CockroachDBOperation::Store(()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(CockroachDBOperation::Update(()));
+        self.operations.push(CockroachDBOperation::Update(()));
         Ok(())
     }
 
@@ -122,7 +120,10 @@ impl CockroachDBStorage {
         // Create vault_entries table if it doesn't exist
         Self::create_tables(&client).await?;
 
-        Ok(Self { _config: config, client })
+        Ok(Self {
+            _config: config,
+            client,
+        })
     }
 
     async fn create_tables(client: &Client) -> StorageResult<()> {
@@ -163,7 +164,7 @@ impl CockroachDBStorage {
     }
 
     fn vault_entry_to_params<'a>(
-        entry: &'a VaultEntry,
+        entry: &'a SecretEntry,
     ) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync + 'a>> {
         vec![
             Box::new(entry.id),
@@ -181,7 +182,7 @@ impl CockroachDBStorage {
         ]
     }
 
-    fn row_to_vault_entry(row: &tokio_postgres::Row) -> StorageResult<VaultEntry> {
+    fn row_to_vault_entry(row: &tokio_postgres::Row) -> StorageResult<SecretEntry> {
         let id: Uuid = row.get(0);
         let path: String = row.get(1);
         let encrypted_data: Vec<u8> = row.get(2);
@@ -214,7 +215,7 @@ impl CockroachDBStorage {
             _ => SecurityLevel::Secret,
         };
 
-        Ok(VaultEntry {
+        Ok(SecretEntry {
             id,
             path,
             encrypted_data,
@@ -233,7 +234,7 @@ impl CockroachDBStorage {
 
 #[async_trait]
 impl StorageBackend for CockroachDBStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let params = Self::vault_entry_to_params(entry);
         let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
             .iter()
@@ -265,7 +266,7 @@ impl StorageBackend for CockroachDBStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let query = "SELECT * FROM vault_entries WHERE id = $1";
         let rows =
             self.client
@@ -282,7 +283,7 @@ impl StorageBackend for CockroachDBStorage {
         }
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let query = "SELECT * FROM vault_entries WHERE path = $1";
         let rows =
             self.client
@@ -299,7 +300,7 @@ impl StorageBackend for CockroachDBStorage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
@@ -329,7 +330,7 @@ impl StorageBackend for CockroachDBStorage {
         Ok(result > 0)
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
         let mut param_index = 1;

@@ -206,7 +206,7 @@ mod tests {
     fn test_aes256gcm_encryption_roundtrip() {
         let engine = CryptoEngine::new();
         let key = generate_key(AlgorithmId::Aes256Gcm).unwrap();
-        let plaintext = b"Hello, Brankas Security System!";
+        let plaintext = b"Hello, Secreton Security System!";
 
         let encrypted = engine
             .encrypt(AlgorithmId::Aes256Gcm, plaintext, &key)
@@ -248,7 +248,7 @@ mod tests {
                 assert_eq!(expected, 32);
                 assert_eq!(actual, 16);
             }
-            _ => panic!("Expected InvalidKeyLength error"),
+            _ => assert!(false, "Expected InvalidKeyLength error"),
         }
     }
 }

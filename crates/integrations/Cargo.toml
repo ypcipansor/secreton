@@ -23,9 +23,10 @@ chrono.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 secreton-common.workspace = true
+once_cell.workspace = true
 
-# HTTP client
-reqwest.workspace = true
+# HTTP client for webhooks and RabbitMQ management API
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 
 # Cloud provider SDKs
 aws-config.workspace = true
@@ -35,27 +36,41 @@ aws-sdk-dynamodb.workspace = true
 aws-sdk-s3.workspace = true
 aws-sdk-secretsmanager.workspace = true
 
+# GCP SDK
+# gcp_auth = "0.8"
+# google-cloud-token = "0.1"
+
+# Azure SDK (simplified)
+# oauth2 = "4.0"
+
 # Kubernetes (optional)
 #[cfg(feature = "kubernetes")]
 #kube.workspace = true
-
-# CI/CD integrations
-oauth2.workspace = true
 
 # Additional dependencies for integrations
 libloading.workspace = true
 base64.workspace = true
 md5.workspace = true
+rand.workspace = true
+urlencoding.workspace = true
+mongodb.workspace = true
+secreton-errors.workspace = true
+
+# LDAP support
+ldap3 = { version = "0.12.1", optional = true }
+
+# Hashing for RabbitMQ password
+sha2.workspace = true
 
 # Database support
 tokio-postgres = { workspace = true, optional = true }
 deadpool-postgres = { workspace = true, optional = true }
 redis = { workspace = true, features = ["aio", "tokio-comp"], optional = true }
 mysql_async.workspace = true
-mongodb.workspace = true
 
-# Random number generation
-rand.workspace = true
+# Certificate generation
+rcgen.workspace = true
+yasna.workspace = true
 
 [features]
 default = []
@@ -65,3 +80,5 @@ kubernetes = []
 aws = []
 azure = []
 gcp = []
+ldap = ["dep:ldap3"]
+rabbitmq = []

@@ -42,8 +42,8 @@ pub struct GCPConfig {
 /// IAM policy binding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IAMBinding {
-    pub resource: String,      // e.g., "projects/my-project"
-    pub roles: Vec<String>,    // IAM roles to grant
+    pub resource: String,   // e.g., "projects/my-project"
+    pub roles: Vec<String>, // IAM roles to grant
 }
 
 /// GCP RoleSet definition
@@ -143,7 +143,9 @@ impl GCPSecretsEngine {
     /// Create a RoleSet
     pub async fn create_roleset(&self, roleset: GCPRoleSet) -> Result<()> {
         if roleset.name.is_empty() {
-            return Err(GCPError::ConfigError("RoleSet name is required".to_string()));
+            return Err(GCPError::ConfigError(
+                "RoleSet name is required".to_string(),
+            ));
         }
         if roleset.project.is_empty() {
             return Err(GCPError::ConfigError("Project is required".to_string()));
@@ -273,7 +275,7 @@ impl GCPSecretsEngine {
     }
 
     /// Apply IAM bindings
-    async fn apply_iam_bindings(&self, email: &str, binding: &IAMBinding) -> Result<()> {
+    async fn apply_iam_bindings(&self, _email: &str, _binding: &IAMBinding) -> Result<()> {
         // Mock IAM binding
         // In real implementation, this would:
         // 1. Call GCP IAM API
@@ -293,7 +295,7 @@ impl GCPSecretsEngine {
         // Mock root credential rotation
         // In real implementation, this would:
         // 1. Generate new service account key
-        // 2. Update Vault configuration
+        // 2. Update Secret configuration
         // 3. Delete old key
 
         Ok(())
@@ -326,7 +328,7 @@ impl GCPSecretsEngine {
     }
 
     /// Delete service account from GCP
-    async fn delete_service_account(&self, email: &str) -> Result<()> {
+    async fn delete_service_account(&self, _email: &str) -> Result<()> {
         // Mock deletion
         // In real implementation, this would call GCP IAM API to delete
         Ok(())
@@ -358,11 +360,8 @@ mod tests {
     fn create_test_config() -> GCPConfig {
         GCPConfig {
             project_id: "my-test-project".to_string(),
-            credentials: r#"{"type":"service_account","project_id":"my-test-project"}"#
-                .to_string(),
-            scopes: vec![
-                "https://www.googleapis.com/auth/cloud-platform".to_string(),
-            ],
+            credentials: r#"{"type":"service_account","project_id":"my-test-project"}"#.to_string(),
+            scopes: vec!["https://www.googleapis.com/auth/cloud-platform".to_string()],
             ttl: Duration::hours(1),
             max_ttl: Duration::hours(24),
         }
@@ -390,9 +389,7 @@ mod tests {
                 roles: vec!["roles/viewer".to_string()],
             }],
             secret_type: GCPSecretType::AccessToken,
-            token_scopes: vec![
-                "https://www.googleapis.com/auth/cloud-platform".to_string(),
-            ],
+            token_scopes: vec!["https://www.googleapis.com/auth/cloud-platform".to_string()],
             ttl: Duration::hours(1),
             max_ttl: Duration::hours(12),
             created_at: Utc::now(),
@@ -416,9 +413,7 @@ mod tests {
             project: "my-project".to_string(),
             bindings: vec![],
             secret_type: GCPSecretType::AccessToken,
-            token_scopes: vec![
-                "https://www.googleapis.com/auth/compute.readonly".to_string(),
-            ],
+            token_scopes: vec!["https://www.googleapis.com/auth/compute.readonly".to_string()],
             ttl: Duration::minutes(30),
             max_ttl: Duration::hours(4),
             created_at: Utc::now(),
@@ -445,12 +440,10 @@ mod tests {
         let roleset = GCPRoleSet {
             name: "app-sa".to_string(),
             project: "my-app-project".to_string(),
-            bindings: vec![
-                IAMBinding {
-                    resource: "projects/my-app-project".to_string(),
-                    roles: vec!["roles/storage.objectViewer".to_string()],
-                },
-            ],
+            bindings: vec![IAMBinding {
+                resource: "projects/my-app-project".to_string(),
+                roles: vec!["roles/storage.objectViewer".to_string()],
+            }],
             secret_type: GCPSecretType::ServiceAccountKey,
             token_scopes: vec![],
             ttl: Duration::days(30),

@@ -131,7 +131,7 @@ export class SecretonClient {
     const response = await fetch(`${this.config.serverUrl}/v1/${secret.path}`, {
       method: 'POST',
       headers: {
-        'X-Vault-Token': this.config.token,
+        'X-Secret-Token': this.config.token,
         'Content-Type': 'application/json',
         ...this.config.headers
       },
@@ -157,7 +157,7 @@ export class SecretonClient {
     const response = await fetch(`${this.config.serverUrl}/v1/${path}`, {
       method: 'GET',
       headers: {
-        'X-Vault-Token': this.config.token,
+        'X-Secret-Token': this.config.token,
         ...this.config.headers
       }
     });
@@ -174,7 +174,7 @@ export class SecretonClient {
     const response = await fetch(`${this.config.serverUrl}/v1/${path}`, {
       method: 'PATCH',
       headers: {
-        'X-Vault-Token': this.config.token,
+        'X-Secret-Token': this.config.token,
         'Content-Type': 'application/json',
         ...this.config.headers
       },
@@ -196,7 +196,7 @@ export class SecretonClient {
     const response = await fetch(`${this.config.serverUrl}/v1/${path}`, {
       method: 'DELETE',
       headers: {
-        'X-Vault-Token': this.config.token,
+        'X-Secret-Token': this.config.token,
         ...this.config.headers
       }
     });
@@ -216,7 +216,7 @@ export class SecretonClient {
     const response = await fetch(`${this.config.serverUrl}/v1/${path}?list=true`, {
       method: 'GET',
       headers: {
-        'X-Vault-Token': this.config.token,
+        'X-Secret-Token': this.config.token,
         ...this.config.headers
       }
     });

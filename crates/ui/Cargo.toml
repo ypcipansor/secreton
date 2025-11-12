@@ -14,28 +14,33 @@ rust-version.workspace = true
 [dependencies]
 secreton-core.workspace = true
 secreton-crypto.workspace = true
-secreton-auth-methods.workspace = true
+secreton-auth.workspace = true
 serde.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 
 # Authentication dependencies
-argon2 = { version = "0.5", features = ["std"] }
-zeroize = "1.7"
-uuid = { version = "1.6", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1.35", features = ["full"] }
+argon2.workspace = true
+zeroize.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tokio.workspace = true
 
 # Web framework
-axum = "0.8.6"
+axum.workspace = true
+leptos.workspace = true
+leptos_router.workspace = true
+web-sys.workspace = true
+wasm-bindgen-futures.workspace = true
 
-# Templates and static files
-rust-embed = "8.0"
-mime_guess = "2.0"
+# HTTP client
+reqwest.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
 
 # CLI tools
-clap = { version = "4.4", features = ["derive"], optional = true }
-rpassword = { version = "7.3", optional = true }
+clap = { workspace = true, optional = true }
+rpassword = { workspace = true, optional = true }
 
 [features]
 default = []

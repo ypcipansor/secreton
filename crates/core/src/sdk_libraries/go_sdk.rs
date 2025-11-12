@@ -7,8 +7,7 @@ use super::types::{SdkConfig, SdkOperationResult, SdkResponse, SdkSecret, Secret
 use std::collections::HashMap;
 
 /// Go SDK client
-pub struct GoSdkClient {
-}
+pub struct GoSdkClient {}
 
 impl GoSdkClient {
     /// Create a new Go SDK client
@@ -132,7 +131,7 @@ func (c *Client) CreateSecret(path string, data map[string]string) error {
         return err
     }
 
-    req.Header.Set("X-Vault-Token", c.token)
+    req.Header.Set("X-Secret-Token", c.token)
     req.Header.Set("Content-Type", "application/json")
 
     resp, err := c.client.Do(req)
@@ -155,7 +154,7 @@ func (c *Client) ReadSecret(path string) (map[string]string, error) {
         return nil, err
     }
 
-    req.Header.Set("X-Vault-Token", c.token)
+    req.Header.Set("X-Secret-Token", c.token)
 
     resp, err := c.client.Do(req)
     if err != nil {
@@ -192,7 +191,7 @@ func (c *Client) DeleteSecret(path string) error {
         return err
     }
 
-    req.Header.Set("X-Vault-Token", c.token)
+    req.Header.Set("X-Secret-Token", c.token)
 
     resp, err := c.client.Do(req)
     if err != nil {

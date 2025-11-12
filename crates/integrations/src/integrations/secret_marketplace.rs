@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum MarketplaceError {
@@ -469,7 +469,7 @@ mod tests {
         marketplace.publish_template(template).await.unwrap();
 
         let rating = TemplateRating {
-            rating_id: Uuid::new_v4().to_string(),
+            rating_id: uuid::Uuid::new_v4().to_string(),
             template_id: "tmpl1".to_string(),
             user: "bob".to_string(),
             rating: 5,

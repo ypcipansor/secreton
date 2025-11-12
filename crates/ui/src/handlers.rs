@@ -14,13 +14,13 @@ pub async fn index() -> Html<String> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brankas Security System</title>
+    <title>Secreton Security System</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <header class="hero">
-            <h1>Brankas Security System</h1>
+            <h1>Secreton Security System</h1>
             <p>Enterprise-grade secret management and access control</p>
         </header>
 
@@ -60,13 +60,13 @@ pub async fn login_page() -> Html<String> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Brankas</title>
+    <title>Login - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <div class="login-form">
-            <h2>Login to Brankas</h2>
+            <h2>Login to Secreton</h2>
             <form action="/login" method="post">
                 <div class="form-group">
                     <label for="username">Username:</label>
@@ -129,13 +129,13 @@ pub async fn login(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Brankas</title>
+    <title>Login - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <div class="login-form">
-            <h2>Login to Brankas</h2>
+            <h2>Login to Secreton</h2>
             <div class="error-message">Invalid username or password</div>
             <form action="/login" method="post">
                 <div class="form-group">
@@ -163,13 +163,13 @@ pub async fn login(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Brankas</title>
+    <title>Login - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <div class="login-form">
-            <h2>Login to Brankas</h2>
+            <h2>Login to Secreton</h2>
             <div class="error-message">Account is locked due to too many failed login attempts. Please try again later.</div>
             <form action="/login" method="post">
                 <div class="form-group">
@@ -197,13 +197,13 @@ pub async fn login(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Brankas</title>
+    <title>Login - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <div class="login-form">
-            <h2>Login to Brankas</h2>
+            <h2>Login to Secreton</h2>
             <div class="error-message">Too many login attempts. Please try again in 15 minutes.</div>
             <form action="/login" method="post">
                 <div class="form-group">
@@ -233,13 +233,13 @@ pub async fn login(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Brankas</title>
+    <title>Login - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <div class="login-form">
-            <h2>Login to Brankas</h2>
+            <h2>Login to Secreton</h2>
             <div class="error-message">{}</div>
             <form action="/login" method="post">
                 <div class="form-group">
@@ -272,13 +272,13 @@ pub async fn dashboard() -> Html<String> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Brankas</title>
+    <title>Dashboard - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="dashboard">
         <nav class="sidebar">
-            <h2>Brankas</h2>
+            <h2>Secreton</h2>
             <ul>
                 <li><a href="/dashboard" class="active">Dashboard</a></li>
                 <li><a href="/secrets">Secrets</a></li>
@@ -330,13 +330,13 @@ pub async fn secrets_page() -> Html<String> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secrets - Brankas</title>
+    <title>Secrets - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="dashboard">
         <nav class="sidebar">
-            <h2>Brankas</h2>
+            <h2>Secreton</h2>
             <ul>
                 <li><a href="/dashboard">Dashboard</a></li>
                 <li><a href="/secrets" class="active">Secrets</a></li>
@@ -371,13 +371,13 @@ pub async fn policies_page() -> Html<String> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Policies - Brankas</title>
+    <title>Policies - Secreton</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="dashboard">
         <nav class="sidebar">
-            <h2>Brankas</h2>
+            <h2>Secreton</h2>
             <ul>
                 <li><a href="/dashboard">Dashboard</a></li>
                 <li><a href="/secrets">Secrets</a></li>

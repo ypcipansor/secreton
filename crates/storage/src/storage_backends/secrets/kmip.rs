@@ -423,13 +423,72 @@ impl KmipEngine {
                         attributes: HashMap::new(),
                     },
                 }
+            KmipOperation::Register => {
+                let algorithm = _request.algorithm.unwrap_or_else(|| "AES".to_string());
+                let key_material = _request.key_material.unwrap_or_default();
+                match self.register_key(algorithm, key_material, _request.attributes).await {
+                    Ok(key_object) => KmipResponse {
+                        success: true,
+                        key_object: Some(key_object),
+                        error: None,
+                        attributes: HashMap::new(),
+                    },
+                    Err(_e) => KmipResponse {
+                        success: false,
+                        key_object: None,
+                        error: Some(_e.to_string()),
+                        attributes: HashMap::new(),
+                    },
+                }
             }
-            _ => KmipResponse {
-                success: false,
-                key_object: None,
-                error: Some("Operation not implemented".to_string()),
-                attributes: HashMap::new(),
-            },
+            KmipOperation::Revoke => {
+                let key_id = _request.key_id.unwrap_or_default();
+                match self.revoke_key(&key_id).await {
+                    Ok(key_object) => KmipResponse {
+                        success: true,
+                        key_object: Some(key_object),
+                        error: None,
+                        attributes: HashMap::new(),
+                    },
+                    Err(_e) => KmipResponse {
+                        success: false,
+                        key_object: None,
+                        error: Some(_e.to_string()),
+                        attributes: HashMap::new(),
+                    },
+                }
+            }
+            KmipOperation::Destroy => {
+                let key_id = _request.key_id.unwrap_or_default();
+                match self.destroy_key(&key_id).await {
+                    Ok(_) => KmipResponse {
+                        success: true,
+                        key_object: None,
+                        error: None,
+                        attributes: HashMap::new(),
+                    },
+                    Err(_e) => KmipResponse {
+                        success: false,
+                        key_object: None,
+                        error: Some(_e.to_string()),
+                        attributes: HashMap::new(),
+                    },
+                }
+            }
+            KmipOperation::Query => {
+                // Return list of all key IDs as attributes
+                let key_ids = self.list_keys().await;
+                let mut attributes = HashMap::new();
+                for (i, key_id) in key_ids.iter().enumerate() {
+                    attributes.insert(format!("key_{}", i), key_id.clone());
+                }
+                KmipResponse {
+                    success: true,
+                    key_object: None,
+                    error: None,
+                    attributes,
+                }
+            }
         }
     }
 }

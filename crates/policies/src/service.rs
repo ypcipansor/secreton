@@ -7,7 +7,9 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::engine::PolicyEngine;
-use super::error::{PolicyError, PolicyResult, ValidationErrors};
+use super::error::{PolicyResult, ValidationErrors};
+use secreton_errors::SecretonError;
+use secreton_common::{CrudService, ListParams, PaginatedResponse, Service, ServiceHealth, ServiceResult};
 use super::evaluator::PolicyEvaluator;
 use super::model::{EvaluationContext, EvaluationResult, Policy, Role};
 
@@ -19,6 +21,12 @@ pub struct PolicyService {
     policies: Arc<RwLock<HashMap<Uuid, Policy>>>,
     /// Role storage
     roles: Arc<RwLock<HashMap<Uuid, Role>>>,
+    /// Service start time
+    start_time: std::sync::Mutex<Option<std::time::Instant>>,
+    /// Service name
+    service_name: String,
+    /// Service version
+    service_version: String,
 }
 
 impl PolicyService {
@@ -30,6 +38,9 @@ impl PolicyService {
             engine,
             policies: Arc::new(RwLock::new(HashMap::new())),
             roles: Arc::new(RwLock::new(HashMap::new())),
+            start_time: std::sync::Mutex::new(None),
+            service_name: "PolicyService".to_string(),
+            service_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 
@@ -65,7 +76,7 @@ impl PolicyService {
         policies
             .get(policy_id)
             .cloned()
-            .ok_or_else(|| PolicyError::PolicyNotFound {
+            .ok_or_else(|| SecretonError::PolicyNotFound {
                 policy_id: policy_id.to_string(),
             })
     }
@@ -76,7 +87,7 @@ impl PolicyService {
 
         let existing = policies
             .get_mut(policy_id)
-            .ok_or_else(|| PolicyError::PolicyNotFound {
+            .ok_or_else(|| SecretonError::PolicyNotFound {
                 policy_id: policy_id.to_string(),
             })?;
 
@@ -161,7 +172,7 @@ impl PolicyService {
         roles
             .get(role_id)
             .cloned()
-            .ok_or_else(|| PolicyError::RoleNotFound {
+            .ok_or_else(|| SecretonError::RoleNotFound {
                 role_id: role_id.to_string(),
             })
     }
@@ -172,7 +183,7 @@ impl PolicyService {
 
         let existing = roles
             .get_mut(role_id)
-            .ok_or_else(|| PolicyError::RoleNotFound {
+            .ok_or_else(|| SecretonError::RoleNotFound {
                 role_id: role_id.to_string(),
             })?;
 
@@ -231,7 +242,7 @@ impl PolicyService {
         let mut roles = self.roles.write().await;
         let role = roles
             .get_mut(role_id)
-            .ok_or_else(|| PolicyError::RoleNotFound {
+            .ok_or_else(|| SecretonError::RoleNotFound {
                 role_id: role_id.to_string(),
             })?;
 
@@ -239,7 +250,7 @@ impl PolicyService {
         {
             let policies = self.policies.read().await;
             if !policies.contains_key(policy_id) {
-                return Err(PolicyError::PolicyNotFound {
+                return Err(SecretonError::PolicyNotFound {
                     policy_id: policy_id.to_string(),
                 });
             }
@@ -263,7 +274,7 @@ impl PolicyService {
         let mut roles = self.roles.write().await;
         let role = roles
             .get_mut(role_id)
-            .ok_or_else(|| PolicyError::RoleNotFound {
+            .ok_or_else(|| SecretonError::RoleNotFound {
                 role_id: role_id.to_string(),
             })?;
 
@@ -329,7 +340,7 @@ impl PolicyService {
         }
 
         if !errors.is_empty() {
-            return Err(PolicyError::InvalidPolicySyntax {
+            return Err(SecretonError::InvalidPolicySyntax {
                 details: errors.to_string(),
             });
         }
@@ -357,7 +368,7 @@ impl PolicyService {
         }
 
         if !errors.is_empty() {
-            return Err(PolicyError::InvalidPolicySyntax {
+            return Err(SecretonError::InvalidPolicySyntax {
                 details: errors.to_string(),
             });
         }
@@ -376,7 +387,7 @@ impl PolicyService {
                 roles.get(&current).and_then(|r| r.parent_role)
             } {
                 if visited.contains(&parent_role) {
-                    return Err(PolicyError::CircularRoleDependency {
+                    return Err(SecretonError::CircularRoleDependency {
                         role_chain: vec![
                             role.id.to_string(),
                             current.to_string(),
@@ -386,7 +397,7 @@ impl PolicyService {
                 }
 
                 if parent_role == role.id {
-                    return Err(PolicyError::CircularRoleDependency {
+                    return Err(SecretonError::CircularRoleDependency {
                         role_chain: vec![role.id.to_string()],
                     });
                 }
@@ -397,6 +408,48 @@ impl PolicyService {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Service for PolicyService {
+    async fn start(&self) -> ServiceResult<()> {
+        let mut start_time = self.start_time.lock().unwrap();
+        *start_time = Some(std::time::Instant::now());
+        tracing::info!("PolicyService started");
+        Ok(())
+    }
+
+    async fn stop(&self) -> ServiceResult<()> {
+        tracing::info!("PolicyService stopped");
+        Ok(())
+    }
+
+    async fn health(&self) -> ServiceResult<ServiceHealth> {
+        // Basic health check - check if storage is accessible
+        let policies_result = self.policies.try_read();
+        let roles_result = self.roles.try_read();
+
+        match (policies_result, roles_result) {
+            (Ok(_), Ok(_)) => Ok(ServiceHealth::Healthy),
+            _ => Ok(ServiceHealth::Unhealthy("Storage lock contention".to_string())),
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.service_name
+    }
+
+    fn version(&self) -> &str {
+        &self.service_version
+    }
+
+    fn uptime_seconds(&self) -> u64 {
+        self.start_time
+            .lock()
+            .unwrap()
+            .map(|start| start.elapsed().as_secs())
+            .unwrap_or(0)
     }
 }
 

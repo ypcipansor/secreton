@@ -1,4 +1,5 @@
-use anyhow::Result;
+use secreton_config::Config;
+use secreton_errors::{Result as SecretonResult, SecretonError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,11 +15,20 @@ impl Default for CliConfig {
     }
 }
 
-impl CliConfig {
-    pub async fn load_from_file(path: &str) -> Result<Self> {
-        let content = tokio::fs::read_to_string(path).await?;
-        let config: CliConfig = toml::from_str(&content)?;
-        Ok(config)
+impl Config for CliConfig {
+    fn validate(&self) -> SecretonResult<()> {
+        if self.server_url.is_empty() {
+            return Err(SecretonError::Configuration {
+                message: "server_url cannot be empty".to_string(),
+            });
+        }
+        // Basic URL validation
+        if !self.server_url.starts_with("http://") && !self.server_url.starts_with("https://") {
+            return Err(SecretonError::Configuration {
+                message: "server_url must start with http:// or https://".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -39,9 +49,7 @@ mod tests {
             .await
             .expect("write config");
 
-        let loaded = CliConfig::load_from_file(tmp.path().to_str().unwrap())
-            .await
-            .expect("load config");
+        let loaded = CliConfig::load_from_file(tmp.path()).expect("load config");
         assert_eq!(loaded.server_url, "https://vault.example.com");
     }
 }

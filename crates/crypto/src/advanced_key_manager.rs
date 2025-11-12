@@ -4,7 +4,10 @@
 //! rotation, escrow, recovery, versioning, and hierarchical derivation.
 
 use chrono::{DateTime, Utc};
+use hkdf::Hkdf;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -26,6 +29,12 @@ pub enum KeyManagerError {
 }
 
 pub type Result<T> = std::result::Result<T, KeyManagerError>;
+
+impl From<crate::error::CryptoError> for KeyManagerError {
+    fn from(error: crate::error::CryptoError) -> Self {
+        KeyManagerError::DerivationFailed(format!("Crypto error: {}", error))
+    }
+}
 
 /// Key type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -161,8 +170,8 @@ impl AdvancedKeyManager {
             KeyType::X25519 => 32,
         };
 
-        // Mock key generation
-        let material = vec![0u8; key_size];
+        // Generate real random key material
+        let material = crate::generate_random_bytes(key_size)?;
 
         let key = ManagedKey {
             key_id: Uuid::new_v4().to_string(),
@@ -206,7 +215,7 @@ impl AdvancedKeyManager {
             .ok_or_else(|| KeyManagerError::KeyNotFound(key_id.to_string()))?;
 
         // Generate new key material
-        let new_material = vec![0u8; key.material.len()];
+        let new_material = crate::generate_random_bytes(key.material.len())?;
         let new_version = key.version + 1;
 
         // Deprecate current version
@@ -240,20 +249,24 @@ impl AdvancedKeyManager {
 
     /// Derive key from parent
     pub async fn derive_key(&self, request: KeyDerivationRequest) -> Result<String> {
-        let (key_type, owner, tags) = {
-            let keys = self.keys.read().await;
+        let keys = self.keys.read().await;
+        let parent = keys
+            .get(&request.parent_key_id)
+            .ok_or_else(|| KeyManagerError::KeyNotFound(request.parent_key_id.clone()))?;
 
-            let parent = keys
-                .get(&request.parent_key_id)
-                .ok_or_else(|| KeyManagerError::KeyNotFound(request.parent_key_id.clone()))?;
+        let (key_type, owner, tags) = (
+            parent.key_type.clone(),
+            parent.metadata.owner.clone(),
+            parent.metadata.tags.clone(),
+        );
 
-            // Mock key derivation (in real implementation, use HKDF, BIP32, etc.)
-            (
-                parent.key_type.clone(),
-                parent.metadata.owner.clone(),
-                parent.metadata.tags.clone(),
-            )
-        };
+        // Use HKDF to derive a new key from parent
+        let hk = Hkdf::<Sha256>::new(Some(request.derivation_path.as_bytes()), &parent.material);
+        let mut derived_key = vec![0u8; parent.material.len()];
+        hk.expand(request.derivation_path.as_bytes(), &mut derived_key)
+            .map_err(|e| {
+                KeyManagerError::DerivationFailed(format!("HKDF expansion failed: {}", e))
+            })?;
 
         let metadata = KeyMetadata {
             owner,
@@ -262,7 +275,39 @@ impl AdvancedKeyManager {
             derivation_path: Some(request.derivation_path),
         };
 
-        self.generate_key(key_type, request.purpose, metadata).await
+        // Create key with derived material
+        let material = derived_key;
+
+        let key = ManagedKey {
+            key_id: Uuid::new_v4().to_string(),
+            key_type,
+            purpose: request.purpose,
+            state: KeyState::Active,
+            version: 1,
+            material,
+            metadata,
+            created_at: Utc::now(),
+            expires_at: None,
+        };
+
+        let key_id = key.key_id.clone();
+
+        // Store initial version
+        let version = KeyVersion {
+            version: 1,
+            key_id: key_id.clone(),
+            material: key.material.clone(),
+            created_at: key.created_at,
+            deprecated_at: None,
+        };
+
+        let mut keys = self.keys.write().await;
+        let mut versions = self.versions.write().await;
+
+        keys.insert(key_id.clone(), key);
+        versions.insert(key_id.clone(), vec![version]);
+
+        Ok(key_id)
     }
 
     /// Split key into shares (Shamir Secret Sharing)
@@ -283,12 +328,18 @@ impl AdvancedKeyManager {
             .get(key_id)
             .ok_or_else(|| KeyManagerError::KeyNotFound(key_id.to_string()))?;
 
-        // Mock share generation (real implementation would use proper Shamir scheme)
-        let shares: Vec<KeyShare> = (0..total_shares)
-            .map(|i| KeyShare {
+        // Use real Shamir secret sharing
+        let mut rng = OsRng;
+        let shamir_shares = crate::shamir::split(&key.material, threshold, total_shares, &mut rng)
+            .map_err(|e| KeyManagerError::EscrowFailed(format!("Shamir split failed: {}", e)))?;
+
+        let shares: Vec<KeyShare> = shamir_shares
+            .into_iter()
+            .enumerate()
+            .map(|(i, share)| KeyShare {
                 share_id: Uuid::new_v4().to_string(),
                 share_index: i,
-                share_data: key.material.clone(),
+                share_data: share.data,
                 holder: format!("holder_{}", i),
             })
             .collect();
@@ -330,8 +381,20 @@ impl AdvancedKeyManager {
             )));
         }
 
-        // Mock reconstruction (real implementation would use Lagrange interpolation)
-        let reconstructed = shares[0].share_data.clone();
+        // Convert KeyShare to shamir::Share
+        let shamir_shares: Vec<crate::shamir::Share> = shares
+            .into_iter()
+            .map(|share| {
+                crate::shamir::Share {
+                    index: (share.share_index + 1) as u8, // Shamir uses 1-based indexing
+                    data: share.share_data,
+                }
+            })
+            .collect();
+
+        // Reconstruct using Shamir secret sharing
+        let reconstructed = crate::shamir::combine(&shamir_shares)
+            .map_err(|e| KeyManagerError::EscrowFailed(format!("Shamir combine failed: {}", e)))?;
 
         Ok(reconstructed)
     }

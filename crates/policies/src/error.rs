@@ -1,64 +1,14 @@
 //! Policy domain errors
+//!
+//! This module now uses SecretonError for all error handling to ensure consistency
+//! across the entire codebase.
 
-use std::fmt;
-use thiserror::Error;
+use secreton_errors::SecretonError;
 
-/// Policy domain error types
-#[derive(Error, Debug)]
-pub enum PolicyError {
-    #[error("Policy not found: {policy_id}")]
-    PolicyNotFound { policy_id: String },
+/// Result type for policy operations using unified SecretonError
+pub type PolicyResult<T> = Result<T, SecretonError>;
 
-    #[error("Role not found: {role_id}")]
-    RoleNotFound { role_id: String },
-
-    #[error("Invalid policy syntax: {details}")]
-    InvalidPolicySyntax { details: String },
-
-    #[error("Policy evaluation failed: {reason}")]
-    EvaluationFailed { reason: String },
-
-    #[error("Policy already exists: {policy_name}")]
-    PolicyAlreadyExists { policy_name: String },
-
-    #[error("Role already exists: {role_name}")]
-    RoleAlreadyExists { role_name: String },
-
-    #[error("Invalid policy condition: {condition}")]
-    InvalidCondition { condition: String },
-
-    #[error("Circular role dependency detected: {}", format_role_chain(.role_chain))]
-    CircularRoleDependency { role_chain: Vec<String> },
-
-    #[error("Policy parsing error: {source}")]
-    ParseError {
-        #[from]
-        source: pest::error::Error<super::engine::Rule>,
-    },
-
-    #[error("Serialization error: {source}")]
-    SerializationError {
-        #[from]
-        source: serde_json::Error,
-    },
-
-    #[error("Database error: {source}")]
-    DatabaseError {
-        #[from]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-
-    #[error("Configuration error: {details}")]
-    ConfigError { details: String },
-
-    #[error("Internal error: {details}")]
-    InternalError { details: String },
-}
-
-/// Result type for policy operations
-pub type PolicyResult<T> = Result<T, PolicyError>;
-
-/// Policy validation errors
+/// Policy validation errors (now using SecretonError)
 #[derive(Debug, Clone)]
 pub struct ValidationError {
     pub field: String,
@@ -111,6 +61,14 @@ impl fmt::Display for ValidationErrors {
 }
 
 impl std::error::Error for ValidationErrors {}
+
+impl From<ValidationErrors> for SecretonError {
+    fn from(err: ValidationErrors) -> Self {
+        SecretonError::InvalidPolicySyntax {
+            details: err.to_string(),
+        }
+    }
+}
 
 fn format_role_chain(chain: &[String]) -> String {
     chain.join(" -> ")

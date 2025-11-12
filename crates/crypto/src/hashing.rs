@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_sha256_hash() {
-        let data = b"Hello, Brankas!";
+        let data = b"Hello, Secreton!";
         let result = compute_hash(AlgorithmId::Sha256, data).unwrap();
 
         assert_eq!(result.algorithm, AlgorithmId::Sha256);

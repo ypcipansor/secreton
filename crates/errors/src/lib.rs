@@ -22,6 +22,12 @@ pub enum SecretonError {
     #[error("Authorization failed: {message}")]
     Authorization { message: String },
 
+    #[error("Missing authentication header")]
+    MissingAuthHeader,
+
+    #[error("Invalid authentication header")]
+    InvalidAuthHeader,
+
     #[error("Token expired")]
     TokenExpired,
 
@@ -194,6 +200,110 @@ pub enum SecretonError {
     #[error("Configuration error: {message}")]
     Configuration { message: String },
 
+    // Policies & RBAC
+    #[error("Policy not found: {policy_id}")]
+    PolicyNotFound { policy_id: String },
+
+    #[error("Role not found: {role_id}")]
+    RoleNotFound { role_id: String },
+
+    #[error("Invalid policy syntax: {details}")]
+    InvalidPolicySyntax { details: String },
+
+    #[error("Policy evaluation failed: {reason}")]
+    PolicyEvaluationFailed { reason: String },
+
+    #[error("Policy already exists: {policy_name}")]
+    PolicyAlreadyExists { policy_name: String },
+
+    #[error("Role already exists: {role_name}")]
+    RoleAlreadyExists { role_name: String },
+
+    #[error("Invalid policy condition: {condition}")]
+    InvalidPolicyCondition { condition: String },
+
+    #[error("Circular role dependency detected: {}", format_role_chain(.role_chain))]
+    CircularRoleDependency { role_chain: Vec<String> },
+
+    #[error("Policy parsing error: {source}")]
+    PolicyParseError {
+        #[from]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    // Secrets Engines
+    #[error("Secret engine error: {message}")]
+    SecretEngine { message: String },
+
+    #[error("GCP error: {message}")]
+    GcpEngine { message: String },
+
+    #[error("Azure error: {message}")]
+    AzureEngine { message: String },
+
+    #[error("AWS error: {message}")]
+    AwsEngine { message: String },
+
+    #[error("LDAP error: {message}")]
+    LdapEngine { message: String },
+
+    #[error("RabbitMQ error: {message}")]
+    RabbitmqEngine { message: String },
+
+    #[error("MongoDB Atlas error: {message}")]
+    MongodbatlasEngine { message: String },
+
+    #[error("Terraform Cloud error: {message}")]
+    TerraformcloudEngine { message: String },
+
+    #[error("OCI error: {message}")]
+    OciEngine { message: String },
+
+    #[error("IBM Cloud error: {message}")]
+    IbmcloudEngine { message: String },
+
+    #[error("Nomad error: {message}")]
+    NomadEngine { message: String },
+
+    #[error("AliCloud error: {message}")]
+    AlicloudEngine { message: String },
+
+    #[error("Active Directory error: {message}")]
+    ActivedirectoryEngine { message: String },
+
+    // Disaster Recovery & Replication
+    #[error("Disaster recovery error: {message}")]
+    DisasterRecovery { message: String },
+
+    #[error("Replication error: {message}")]
+    Replication { message: String },
+
+    #[error("Snapshot error: {message}")]
+    Snapshot { message: String },
+
+    #[error("Sync error: {message}")]
+    Sync { message: String },
+
+    // Authentication Methods
+    #[error("Authentication method not found: {method}")]
+    AuthMethodNotFound { method: String },
+
+    #[error("Authentication method already exists: {method}")]
+    AuthMethodAlreadyExists { method: String },
+
+    #[error("Authentication method disabled")]
+    AuthMethodDisabled,
+
+    #[error("Authentication method not supported")]
+    AuthMethodNotSupported,
+
+    #[error("Invalid authentication method configuration: {message}")]
+    AuthMethodConfigInvalid { message: String },
+
+    // Templating & Rendering
+    #[error("Template error: {message}")]
+    Template { message: String },
+
     // IO & System
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -226,6 +336,8 @@ impl SecretonError {
             // Authentication
             SecretonError::Authentication { .. } => StatusCode::UNAUTHORIZED,
             SecretonError::Authorization { .. } => StatusCode::FORBIDDEN,
+            SecretonError::MissingAuthHeader => StatusCode::UNAUTHORIZED,
+            SecretonError::InvalidAuthHeader => StatusCode::UNAUTHORIZED,
             SecretonError::TokenExpired => StatusCode::UNAUTHORIZED,
             SecretonError::TokenInvalid { .. } => StatusCode::UNAUTHORIZED,
             SecretonError::TokenRevoked => StatusCode::UNAUTHORIZED,
@@ -302,6 +414,48 @@ impl SecretonError {
             // Configuration
             SecretonError::Configuration { .. } => StatusCode::INTERNAL_SERVER_ERROR,
 
+            // Policies & RBAC
+            SecretonError::PolicyNotFound { .. } => StatusCode::NOT_FOUND,
+            SecretonError::RoleNotFound { .. } => StatusCode::NOT_FOUND,
+            SecretonError::InvalidPolicySyntax { .. } => StatusCode::BAD_REQUEST,
+            SecretonError::PolicyEvaluationFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            SecretonError::PolicyAlreadyExists { .. } => StatusCode::CONFLICT,
+            SecretonError::RoleAlreadyExists { .. } => StatusCode::CONFLICT,
+            SecretonError::InvalidPolicyCondition { .. } => StatusCode::BAD_REQUEST,
+            SecretonError::CircularRoleDependency { .. } => StatusCode::BAD_REQUEST,
+            SecretonError::PolicyParseError { .. } => StatusCode::BAD_REQUEST,
+
+            // Secrets Engines
+            SecretonError::SecretEngine { .. }
+            | SecretonError::GcpEngine { .. }
+            | SecretonError::AzureEngine { .. }
+            | SecretonError::AwsEngine { .. }
+            | SecretonError::LdapEngine { .. }
+            | SecretonError::RabbitmqEngine { .. }
+            | SecretonError::MongodbatlasEngine { .. }
+            | SecretonError::TerraformcloudEngine { .. }
+            | SecretonError::OciEngine { .. }
+            | SecretonError::IbmcloudEngine { .. }
+            | SecretonError::NomadEngine { .. }
+            | SecretonError::AlicloudEngine { .. }
+            | SecretonError::ActivedirectoryEngine { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+
+            // Disaster Recovery & Replication
+            SecretonError::DisasterRecovery { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            SecretonError::Replication { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            SecretonError::Snapshot { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            SecretonError::Sync { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+
+            // Authentication Methods
+            SecretonError::AuthMethodNotFound { .. } => StatusCode::NOT_FOUND,
+            SecretonError::AuthMethodAlreadyExists { .. } => StatusCode::CONFLICT,
+            SecretonError::AuthMethodDisabled => StatusCode::FORBIDDEN,
+            SecretonError::AuthMethodNotSupported => StatusCode::BAD_REQUEST,
+            SecretonError::AuthMethodConfigInvalid { .. } => StatusCode::BAD_REQUEST,
+
+            // Templating
+            SecretonError::Template { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+
             // System
             SecretonError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             SecretonError::Serialization(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -342,6 +496,8 @@ impl SecretonError {
         match self {
             SecretonError::Authentication { .. }
             | SecretonError::Authorization { .. }
+            | SecretonError::MissingAuthHeader
+            | SecretonError::InvalidAuthHeader
             | SecretonError::TokenExpired
             | SecretonError::TokenInvalid { .. }
             | SecretonError::TokenRevoked
@@ -398,6 +554,48 @@ impl SecretonError {
             SecretonError::RateLimitExceeded | SecretonError::QuotaExceeded { .. } => "limits",
 
             SecretonError::Configuration { .. } => "configuration",
+
+            // Policies & RBAC
+            SecretonError::PolicyNotFound { .. }
+            | SecretonError::RoleNotFound { .. }
+            | SecretonError::InvalidPolicySyntax { .. }
+            | SecretonError::PolicyEvaluationFailed { .. }
+            | SecretonError::PolicyAlreadyExists { .. }
+            | SecretonError::RoleAlreadyExists { .. }
+            | SecretonError::InvalidPolicyCondition { .. }
+            | SecretonError::CircularRoleDependency { .. }
+            | SecretonError::PolicyParseError { .. } => "policies",
+
+            // Secrets Engines
+            SecretonError::SecretEngine { .. }
+            | SecretonError::GcpEngine { .. }
+            | SecretonError::AzureEngine { .. }
+            | SecretonError::AwsEngine { .. }
+            | SecretonError::LdapEngine { .. }
+            | SecretonError::RabbitmqEngine { .. }
+            | SecretonError::MongodbatlasEngine { .. }
+            | SecretonError::TerraformcloudEngine { .. }
+            | SecretonError::OciEngine { .. }
+            | SecretonError::IbmcloudEngine { .. }
+            | SecretonError::NomadEngine { .. }
+            | SecretonError::AlicloudEngine { .. }
+            | SecretonError::ActivedirectoryEngine { .. } => "secrets",
+
+            // Disaster Recovery & Replication
+            SecretonError::DisasterRecovery { .. }
+            | SecretonError::Replication { .. }
+            | SecretonError::Snapshot { .. }
+            | SecretonError::Sync { .. } => "replication",
+
+            // Authentication Methods
+            SecretonError::AuthMethodNotFound { .. }
+            | SecretonError::AuthMethodAlreadyExists { .. }
+            | SecretonError::AuthMethodDisabled
+            | SecretonError::AuthMethodNotSupported
+            | SecretonError::AuthMethodConfigInvalid { .. } => "auth_method",
+
+            // Templating
+            SecretonError::Template { .. } => "templating",
 
             SecretonError::Io(_)
             | SecretonError::Serialization(_)
@@ -561,4 +759,9 @@ pub mod utils {
             }
         }
     }
+}
+
+/// Helper function for formatting role chains in error messages
+fn format_role_chain(chain: &[String]) -> String {
+    chain.join(" -> ")
 }

@@ -40,10 +40,10 @@ pub enum Algorithm {
 pub struct TOTPKey {
     pub issuer: String,
     pub account_name: String,
-    pub secret: String,        // Base32 encoded
+    pub secret: String, // Base32 encoded
     pub algorithm: Algorithm,
-    pub digits: u32,           // 6 or 8
-    pub period: u32,           // Seconds, typically 30
+    pub digits: u32, // 6 or 8
+    pub period: u32, // Seconds, typically 30
 }
 
 /// HOTP key configuration
@@ -51,10 +51,10 @@ pub struct TOTPKey {
 pub struct HOTPKey {
     pub issuer: String,
     pub account_name: String,
-    pub secret: String,        // Base32 encoded
+    pub secret: String, // Base32 encoded
     pub algorithm: Algorithm,
-    pub digits: u32,           // 6 or 8
-    pub counter: u64,          // Current counter value
+    pub digits: u32,  // 6 or 8
+    pub counter: u64, // Current counter value
 }
 
 /// OTP configuration
@@ -67,10 +67,10 @@ pub struct OTPConfig {
     pub secret: String,
     pub algorithm: Algorithm,
     pub digits: u32,
-    pub period: Option<u32>,   // For TOTP
-    pub counter: Option<u64>,  // For HOTP
-    pub qr_size: u32,          // QR code size in pixels
-    pub skew: u32,             // Time skew tolerance in periods
+    pub period: Option<u32>,  // For TOTP
+    pub counter: Option<u64>, // For HOTP
+    pub qr_size: u32,         // QR code size in pixels
+    pub skew: u32,            // Time skew tolerance in periods
     pub created_at: DateTime<Utc>,
 }
 
@@ -79,7 +79,7 @@ pub struct OTPConfig {
 pub struct GeneratedCode {
     pub code: String,
     pub valid_until: Option<DateTime<Utc>>, // For TOTP
-    pub counter: Option<u64>,                // For HOTP
+    pub counter: Option<u64>,               // For HOTP
 }
 
 /// TOTP/HOTP secrets engine
@@ -103,7 +103,9 @@ impl TOTPEngine {
             return Err(OTPError::ConfigError("Issuer is required".to_string()));
         }
         if config.account_name.is_empty() {
-            return Err(OTPError::ConfigError("Account name is required".to_string()));
+            return Err(OTPError::ConfigError(
+                "Account name is required".to_string(),
+            ));
         }
 
         // Generate secret if not provided
@@ -126,9 +128,7 @@ impl TOTPEngine {
         }
 
         if config.digits != 6 && config.digits != 8 {
-            return Err(OTPError::ConfigError(
-                "Digits must be 6 or 8".to_string(),
-            ));
+            return Err(OTPError::ConfigError("Digits must be 6 or 8".to_string()));
         }
 
         config.created_at = Utc::now();
@@ -271,7 +271,8 @@ impl TOTPEngine {
                             current_counter.saturating_sub(offset as u64)
                         };
 
-                        let expected = self.generate_otp_code(&config.secret, counter, config.digits)?;
+                        let expected =
+                            self.generate_otp_code(&config.secret, counter, config.digits)?;
                         if expected == code {
                             return Ok(true);
                         }

@@ -3,6 +3,8 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
@@ -93,7 +95,108 @@ impl AuditEntry {
     pub fn builder() -> AuditEntryBuilder {
         AuditEntryBuilder::new()
     }
+
+    /// Calculate hash for this audit entry
+    pub fn calculate_hash(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.audit_id);
+        hasher.update(&self.secret_name);
+        hasher.update(self.version.to_string().as_bytes());
+        hasher.update(&self.action);
+        hasher.update(&self.actor);
+        hasher.update(self.timestamp.timestamp().to_string().as_bytes());
+        if let Some(diff) = &self.diff {
+            hasher.update(diff);
+        }
+        if let Some(prev) = &self.prev_hash {
+            hasher.update(prev);
+        }
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Verify this entry's hash matches calculated hash
+    pub fn verify_hash(&self) -> bool {
+        self.calculate_hash() == self.hash
+    }
 }
 
-// TODO: Integrate with global audit log storage (append-only, tamper-evident)
-// TODO: Add cryptographic hash chain for full audit integrity
+/// Tamper-evident audit log storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLog {
+    pub entries: Vec<AuditEntry>,
+    pub entry_index: HashMap<String, usize>, // audit_id -> index
+    pub latest_hash: Option<String>,
+}
+
+impl Default for AuditLog {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            entry_index: HashMap::new(),
+            latest_hash: None,
+        }
+    }
+}
+
+impl AuditLog {
+    /// Create new audit log
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add audit entry with hash chain integrity
+    pub fn add_entry(&mut self, mut entry: AuditEntry) -> Result<(), String> {
+        // Set previous hash to current latest
+        entry.prev_hash = self.latest_hash.clone();
+
+        // Calculate and set hash
+        entry.hash = entry.calculate_hash();
+
+        // Update latest hash
+        self.latest_hash = Some(entry.hash.clone());
+
+        // Store entry
+        let index = self.entries.len();
+        self.entry_index.insert(entry.audit_id.clone(), index);
+        self.entries.push(entry);
+
+        Ok(())
+    }
+
+    /// Get entry by audit ID
+    pub fn get_entry(&self, audit_id: &str) -> Option<&AuditEntry> {
+        self.entry_index
+            .get(audit_id)
+            .and_then(|&index| self.entries.get(index))
+    }
+
+    /// Verify integrity of entire hash chain
+    pub fn verify_chain(&self) -> bool {
+        let mut expected_prev_hash = None;
+
+        for entry in &self.entries {
+            // Verify entry's hash
+            if !entry.verify_hash() {
+                return false;
+            }
+
+            // Verify chain continuity
+            if entry.prev_hash != expected_prev_hash {
+                return false;
+            }
+
+            // Update expected previous hash for next entry
+            expected_prev_hash = Some(entry.hash.clone());
+        }
+
+        true
+    }
+
+    /// Get all entries for a specific secret
+    pub fn get_secret_entries(&self, secret_name: &str) -> Vec<&AuditEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.secret_name == secret_name)
+            .collect()
+    }
+}

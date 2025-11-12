@@ -282,17 +282,83 @@ impl StorageBackend for NamespaceStorage {
         // Audit log the operation
         self.audit_log("backup", destination, None).await;
 
-        // Backup should only include keys within this namespace
-        // Implementation would depend on backend capabilities
-        Err(StorageError::NotImplemented("Backup not implemented for namespace storage".to_string()))
+        // Get all keys in this namespace
+        let namespace_prefix = self.get_namespace_prefix();
+        let all_entries = self.backend.list(&namespace_prefix).await?;
+
+        // Create backup data structure
+        let mut backup_data = serde_json::Map::new();
+        for key in all_entries {
+            if let Some(entry) = self.backend.get(&key).await? {
+                // Convert entry to JSON value
+                let entry_value = serde_json::json!({
+                    "key": entry.key,
+                    "value": base64::encode(&entry.value),
+                    "metadata": entry.metadata
+                });
+                backup_data.insert(key, entry_value);
+            }
+        }
+
+        // Write backup to destination (file path)
+        let backup_json = serde_json::to_string_pretty(&backup_data)
+            .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+
+        info!("Namespace backup created for namespace {}: {} entries", self.namespace_id, backup_data.len());
+        debug!("Backup data: {}", backup_json);
+
+        // Write backup data to file
+        tokio::fs::write(destination, backup_json).await
+            .map_err(|e| StorageError::SerializationError(format!("Failed to write backup file: {}", e)))?;
+
+        Ok(())
     }
 
     async fn restore(&self, source: &str) -> Result<(), StorageError> {
         // Audit log the operation
         self.audit_log("restore", source, None).await;
 
-        // Restore should validate that restored keys belong to this namespace
-        Err(StorageError::NotImplemented("Restore not implemented for namespace storage".to_string()))
+        // Read backup content from file
+        let backup_content = tokio::fs::read_to_string(source).await
+            .map_err(|e| StorageError::SerializationError(format!("Failed to read backup file: {}", e)))?;
+
+        let backup_data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&backup_content)
+            .map_err(|e| StorageError::SerializationError(format!("Failed to parse backup data: {}", e)))?;
+
+        // Validate and restore entries
+        for (key, value) in backup_data {
+            // Verify key belongs to this namespace
+            let namespace_prefix = self.get_namespace_prefix();
+            if !key.starts_with(&namespace_prefix) {
+                return Err(StorageError::ValidationError(format!(
+                    "Key {} does not belong to namespace {}", key, self.namespace_id
+                )));
+            }
+
+            // Parse entry data
+            if let Some(entry_obj) = value.as_object() {
+                if let (Some(key_val), Some(value_b64), Some(metadata)) = (
+                    entry_obj.get("key").and_then(|v| v.as_str()),
+                    entry_obj.get("value").and_then(|v| v.as_str()),
+                    entry_obj.get("metadata")
+                ) {
+                    let decoded_value = base64::decode(value_b64)
+                        .map_err(|e| StorageError::SerializationError(format!("Base64 decode error: {}", e)))?;
+
+                    let entry = StorageEntry {
+                        key: key_val.to_string(),
+                        value: decoded_value,
+                        metadata: Some(metadata.clone()),
+                    };
+
+                    self.backend.put(entry).await?;
+                }
+            }
+        }
+
+        info!("Namespace restore completed for namespace {}", self.namespace_id);
+
+        Ok(())
     }
 }
 

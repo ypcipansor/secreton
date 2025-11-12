@@ -1,4 +1,4 @@
-//! Health monitoring module for the Brankas agent
+//! Health monitoring module for the Secreton agent
 
 use crate::config::HealthConfig;
 use secreton_core::CoreResult;

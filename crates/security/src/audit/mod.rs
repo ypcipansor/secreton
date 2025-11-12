@@ -1,4 +1,4 @@
-//! Audit logging for Brankas Adhyaksa
+//! Audit logging for Secreton Adhyaksa
 
 use chrono::Utc;
 use parking_lot;

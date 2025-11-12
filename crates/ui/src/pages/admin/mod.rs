@@ -1,8 +1,9 @@
+use leptos::prelude::ElementChild;
 use leptos::*;
 
 #[component]
-pub fn Admin(cx: Scope) -> impl IntoView {
-    view! { cx,
+pub fn admin() -> impl IntoView {
+    view! {
         <h2>"Admin"</h2>
         <h3>"Add Role"</h3>
         <form>
@@ -24,4 +25,4 @@ pub fn Admin(cx: Scope) -> impl IntoView {
             <button type="submit">"Add Policy"</button>
         </form>
     }
-} 
+}

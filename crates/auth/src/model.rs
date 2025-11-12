@@ -1,0 +1,256 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// User information structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub id: Option<String>,
+    pub username: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub roles: Vec<String>,
+    pub metadata: HashMap<String, String>,
+    pub last_login: Option<DateTime<Utc>>,
+}
+
+/// MFA method enum
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MfaMethod {
+    Totp,
+    Sms,
+    Email,
+    Hardware,
+}
+
+/// MFA configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MfaConfig {
+    pub enabled: bool,
+    pub method: MfaMethod,
+    pub secret: Option<String>,
+    pub recovery_codes: Vec<String>,
+}
+
+/// MFA setup request
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaSetupRequest {
+    pub method: MfaMethod,
+    pub email: Option<String>, // Required if method is Email
+}
+
+/// MFA setup response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaSetupResponse {
+    pub qr_code_url: Option<String>,                          // For TOTP
+    pub secret: Option<String>,                               // For TOTP
+    pub webauthn_register_options: Option<serde_json::Value>, // For WebAuthn
+}
+
+/// MFA verification request
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaVerifyRequest {
+    pub code: String, // TOTP code or recovery code
+}
+
+/// MFA status response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaStatusResponse {
+    pub is_enabled: bool,
+    pub method: Option<String>,
+    pub setup_required: bool,
+    pub enabled_methods: Vec<String>,
+}
+
+/// MFA login request
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaLoginRequest {
+    pub username: String,
+    pub password: String,
+    pub code: Option<String>, // MFA code if MFA is enabled
+}
+
+/// MFA recovery codes response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaRecoveryCodesResponse {
+    pub recovery_codes: Vec<String>,
+}
+
+/// MFA verification result
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaVerificationResult {
+    pub is_valid: bool,
+    pub method: MfaMethod,
+    pub message: Option<String>,
+}
+
+/// Refresh token request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+/// Authentication request (legacy compatibility)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuthRequest {
+    Token { token: String },
+    UserPass { username: String, password: String },
+    Ldap { username: String, password: String },
+    Oidc { code: String, state: String },
+    Okta { username: String, password: String },
+    Github { token: String },
+    Radius { username: String, password: String },
+    AppRole { role_id: String, secret_id: String },
+    Kubernetes { jwt: String },
+}
+
+/// Authentication response (legacy compatibility)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthResponse {
+    pub authenticated: bool,
+    pub user_info: UserInfo,
+    pub policies: Vec<String>,
+    pub lease_duration: i64,
+    pub renewable: bool,
+    pub token: String,
+    pub accessor: String,
+    pub metadata: HashMap<String, String>,
+}
+
+/// Legacy token structure for backward compatibility
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LegacyToken {
+    pub token: String,
+    pub user: String,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub orphan: bool,
+    pub batch: bool,
+    pub locked: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Authentication method type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AuthMethodType {
+    Token,
+    UserPass,
+    Ldap,
+    Oidc,
+    OAuth2,
+    AppRole,
+    Kubernetes,
+    AwsIam,
+    Github,
+    Okta,
+    Radius,
+    Saml,
+    Certificate,
+}
+
+/// Authentication credentials
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuthCredentials {
+    Token {
+        token: String,
+    },
+    UserPass {
+        username: String,
+        password: String,
+    },
+    Ldap {
+        username: String,
+        password: String,
+    },
+    Oidc {
+        code: String,
+        state: String,
+    },
+    OAuth2 {
+        code: String,
+        state: String,
+    },
+    AppRole {
+        role_id: String,
+        secret_id: String,
+    },
+    Kubernetes {
+        jwt: String,
+        role: Option<String>,
+    },
+    AwsIam {
+        iam_request_url: String,
+        iam_request_body: String,
+        iam_request_headers: String,
+    },
+    Github {
+        token: String,
+    },
+    Okta {
+        username: String,
+        password: String,
+    },
+    Radius {
+        username: String,
+        password: String,
+    },
+    Saml {
+        saml_response: String,
+    },
+    Certificate {
+        certificate: String,
+    },
+}
+
+/// Authentication result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthResult {
+    pub success: bool,
+    pub user_info: Option<UserInfo>,
+    pub token: Option<String>,
+    pub policies: Vec<String>,
+    pub metadata: HashMap<String, String>,
+    pub mfa_required: bool,
+}
+
+/// Login request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+    pub mfa_code: Option<String>,
+    pub remember_me: Option<bool>,
+}
+
+/// Login response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub success: bool,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub user_info: Option<UserInfo>,
+    pub mfa_required: bool,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Authentication method configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthMethod {
+    pub method_type: AuthMethodType,
+    pub enabled: bool,
+    pub config: HashMap<String, serde_json::Value>,
+}
+
+/// User entity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub roles: Vec<String>,
+    pub policies: Vec<String>,
+    pub metadata: HashMap<String, String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub disabled: bool,
+}

@@ -393,7 +393,7 @@ mod tests {
 
         match result.unwrap_err() {
             BarrierError::BarrierSealed => {}
-            _ => panic!("Expected BarrierSealed error"),
+            _ => assert!(false, "Expected BarrierSealed error"),
         }
     }
 

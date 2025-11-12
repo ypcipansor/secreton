@@ -125,11 +125,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        Commands::List => {
-            // TODO: Implement user listing
-            println!("User listing not yet implemented");
-            println!("This would require persistent storage backend");
-        }
+        Commands::List => match auth.list_users().await {
+            users => {
+                if users.is_empty() {
+                    println!("No users found.");
+                } else {
+                    println!("Users:");
+                    println!(
+                        "{:<36} {:<20} {:<30} {:<12} {:<12}",
+                        "User ID", "Username", "Email", "Active", "Superuser"
+                    );
+                    println!("{}", "-".repeat(110));
+                    for user in users {
+                        println!(
+                            "{:<36} {:<20} {:<30} {:<12} {:<12}",
+                            user.id, user.username, user.email, user.is_active, user.is_superuser
+                        );
+                    }
+                }
+            }
+        },
 
         Commands::Policy => {
             let policy = PasswordPolicy::default();

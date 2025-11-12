@@ -1,4 +1,5 @@
 //! OCI (Oracle Cloud Infrastructure) backend for secret management
+//! TODO: Add oci_sdk dependency to enable full OCI integration
 
 use crate::error::*;
 use serde_json::Value;
@@ -14,6 +15,24 @@ pub struct OciBackend {
 }
 
 impl OciBackend {
+    /// Create OCI client configuration (stub - requires oci_sdk)
+    fn create_oci_client(&self) -> Result<(), SecretError> {
+        // TODO: Implement when oci_sdk dependency is available
+        Err(SecretError::BackendConnectionFailed(
+            "OCI SDK support requires oci_sdk dependency (not yet available)".to_string(),
+        ))
+
+        // Commented out until oci_sdk is available:
+        // let config = oci_sdk::common::Config::builder()
+        //     .tenancy_ocid(&self.tenancy_ocid)
+        //     .user_ocid(&self.user_ocid)
+        //     .fingerprint(&self.fingerprint)
+        //     .private_key(&self._private_key)
+        //     .region(&self.region)
+        //     .build()?;
+        // Ok(oci_sdk::common::Client::new(config))
+    }
+
     /// Create a new OCI backend
     pub fn new(
         tenancy_ocid: String,
@@ -36,14 +55,15 @@ impl OciBackend {
         &self,
         ttl_seconds: u64,
     ) -> Result<HashMap<String, Value>, SecretError> {
-        // In a real implementation, this would:
-        // 1. Use the OCI SDK to get an instance principal token
-        // 2. Exchange it for temporary credentials
-        // 3. Return the credentials in the expected format
+        // TODO: Implement when oci_sdk is available
+        let _client = self.create_oci_client()?;
+
+        // Stub implementation - return mock credentials
+        // In production, this would use OCI SDK:
+        // let identity_client = oci_sdk::identity::IdentityClient::new(client);
+        // let instance_principal_token = identity_client.get_instance_principal_token().await?;
 
         let mut credentials_result = HashMap::new();
-
-        // Mock OCI credentials for demonstration
         credentials_result.insert(
             "tenancy_ocid".to_string(),
             Value::String(self.tenancy_ocid.clone()),
@@ -62,10 +82,12 @@ impl OciBackend {
             "credential_type".to_string(),
             Value::String("instance_principal".to_string()),
         );
+        credentials_result.insert(
+            "token".to_string(),
+            Value::String("mock_token_requires_oci_sdk".to_string()),
+        );
 
-        // In production, this would include actual OCI API calls
         tracing::info!("Generated OCI instance principal credentials");
-
         Ok(credentials_result)
     }
 
@@ -74,9 +96,13 @@ impl OciBackend {
         &self,
         ttl_seconds: u64,
     ) -> Result<HashMap<String, Value>, SecretError> {
-        let mut credentials_result = HashMap::new();
+        let _client = self.create_oci_client()?;
 
-        // Mock OCI API key credentials
+        // TODO: Implement when oci_sdk is available
+        // let identity_client = oci_sdk::identity::IdentityClient::new(client);
+        // let temp_credentials = identity_client.create_temporary_api_key_credentials(ttl_seconds).await?;
+
+        let mut credentials_result = HashMap::new();
         credentials_result.insert(
             "tenancy_ocid".to_string(),
             Value::String(self.tenancy_ocid.clone()),
@@ -89,19 +115,26 @@ impl OciBackend {
             "fingerprint".to_string(),
             Value::String(self.fingerprint.clone()),
         );
-        credentials_result.insert(
-            "private_key".to_string(),
-            Value::String("(redacted)".to_string()), // Never expose private keys
-        );
         credentials_result.insert("region".to_string(), Value::String(self.region.clone()));
         credentials_result.insert("ttl".to_string(), Value::Number(ttl_seconds.into()));
         credentials_result.insert(
             "credential_type".to_string(),
             Value::String("api_key".to_string()),
         );
+        credentials_result.insert(
+            "access_key_id".to_string(),
+            Value::String("mock_access_key".to_string()),
+        );
+        credentials_result.insert(
+            "secret_access_key".to_string(),
+            Value::String("mock_secret_key".to_string()),
+        );
+        credentials_result.insert(
+            "session_token".to_string(),
+            Value::String("mock_session_token".to_string()),
+        );
 
         tracing::info!("Generated OCI API key credentials");
-
         Ok(credentials_result)
     }
 
@@ -111,8 +144,13 @@ impl OciBackend {
         resource_type: &str,
         ttl_seconds: u64,
     ) -> Result<HashMap<String, Value>, SecretError> {
-        let mut credentials_result = HashMap::new();
+        let _client = self.create_oci_client()?;
 
+        // TODO: Implement when oci_sdk is available
+        // let identity_client = oci_sdk::identity::IdentityClient::new(client);
+        // let resource_principal_token = identity_client.get_resource_principal_token(resource_type).await?;
+
+        let mut credentials_result = HashMap::new();
         credentials_result.insert(
             "tenancy_ocid".to_string(),
             Value::String(self.tenancy_ocid.clone()),
@@ -127,6 +165,10 @@ impl OciBackend {
             "credential_type".to_string(),
             Value::String("resource_principal".to_string()),
         );
+        credentials_result.insert(
+            "token".to_string(),
+            Value::String("mock_resource_principal_token".to_string()),
+        );
 
         tracing::info!(
             "Generated OCI resource principal credentials for {}",
@@ -138,34 +180,16 @@ impl OciBackend {
 
     /// List OCI compartments
     pub async fn list_compartments(&self) -> Result<Vec<HashMap<String, Value>>, SecretError> {
-        // Mock compartment list
-        let compartments = vec![
-            HashMap::from([
-                (
-                    "id".to_string(),
-                    Value::String("ocid1.compartment.oc1..example1".to_string()),
-                ),
-                ("name".to_string(), Value::String("root".to_string())),
-                (
-                    "description".to_string(),
-                    Value::String("Root compartment".to_string()),
-                ),
-            ]),
-            HashMap::from([
-                (
-                    "id".to_string(),
-                    Value::String("ocid1.compartment.oc1..example2".to_string()),
-                ),
-                ("name".to_string(), Value::String("production".to_string())),
-                (
-                    "description".to_string(),
-                    Value::String("Production compartment".to_string()),
-                ),
-            ]),
-        ];
+        let _client = self.create_oci_client()?;
+
+        // TODO: Implement when oci_sdk is available
+        // let identity_client = oci_sdk::identity::IdentityClient::new(client);
+        // let compartments_response = identity_client.list_compartments(&self.tenancy_ocid).await?;
+
+        let compartments = Vec::new();
+        // Mock implementation - would iterate over compartments_response.items
 
         tracing::info!("Listed OCI compartments");
-
         Ok(compartments)
     }
 
@@ -174,42 +198,16 @@ impl OciBackend {
         &self,
         vault_id: &str,
     ) -> Result<Vec<HashMap<String, Value>>, SecretError> {
-        // Mock vault secrets
-        let secrets = vec![
-            HashMap::from([
-                (
-                    "id".to_string(),
-                    Value::String(format!("{}/secret1", vault_id)),
-                ),
-                (
-                    "name".to_string(),
-                    Value::String("database-password".to_string()),
-                ),
-                (
-                    "secret_type".to_string(),
-                    Value::String("password".to_string()),
-                ),
-                (
-                    "created_at".to_string(),
-                    Value::String(chrono::Utc::now().to_rfc3339()),
-                ),
-            ]),
-            HashMap::from([
-                (
-                    "id".to_string(),
-                    Value::String(format!("{}/secret2", vault_id)),
-                ),
-                ("name".to_string(), Value::String("api-key".to_string())),
-                ("secret_type".to_string(), Value::String("key".to_string())),
-                (
-                    "created_at".to_string(),
-                    Value::String(chrono::Utc::now().to_rfc3339()),
-                ),
-            ]),
-        ];
+        let _client = self.create_oci_client()?;
+
+        // TODO: Implement when oci_sdk is available
+        // let vault_client = oci_sdk::vault::SecretClient::new(client);
+        // let secrets_response = vault_client.list_secrets(vault_id).await?;
+
+        let secrets = Vec::new();
+        // Mock implementation - would iterate over secrets_response.items
 
         tracing::info!("Retrieved OCI vault secrets for vault {}", vault_id);
-
         Ok(secrets)
     }
 
@@ -221,11 +219,17 @@ impl OciBackend {
         _secret_value: &str,
         secret_type: &str,
     ) -> Result<HashMap<String, Value>, SecretError> {
-        let mut result = HashMap::new();
+        let _client = self.create_oci_client()?;
 
+        // TODO: Implement when oci_sdk is available
+        // let vault_client = oci_sdk::vault::SecretClient::new(client);
+        // let create_secret_details = oci_sdk::vault::models::CreateSecretDetails { ... };
+        // let secret_response = vault_client.create_secret(create_secret_details).await?;
+
+        let mut result = HashMap::new();
         result.insert(
             "id".to_string(),
-            Value::String(format!("{}/{}", vault_id, secret_name)),
+            Value::String("mock_secret_id".to_string()),
         );
         result.insert("name".to_string(), Value::String(secret_name.to_string()));
         result.insert("vault_id".to_string(), Value::String(vault_id.to_string()));
@@ -237,7 +241,10 @@ impl OciBackend {
             "created_at".to_string(),
             Value::String(chrono::Utc::now().to_rfc3339()),
         );
-        result.insert("status".to_string(), Value::String("active".to_string()));
+        result.insert(
+            "lifecycle_state".to_string(),
+            Value::String("ACTIVE".to_string()),
+        );
 
         tracing::info!(
             "Created OCI vault secret {} in vault {}",
@@ -250,9 +257,16 @@ impl OciBackend {
 
     /// Test OCI connectivity
     pub async fn test_connectivity(&self) -> Result<bool, SecretError> {
-        // In a real implementation, this would test actual OCI connectivity
-        // For now, return true to indicate successful mock connectivity
-        tracing::info!("Testing OCI connectivity - mock successful");
-        Ok(true)
+        let _client = self.create_oci_client()?;
+
+        // TODO: Implement when oci_sdk is available
+        // let identity_client = oci_sdk::identity::IdentityClient::new(client);
+        // match identity_client.get_compartment(&self.tenancy_ocid).await {
+        //     Ok(_) => Ok(true),
+        //     Err(e) => Err(SecretError::BackendOperationFailed(format!("OCI connectivity test failed: {}", e)))
+        // }
+
+        tracing::warn!("OCI connectivity test skipped - oci_sdk dependency not available");
+        Ok(false)
     }
 }

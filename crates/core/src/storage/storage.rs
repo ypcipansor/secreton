@@ -4,6 +4,7 @@
 //! to the storage crate for actual persistence operations.
 
 use anyhow::Result;
+use secreton_errors::SecretonError;
 
 /// Main storage struct that provides high-level storage operations
 /// by delegating to the storage crate
@@ -39,16 +40,21 @@ impl Storage {
             .map_err(|e| anyhow::anyhow!("Password hashing failed: {}", e))?;
 
         // Format: $argon2id$v=19$m=65536,t=3,p=4$salt$hash
-        // For now, we'll store the parameters and a dummy hash since we're using this for verification
-        // In a real implementation, we'd hash the password directly
+        // Generate actual password hash using Argon2
         let salt_hex = hex::encode(&params.salt);
+        let password_hash =
+            derive_key(password.as_bytes(), &params).map_err(|e| SecretonError::Cryptographic {
+                message: format!("Failed to derive key: {}", e),
+            })?;
+        let hash_hex = hex::encode(&password_hash.key);
+
         let hash_str = format!(
             "$argon2id$v=19$m={},t={},p={}${}${}",
             params.memory_cost.unwrap(),
             params.iterations,
             params.parallelism.unwrap(),
             salt_hex,
-            "dummy_hash_for_verification" // This would be the actual hash in a real implementation
+            hash_hex
         );
 
         Ok(hash_str)
@@ -88,6 +94,7 @@ impl Storage {
             .map_err(|_| anyhow::anyhow!("Invalid parallelism"))?;
 
         let salt_hex = parts[4];
+        let stored_hash = parts[5];
         let salt = hex::decode(salt_hex).map_err(|_| anyhow::anyhow!("Invalid salt encoding"))?;
 
         // Recreate the parameters
@@ -101,13 +108,12 @@ impl Storage {
         };
 
         // Verify by deriving the key again and checking if it matches
-        // In a real implementation, we'd compare against the stored hash
         let derived = derive_key(password.as_bytes(), &params)
             .map_err(|e| anyhow::anyhow!("Password verification failed: {}", e))?;
 
-        // For now, since we're using dummy hash, just check if derivation succeeds
-        // In production, we'd compare the derived key against the stored hash
-        Ok(derived.key.len() == 32) // Dummy check - in real implementation, compare hashes
+        // Compare the derived key with the stored hash
+        let derived_hex = hex::encode(&derived.key);
+        Ok(derived_hex == stored_hash)
     }
 
     // Note: High-level storage operations (create_user, store_secret, etc.)

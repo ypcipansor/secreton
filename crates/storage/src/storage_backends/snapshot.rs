@@ -63,7 +63,7 @@ pub enum SnapshotType {
     Incremental { base_snapshot_id: String },
 }
 
-/// Snapshot _data containing all Vault state
+/// Snapshot _data containing all Secret state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotData {
     /// Secrets _data

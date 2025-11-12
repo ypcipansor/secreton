@@ -24,3 +24,28 @@ prepared_statement_cache_size = 100
 token_ttl = 3600  # 1 hour in seconds
 refresh_token_ttl = 2592000  # 30 days in seconds
 jwt_secret = "change-this-to-a-secure-random-string"
+
+# OAuth configuration
+[oauth]
+base_url = "https://api.secreton.com"
+
+[oauth.google]
+client_id = "your-google-client-id"
+client_secret = "your-google-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/google/callback"
+
+[oauth.github]
+client_id = "your-github-client-id"
+client_secret = "your-github-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/github/callback"
+
+[oauth.microsoft]
+client_id = "your-microsoft-client-id"
+client_secret = "your-microsoft-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/microsoft/callback"
+
+[oauth.okta]
+tenant = "your-tenant"
+client_id = "your-okta-client-id"
+client_secret = "your-okta-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/okta/callback"

@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use secreton_storage::{
-    EncryptionMetadata, MockStorageBackend, QueryParams, SecurityLevel, StorageBackend,
-    StorageConfig, StorageError, VaultEntry,
+    EncryptionMetadata, MockStorageBackend, QueryParams, SecretEntry, SecurityLevel,
+    StorageBackend, StorageConfig, StorageError,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ mod storage_backend_tests {
         let storage = MockStorageBackend::new();
 
         // Test basic store and retrieve
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/path".to_string(),
             b"test data".to_vec(),
             EncryptionMetadata {
@@ -58,7 +58,7 @@ mod storage_backend_tests {
         let storage = MockStorageBackend::new();
 
         // Create initial entry
-        let mut entry = VaultEntry::new(
+        let mut entry = SecretEntry::new(
             "test/path".to_string(),
             b"initial data".to_vec(),
             EncryptionMetadata {
@@ -94,7 +94,7 @@ mod storage_backend_tests {
         let storage = MockStorageBackend::new();
 
         // Create and store entry
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/delete/path".to_string(),
             b"data to delete".to_vec(),
             EncryptionMetadata {
@@ -124,7 +124,7 @@ mod storage_backend_tests {
         assert!(!exists_after);
 
         // Delete by ID
-        let entry2 = VaultEntry::new(
+        let entry2 = SecretEntry::new(
             "test/delete/id".to_string(),
             b"data to delete by id".to_vec(),
             EncryptionMetadata {
@@ -159,7 +159,7 @@ mod storage_backend_tests {
         ];
 
         for (path, data) in entries {
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 path,
                 data,
                 EncryptionMetadata {
@@ -213,7 +213,7 @@ mod storage_backend_tests {
         assert!(!delete_result);
 
         // Test updating non-existent entry should fail
-        let nonexistent_entry = VaultEntry::new(
+        let nonexistent_entry = SecretEntry::new(
             "nonexistent".to_string(),
             b"data".to_vec(),
             EncryptionMetadata {
@@ -253,7 +253,7 @@ mod storage_backend_tests {
 
         // Add some test data
         for i in 0..5 {
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 format!("test/path/{}", i),
                 vec![42; 100], // 100 bytes each
                 EncryptionMetadata {
@@ -287,7 +287,7 @@ mod storage_backend_tests {
         let mut tx = storage.begin_transaction().await?;
 
         // Mock transaction should not fail operations
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "tx_test".to_string(),
             b"transaction data".to_vec(),
             EncryptionMetadata {
@@ -325,7 +325,7 @@ mod storage_backend_tests {
     async fn test_vault_entry_creation_and_validation() -> Result<()> {
         let owner_id = Uuid::new_v4();
 
-        let entry = VaultEntry::new(
+        let entry = SecretEntry::new(
             "test/entry".to_string(),
             b"test data".to_vec(),
             EncryptionMetadata {
@@ -384,13 +384,13 @@ mod storage_backend_tests {
     async fn test_storage_error_types() -> Result<()> {
         // Test error display and debug formatting
         let error = StorageError::NotFound {
-            resource_type: "VaultEntry".to_string(),
+            resource_type: "SecretEntry".to_string(),
             id: "test-id".to_string(),
         };
 
         let error_msg = format!("{}", error);
         assert!(error_msg.contains("Not found"));
-        assert!(error_msg.contains("VaultEntry"));
+        assert!(error_msg.contains("SecretEntry"));
         assert!(error_msg.contains("test-id"));
 
         Ok(())
@@ -455,7 +455,7 @@ mod storage_integration_tests {
         for i in 0..10 {
             let storage_clone = storage.clone();
             let handle = tokio::spawn(async move {
-                let entry = VaultEntry::new(
+                let entry = SecretEntry::new(
                     format!("concurrent/path/{}", i),
                     format!("data {}", i).as_bytes().to_vec(),
                     EncryptionMetadata {
@@ -494,7 +494,7 @@ mod storage_integration_tests {
         // Benchmark writes
         let write_start = std::time::Instant::now();
         for i in 0..num_operations {
-            let entry = VaultEntry::new(
+            let entry = SecretEntry::new(
                 format!("perf/path/{}", i),
                 vec![42; 1024], // 1KB each
                 EncryptionMetadata {

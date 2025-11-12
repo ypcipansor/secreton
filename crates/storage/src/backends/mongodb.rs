@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use mongodb::{
     Client, Collection, Database,
-    bson::{Document, doc},
+    bson::{Document, doc as bson_doc},
     options::{ClientOptions, FindOptions, UpdateOptions},
 };
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, SecurityLevel, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 
 /// Configuration for MongoDB storage backend
@@ -56,7 +56,7 @@ impl MongoDBTransaction {
 
 #[async_trait]
 impl StorageTransaction for MongoDBTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -66,14 +66,13 @@ impl StorageTransaction for MongoDBTransaction {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(MongoDBOperation::Update(()));
+        self.operations.push(MongoDBOperation::Update(()));
         Ok(())
     }
 
@@ -133,7 +132,7 @@ impl MongoDBStorage {
 
         // Test the connection
         database
-            .run_command(doc! { "ping": 1 })
+            .run_command(bson_doc! { "ping": 1 })
             .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mongodb".to_string(),
@@ -151,7 +150,7 @@ impl MongoDBStorage {
 
 #[async_trait]
 impl StorageBackend for MongoDBStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let data = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to serialize entry: {}", e),
         })?;
@@ -172,7 +171,7 @@ impl StorageBackend for MongoDBStorage {
 
         let tags: Vec<String> = entry.tags.clone();
 
-        let doc = doc! {
+        let doc = bson_doc! {
             "_id": entry.id.to_string(),
             "path": &entry.path,
             "data": data,
@@ -185,8 +184,8 @@ impl StorageBackend for MongoDBStorage {
             "tags": tags,
         };
 
-        let filter = doc! { "_id": entry.id.to_string() };
-        let update = doc! { "$set": doc };
+        let filter = bson_doc! { "_id": entry.id.to_string() };
+        let update = bson_doc! { "$set": doc };
 
         self.collection
             .update_one(filter, update)
@@ -200,8 +199,8 @@ impl StorageBackend for MongoDBStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
-        let filter = doc! { "_id": id.to_string() };
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        let filter = bson_doc! { "_id": id.to_string() };
 
         let result =
             self.collection
@@ -220,7 +219,7 @@ impl StorageBackend for MongoDBStorage {
                 })?
                 .to_string();
 
-            let mut entry: VaultEntry =
+            let mut entry: SecretEntry =
                 serde_json::from_str(&data).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to deserialize entry: {}", e),
                 })?;
@@ -245,8 +244,8 @@ impl StorageBackend for MongoDBStorage {
         }
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
-        let filter = doc! { "path": path };
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+        let filter = bson_doc! { "path": path };
 
         let result =
             self.collection
@@ -265,7 +264,7 @@ impl StorageBackend for MongoDBStorage {
                 })?
                 .to_string();
 
-            let mut entry: VaultEntry =
+            let mut entry: SecretEntry =
                 serde_json::from_str(&data).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to deserialize entry: {}", e),
                 })?;
@@ -292,12 +291,12 @@ impl StorageBackend for MongoDBStorage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         self.store(entry).await
     }
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
-        let filter = doc! { "_id": id.to_string() };
+        let filter = bson_doc! { "_id": id.to_string() };
 
         let result =
             self.collection
@@ -312,7 +311,7 @@ impl StorageBackend for MongoDBStorage {
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        let filter = doc! { "path": path };
+        let filter = bson_doc! { "path": path };
 
         let result =
             self.collection
@@ -326,14 +325,14 @@ impl StorageBackend for MongoDBStorage {
         Ok(result.deleted_count > 0)
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut filter = Document::new();
 
         // Add path prefix filter
         if let Some(prefix) = &params.path_prefix {
             filter.insert(
                 "path",
-                doc! { "$regex": format!("^{}", regex::escape(prefix)) },
+                bson_doc! { "$regex": format!("^{}", regex::escape(prefix)) },
             );
         }
 
@@ -348,7 +347,7 @@ impl StorageBackend for MongoDBStorage {
                 SecurityLevel::Secret => vec!["secret", "top_secret"],
                 SecurityLevel::TopSecret => vec!["top_secret"],
             };
-            filter.insert("security_level", doc! { "$in": level_values });
+            filter.insert("security_level", bson_doc! { "$in": level_values });
         }
 
         // Add owner filter
@@ -358,7 +357,7 @@ impl StorageBackend for MongoDBStorage {
 
         // Add tag filters
         if !params.tags.is_empty() {
-            filter.insert("tags", doc! { "$in": params.tags.clone() });
+            filter.insert("tags", bson_doc! { "$in": params.tags.clone() });
         }
 
         // Add metadata filters
@@ -375,7 +374,7 @@ impl StorageBackend for MongoDBStorage {
             let now = chrono::Utc::now().timestamp_millis();
             filter.insert(
                 "expires_at",
-                doc! { "$or": vec![doc! { "$exists": false }, doc! { "$gt": now }] },
+                bson_doc! { "$or": vec![bson_doc! { "$exists": false }, bson_doc! { "$gt": now }] },
             );
         }
 
@@ -410,7 +409,7 @@ impl StorageBackend for MongoDBStorage {
                 })?
                 .to_string();
 
-            let mut entry: VaultEntry =
+            let mut entry: SecretEntry =
                 serde_json::from_str(&data).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to deserialize entry: {}", e),
                 })?;
@@ -444,7 +443,7 @@ impl StorageBackend for MongoDBStorage {
         if let Some(prefix) = &params.path_prefix {
             filter.insert(
                 "path",
-                doc! { "$regex": format!("^{}", regex::escape(prefix)) },
+                bson_doc! { "$regex": format!("^{}", regex::escape(prefix)) },
             );
         }
 
@@ -458,7 +457,7 @@ impl StorageBackend for MongoDBStorage {
                 SecurityLevel::Secret => vec!["secret", "top_secret"],
                 SecurityLevel::TopSecret => vec!["top_secret"],
             };
-            filter.insert("security_level", doc! { "$in": level_values });
+            filter.insert("security_level", bson_doc! { "$in": level_values });
         }
 
         if let Some(owner_id) = params.owner_id {
@@ -466,7 +465,7 @@ impl StorageBackend for MongoDBStorage {
         }
 
         if !params.tags.is_empty() {
-            filter.insert("tags", doc! { "$in": params.tags.clone() });
+            filter.insert("tags", bson_doc! { "$in": params.tags.clone() });
         }
 
         if !params.metadata_filters.is_empty() {
@@ -481,7 +480,7 @@ impl StorageBackend for MongoDBStorage {
             let now = chrono::Utc::now().timestamp_millis();
             filter.insert(
                 "expires_at",
-                doc! { "$or": vec![doc! { "$exists": false }, doc! { "$gt": now }] },
+                bson_doc! { "$or": vec![bson_doc! { "$exists": false }, bson_doc! { "$gt": now }] },
             );
         }
 
@@ -496,7 +495,7 @@ impl StorageBackend for MongoDBStorage {
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
-        let filter = doc! { "path": path };
+        let filter = bson_doc! { "path": path };
 
         let count = self.collection.count_documents(filter).await.map_err(|e| {
             StorageError::BackendError {
@@ -516,7 +515,7 @@ impl StorageBackend for MongoDBStorage {
         let start = std::time::Instant::now();
 
         // Test connectivity by running a ping command
-        let result = self.database.run_command(doc! { "ping": 1 }).await;
+        let result = self.database.run_command(bson_doc! { "ping": 1 }).await;
 
         let duration = start.elapsed().as_millis() as f64;
 
@@ -560,7 +559,7 @@ impl StorageBackend for MongoDBStorage {
 
         // Get statistics by security level
         let pipeline =
-            vec![doc! { "$group": { "_id": "$security_level", "count": { "$sum": 1 } } }];
+            vec![bson_doc! { "$group": { "_id": "$security_level", "count": { "$sum": 1 } } }];
 
         let mut cursor =
             self.collection
@@ -602,7 +601,7 @@ impl StorageBackend for MongoDBStorage {
         let start_of_day = today.and_hms_opt(0, 0, 0).unwrap();
         let end_of_day = today.and_hms_opt(23, 59, 59).unwrap();
 
-        let filter = doc! {
+        let filter = bson_doc! {
             "created_at": {
                 "$gte": start_of_day.and_utc().timestamp_millis(),
                 "$lte": end_of_day.and_utc().timestamp_millis()
@@ -616,7 +615,7 @@ impl StorageBackend for MongoDBStorage {
         })? as u64;
 
         // Get entries updated today
-        let filter = doc! {
+        let filter = bson_doc! {
             "updated_at": {
                 "$gte": start_of_day.and_utc().timestamp_millis(),
                 "$lte": end_of_day.and_utc().timestamp_millis()
@@ -631,7 +630,7 @@ impl StorageBackend for MongoDBStorage {
 
         // Get expired entries
         let now = chrono::Utc::now().timestamp_millis();
-        let filter = doc! { "expires_at": { "$lte": now } };
+        let filter = bson_doc! { "expires_at": { "$lte": now } };
         expired_entries = self.collection.count_documents(filter).await.map_err(|e| {
             StorageError::BackendError {
                 backend: "mongodb".to_string(),
@@ -641,7 +640,7 @@ impl StorageBackend for MongoDBStorage {
 
         // Calculate average entry size (approximate)
         let pipeline = vec![
-            doc! { "$group": { "_id": null, "avg_size": { "$avg": { "$strLenBytes": "$data" } } } },
+            bson_doc! { "$group": { "_id": null, "avg_size": { "$avg": { "$strLenBytes": "$data" } } } },
         ];
 
         let mut cursor =

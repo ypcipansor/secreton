@@ -321,7 +321,7 @@ impl Default for AuditPolicy {
             include_data: false,
             retention_period: Duration::days(90),
             destinations: vec![AuditDestination::File {
-                path: "/var/log/brankas/transit-audit.log".to_string(),
+                path: "/var/log/secreton/transit-audit.log".to_string(),
             }],
         }
     }

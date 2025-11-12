@@ -37,9 +37,9 @@ pub enum RoleType {
 /// Policy statement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyStatement {
-    pub resource: String,      // e.g., cloud-object-storage
-    pub actions: Vec<String>,  // e.g., read, write, manage
-    pub effect: String,        // Allow or Deny
+    pub resource: String,     // e.g., cloud-object-storage
+    pub actions: Vec<String>, // e.g., read, write, manage
+    pub effect: String,       // Allow or Deny
 }
 
 /// IAM role
@@ -142,7 +142,9 @@ impl IBMCloudEngine {
             .ok_or_else(|| IBMCloudError::IAMError("Role not found".to_string()))?;
 
         // Generate Service ID
-        let service_id = self.create_service_id(&config.account_id, role_name).await?;
+        let service_id = self
+            .create_service_id(&config.account_id, role_name)
+            .await?;
 
         // Generate API key
         let api_key = self.generate_api_key(&service_id.id).await?;
@@ -172,7 +174,7 @@ impl IBMCloudEngine {
         let service_id = ServiceID {
             id: format!("iam-ServiceId-{}", uuid::Uuid::new_v4()),
             name: format!("vault-{}", name),
-            description: format!("Vault-generated service ID for {}", name),
+            description: format!("Secret-generated service ID for {}", name),
             account_id: account_id.to_string(),
             created_at: Utc::now(),
         };

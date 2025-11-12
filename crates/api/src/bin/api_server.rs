@@ -1,15 +1,8 @@
-use axum::serve;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::net::TcpListener;
+use std::env;
 use tracing::info;
 
-// Use proper imports from secreton_api
-use secreton_api::{
-    ApiConfig, ApiState, KVApiState, TransitApiState, create_api_router,
-    performance_optimizer::OptimizationLevel,
-};
-use secreton_crypto::transit::TransitEngine;
+// Use the existing security API from lib.rs
+use secreton_api::start_security_server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,41 +16,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     print_startup_banner();
 
-    info!("Creating transit engine...");
-    // Create transit engine
-    let transit_engine = Arc::new(TransitEngine::new());
+    // Get port from environment or default to 8080
+    let port = env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .expect("PORT must be a valid port number");
 
-    info!("Creating KV engine...");
-    // Create KV engine - using default in-memory storage for now
-    let kv_state = KVApiState::default();
+    info!("Starting Secreton Security API server on port {}", port);
 
-    info!("Creating API state...");
-    // Create API state
-    let api_state = ApiState::new(
-        TransitApiState {
-            engine: transit_engine,
-        },
-        kv_state,
-        OptimizationLevel::Balanced,
-    )
-    .await?;
-
-    info!("Creating router...");
-    // Create router
-    let app = create_api_router(api_state);
-
-    info!("Loading configuration...");
-    // Load configuration
-    let config = ApiConfig::default();
-    let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
-
-    info!("Starting Secreton API server on http://{}", addr);
-    let listener = TcpListener::bind(addr).await?;
-    serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await?;
+    // Use the existing start_security_server function from lib.rs
+    start_security_server(port).await?;
 
     Ok(())
 }

@@ -1,11 +1,11 @@
-use crate::{auth::auth_impl::AuthService, config::Config, AppError};
+use crate::{AppError, auth::auth_impl::AuthService, utils::config::Config};
 use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-    response::Response,
-    routing::get,
     Router,
+    body::Body,
+    http::Request,
+    routing::{get, post},
 };
+use chrono;
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -36,12 +36,16 @@ impl Server {
         self.init_logging()?;
 
         // Create auth service
-        let auth_service = AuthService::new(
-            &self.config.auth.jwt_secret,
-            &self.config.auth.refresh_secret,
-            3600,  // 1 hour
-            86400, // 24 hours
-        );
+        let token_config = secreton_auth::TokenConfig {
+            jwt_secret: self.config.auth.jwt_secret.clone(),
+            jwt_refresh_secret: self.config.auth.refresh_secret.clone(),
+            access_token_duration: chrono::Duration::hours(1),
+            refresh_token_duration: chrono::Duration::days(7),
+            issuer: "secreton".to_string(),
+            audience: "secreton-api".to_string(),
+        };
+        let jwt_token_service = secreton_auth::JwtTokenService::new(token_config.clone());
+        let auth_service = AuthService::new(jwt_token_service, token_config);
 
         // Create application state
         let state = Arc::new(AppState {
@@ -92,10 +96,17 @@ impl Server {
             // Health check endpoint (public)
             .route("/health", get(|| async { "OK" }))
             // Auth routes (public)
-            // .route("/v1/auth/login", post(auth::login))
-            // .route("/v1/auth/refresh", post(auth::refresh_token))
+            .route("/v1/auth/login", post(crate::auth::login))
+            .route("/v1/auth/refresh", post(crate::auth::refresh_token))
             // Protected routes
-            // .route("/v1/auth/logout", post(auth::logout))
+            .route("/v1/auth/logout", post(crate::auth::logout))
+            .route("/v1/auth/me", get(crate::auth::me))
+            .route(
+                "/v1/auth/change-password",
+                post(crate::auth::change_password),
+            )
+            .route("/v1/auth/register", post(crate::auth::register_user))
+            .route("/v1/auth/users", get(crate::auth::list_users))
             // Add more protected routes here
             // Apply auth middleware to protected routes
             // .layer(middleware::from_fn_with_state(

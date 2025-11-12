@@ -26,11 +26,14 @@ async-trait.workspace = true
 # HTTP client for Consul/etcd
 reqwest.workspace = true
 base64.workspace = true
-urlencoding = "2.1"
+urlencoding.workspace = true
 
 # Database - Using postgres crate for better dependency isolation
 postgres.workspace = true
 postgres-types.workspace = true
+
+# MongoDB client
+mongodb.workspace = true
 
 # Database
 tokio-postgres.workspace = true
@@ -45,17 +48,15 @@ aws-config.workspace = true
 aws-smithy-types.workspace = true
 aws-types.workspace = true
 
-# Azure Storage
-azure_storage.workspace = true
-azure_storage_blobs.workspace = true
-azure_core.workspace = true
+# Azure Storage - removed to avoid failure dependency
+# azure_storage.workspace = true
+# azure_storage_blobs.workspace = true
+# azure_core.workspace = true
 
-# Cassandra
-scylla = "1.3.1"
-
-# MongoDB
-mongodb.workspace = true
-regex = "1.10"
+# Async streams
+futures.workspace = true
+tokio-stream.workspace = true
+regex.workspace = true
 
 # Cryptography
 secreton-crypto = { path = "../crypto" }
@@ -75,10 +76,17 @@ toml.workspace = true
 bincode.workspace = true
 ciborium.workspace = true
 
-# Google Cloud Storage Dependencies
-google-cloud-storage.workspace = true
-futures.workspace = true
+# GCP (pure Rust)
+# google-cloud-storage.workspace = true
+
+# Kubernetes (optional)
+kube = { workspace = true, optional = true }
+k8s-openapi = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
+
+[features]
+default = []
+kubernetes = ["kube", "k8s-openapi"]

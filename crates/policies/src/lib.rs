@@ -29,7 +29,8 @@ pub mod model;
 pub mod service;
 
 pub use engine::*;
-pub use error::*;
+pub use error::{PolicyResult, ValidationError, ValidationErrors};
+pub use secreton_errors::SecretonError;
 pub use evaluator::*;
 pub use model::*;
 pub use service::*;

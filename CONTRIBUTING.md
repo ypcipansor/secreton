@@ -1,309 +1,424 @@
 # Contributing to Secreton
 
-Thank you for your interest in contributing to Secreton! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Secreton! This document provides comprehensive guidelines for contributors to ensure a smooth and effective development process.
 
-## 🚀 Quick Start
+## Table of Contents
 
-### Development Environment Setup
+- [Development Setup](#development-setup)
+- [Code Style and Standards](#code-style-and-standards)
+- [Testing Guidelines](#testing-guidelines)
+- [Pull Request Process](#pull-request-process)
+- [Issue Reporting](#issue-reporting)
+- [Security Considerations](#security-considerations)
+- [Architecture Overview](#architecture-overview)
+- [Adding New Features](#adding-new-features)
+- [Documentation](#documentation)
 
-1. **Prerequisites**
+## Development Setup
+
+### Prerequisites
+
+- **Rust**: Latest stable version (minimum 1.90)
+- **PostgreSQL**: For development and testing (recommended)
+- **Git**: For version control
+- **Docker**: Optional, for containerized testing
+
+### Initial Setup
+
+1. **Fork and Clone**
    ```bash
-   # Install Rust 1.90+
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   rustup update
-
-   # Install development tools
-   cargo install cargo-audit cargo-fuzz cargo-miri cargo-tarpaulin
-   ```
-
-2. **Clone and Setup**
-   ```bash
-   git clone https://github.com/analisaperlengkapan/secreton.git
+   git clone https://github.com/your-username/secreton.git
    cd secreton
-
-   # Install pre-commit hooks (if available)
-   # This will run formatting, linting, and tests before commits
    ```
 
-3. **Verify Setup**
+2. **Install Rust Toolchain**
    ```bash
-   cargo check
-   cargo test
-   cargo clippy
+   rustup update stable
+   rustup component add rustfmt clippy
    ```
 
-### Development Workflow
-
-1. **Create a Branch**
+3. **Install Development Tools**
    ```bash
-   git checkout -b feature/your-feature-name
-   # or
-   git checkout -b fix/issue-number-description
+   cargo install cargo-watch cargo-tarpaulin cargo-audit
    ```
 
-2. **Make Changes**
-   - Follow the existing code style
-   - Add tests for new functionality
-   - Update documentation as needed
-   - Run checks frequently: `cargo check && cargo test`
-
-3. **Commit Changes**
+4. **Setup Development Database**
    ```bash
-   git add .
-   git commit -m "feat: add new feature description"
-   # Follow conventional commit format
+   # Using Docker for PostgreSQL
+   docker run --name secreton-dev-db -e POSTGRES_PASSWORD=dev_password -e POSTGRES_USER=secreton_user -e POSTGRES_DB=secreton_db -p 5432:5432 -d postgres:15
    ```
 
-4. **Create Pull Request**
-   - Push your branch
-   - Create PR with clear description
-   - Link to any relevant issues
+5. **Environment Configuration**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your development settings
+   ```
 
-## 📋 Development Guidelines
+### Building the Project
 
-### Code Style
+```bash
+# Build all workspace members
+cargo build --workspace
 
-- Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- Use `rustfmt` for formatting: `cargo fmt`
-- Follow `clippy` linting recommendations: `cargo clippy`
-- Use meaningful variable and function names
-- Add documentation comments for public APIs
+# Build with all features
+cargo build --workspace --all-features
 
-### Testing
+# Build release version
+cargo build --workspace --release
+```
 
-- **Unit Tests**: Required for all new code
-- **Integration Tests**: For API changes
-- **Fuzz Tests**: For cryptographic and parsing code
-- **Performance Tests**: For performance-critical code
+### Running Tests
 
 ```bash
 # Run all tests
-cargo test
+cargo test --workspace --all-features
 
-# Run specific tests
-cargo test test_name
+# Run tests with coverage
+cargo tarpaulin --workspace --all-features --out Lcov
 
-# Run with coverage
-cargo tarpaulin --out Html
-
-# Run fuzzing
-cargo fuzz run target_name
+# Run specific crate tests
+cargo test -p secreton-core
+cargo test -p secreton-api
 ```
 
-### Security
+## Code Style and Standards
 
-- **Cryptography**: Only use audited libraries (RustCrypto preferred)
-- **Memory Safety**: Zeroize sensitive data
-- **Input Validation**: Validate all inputs
-- **Audit Logging**: Log security-relevant events
+### Formatting
 
-### Documentation
+All code must be formatted with `rustfmt`:
 
-- **API Docs**: Document all public functions/structs
-- **Code Comments**: Explain complex logic
-- **Examples**: Provide usage examples
-- **Changelogs**: Update CHANGELOG.md for user-facing changes
-
-## 🏗️ Architecture Overview
-
-### Project Structure
-
-```
-crates/
-├── common/          # Shared types and utilities
-├── errors/          # Error types and handling
-├── config/          # Configuration management
-├── core/            # Core vault functionality
-├── crypto/          # Cryptographic operations
-├── storage/         # Storage backend implementations
-├── replication/     # Data replication
-├── api/             # REST API server
-├── cli/             # Command-line interface
-├── security/        # Audit logging and security
-├── integrations/    # Third-party integrations
-├── infrastructure/  # Infrastructure components
-├── enterprise/      # Enterprise features
-├── secrets/         # Secret engine implementations
-├── auth/            # Authentication framework
-├── auth-methods/    # Authentication method implementations
-├── policies/        # Policy engine
-└── ui/              # Web interface (minimal)
+```bash
+cargo fmt --all
 ```
 
-### Key Components
+### Linting
 
-- **Storage Backends**: Pluggable storage with transaction support
-- **Secret Engines**: Modular secret management engines
-- **Auth Methods**: Pluggable authentication mechanisms
-- **Policy Engine**: Attribute-based access control
-- **Audit System**: Comprehensive security event logging
+We use `clippy` for linting. All warnings must be addressed:
 
-## 🔧 Development Tasks
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
 
-### High Priority
+### Code Quality Standards
 
-1. **Complete Authentication API**
-   - Implement login/logout endpoints
-   - Add token refresh functionality
-   - Complete MFA implementation
+- **Memory Safety**: All code must be memory-safe and use Rust's ownership system properly
+- **Error Handling**: Use the `secreton-errors` crate for consistent error handling
+- **Logging**: Use structured logging with `tracing` crate
+- **Async/Await**: Use async/await for all I/O operations
+- **Security**: Follow security best practices, use constant-time operations for crypto
 
-2. **Replace Mock Implementations**
-   - OCI backend: Real Oracle Cloud integration
-   - AWS backend: Real AWS credential generation
-   - Other cloud backends
+### Naming Conventions
 
-3. **Clean Up Technical Debt**
-   - Remove unused imports
-   - Fix dead code warnings
-   - Complete TODO implementations
+- **Crates**: `secreton-{module}` (e.g., `secreton-core`, `secreton-api`)
+- **Modules**: `snake_case`
+- **Types**: `PascalCase`
+- **Functions**: `snake_case`
+- **Constants**: `SCREAMING_SNAKE_CASE`
 
-### Medium Priority
-
-4. **Performance Optimization**
-   - Connection pooling improvements
-   - Caching layer implementation
-   - Async operation optimizations
-
-5. **Additional Secret Engines**
-   - Azure credentials
-   - GCP credentials
-   - Kubernetes secrets
-
-### Low Priority
-
-6. **Web UI Development**
-   - Modern React/Vue interface
-   - Administrative dashboard
-   - User self-service portal
-
-## 🧪 Testing Strategy
-
-### Test Categories
-
-- **Unit Tests**: Individual function/component testing
-- **Integration Tests**: End-to-end API testing
-- **Performance Tests**: Benchmarking and load testing
-- **Security Tests**: Fuzzing and vulnerability testing
-- **Compatibility Tests**: Multi-platform testing
+## Testing Guidelines
 
 ### Test Organization
 
-```
-tests/
-├── unit/            # Unit tests by crate
-├── integration/     # Integration tests
-├── performance/     # Performance benchmarks
-├── security/        # Security-focused tests
-└── common/          # Shared test utilities
+- **Unit Tests**: In the same module as the code being tested
+- **Integration Tests**: In the `tests/` directory
+- **Performance Tests**: In `tests/performance/`
+- **Security Tests**: In `tests/security/`
+
+### Test Requirements
+
+1. **Coverage**: All new code must have adequate test coverage
+2. **Async Tests**: Use `#[tokio::test]` for async functions
+3. **Mock Dependencies**: Use mock implementations for external dependencies
+4. **Property-Based Testing**: Use `proptest` for complex logic
+
+### Example Test Structure
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_test;
+    
+    #[tokio::test]
+    async fn test_feature_functionality() {
+        // Arrange
+        let setup = create_test_setup().await;
+        
+        // Act
+        let result = setup.test_function().await;
+        
+        // Assert
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_error_conditions() {
+        // Test error scenarios
+    }
+}
 ```
 
-### Fuzzing
+## Pull Request Process
 
-Extensive fuzzing targets are available:
+### Before Submitting
+
+1. **Create Feature Branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Ensure All Tests Pass**
+   ```bash
+   cargo test --workspace --all-features
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
+   cargo fmt --all -- --check
+   ```
+
+3. **Update Documentation**
+   - Update relevant documentation
+   - Add API documentation for new endpoints
+   - Update README if needed
+
+4. **Commit Changes**
+   ```bash
+   git add .
+   git commit -m "feat: add new feature description"
+   ```
+
+### Pull Request Requirements
+
+- **Descriptive Title**: Use conventional commit format
+- **Detailed Description**: Explain what the PR does and why
+- **Test Coverage**: Include tests for new functionality
+- **Documentation**: Update relevant documentation
+- **Breaking Changes**: Clearly document any breaking changes
+
+### Conventional Commit Format
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+Types:
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, etc.)
+- `refactor`: Code refactoring
+- `test`: Adding or updating tests
+- `chore`: Maintenance tasks
+
+## Issue Reporting
+
+### Bug Reports
+
+When reporting bugs, include:
+
+1. **Environment**: OS, Rust version, PostgreSQL version
+2. **Reproduction Steps**: Clear steps to reproduce the issue
+3. **Expected Behavior**: What you expected to happen
+4. **Actual Behavior**: What actually happened
+5. **Logs**: Relevant log output
+6. **Stack Trace**: If available
+
+### Feature Requests
+
+For feature requests:
+
+1. **Use Case**: Describe the problem you're trying to solve
+2. **Proposed Solution**: How you envision the feature working
+3. **Alternatives**: Other approaches you've considered
+4. **Impact**: Who would benefit from this feature
+
+## Security Considerations
+
+### Secure Coding Practices
+
+1. **Input Validation**: Always validate and sanitize inputs
+2. **Cryptography**: Use audited crypto libraries (RustCrypto suite)
+3. **Secrets**: Never log sensitive information
+4. **Memory**: Use `zeroize` for sensitive data in memory
+5. **Dependencies**: Regularly audit dependencies with `cargo audit`
+
+### Security Testing
+
+- **Fuzzing**: Use cargo-fuzz for critical components
+- **Security Scans**: Run security scans in CI/CD
+- **Penetration Testing**: Regular security assessments
+
+### Reporting Security Issues
+
+For security vulnerabilities, please email: security@secreton.com
+
+Do not open public issues for security vulnerabilities.
+
+## Architecture Overview
+
+### Workspace Structure
+
+```
+secreton/
+├── crates/
+│   ├── common/          # Shared utilities
+│   ├── errors/          # Error handling
+│   ├── config/          # Configuration management
+│   ├── core/            # Core business logic
+│   ├── auth/            # Authentication methods
+│   ├── secrets/         # Secret engines
+│   ├── crypto/          # Cryptographic operations
+│   ├── storage/         # Storage backends
+│   ├── api/             # HTTP API server
+│   ├── cli/             # Command-line interface
+│   ├── agent/           # Sidecar agent
+│   ├── monitoring/      # Metrics and monitoring
+│   └── security/        # Security features
+├── tests/               # Integration tests
+├── config/              # Configuration files
+└── docs/                # Documentation
+```
+
+### Design Principles
+
+- **Domain-Driven Design**: Clear domain boundaries
+- **Zero-Trust Architecture**: Security by default
+- **Modular Design**: Loosely coupled, highly cohesive modules
+- **Async-First**: Non-blocking operations throughout
+- **Memory Safety**: Leverage Rust's ownership system
+
+## Adding New Features
+
+### 1. Planning
+
+- Create an issue for discussion
+- Get feedback from maintainers
+- Plan the implementation approach
+
+### 2. Implementation
+
+- Follow existing patterns and conventions
+- Add comprehensive tests
+- Update documentation
+- Consider backward compatibility
+
+### 3. Adding New Authentication Methods
+
+```rust
+// In secreton-auth crate
+pub mod your_auth_method {
+    use super::*;
+    
+    pub struct YourAuthMethod {
+        // Configuration and state
+    }
+    
+    #[async_trait]
+    impl AuthMethod for YourAuthMethod {
+        async fn authenticate(&self, request: AuthRequest) -> AuthResult {
+            // Implementation
+        }
+    }
+}
+```
+
+### 4. Adding New Secret Engines
+
+```rust
+// In secreton-secrets crate
+pub mod your_engine {
+    use super::*;
+    
+    pub struct YourEngine {
+        // Engine state
+    }
+    
+    #[async_trait]
+    impl SecretEngine for YourEngine {
+        async fn store_secret(&self, path: &str, data: SecretData) -> Result<()> {
+            // Implementation
+        }
+    }
+}
+```
+
+## Documentation
+
+### Code Documentation
+
+- Use `///` for public API documentation
+- Include examples for complex functions
+- Document error conditions
+- Use `#[doc(hidden)]` for internal APIs
+
+### API Documentation
+
+- Document all REST endpoints
+- Include request/response examples
+- Document authentication requirements
+- Provide curl examples
+
+### README Updates
+
+When adding significant features:
+
+1. Update the features list
+2. Add usage examples
+3. Update installation instructions
+4. Add configuration examples
+
+## Development Workflow
+
+### Daily Development
 
 ```bash
-# List all fuzz targets
-cargo fuzz list
+# Watch for changes and run tests
+cargo watch -x test
 
-# Run specific fuzz target
-cargo fuzz run crypto_operations -- -max_len=1000
+# Run specific tests
+cargo test -p secreton-core -- auth::tests
 
-# Run with crash minimization
-cargo fuzz run --release api_endpoints
+# Check for security vulnerabilities
+cargo audit
+
+# Format code
+cargo fmt
+
+# Run linter
+cargo clippy
 ```
 
-## 🔒 Security Considerations
+### Performance Testing
 
-### Cryptographic Code
-- Use only audited cryptographic libraries
-- Implement proper key management
-- Zeroize sensitive data from memory
-- Follow cryptographic best practices
+```bash
+# Run benchmarks
+cargo bench
 
-### Input Validation
-- Validate all user inputs
-- Use safe parsing libraries
-- Implement rate limiting
-- Log suspicious activities
+# Profile performance
+cargo build --release
+perf record ./target/release/secreton-api
+```
 
-### Access Control
-- Implement principle of least privilege
-- Use secure defaults
-- Regular security audits
-- Prompt security updates
+### Memory Safety
 
-## 📝 Pull Request Process
+```bash
+# Run with sanitizers (nightly Rust)
+RUSTFLAGS="-Z sanitizer=address" cargo +nightly run
+```
 
-1. **Fork** the repository
-2. **Create** a feature branch
-3. **Make** your changes with tests
-4. **Run** all checks: `cargo check && cargo test && cargo clippy`
-5. **Update** documentation if needed
-6. **Commit** with conventional commit messages
-7. **Push** to your fork
-8. **Create** a Pull Request
+## Getting Help
 
-### PR Requirements
+- **Discord**: Join our development community
+- **GitHub Issues**: For bugs and feature requests
+- **Documentation**: Check the `/docs` directory
+- **Examples**: Look at existing implementations
 
-- [ ] Tests pass: `cargo test`
-- [ ] Code formatted: `cargo fmt`
-- [ ] Linting passes: `cargo clippy`
-- [ ] Security audit: `cargo audit`
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated (if user-facing)
-- [ ] Conventional commit messages
+## License
 
-### PR Review Process
-
-1. Automated checks run
-2. Code review by maintainers
-3. Security review for crypto changes
-4. Merge when approved
-
-## 📚 Resources
-
-### Documentation
-- [Rust Book](https://doc.rust-lang.org/book/)
-- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- [Tokio Documentation](https://tokio.rs/docs/)
-- [RustCrypto Libraries](https://github.com/RustCrypto)
-
-### Security
-- [Rust Security Advisories](https://rustsec.org/)
-- [Cryptographic Right Answers](https://www.latacora.com/blog/2018/04/03/cryptographic-right-answers/)
-- [OWASP Guidelines](https://owasp.org/www-project-top-ten/)
-
-### Tools
-- [cargo-audit](https://github.com/RustSec/cargo-audit) - Security vulnerability scanner
-- [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) - Fuzz testing
-- [cargo-miri](https://github.com/rust-lang/miri) - Interpreter for Rust's mid-level IR
-
-## 🤝 Code of Conduct
-
-This project follows a code of conduct to ensure a welcoming environment for all contributors.
-
-### Expected Behavior
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help newcomers learn
-- Maintain professional communication
-
-### Unacceptable Behavior
-- Harassment or discrimination
-- Personal attacks
-- Disruptive behavior
-- Violation of privacy
-
-## 📞 Getting Help
-
-- **Issues**: [GitHub Issues](https://github.com/analisaperlengkapan/secreton/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/analisaperlengkapan/secreton/discussions)
-- **Documentation**: Check the `docs/` directory
-
-## 🙏 Recognition
-
-Contributors are recognized in CHANGELOG.md and release notes. Significant contributions may be acknowledged in the main README.
+By contributing to Secreton, you agree that your contributions will be licensed under the Apache-2.0 license.
 
 ---
 
-Thank you for contributing to Secreton! Your efforts help make secrets management more secure and reliable.
+Thank you for contributing to Secreton! Your contributions help make enterprise-grade security accessible to everyone.

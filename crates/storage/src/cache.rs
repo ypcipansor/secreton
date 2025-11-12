@@ -1,6 +1,6 @@
 //! Cache abstraction for storage layer
 
-use crate::{StorageResult, VaultEntry};
+use crate::{SecretEntry, StorageResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -285,7 +285,7 @@ where
     S: crate::StorageBackend,
     C: CacheBackend,
 {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let result = self.storage.store(entry).await;
 
         if result.is_ok() {
@@ -312,12 +312,12 @@ where
         result
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let cache_key = Self::cache_key_for_id(id);
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok(entry) = bincode::deserialize::<VaultEntry>(&cached_data) {
+            if let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
                 return Ok(Some(entry));
             }
         }
@@ -338,12 +338,12 @@ where
         Ok(entry)
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let cache_key = Self::cache_key_for_path(path);
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok(entry) = bincode::deserialize::<VaultEntry>(&cached_data) {
+            if let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
                 return Ok(Some(entry));
             }
         }
@@ -364,7 +364,7 @@ where
         Ok(entry)
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         let result = self.storage.update(entry).await;
 
         if result.is_ok() {
@@ -431,7 +431,7 @@ where
 
     // For operations that return multiple entries, we don't cache them as they can be large
     // and the cache keys would be complex to manage
-    async fn list(&self, params: &crate::QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &crate::QueryParams) -> StorageResult<Vec<SecretEntry>> {
         self.storage.list(params).await
     }
 

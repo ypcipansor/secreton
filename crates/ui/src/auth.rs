@@ -11,13 +11,46 @@
 use chrono::{DateTime, Duration, Utc};
 use secreton_crypto::hashing::password::{hash_password_argon2, verify_password_argon2};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-// Re-export core User - use top-level re-export
-pub use secreton_auth_methods::model::User;
+/// User entity for UI authentication
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: Uuid,
+    pub username: String,
+    pub password_hash: String,
+    pub email: String,
+    pub full_name: Option<String>,
+    pub is_active: bool,
+    pub is_superuser: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_login: Option<DateTime<Utc>>,
+    pub mfa_enabled: bool,
+    pub roles: HashSet<String>,
+    pub namespace: String,
+    pub is_locked: bool,
+    pub failed_attempts: u32,
+    pub locked_until: Option<DateTime<Utc>>,
+}
+
+impl User {
+    /// Check if the user account is currently locked
+    pub fn is_currently_locked(&self) -> bool {
+        if !self.is_locked {
+            return false;
+        }
+
+        if let Some(locked_until) = self.locked_until {
+            Utc::now() < locked_until
+        } else {
+            true // Permanently locked
+        }
+    }
+}
 
 /// Authentication error types
 #[derive(Debug, Clone)]
@@ -368,6 +401,12 @@ impl SessionService {
     pub async fn get_user(&self, username: &str) -> Option<User> {
         let users = self.users.read().await;
         users.get(username).cloned()
+    }
+
+    /// List all users
+    pub async fn list_users(&self) -> Vec<User> {
+        let users = self.users.read().await;
+        users.values().cloned().collect()
     }
 
     /// Change password

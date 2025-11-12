@@ -9,21 +9,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::storage::secret::SecretStorage;
+use crate::{Result, SecretonError};
 
 /// Supported external secret management systems
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ExternalSystem {
     /// AWS Secrets Manager
     AwsSecretsManager,
-    /// Azure Key Vault
-    AzureKeyVault,
+    /// Azure Key Secret
+    AzureKeySecret,
     /// Google Cloud Secret Manager
     GcpSecretManager,
-    /// HashiCorp Vault
-    HashiCorpVault,
+    /// HashiCorp Secret
+    HashiCorpSecret,
     /// Generic REST API
     GenericRest,
 }
@@ -185,30 +185,49 @@ pub struct SyncResult {
 #[async_trait]
 pub trait ExternalSystemClient: Send + Sync {
     /// Test connection to the external system
-    async fn test_connection(&self) -> Result<bool>;
+    async fn test_connection(&self) -> std::result::Result<bool, SyncError>;
 
     /// Create a secret in the external system
-    async fn create_secret(&self, path: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<String>;
+    async fn create_secret(
+        &self,
+        path: &str,
+        data: &[u8],
+        metadata: &HashMap<String, String>,
+    ) -> std::result::Result<String, SyncError>;
 
     /// Read a secret from the external system
-    async fn read_secret(&self, external_id: &str) -> Result<(Vec<u8>, HashMap<String, String>)>;
+    async fn read_secret(
+        &self,
+        external_id: &str,
+    ) -> std::result::Result<(Vec<u8>, HashMap<String, String>), SyncError>;
 
     /// Update a secret in the external system
-    async fn update_secret(&self, external_id: &str, data: &[u8], metadata: &HashMap<String, String>) -> Result<()>;
+    async fn update_secret(
+        &self,
+        external_id: &str,
+        data: &[u8],
+        metadata: &HashMap<String, String>,
+    ) -> std::result::Result<(), SyncError>;
 
     /// Delete a secret from the external system
-    async fn delete_secret(&self, external_id: &str) -> Result<()>;
+    async fn delete_secret(&self, external_id: &str) -> std::result::Result<(), SyncError>;
 
     /// List secrets in the external system
-    async fn list_secrets(&self, path_prefix: Option<&str>) -> Result<Vec<String>>;
+    async fn list_secrets(
+        &self,
+        path_prefix: Option<&str>,
+    ) -> std::result::Result<Vec<String>, SyncError>;
 
     /// Get secret metadata
-    async fn get_secret_metadata(&self, external_id: &str) -> Result<HashMap<String, String>>;
+    async fn get_secret_metadata(
+        &self,
+        external_id: &str,
+    ) -> std::result::Result<HashMap<String, String>, SyncError>;
 }
 
 /// Secrets sync manager
 pub struct SecretsSyncManager {
-    clients: RwLock<HashMap<String, Box<dyn ExternalSystemClient>>>,
+    clients: RwLock<HashMap<String, Arc<dyn ExternalSystemClient>>>,
     sync_configs: RwLock<HashMap<String, SyncConfig>>,
     sync_status: RwLock<HashMap<String, SyncStatus>>,
     retry_manager: Arc<RetryManager>,
@@ -241,7 +260,11 @@ impl SecretsSyncManager {
     }
 
     /// Register an external system client
-    pub async fn register_client(&self, system_id: String, client: Box<dyn ExternalSystemClient>) -> Result<()> {
+    pub async fn register_client(
+        &self,
+        system_id: String,
+        client: Arc<dyn ExternalSystemClient>,
+    ) -> Result<()> {
         // Test the connection
         if !client.test_connection().await? {
             return Err(SecretonError::ServiceUnavailable {
@@ -260,27 +283,36 @@ impl SecretsSyncManager {
     }
 
     /// Sync a specific secret
-    pub async fn sync_secret(&self, secreton_path: &str, operation: SyncOperation) -> Result<SyncResult> {
+    pub async fn sync_secret(
+        &self,
+        secreton_path: &str,
+        operation: SyncOperation,
+    ) -> Result<SyncResult> {
         // Find applicable sync configuration
         let config = self.find_sync_config(secreton_path).await?;
 
         // Get the appropriate client
         let client = self.get_client(&config.system).await?;
 
-        // Perform the sync operation with retry logic
-        let result = self.retry_manager.execute_with_retry(|| async {
-            self.perform_sync_operation(&*client, secreton_path, &operation, &config).await
-        }).await?;
+        // Perform the sync operation
+        let client = client.clone();
+        let secreton_path_for_update = secreton_path.to_string();
+        let operation = operation.clone();
+        let config = config.clone();
+        let result = self
+            .perform_sync_operation(&*client, &secreton_path_for_update, &operation, &config)
+            .await?;
 
         // Update sync status
-        self.update_sync_status(secreton_path, &result).await?;
+        self.update_sync_status(&secreton_path_for_update, &result)
+            .await?;
 
         Ok(result)
     }
 
     /// Sync all secrets matching a pattern
-    pub async fn sync_by_pattern(&self, pattern: &str) -> Result<Vec<SyncResult>> {
-        let mut results = Vec::new();
+    pub async fn sync_by_pattern(&self, _pattern: &str) -> Result<Vec<SyncResult>> {
+        let results = Vec::new();
 
         // This would typically query the storage backend for matching secrets
         // For now, we'll return an empty list as this is a demonstration
@@ -299,7 +331,9 @@ impl SecretsSyncManager {
 
     /// List all sync configurations
     pub async fn list_sync_configs(&self) -> Vec<(String, SyncConfig)> {
-        self.sync_configs.read().await
+        self.sync_configs
+            .read()
+            .await
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
@@ -320,15 +354,16 @@ impl SecretsSyncManager {
     /// Check if a path matches a pattern
     fn path_matches_pattern(&self, path: &str, pattern: &str) -> bool {
         // Simple pattern matching - in a real implementation, this would use glob patterns
-        path.starts_with(pattern.trim_end_matches('*')) ||
-        pattern == "*" ||
-        path == pattern
+        path.starts_with(pattern.trim_end_matches('*')) || pattern == "*" || path == pattern
     }
 
     /// Get client for an external system
     async fn get_client(&self, system: &ExternalSystem) -> Result<Arc<dyn ExternalSystemClient>> {
         let system_id = format!("{:?}", system);
-        self.clients.read().await.get(&system_id)
+        self.clients
+            .read()
+            .await
+            .get(&system_id)
             .cloned()
             .ok_or_else(|| SecretonError::Configuration {
                 message: format!("No client registered for system: {:?}", system),
@@ -341,12 +376,15 @@ impl SecretsSyncManager {
         client: &dyn ExternalSystemClient,
         secreton_path: &str,
         operation: &SyncOperation,
-        config: &SyncConfig,
+        _config: &SyncConfig,
     ) -> Result<SyncResult> {
         match operation {
             SyncOperation::Create => {
                 // Read the secret from Secreton storage
-                let (secret_data, _version) = self.storage.get_latest_secret(secreton_path).await?
+                let (secret_data, _version) = self
+                    .storage
+                    .get_latest_secret(secreton_path)
+                    .await?
                     .ok_or_else(|| SecretonError::NotFound {
                         resource: format!("secret {}", secreton_path),
                     })?;
@@ -355,7 +393,9 @@ impl SecretsSyncManager {
                 let data = serde_json::to_vec(&secret_data)?;
                 let metadata = HashMap::new();
 
-                let external_id = client.create_secret(secreton_path, &data, &metadata).await?;
+                let external_id = client
+                    .create_secret(secreton_path, &data, &metadata)
+                    .await?;
                 Ok(SyncResult {
                     operation: SyncOperation::Create,
                     success: true,
@@ -366,10 +406,11 @@ impl SecretsSyncManager {
             }
             SyncOperation::Update => {
                 // Get the external ID from sync status
-                let status = self.get_sync_status(secreton_path).await
-                    .ok_or_else(|| SecretonError::NotFound {
+                let status = self.get_sync_status(secreton_path).await.ok_or_else(|| {
+                    SecretonError::NotFound {
                         resource: format!("sync status for {}", secreton_path),
-                    })?;
+                    }
+                })?;
 
                 if status.status == SyncStatusType::Deleted {
                     return Err(SecretonError::NotFound {
@@ -378,7 +419,10 @@ impl SecretsSyncManager {
                 }
 
                 // Read the updated secret from Secreton storage
-                let (secret_data, _version) = self.storage.get_latest_secret(secreton_path).await?
+                let (secret_data, _version) = self
+                    .storage
+                    .get_latest_secret(secreton_path)
+                    .await?
                     .ok_or_else(|| SecretonError::NotFound {
                         resource: format!("secret {}", secreton_path),
                     })?;
@@ -387,7 +431,9 @@ impl SecretsSyncManager {
                 let data = serde_json::to_vec(&secret_data)?;
                 let metadata = HashMap::new();
 
-                client.update_secret(&status.external_id, &data, &metadata).await?;
+                client
+                    .update_secret(&status.external_id, &data, &metadata)
+                    .await?;
                 Ok(SyncResult {
                     operation: SyncOperation::Update,
                     success: true,
@@ -397,10 +443,11 @@ impl SecretsSyncManager {
                 })
             }
             SyncOperation::Delete => {
-                let status = self.get_sync_status(secreton_path).await
-                    .ok_or_else(|| SecretonError::NotFound {
+                let status = self.get_sync_status(secreton_path).await.ok_or_else(|| {
+                    SecretonError::NotFound {
                         resource: format!("sync status for {}", secreton_path),
-                    })?;
+                    }
+                })?;
 
                 client.delete_secret(&status.external_id).await?;
                 Ok(SyncResult {
@@ -456,9 +503,9 @@ impl RetryManager {
         Self { config }
     }
 
-    pub async fn execute_with_retry<F, T, E>(&self, mut operation: F) -> Result<T, E>
+    pub async fn execute_with_retry<F, T, E>(&self, mut operation: F) -> std::result::Result<T, E>
     where
-        F: FnMut() -> BoxFuture<Result<T, E>>,
+        F: FnMut() -> BoxFuture<std::result::Result<T, E>>,
         E: std::fmt::Display,
     {
         let mut delay = self.config.initial_delay;

@@ -25,18 +25,18 @@ pub type Result<T> = std::result::Result<T, TerraformCloudError>;
 /// Token type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TokenType {
-    User,        // User token
-    Team,        // Team token
+    User,         // User token
+    Team,         // Team token
     Organization, // Organization token
 }
 
 /// Terraform Cloud configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerraformCloudConfig {
-    pub address: String,             // TFC/TFE address (e.g., app.terraform.io)
-    pub token: String,               // Admin token for API access
-    pub organization: String,        // Default organization
-    pub base_url: String,            // Base API URL
+    pub address: String,      // TFC/TFE address (e.g., app.terraform.io)
+    pub token: String,        // Admin token for API access
+    pub organization: String, // Default organization
+    pub base_url: String,     // Base API URL
 }
 
 /// Run permissions
@@ -76,17 +76,17 @@ pub struct TFRole {
     pub name: String,
     pub organization: String,
     pub token_type: TokenType,
-    pub team_id: Option<String>,     // For team tokens
-    pub user_id: Option<String>,     // For user tokens
+    pub team_id: Option<String>, // For team tokens
+    pub user_id: Option<String>, // For user tokens
     pub workspace_access: Vec<WorkspaceAccess>,
-    pub ttl: Duration,               // Token TTL
+    pub ttl: Duration, // Token TTL
 }
 
 /// Generated Terraform Cloud token
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TFToken {
-    pub token: String,               // Token value (tf-XXXX format)
-    pub token_id: String,            // Token ID
+    pub token: String,    // Token value (tf-XXXX format)
+    pub token_id: String, // Token ID
     pub token_type: TokenType,
     pub organization: String,
     pub team_id: Option<String>,
@@ -209,7 +209,7 @@ impl TerraformCloudEngine {
             organization: role.organization.clone(),
             team_id: role.team_id.clone(),
             user_id: role.user_id.clone(),
-            description: format!("Vault generated token for role: {}", role_name),
+            description: format!("Secret generated token for role: {}", role_name),
             created_at: Utc::now(),
             expires_at: Utc::now() + role.ttl,
         };
@@ -478,10 +478,7 @@ mod tests {
 
         engine.create_role(role).await.unwrap();
 
-        let token = engine
-            .generate_credentials("workspace-role")
-            .await
-            .unwrap();
+        let token = engine.generate_credentials("workspace-role").await.unwrap();
 
         assert_eq!(token.organization, "my-org");
         assert!(token.description.contains("workspace-role"));

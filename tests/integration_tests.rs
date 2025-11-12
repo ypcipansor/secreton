@@ -4,19 +4,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
-use secreton_api::services::vault::{VaultService, KeyInfo, EncryptedData};
-use brankas_storage::MockStorageBackend;
-use brankas_crypto::CryptoService;
-use brankas_core::audit::AuditLogger;
-use brankas_crypto::SecurityParams;
+use secreton_api::services::vault::{SecretService, KeyInfo, EncryptedData};
+use secreton_storage::MockStorageBackend;
+use secreton_crypto::CryptoService;
+use secreton_core::audit::AuditLogger;
+use secreton_crypto::SecurityParams;
 
 // Helper function to create a test vault service
-async fn create_test_vault_service() -> Result<VaultService, Box<dyn std::error::Error>> {
+async fn create_test_vault_service() -> Result<SecretService, Box<dyn std::error::Error>> {
     let storage = Arc::new(MockStorageBackend::new());
     let crypto = Arc::new(CryptoService::new(SecurityParams::default())?);
     let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
 
-    Ok(VaultService::new(storage, crypto, audit).await?)
+    Ok(SecretService::new(storage, crypto, audit).await?)
 }
             common_criteria_compliant: Some(true),
         })

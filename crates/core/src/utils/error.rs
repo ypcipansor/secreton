@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -75,21 +75,21 @@ impl From<std::io::Error> for AppError {
     }
 }
 
-// Add implementation for the secrets_impl module path
-impl From<crate::secrets::secrets_impl::engine::SecretsError> for AppError {
-    fn from(err: crate::secrets::secrets_impl::engine::SecretsError) -> Self {
-        match err {
-            crate::secrets::secrets_impl::engine::SecretsError::NotFound(_) => AppError::NotFound,
-            crate::secrets::secrets_impl::engine::SecretsError::PermissionDenied(_) => {
-                AppError::Forbidden(err.to_string())
-            }
-            crate::secrets::secrets_impl::engine::SecretsError::InvalidData(msg) => {
-                AppError::BadRequest(msg)
-            }
-            crate::secrets::secrets_impl::engine::SecretsError::InvalidConfiguration(msg) => {
-                AppError::BadRequest(msg)
-            }
-            _ => AppError::InternalError(err.to_string()),
-        }
-    }
-}
+// TODO: Add implementation for the secrets_impl module when it's available
+// impl From<crate::secrets::secrets_impl::engine::SecretsError> for AppError {
+//     fn from(err: crate::secrets::secrets_impl::engine::SecretsError) -> Self {
+//         match err {
+//             crate::secrets::secrets_impl::engine::SecretsError::NotFound(_) => AppError::NotFound,
+//             crate::secrets::secrets_impl::engine::SecretsError::PermissionDenied(_) => {
+//                 AppError::Forbidden(err.to_string())
+//             }
+//             crate::secrets::secrets_impl::engine::SecretsError::InvalidData(msg) => {
+//                 AppError::BadRequest(msg)
+//             }
+//             crate::secrets::secrets_impl::engine::SecretsError::InvalidConfiguration(msg) => {
+//                 AppError::BadRequest(msg)
+//             }
+//             _ => AppError::InternalError(err.to_string()),
+//         }
+//     }
+// }

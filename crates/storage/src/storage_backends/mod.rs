@@ -2,6 +2,7 @@ pub mod auto_unseal;
 pub mod database_connection_strings;
 pub mod database_rotation;
 pub mod integrated_storage;
+#[cfg(feature = "kubernetes")]
 pub mod kubernetes_operator;
 pub mod lease;
 pub mod performance_standby;
@@ -10,7 +11,5 @@ pub mod secret_dependency_graph;
 pub mod secret_lifecycle_management;
 pub mod secret_migration;
 pub mod secret_scanning;
-pub mod secret_usage_analytics;
 pub mod secret_versioning;
-pub mod secrets;
 pub mod snapshot;

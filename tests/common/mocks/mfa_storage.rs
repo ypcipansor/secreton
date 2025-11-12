@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use brankas_adhyaksa::{
+use secreton_adhyaksa::{
     auth::mfa::{MfaMethod, MfaStatus, MfaStorage},
     storage::StorageError,
 };

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{StorageBackend, StorageError, VaultEntry, StorageResult};
+use crate::{StorageBackend, StorageError, SecretEntry, StorageResult};
 
 /// ZooKeeper configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

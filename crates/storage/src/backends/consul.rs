@@ -1,6 +1,6 @@
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -50,7 +50,7 @@ impl Default for ConsulStorageConfig {
 pub struct ConsulStorage {
     config: ConsulStorageConfig,
     client: reqwest::Client,
-    cache: Arc<RwLock<HashMap<String, VaultEntry>>>,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// Consul transaction implementation
@@ -76,7 +76,7 @@ impl ConsulTransaction {
 
 #[async_trait]
 impl StorageTransaction for ConsulTransaction {
-    async fn store(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -86,7 +86,7 @@ impl StorageTransaction for ConsulTransaction {
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
@@ -184,7 +184,7 @@ impl ConsulStorage {
 
 #[async_trait]
 impl StorageBackend for ConsulStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let key = &entry.path;
         let url = self.build_url(key);
 
@@ -220,14 +220,14 @@ impl StorageBackend for ConsulStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         // For Consul, we need to list all entries and find by ID
         // This is not efficient - in production you'd maintain an ID index
         let entries = self.list(&QueryParams::default()).await?;
         Ok(entries.into_iter().find(|e| e.id == id))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -281,7 +281,7 @@ impl StorageBackend for ConsulStorage {
                         message: format!("Failed to decode base64: {}", e),
                     })?;
 
-            let entry: VaultEntry =
+            let entry: SecretEntry =
                 serde_json::from_slice(&decoded).map_err(|e| StorageError::SerializationError {
                     message: format!("Failed to deserialize entry: {}", e),
                 })?;
@@ -296,7 +296,7 @@ impl StorageBackend for ConsulStorage {
         }
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         // For Consul, update is the same as store (PUT operation)
         self.store(entry).await
     }
@@ -336,7 +336,7 @@ impl StorageBackend for ConsulStorage {
         Ok(response.status().is_success())
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let prefix = params.path_prefix.as_deref().unwrap_or("");
         let url = format!("{}?keys&separator=/", self.build_url(prefix));
         let request = self.client.get(&url);

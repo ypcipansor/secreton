@@ -36,6 +36,9 @@ pub enum ShamirError {
 
     #[error("Duplicate share index: {0}")]
     DuplicateShareIndex(u8),
+
+    #[error("Invalid shares for reconstruction")]
+    InvalidShares,
 }
 
 /// A single share of a secret
@@ -101,16 +104,16 @@ impl GF256 {
 
     /// Divide two elements in GF(256)
     #[inline]
-    fn div(a: u8, b: u8) -> u8 {
+    fn div(a: u8, b: u8) -> Result<u8, &'static str> {
         if a == 0 {
-            0
+            Ok(0)
         } else if b == 0 {
-            panic!("Division by zero in GF(256)");
+            Err("Division by zero in GF(256)")
         } else {
             let log_a = Self::LOG_TABLE[a as usize] as i32;
             let log_b = Self::LOG_TABLE[b as usize] as i32;
             let log_result = (log_a - log_b + 255) % 255;
-            Self::EXP_TABLE[log_result as usize]
+            Ok(Self::EXP_TABLE[log_result as usize])
         }
     }
 
@@ -250,7 +253,8 @@ pub fn combine(shares: &[Share]) -> Result<Vec<u8>, ShamirError> {
                 }
             }
 
-            let basis = GF256::div(numerator, denominator);
+            let basis =
+                GF256::div(numerator, denominator).map_err(|_| ShamirError::InvalidShares)?;
             value ^= GF256::mul(y_i, basis);
         }
 
@@ -325,7 +329,10 @@ mod tests {
         assert_eq!(GF256::mul(0, 5), 0);
 
         // Test division
-        assert_eq!(GF256::div(10, 5), GF256::mul(10, GF256::div(1, 5)));
+        assert_eq!(
+            GF256::div(10, 5).unwrap(),
+            GF256::mul(10, GF256::div(1, 5).unwrap())
+        );
     }
 
     #[test]

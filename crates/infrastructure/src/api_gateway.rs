@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Error)]

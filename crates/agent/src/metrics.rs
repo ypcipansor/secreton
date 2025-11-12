@@ -1,15 +1,13 @@
-//! Metrics collection module for the Brankas agent
+//! Metrics collection module for the Secreton agent
 
-use crate::config::MetricsConfig;
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
-use secreton_core::{CoreError, CoreResult};
+use secreton_config::MetricsConfig;
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use sysinfo::System;
-use tokio::sync::mpsc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Metrics server for serving Prometheus metrics
 pub struct MetricsServer {
@@ -25,7 +23,7 @@ struct AppState {
 
 impl MetricsServer {
     /// Create a new metrics server
-    pub async fn new(port: u16) -> CoreResult<Self> {
+    pub async fn new(port: u16) -> Result<Self, SecretonError> {
         let mut config = MetricsConfig::default();
         config.prometheus_port = port;
 
@@ -36,7 +34,7 @@ impl MetricsServer {
     }
 
     /// Serve metrics via HTTP
-    pub async fn serve(self) -> CoreResult<()> {
+    pub async fn serve(self) -> Result<(), SecretonError> {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.prometheus_port));
 
         let app_state = AppState {
@@ -50,16 +48,15 @@ impl MetricsServer {
 
         tracing::info!("Starting metrics server on {}", addr);
 
-        let listener =
-            tokio::net::TcpListener::bind(addr)
-                .await
-                .map_err(|e| CoreError::Internal {
-                    message: format!("Failed to bind to address: {}", e),
-                })?;
+        let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+            SecretonError::Configuration {
+                message: format!("Failed to bind to address: {}", e),
+            }
+        })?;
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| CoreError::Internal {
+            .map_err(|e| SecretonError::Internal {
                 message: format!("Server error: {}", e),
             })?;
 

@@ -1,4 +1,4 @@
-// Azure Key Vault Backend - Azure Key Vault integration
+// Azure Key Secret Backend - Azure Key Secret integration
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,9 +26,9 @@ pub enum AuthMethod {
     ClientSecret,
 }
 
-/// Azure Key Vault configuration
+/// Azure Key Secret configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AzureKeyVaultConfig {
+pub struct AzureKeySecretConfig {
     pub vault_url: String, // https://{vault-name}.vault.azure.net
     pub tenant_id: String,
     pub auth_method: AuthMethod,
@@ -49,7 +49,7 @@ pub enum ContentType {
 pub struct AzureSecret {
     pub secret_name: String,
     pub secret_id: String,  // Azure resource ID
-    pub vault_path: String, // Vault path mapping
+    pub vault_path: String, // Secret path mapping
     pub value: String,
     pub content_type: ContentType,
     pub enabled: bool,
@@ -92,7 +92,7 @@ pub enum KeyOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ConflictResolution {
     PreferAzure,
-    PreferVault,
+    PreferSecret,
     Manual,
 }
 
@@ -104,16 +104,16 @@ pub struct SyncConfig {
     pub conflict_resolution: ConflictResolution,
 }
 
-/// Azure Key Vault Backend
-pub struct AzureKeyVaultBackend {
-    config: Arc<RwLock<AzureKeyVaultConfig>>,
+/// Azure Key Secret Backend
+pub struct AzureKeySecretBackend {
+    config: Arc<RwLock<AzureKeySecretConfig>>,
     sync_config: Arc<RwLock<SyncConfig>>,
     secrets: Arc<RwLock<HashMap<String, AzureSecret>>>,
     keys: Arc<RwLock<HashMap<String, AzureKey>>>,
 }
 
-impl AzureKeyVaultBackend {
-    pub fn new(config: AzureKeyVaultConfig, sync_config: SyncConfig) -> Self {
+impl AzureKeySecretBackend {
+    pub fn new(config: AzureKeySecretConfig, sync_config: SyncConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
             sync_config: Arc::new(RwLock::new(sync_config)),
@@ -122,7 +122,7 @@ impl AzureKeyVaultBackend {
         }
     }
 
-    /// Store secret to Azure Key Vault
+    /// Store secret to Azure Key Secret
     pub async fn store_secret(
         &self,
         secret_name: &str,
@@ -153,7 +153,7 @@ impl AzureKeyVaultBackend {
         Ok(azure_secret)
     }
 
-    /// Retrieve secret from Azure Key Vault
+    /// Retrieve secret from Azure Key Secret
     pub async fn retrieve_secret(&self, secret_name: &str) -> Result<AzureSecret> {
         let secrets = self.secrets.read().await;
         secrets
@@ -162,7 +162,7 @@ impl AzureKeyVaultBackend {
             .ok_or_else(|| AzureError::ApiError("Secret not found".to_string()))
     }
 
-    /// Sync secrets between Vault and Azure
+    /// Sync secrets between Secret and Azure
     pub async fn sync_secrets(&self) -> Result<SyncResult> {
         let sync_config = self.sync_config.read().await;
         let conflict_resolution = sync_config.conflict_resolution.clone();
@@ -173,7 +173,7 @@ impl AzureKeyVaultBackend {
         let mut conflict_count = 0;
 
         for (_name, azure_secret) in secrets.iter() {
-            // Mock: Check if secret exists in Vault
+            // Mock: Check if secret exists in Secret
             let vault_exists = self
                 .mock_vault_secret_exists(&azure_secret.vault_path)
                 .await;
@@ -182,13 +182,13 @@ impl AzureKeyVaultBackend {
                 // Handle conflict
                 match conflict_resolution {
                     ConflictResolution::PreferAzure => {
-                        // Update Vault with Azure value
+                        // Update Secret with Azure value
                         self.mock_update_vault(&azure_secret.vault_path, &azure_secret.value)
                             .await?;
                         synced_count += 1;
                     }
-                    ConflictResolution::PreferVault => {
-                        // Update Azure with Vault value
+                    ConflictResolution::PreferSecret => {
+                        // Update Azure with Secret value
                         let _vault_value =
                             self.mock_get_vault_value(&azure_secret.vault_path).await?;
                         // Would update Azure here
@@ -199,7 +199,7 @@ impl AzureKeyVaultBackend {
                     }
                 }
             } else {
-                // No conflict, create in Vault
+                // No conflict, create in Secret
                 self.mock_create_vault(&azure_secret.vault_path, &azure_secret.value)
                     .await?;
                 synced_count += 1;
@@ -215,7 +215,7 @@ impl AzureKeyVaultBackend {
         })
     }
 
-    /// Create key in Azure Key Vault
+    /// Create key in Azure Key Secret
     pub async fn create_key(
         &self,
         key_name: &str,
@@ -346,8 +346,8 @@ pub struct AzureStatistics {
 mod tests {
     use super::*;
 
-    fn create_test_config() -> AzureKeyVaultConfig {
-        AzureKeyVaultConfig {
+    fn create_test_config() -> AzureKeySecretConfig {
+        AzureKeySecretConfig {
             vault_url: "https://my-vault.vault.azure.net".to_string(),
             tenant_id: "12345678-1234-1234-1234-123456789012".to_string(),
             auth_method: AuthMethod::ManagedIdentity,
@@ -366,7 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_secret() {
-        let backend = AzureKeyVaultBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
 
         let mut tags = HashMap::new();
         tags.insert("env".to_string(), "production".to_string());
@@ -389,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retrieve_secret() {
-        let backend = AzureKeyVaultBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .store_secret(
@@ -408,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_secrets() {
-        let backend = AzureKeyVaultBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .store_secret(
@@ -427,7 +427,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_key() {
-        let backend = AzureKeyVaultBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
 
         let key = backend
             .create_key(
@@ -445,7 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_encrypt_with_azure_key() {
-        let backend = AzureKeyVaultBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .create_key(

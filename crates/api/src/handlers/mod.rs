@@ -1,10 +1,10 @@
-//! HTTP request handlers for the Brankas API.
+//! HTTP request handlers for the Secreton API.
 //! 
 //! Provides comprehensive REST endpoints for vault operations,
 //! authentication, authorization, and administrative functions.
 
 pub mod auth;
-pub mod vault;
+pub mod secret;
 pub mod admin;
 pub mod health;
 
@@ -42,7 +42,7 @@ pub fn create_router(config: &ApiConfig, services: Arc<ServiceContainer>) -> Rou
     // Create API v1 routes
     let api_v1 = Router::new()
         .nest("/auth", auth::create_routes())
-        .nest("/vault", vault::create_routes())
+        .nest("/secret", secret::create_routes())
         .nest("/admin", admin::create_routes())
         .route("/health", get(health::health_check))
         .route("/version", get(get_version))
@@ -57,7 +57,13 @@ pub fn create_router(config: &ApiConfig, services: Arc<ServiceContainer>) -> Rou
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
                 .layer(TimeoutLayer::new(config.http.timeout))
-                .layer(CorsLayer::permissive()) // TODO: Configure properly
+                .layer(CorsLayer::new()
+                    .allow_origin(tower_http::cors::Any) // For now, allow any origin - configure based on config.cors.allowed_origins
+                    .allow_methods(config.cors.allowed_methods.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
+                    .allow_headers(config.cors.allowed_headers.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
+                    .expose_headers(config.cors.exposed_headers.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
+                    .allow_credentials(config.cors.allow_credentials)
+                    .max_age(config.cors.max_age.map(|d| tower_http::cors::MaxAge::exact(d))))
                 .layer(RateLimitMiddleware::new(&config.rate_limit))
                 .layer(AuthMiddleware::new(&config.auth)),
         )
@@ -67,9 +73,9 @@ pub fn create_router(config: &ApiConfig, services: Arc<ServiceContainer>) -> Rou
 /// Root endpoint handler
 async fn root_handler() -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     let data = serde_json::json!({
-        "service": "Brankas API",
+        "service": "Secreton API",
         "version": env!("CARGO_PKG_VERSION"),
-        "description": "Advanced Security Vault System",
+        "description": "Advanced Security Secret System",
         "documentation": "/api/v1/docs"
     });
 
@@ -92,7 +98,7 @@ async fn get_version() -> ApiResult<Json<ApiResponse<VersionInfo>>> {
 async fn get_metrics(State(_state): State<AppState>) -> Result<String, StatusCode> {
     // Basic metrics implementation
     let metrics = format!(
-        "# Brankas API Metrics\n\
+        "# Secreton API Metrics\n\
          api_requests_total{{method=\"GET\"}} 0\n\
          api_requests_total{{method=\"POST\"}} 0\n\
          api_response_time_seconds{{quantile=\"0.5\"}} 0.1\n\

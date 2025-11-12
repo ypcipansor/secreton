@@ -1,7 +1,7 @@
 //! Raft Integrated Storage Backend
 //!
 //! This module provides a Raft consensus-based storage backend for Secreton,
-//! compatible with HashiCorp Vault's integrated storage approach.
+//! compatible with HashiCorp Secret's integrated storage approach.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -13,8 +13,8 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    StorageTransaction, VaultEntry,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 
 /// Raft node configuration
@@ -68,10 +68,10 @@ impl Default for RaftConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RaftCommand {
     /// Store a vault entry
-    Store { entry: VaultEntry },
+    Store { entry: SecretEntry },
 
     /// Update an existing entry
-    Update { entry: VaultEntry },
+    Update { entry: SecretEntry },
 
     /// Delete an entry by path
     Delete { path: String },
@@ -85,8 +85,8 @@ pub enum RaftCommand {
 pub enum RaftResponse {
     Success,
     Error { message: String },
-    Entry { entry: Box<Option<VaultEntry>> },
-    Entries { entries: Vec<VaultEntry> },
+    Entry { entry: Box<Option<SecretEntry>> },
+    Entries { entries: Vec<SecretEntry> },
     Count { count: u64 },
     Boolean { value: bool },
 }
@@ -95,7 +95,7 @@ pub enum RaftResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaftStateMachine {
     /// In-memory storage for fast access
-    data: HashMap<String, VaultEntry>,
+    data: HashMap<String, SecretEntry>,
 
     /// Index by UUID for O(1) lookups
     id_index: HashMap<Uuid, String>,
@@ -220,12 +220,12 @@ impl RaftStateMachine {
     }
 
     /// Get entry by path
-    pub fn get_by_path(&self, path: &str) -> Option<VaultEntry> {
+    pub fn get_by_path(&self, path: &str) -> Option<SecretEntry> {
         self.data.get(path).cloned()
     }
 
     /// Get entry by ID
-    pub fn get_by_id(&self, id: Uuid) -> Option<VaultEntry> {
+    pub fn get_by_id(&self, id: Uuid) -> Option<SecretEntry> {
         self.id_index
             .get(&id)
             .and_then(|path| self.data.get(path))
@@ -233,8 +233,8 @@ impl RaftStateMachine {
     }
 
     /// List entries matching query parameters
-    pub fn list(&self, params: &QueryParams) -> Vec<VaultEntry> {
-        let mut results: Vec<VaultEntry> = self
+    pub fn list(&self, params: &QueryParams) -> Vec<SecretEntry> {
+        let mut results: Vec<SecretEntry> = self
             .data
             .values()
             .filter(|entry| self.matches_query(entry, params))
@@ -270,7 +270,7 @@ impl RaftStateMachine {
     }
 
     /// Check if entry matches query parameters
-    fn matches_query(&self, entry: &VaultEntry, params: &QueryParams) -> bool {
+    fn matches_query(&self, entry: &SecretEntry, params: &QueryParams) -> bool {
         // Check expiration
         if !params.include_expired && entry.is_expired() {
             return false;
@@ -433,7 +433,7 @@ impl RaftStorageBackend {
 
 #[async_trait]
 impl StorageBackend for RaftStorageBackend {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         debug!("Storing entry: {}", entry.path);
 
         let command = RaftCommand::Store {
@@ -453,7 +453,7 @@ impl StorageBackend for RaftStorageBackend {
         }
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         debug!("Getting entry by ID: {}", id);
 
         let state = self
@@ -467,7 +467,7 @@ impl StorageBackend for RaftStorageBackend {
         Ok(state.get_by_id(id))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         debug!("Getting entry by path: {}", path);
 
         let state = self
@@ -481,7 +481,7 @@ impl StorageBackend for RaftStorageBackend {
         Ok(state.get_by_path(path))
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         debug!("Updating entry: {}", entry.path);
 
         let command = RaftCommand::Update {
@@ -544,7 +544,7 @@ impl StorageBackend for RaftStorageBackend {
         }
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         debug!("Listing entries with params: {:?}", params);
 
         let state = self
@@ -665,14 +665,14 @@ impl RaftTransaction {
 
 #[async_trait]
 impl StorageTransaction for RaftTransaction {
-    async fn store(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         self.operations.push(RaftCommand::Store {
             entry: entry.clone(),
         });
         Ok(())
     }
 
-    async fn update(&mut self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         self.operations.push(RaftCommand::Update {
             entry: entry.clone(),
         });

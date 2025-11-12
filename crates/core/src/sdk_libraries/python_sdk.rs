@@ -118,7 +118,7 @@ class SecretonClient:
 
         self.session = requests.Session()
         self.session.headers.update({
-            'X-Vault-Token': token,
+            'X-Secret-Token': token,
             'Content-Type': 'application/json'
         })
 

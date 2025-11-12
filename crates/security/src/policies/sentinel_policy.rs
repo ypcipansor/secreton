@@ -134,8 +134,7 @@ impl SentinelEngine {
         policy: &Policy,
         context: &EvaluationContext,
     ) -> Result<EvaluationResult> {
-        // Mock Sentinel policy evaluation
-        // Real implementation would parse and execute Sentinel code
+        // Simple JSON-based Sentinel policy evaluation
         let violations = self.check_policy_rules(policy, context);
 
         let decision = if violations.is_empty() {
@@ -165,53 +164,162 @@ impl SentinelEngine {
         })
     }
 
-    /// Check policy rules (mock)
+    /// Check policy rules using JSON-based evaluation
     fn check_policy_rules(&self, policy: &Policy, context: &EvaluationContext) -> Vec<Violation> {
         let mut violations = Vec::new();
 
-        // Mock rules based on policy code keywords
-        if policy.code.contains("require_mfa") && !context.metadata.contains_key("mfa_verified") {
-            violations.push(Violation {
-                rule: "require_mfa".to_string(),
-                message: "MFA verification required".to_string(),
-                severity: "error".to_string(),
-            });
-        }
-
-        if policy.code.contains("block_production") && context.request_path.contains("production") {
-            violations.push(Violation {
-                rule: "block_production".to_string(),
-                message: "Production access blocked by policy".to_string(),
-                severity: "critical".to_string(),
-            });
-        }
-
-        if policy.code.contains("working_hours") {
-            let hour = Utc::now().hour();
-            if hour < 8 || hour > 18 {
+        // Try to parse policy code as JSON
+        if let Ok(rules) = serde_json::from_str::<serde_json::Value>(&policy.code) {
+            if let Some(obj) = rules.as_object() {
+                for (rule_name, rule_config) in obj {
+                    self.evaluate_rule(rule_name, rule_config, context, &mut violations);
+                }
+            }
+        } else {
+            // Fallback to keyword-based rules for backward compatibility
+            if policy.code.contains("require_mfa") && !context.metadata.contains_key("mfa_verified")
+            {
                 violations.push(Violation {
-                    rule: "working_hours".to_string(),
-                    message: "Access only allowed during working hours (8AM-6PM)".to_string(),
-                    severity: "warning".to_string(),
+                    rule: "require_mfa".to_string(),
+                    message: "MFA verification required".to_string(),
+                    severity: "error".to_string(),
                 });
             }
-        }
 
-        if policy.code.contains("max_ttl") {
-            if let Some(ttl) = context.metadata.get("ttl") {
-                if let Ok(ttl_value) = ttl.parse::<i64>() {
-                    if ttl_value > 86400 {
-                        violations.push(Violation {
-                            rule: "max_ttl".to_string(),
-                            message: "TTL exceeds maximum of 24 hours".to_string(),
-                            severity: "error".to_string(),
-                        });
+            if policy.code.contains("block_production")
+                && context.request_path.contains("production")
+            {
+                violations.push(Violation {
+                    rule: "block_production".to_string(),
+                    message: "Production access blocked by policy".to_string(),
+                    severity: "critical".to_string(),
+                });
+            }
+
+            if policy.code.contains("working_hours") {
+                let hour = Utc::now().hour();
+                if hour < 8 || hour > 18 {
+                    violations.push(Violation {
+                        rule: "working_hours".to_string(),
+                        message: "Access only allowed during working hours (8AM-6PM)".to_string(),
+                        severity: "warning".to_string(),
+                    });
+                }
+            }
+
+            if policy.code.contains("max_ttl") {
+                if let Some(ttl) = context.metadata.get("ttl") {
+                    if let Ok(ttl_value) = ttl.parse::<i64>() {
+                        if ttl_value > 86400 {
+                            violations.push(Violation {
+                                rule: "max_ttl".to_string(),
+                                message: "TTL exceeds maximum of 24 hours".to_string(),
+                                severity: "error".to_string(),
+                            });
+                        }
                     }
                 }
             }
         }
 
         violations
+    }
+
+    /// Evaluate a single rule
+    fn evaluate_rule(
+        &self,
+        rule_name: &str,
+        rule_config: &serde_json::Value,
+        context: &EvaluationContext,
+        violations: &mut Vec<Violation>,
+    ) {
+        match rule_name {
+            "require_mfa" => {
+                if let Some(required) = rule_config.as_bool() {
+                    if required && !context.metadata.contains_key("mfa_verified") {
+                        violations.push(Violation {
+                            rule: rule_name.to_string(),
+                            message: "MFA verification required".to_string(),
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
+            }
+            "block_production" => {
+                if let Some(block) = rule_config.as_bool() {
+                    if block && context.request_path.contains("production") {
+                        violations.push(Violation {
+                            rule: rule_name.to_string(),
+                            message: "Production access blocked by policy".to_string(),
+                            severity: "critical".to_string(),
+                        });
+                    }
+                }
+            }
+            "working_hours" => {
+                if let Some(hours) = rule_config.as_object() {
+                    if let (Some(start), Some(end)) = (hours.get("start"), hours.get("end")) {
+                        if let (Some(start_hour), Some(end_hour)) = (start.as_u64(), end.as_u64()) {
+                            let current_hour = Utc::now().hour() as u64;
+                            if current_hour < start_hour || current_hour > end_hour {
+                                violations.push(Violation {
+                                    rule: rule_name.to_string(),
+                                    message: format!(
+                                        "Access only allowed during working hours ({}AM-{}PM)",
+                                        start_hour, end_hour
+                                    ),
+                                    severity: "warning".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            "max_ttl" => {
+                if let Some(max_ttl) = rule_config.as_u64() {
+                    if let Some(ttl) = context.metadata.get("ttl") {
+                        if let Ok(ttl_value) = ttl.parse::<u64>() {
+                            if ttl_value > max_ttl {
+                                violations.push(Violation {
+                                    rule: rule_name.to_string(),
+                                    message: format!("TTL exceeds maximum of {} seconds", max_ttl),
+                                    severity: "error".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            "ip_whitelist" => {
+                if let Some(ips) = rule_config.as_array() {
+                    if let Some(client_ip) = context.metadata.get("client_ip") {
+                        let allowed = ips.iter().any(|ip| {
+                            if let Some(ip_str) = ip.as_str() {
+                                ip_str == client_ip
+                            } else {
+                                false
+                            }
+                        });
+                        if !allowed {
+                            violations.push(Violation {
+                                rule: rule_name.to_string(),
+                                message: "Client IP not in whitelist".to_string(),
+                                severity: "error".to_string(),
+                            });
+                        }
+                    } else {
+                        violations.push(Violation {
+                            rule: rule_name.to_string(),
+                            message: "Client IP required but not provided".to_string(),
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
+            }
+            _ => {
+                // Unknown rule, ignore or log
+            }
+        }
     }
 
     /// Check authorization with policies

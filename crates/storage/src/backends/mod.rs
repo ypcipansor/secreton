@@ -15,9 +15,9 @@ pub mod mongodb;
 pub mod mysql;
 pub mod s3;
 
-// Azure and GCS backends
-pub mod azure_blob;
-pub mod gcs;
+// Azure and GCS backends (commented out due to missing dependencies)
+// pub mod azure_blob;
+// pub mod gcs;
 
 // Additional storage backends
 // pub mod aerospike;
@@ -47,9 +47,9 @@ pub use mongodb::{MongoDBConfig, MongoDBStorage};
 pub use mysql::{MySQLStorage, MySQLStorageConfig};
 pub use s3::{S3Storage, S3StorageConfig};
 
-// Export Azure and GCS backends
-pub use azure_blob::{AzureBlobConfig, AzureBlobStorage};
-pub use gcs::{GcsConfig, GoogleCloudStorage};
+// Export Azure and GCS backends (commented out due to missing dependencies)
+// pub use azure_blob::{AzureBlobConfig, AzureBlobStorage};
+// pub use gcs::{GcsConfig, GoogleCloudStorage};
 
 // Export additional backends
 // pub use aerospike::{AerospikeStorage, AerospikeConfig};

@@ -172,7 +172,7 @@ impl AnsibleIntegration {
             if value.starts_with("vault:") {
                 let secret_path = value.strip_prefix("vault:").unwrap();
                 injected_secrets.push(secret_path.to_string());
-                // Real implementation would fetch from Vault
+                // Real implementation would fetch from Secret
             }
         }
 
@@ -284,7 +284,7 @@ mod tests {
             tasks: vec![
                 AnsibleTask {
                     task_id: "task1".to_string(),
-                    name: "Read secret from Vault".to_string(),
+                    name: "Read secret from Secret".to_string(),
                     module: "vault_read".to_string(),
                     args: {
                         let mut args = HashMap::new();

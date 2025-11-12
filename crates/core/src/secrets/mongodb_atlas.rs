@@ -25,16 +25,16 @@ pub type Result<T> = std::result::Result<T, MongoDBAtlasError>;
 /// MongoDB Atlas configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MongoDBAtlasConfig {
-    pub public_key: String,          // Atlas API public key
-    pub private_key: String,         // Atlas API private key
-    pub project_id: String,          // Atlas project ID
+    pub public_key: String,  // Atlas API public key
+    pub private_key: String, // Atlas API private key
+    pub project_id: String,  // Atlas project ID
 }
 
 /// Database role definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseRole {
-    pub role_name: String,           // Built-in role or custom role
-    pub database_name: String,       // Database for the role
+    pub role_name: String,               // Built-in role or custom role
+    pub database_name: String,           // Database for the role
     pub collection_name: Option<String>, // Optional collection scope
 }
 
@@ -43,10 +43,10 @@ pub struct DatabaseRole {
 pub struct AtlasRole {
     pub name: String,
     pub project_id: String,
-    pub database_name: String,       // Default database
-    pub roles: Vec<DatabaseRole>,    // Roles to assign
-    pub scopes: Vec<String>,         // Resource scopes (cluster names)
-    pub ttl: Duration,               // User TTL
+    pub database_name: String,    // Default database
+    pub roles: Vec<DatabaseRole>, // Roles to assign
+    pub scopes: Vec<String>,      // Resource scopes (cluster names)
+    pub ttl: Duration,            // User TTL
 }
 
 /// Generated MongoDB Atlas user
@@ -193,10 +193,19 @@ impl MongoDBAtlasEngine {
             .collect()
     }
 
-    /// Generate secure password
+    /// Generate password
     fn generate_password(&self, length: usize) -> String {
-        use secreton_common::utils::password::generate_password;
-        generate_password(length)
+        use rand::Rng;
+        const CHARSET: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        let mut rng = rand::thread_rng();
+
+        (0..length)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
     }
 
     /// Create user in Atlas
@@ -240,9 +249,11 @@ impl MongoDBAtlasEngine {
 
         // Add roles to user (mock)
         for role in additional_roles {
-            if !user.roles.iter().any(|r| {
-                r.role_name == role.role_name && r.database_name == role.database_name
-            }) {
+            if !user
+                .roles
+                .iter()
+                .any(|r| r.role_name == role.role_name && r.database_name == role.database_name)
+            {
                 user.roles.push(role);
             }
         }
@@ -557,9 +568,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(user.roles.len(), 1);
-        assert_eq!(
-            user.roles[0].collection_name,
-            Some("events".to_string())
-        );
+        assert_eq!(user.roles[0].collection_name, Some("events".to_string()));
     }
 }

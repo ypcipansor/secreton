@@ -25,16 +25,16 @@ pub type Result<T> = std::result::Result<T, AliCloudError>;
 /// RAM role type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RoleType {
-    RamUser,      // Create RAM user with access keys
-    RamRole,      // Assume RAM role
-    STS,          // Generate STS token
+    RamUser, // Create RAM user with access keys
+    RamRole, // Assume RAM role
+    STS,     // Generate STS token
 }
 
 /// Policy type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PolicyType {
-    System,       // System-managed policy
-    Custom,       // Custom inline policy
+    System, // System-managed policy
+    Custom, // Custom inline policy
 }
 
 /// AliCloud configuration
@@ -42,8 +42,8 @@ pub enum PolicyType {
 pub struct AliCloudConfig {
     pub access_key_id: String,
     pub access_key_secret: String,
-    pub region: String,              // e.g., cn-hangzhou
-    pub endpoint: String,            // e.g., ram.aliyuncs.com
+    pub region: String,   // e.g., cn-hangzhou
+    pub endpoint: String, // e.g., ram.aliyuncs.com
 }
 
 /// Policy document
@@ -51,7 +51,7 @@ pub struct AliCloudConfig {
 pub struct PolicyDocument {
     pub policy_name: String,
     pub policy_type: PolicyType,
-    pub document: String,            // JSON policy document
+    pub document: String, // JSON policy document
 }
 
 /// AliCloud role configuration
@@ -72,8 +72,8 @@ pub struct AliCloudCredential {
     pub access_key_secret: String,
     pub security_token: Option<String>, // For STS tokens
     pub expiration: DateTime<Utc>,
-    pub user_name: Option<String>,      // For RamUser
-    pub role_arn: Option<String>,       // For RamRole/STS
+    pub user_name: Option<String>, // For RamUser
+    pub role_arn: Option<String>,  // For RamRole/STS
 }
 
 /// AliCloud secrets engine
@@ -105,9 +105,7 @@ impl AliCloudEngine {
             ));
         }
         if config.region.is_empty() {
-            return Err(AliCloudError::ConfigError(
-                "Region is required".to_string(),
-            ));
+            return Err(AliCloudError::ConfigError("Region is required".to_string()));
         }
 
         // Validate credentials (mock)
@@ -160,9 +158,9 @@ impl AliCloudEngine {
     /// Generate credentials for a role
     pub async fn generate_credentials(&self, role_name: &str) -> Result<AliCloudCredential> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            AliCloudError::ConfigError("AliCloud not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| AliCloudError::ConfigError("AliCloud not configured".to_string()))?;
 
         let roles = self.roles.read().await;
         let role = roles
@@ -247,11 +245,7 @@ impl AliCloudEngine {
     }
 
     /// Create RAM user
-    async fn create_ram_user(
-        &self,
-        _config: &AliCloudConfig,
-        _user_name: &str,
-    ) -> Result<()> {
+    async fn create_ram_user(&self, _config: &AliCloudConfig, _user_name: &str) -> Result<()> {
         // Mock implementation
         // Real implementation would call RAM API:
         // POST https://ram.aliyuncs.com/?Action=CreateUser
@@ -274,9 +268,9 @@ impl AliCloudEngine {
     /// Revoke credentials
     pub async fn revoke_credentials(&self, access_key_id: &str) -> Result<()> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            AliCloudError::ConfigError("AliCloud not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| AliCloudError::ConfigError("AliCloud not configured".to_string()))?;
 
         let users = self.users.read().await;
         let credential = users
@@ -298,11 +292,7 @@ impl AliCloudEngine {
     }
 
     /// Delete RAM user
-    async fn delete_ram_user(
-        &self,
-        _config: &AliCloudConfig,
-        _user_name: &str,
-    ) -> Result<()> {
+    async fn delete_ram_user(&self, _config: &AliCloudConfig, _user_name: &str) -> Result<()> {
         // Mock implementation
         // Real implementation would call:
         // POST https://ram.aliyuncs.com/?Action=DeleteUser
@@ -312,9 +302,9 @@ impl AliCloudEngine {
     /// Rotate root credentials
     pub async fn rotate_root_credentials(&self) -> Result<AliCloudConfig> {
         let mut config = self.config.write().await;
-        let current_config = config.as_ref().ok_or_else(|| {
-            AliCloudError::ConfigError("AliCloud not configured".to_string())
-        })?;
+        let current_config = config
+            .as_ref()
+            .ok_or_else(|| AliCloudError::ConfigError("AliCloud not configured".to_string()))?;
 
         // Generate new access keys (mock)
         let new_access_key_id = format!("LTAI{}", self.generate_random_string(16));
@@ -374,9 +364,9 @@ impl AliCloudEngine {
     /// Cleanup expired credentials
     pub async fn cleanup_expired(&self) -> Result<usize> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            AliCloudError::ConfigError("AliCloud not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| AliCloudError::ConfigError("AliCloud not configured".to_string()))?;
 
         let mut users = self.users.write().await;
         let now = Utc::now();

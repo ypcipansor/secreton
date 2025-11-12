@@ -1,9 +1,10 @@
-//! Placeholder implementation for rabbitmq secret engine
+//! RabbitMQ secret engine implementation
 
 use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
+use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -11,13 +12,16 @@ use uuid::Uuid;
 /// rabbitmq secret engine
 pub struct RabbitmqEngine {
     config: RabbitmqConfig,
+    _http_client: Client,
     enabled: bool,
 }
 
 impl RabbitmqEngine {
     pub fn new(config: RabbitmqConfig) -> Self {
+        let http_client = Client::new();
         Self {
             config,
+            _http_client: http_client,
             enabled: false,
         }
     }
@@ -101,31 +105,70 @@ impl SecretEngine for RabbitmqEngine {
 }
 
 impl RabbitmqEngine {
+    /// Generate a secure random password
+    fn generate_password(&self, length: usize) -> String {
+        use rand::Rng;
+        const CHARSET: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        let mut rng = rand::thread_rng();
+        (0..length)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
+    }
+
     /// Generate RabbitMQ credentials
     async fn generate_rabbitmq_credentials(
         &self,
         _data: &HashMap<String, Value>,
     ) -> SecretResult<HashMap<String, Value>> {
-        // Basic RabbitMQ credentials generation (placeholder - would use RabbitMQ management API in production)
-        let mut creds_data = HashMap::new();
+        // Generate unique username and password
+        let username = format!("vault_{}", Uuid::new_v4().simple());
+        let password = self.generate_password(16);
 
-        creds_data.insert("username".to_string(), Value::String("guest".to_string()));
-        creds_data.insert(
-            "password".to_string(),
-            Value::String(self.generate_password(16)),
+        // Default vhost
+        let vhost = self.config.vhost.as_deref().unwrap_or("/");
+
+        // TODO: Implement when secreton_rabbitmq_utils is available
+        // For now, return mock credentials
+        let mut result = HashMap::new();
+        result.insert("username".to_string(), Value::String(username.clone()));
+        result.insert("password".to_string(), Value::String(password));
+        result.insert("vhost".to_string(), Value::String(vhost.to_string()));
+        result.insert(
+            "connection_uri".to_string(),
+            Value::String(self.config.connection_uri.clone()),
         );
-        creds_data.insert("vhost".to_string(), Value::String("/".to_string()));
-        creds_data.insert(
-            "connection_string".to_string(),
-            Value::String("amqp://guest:password@localhost:5672/".to_string()),
+        result.insert(
+            "management_url".to_string(),
+            Value::String(format!(
+                "{}/#/login/{}/{}",
+                self.config.connection_uri, username, vhost
+            )),
         );
 
-        Ok(creds_data)
-    }
+        tracing::warn!(
+            "RabbitMQ credentials generated with stub implementation - secreton_rabbitmq_utils not available"
+        );
+        Ok(result)
 
-    /// Generate secure password
-    fn generate_password(&self, length: usize) -> String {
-        use secreton_common::utils::password::generate_password;
-        generate_password(length)
+        // Commented out until secreton_rabbitmq_utils is available:
+        // let utils_config = secreton_rabbitmq_utils::RabbitMqConfig {
+        //     connection_uri: self.config.connection_uri.clone(),
+        //     username: self.config.username.clone(),
+        //     password: self.config.password.clone(),
+        //     vhost: self.config.vhost.clone(),
+        //     default_lease_ttl: self.config.default_lease_ttl,
+        // };
+        // let creds_data = secreton_rabbitmq_utils::RabbitMqOperations::generate_credentials(
+        //     &utils_config, &username, &password, "management", vhost, ".*", ".*", ".*"
+        // ).await?;
+        // let mut result = HashMap::new();
+        // for (key, value) in creds_data {
+        //     result.insert(key, Value::String(value.as_str().unwrap_or("").to_string()));
+        // }
+        // Ok(result)
     }
 }

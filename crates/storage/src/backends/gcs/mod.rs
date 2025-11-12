@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     HealthStatus, QueryParams, StorageBackend, StorageError, StorageResult, StorageStats,
-    VaultEntry,
+    SecretEntry,
 };
 
 /// Configuration for Google Cloud Storage backend
@@ -126,7 +126,7 @@ impl GoogleCloudStorage {
 
 #[async_trait]
 impl StorageBackend for GoogleCloudStorage {
-    async fn store(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let object_name = self.path_to_object_name(&entry.path);
         let url = format!(
             "https://storage.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}",
@@ -173,7 +173,7 @@ impl StorageBackend for GoogleCloudStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let object_name = self.id_to_object_name(id);
         let url = format!(
             "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
@@ -215,7 +215,7 @@ impl StorageBackend for GoogleCloudStorage {
                 message: format!("Failed to read response: {}", e),
             })?;
 
-        let entry: VaultEntry =
+        let entry: SecretEntry =
             serde_json::from_slice(&data).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to deserialize entry: {}", e),
             })?;
@@ -223,7 +223,7 @@ impl StorageBackend for GoogleCloudStorage {
         Ok(Some(entry))
     }
 
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<VaultEntry>> {
+    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let object_name = self.path_to_object_name(path);
         let url = format!(
             "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
@@ -265,7 +265,7 @@ impl StorageBackend for GoogleCloudStorage {
                 message: format!("Failed to read response: {}", e),
             })?;
 
-        let entry: VaultEntry =
+        let entry: SecretEntry =
             serde_json::from_slice(&data).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to deserialize entry: {}", e),
             })?;
@@ -273,7 +273,7 @@ impl StorageBackend for GoogleCloudStorage {
         Ok(Some(entry))
     }
 
-    async fn update(&self, entry: &VaultEntry) -> StorageResult<()> {
+    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         // GCS update is the same as store (overwrite)
         self.store(entry).await
     }
@@ -354,7 +354,7 @@ impl StorageBackend for GoogleCloudStorage {
         Ok(true)
     }
 
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<VaultEntry>> {
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut entries = Vec::new();
         let mut page_token: Option<String> = None;
 
@@ -434,7 +434,7 @@ impl StorageBackend for GoogleCloudStorage {
                         if let Ok(obj_response) = obj_request.send().await {
                             if obj_response.status().is_success() {
                                 if let Ok(data) = obj_response.bytes().await {
-                                    if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                                    if let Ok(entry) = serde_json::from_slice::<SecretEntry>(&data) {
                                         entries.push(entry);
                                     }
                                 }
@@ -637,7 +637,7 @@ impl StorageBackend for GoogleCloudStorage {
                         if let Ok(obj_response) = obj_request.send().await {
                             if obj_response.status().is_success() {
                                 if let Ok(data) = obj_response.bytes().await {
-                                    if let Ok(entry) = serde_json::from_slice::<VaultEntry>(&data) {
+                                    if let Ok(entry) = serde_json::from_slice::<SecretEntry>(&data) {
                                         // Count by security level
                                         *entries_by_security_level
                                             .entry(entry.security_level)

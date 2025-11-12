@@ -131,7 +131,7 @@ mod multi_component_integration_tests {
         // 7. Verify audit trail
         let response = server.get("/audit").await;
         response.assert_status_ok();
-        let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+        let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
         let audit_entries = body.data.unwrap();
 
         // Should have audit entries for key creation, secret creation, encryption, decryption
@@ -226,7 +226,7 @@ mod multi_component_integration_tests {
         // 7. Verify audit trail captures all operations
         let response = server.get("/audit").await;
         response.assert_status_ok();
-        let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+        let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
         let audit_entries = body.data.unwrap();
 
         // Should have comprehensive audit trail
@@ -363,7 +363,7 @@ mod multi_component_integration_tests {
         // 4. Verify audit trail includes policy decisions
         let response = server.get("/audit").await;
         response.assert_status_ok();
-        let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+        let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
         let audit_entries = body.data.unwrap();
 
         // Should have audit entries for policy operations
@@ -467,7 +467,7 @@ mod multi_component_integration_tests {
         // Verify audit trail
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let audit_entries = body.data.unwrap();
             assert!(audit_entries.len() >= total_operations / 2, "Should have substantial audit trail");
         }
@@ -524,7 +524,7 @@ mod multi_component_integration_tests {
         // 5. Check audit trail includes error events
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let audit_entries = body.data.unwrap();
 
             // Should have error-related audit entries
@@ -601,7 +601,7 @@ mod multi_component_integration_tests {
         // 5. Verify audit trail integrity
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let audit_entries = body.data.unwrap();
 
             // Should have audit entries for baseline, stress, and recovery
@@ -714,7 +714,7 @@ mod multi_component_integration_tests {
         // 4. Audit Layer: Verify comprehensive audit trail
         let response = server.get("/audit").await;
         response.assert_status_ok();
-        let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+        let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
         let audit_entries = body.data.unwrap();
 
         // Should have audit entries for API, storage, and crypto operations
@@ -764,7 +764,7 @@ mod multi_component_integration_tests {
         // 7. Final verification of system state
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let final_audit_count = body.data.unwrap().len();
             assert!(final_audit_count >= 5, "Should have comprehensive final audit trail");
         }
@@ -836,7 +836,7 @@ mod multi_component_integration_tests {
         // 6. Verify audit trail for compliance
         let response = server.get("/audit").await;
         response.assert_status_ok();
-        let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+        let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
         let audit_entries = body.data.unwrap();
 
         // Should have comprehensive audit trail for all operations
@@ -852,7 +852,7 @@ mod multi_component_integration_tests {
         // 8. Verify cleanup in audit trail
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let final_audits = body.data.unwrap();
 
             // Should have deletion audit entries
@@ -902,7 +902,7 @@ mod multi_component_integration_tests {
         // 3. Verify system state consistency
         let response = server.get("/audit").await;
         if response.status_code().is_success() {
-            let body: ApiResponse<Vec<brankas_core::audit::AuditEntry>> = response.json();
+            let body: ApiResponse<Vec<secreton_core::audit::AuditEntry>> = response.json();
             let audit_count = body.data.unwrap().len();
             assert!(audit_count >= 5, "Should have comprehensive audit trail");
         }

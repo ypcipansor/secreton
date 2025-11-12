@@ -1,0 +1,34 @@
+[package]
+name = "secreton-performance"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Unified performance optimization and monitoring for Secreton"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+
+# Additional utilities
+regex.workspace = true
+rand.workspace = true
+
+# Shared crates
+secreton-common.workspace = true
+secreton-errors.workspace = true
+secreton-crypto.workspace = true

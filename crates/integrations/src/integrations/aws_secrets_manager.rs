@@ -23,8 +23,8 @@ pub type Result<T> = std::result::Result<T, AWSError>;
 /// Sync direction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SyncDirection {
-    VaultToAWS,
-    AWSToVault,
+    SecretToAWS,
+    AWSToSecret,
     Bidirectional,
 }
 
@@ -104,12 +104,17 @@ impl AWSSecretsManager {
     }
 
     /// Sync secret to AWS
-    pub async fn sync_to_aws(&self, vault_path: &str, secret_name: &str, vault_data: &[u8]) -> Result<SyncOperation> {
+    pub async fn sync_to_aws(
+        &self,
+        vault_path: &str,
+        secret_name: &str,
+        vault_data: &[u8],
+    ) -> Result<SyncOperation> {
         let config = self.config.read().await;
 
-        if config.sync_direction == SyncDirection::AWSToVault {
+        if config.sync_direction == SyncDirection::AWSToSecret {
             return Err(AWSError::SyncError(
-                "Sync direction is AWS to Vault only".to_string(),
+                "Sync direction is AWS to Secret only".to_string(),
             ));
         }
 
@@ -121,7 +126,8 @@ impl AWSSecretsManager {
         let secret_value = std::str::from_utf8(vault_data)
             .map_err(|e| AWSError::SyncError(format!("Invalid UTF-8 data: {}", e)))?;
 
-        let request = self.client
+        let request = self
+            .client
             .create_secret()
             .name(secret_name)
             .secret_string(secret_value)
@@ -133,7 +139,7 @@ impl AWSSecretsManager {
 
                 let operation = SyncOperation {
                     operation_id: operation_id.clone(),
-                    direction: SyncDirection::VaultToAWS,
+                    direction: SyncDirection::SecretToAWS,
                     source_path: vault_path.to_string(),
                     target_path: secret_name.to_string(),
                     started_at: Utc::now(),
@@ -150,7 +156,8 @@ impl AWSSecretsManager {
             }
             Err(_) => {
                 // If create fails, try to update the existing secret
-                let update_request = self.client
+                let update_request = self
+                    .client
                     .update_secret()
                     .secret_id(secret_name)
                     .secret_string(secret_value);
@@ -161,7 +168,7 @@ impl AWSSecretsManager {
 
                 let operation = SyncOperation {
                     operation_id: operation_id.clone(),
-                    direction: SyncDirection::VaultToAWS,
+                    direction: SyncDirection::SecretToAWS,
                     source_path: vault_path.to_string(),
                     target_path: secret_name.to_string(),
                     started_at: Utc::now(),
@@ -180,15 +187,12 @@ impl AWSSecretsManager {
     }
 
     /// Sync secret from AWS
-    pub async fn sync_from_aws(
-        &self,
-        secret_name: &str,
-    ) -> Result<(Vec<u8>, SyncOperation)> {
+    pub async fn sync_from_aws(&self, secret_name: &str) -> Result<(Vec<u8>, SyncOperation)> {
         let config = self.config.read().await;
 
-        if config.sync_direction == SyncDirection::VaultToAWS {
+        if config.sync_direction == SyncDirection::SecretToAWS {
             return Err(AWSError::SyncError(
-                "Sync direction is Vault to AWS only".to_string(),
+                "Sync direction is Secret to AWS only".to_string(),
             ));
         }
 
@@ -197,21 +201,23 @@ impl AWSSecretsManager {
         let operation_id = uuid::Uuid::new_v4().to_string();
 
         // Fetch secret from AWS Secrets Manager
-        let response = self.client
+        let response = self
+            .client
             .get_secret_value()
             .secret_id(secret_name)
             .send()
             .await
             .map_err(|e| AWSError::ApiError(format!("Failed to get AWS secret: {}", e)))?;
 
-        let secret_string = response.secret_string()
+        let secret_string = response
+            .secret_string()
             .ok_or_else(|| AWSError::SyncError("Secret has no string value".to_string()))?;
 
         let aws_data = secret_string.as_bytes().to_vec();
 
         let operation = SyncOperation {
             operation_id: operation_id.clone(),
-            direction: SyncDirection::AWSToVault,
+            direction: SyncDirection::AWSToSecret,
             source_path: secret_name.to_string(),
             target_path: "".to_string(), // Will be set by caller
             started_at: Utc::now(),
@@ -245,14 +251,16 @@ impl AWSSecretsManager {
         drop(config);
 
         // Get AWS secret metadata to compare timestamps
-        let aws_metadata = match self.client
+        let aws_metadata = match self
+            .client
             .describe_secret()
             .secret_id(secret_name)
             .send()
             .await
         {
             Ok(response) => {
-                let last_changed = response.last_changed_date()
+                let last_changed = response
+                    .last_changed_date()
                     .and_then(|dt| dt.to_millis().ok())
                     .unwrap_or(0);
                 Some(last_changed)
@@ -271,7 +279,7 @@ impl AWSSecretsManager {
                 Ok(operation)
             }
             _ => {
-                // Vault is newer or AWS doesn't exist, sync to AWS
+                // Secret is newer or AWS doesn't exist, sync to AWS
                 self.sync_to_aws(vault_path, secret_name, vault_data).await
             }
         }
@@ -418,7 +426,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(operation.direction, SyncDirection::VaultToAWS);
+        assert_eq!(operation.direction, SyncDirection::SecretToAWS);
         assert_eq!(operation.status, SyncStatus::Completed);
         assert_eq!(operation.records_synced, 1);
     }
@@ -429,12 +437,9 @@ mod tests {
         let aws_config = create_test_aws_config();
         let manager = AWSSecretsManager::new(create_test_config(), &aws_config);
 
-        let (_data, operation) = manager
-            .sync_from_aws("api-key")
-            .await
-            .unwrap();
+        let (_data, operation) = manager.sync_from_aws("api-key").await.unwrap();
 
-        assert_eq!(operation.direction, SyncDirection::AWSToVault);
+        assert_eq!(operation.direction, SyncDirection::AWSToSecret);
         assert_eq!(operation.status, SyncStatus::Completed);
     }
 
@@ -497,16 +502,13 @@ mod tests {
             .await
             .unwrap();
 
-        let (_data, _operation) = manager
-            .sync_from_aws("api-key")
-            .await
-            .unwrap();
+        let (_data, _operation) = manager.sync_from_aws("api-key").await.unwrap();
 
         let history = manager.get_sync_history(None, None).await;
         assert_eq!(history.len(), 2);
 
         let vault_to_aws = manager
-            .get_sync_history(Some(SyncDirection::VaultToAWS), None)
+            .get_sync_history(Some(SyncDirection::SecretToAWS), None)
             .await;
         assert_eq!(vault_to_aws.len(), 1);
 

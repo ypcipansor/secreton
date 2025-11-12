@@ -13,7 +13,7 @@ mod ui_component_tests {
     fn test_ui_configuration() -> Result<()> {
         // Test UI configuration structure
         let ui_config = json!({
-            "title": "Secreton Vault",
+            "title": "Secreton Secret",
             "version": "1.0.0",
             "theme": "dark",
             "features": {
@@ -24,7 +24,7 @@ mod ui_component_tests {
             }
         });
 
-        assert_eq!(ui_config["title"], "Secreton Vault");
+        assert_eq!(ui_config["title"], "Secreton Secret");
         assert_eq!(ui_config["version"], "1.0.0");
         assert_eq!(ui_config["theme"], "dark");
         assert!(ui_config["features"]["transit"].as_bool().unwrap());

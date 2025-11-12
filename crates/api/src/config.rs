@@ -1,4 +1,4 @@
-//! Configuration management for the Brankas API server.
+//! Configuration management for the Secreton API server.
 //!
 //! Provides comprehensive configuration options for HTTP/gRPC servers,
 //! authentication, authorization, rate limiting, and security features.
@@ -505,7 +505,7 @@ impl Default for JwtConfig {
             expiration: Duration::from_secs(3600), // 1 hour
             refresh_expiration: Duration::from_secs(86400 * 7), // 7 days
             algorithm: "HS256".to_string(),
-            issuer: "brankas".to_string(),
+            issuer: "secreton".to_string(),
             audience: "secreton-api".to_string(),
         }
     }
@@ -537,7 +537,7 @@ impl Default for CookieConfig {
 impl Default for TotpConfig {
     fn default() -> Self {
         Self {
-            issuer: "Brankas".to_string(),
+            issuer: "Secreton".to_string(),
             secret_length: 32,
             time_step: 30,
             code_length: 6,
@@ -674,7 +674,7 @@ mod tests {
                 mfa: MfaConfig {
                     enabled: true,
                     totp: TotpConfig {
-                        issuer: "Secreton Vault".to_string(),
+                        issuer: "Secreton Secret".to_string(),
                         secret_length: 32,
                         time_step: 30,
                         code_length: 6,
@@ -683,7 +683,7 @@ mod tests {
                     sms: None,
                     email: None,
                     webauthn: Some(WebAuthnConfig {
-                        rp_name: "Secreton Vault".to_string(),
+                        rp_name: "Secreton Secret".to_string(),
                         rp_id: "vault.example.com".to_string(),
                         origin: "https://vault.example.com".to_string(),
                     }),

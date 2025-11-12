@@ -52,7 +52,7 @@ impl MockMfaSystem {
         
         Ok(TotpConfig {
             secret: secret.to_string(),
-            issuer: "Brankas Enterprise".to_string(),
+            issuer: "Secreton Enterprise".to_string(),
             account_name: user_id.to_string(),
         })
     }
@@ -131,7 +131,7 @@ fn test_mfa_setup() -> Result<(), Box<dyn std::error::Error>> {
     let config = mfa_system.setup_mfa(user_id, secret)?;
     
     assert_eq!(config.secret, secret);
-    assert_eq!(config.issuer, "Brankas Enterprise");
+    assert_eq!(config.issuer, "Secreton Enterprise");
     assert_eq!(config.account_name, user_id);
     
     // Verify user state was created

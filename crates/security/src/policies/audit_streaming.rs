@@ -236,7 +236,7 @@ impl AuditStreamEngine {
             EventFormat::CEF => {
                 // Common Event Format
                 Ok(format!(
-                    "CEF:0|Secreton|Vault|1.0|{}|{}|5|rt={} src={} dvc={} outcome={}",
+                    "CEF:0|Secreton|Secret|1.0|{}|{}|5|rt={} src={} dvc={} outcome={}",
                     event.operation,
                     event.path,
                     event.timestamp.timestamp_millis(),
@@ -248,7 +248,7 @@ impl AuditStreamEngine {
             EventFormat::LEEF => {
                 // Log Event Extended Format
                 Ok(format!(
-                    "LEEF:1.0|Secreton|Vault|1.0|{}|devTime={}\tsrc={}\tdst={}\tresult={}",
+                    "LEEF:1.0|Secreton|Secret|1.0|{}|devTime={}\tsrc={}\tdst={}\tresult={}",
                     event.operation,
                     event.timestamp.to_rfc3339(),
                     event.principal,
@@ -475,12 +475,12 @@ mod tests {
 
         // CEF format
         let cef = engine.format_event(&event, &EventFormat::CEF).unwrap();
-        assert!(cef.starts_with("CEF:0|Secreton|Vault"));
+        assert!(cef.starts_with("CEF:0|Secreton|Secret"));
         assert!(cef.contains("read"));
 
         // LEEF format
         let leef = engine.format_event(&event, &EventFormat::LEEF).unwrap();
-        assert!(leef.starts_with("LEEF:1.0|Secreton|Vault"));
+        assert!(leef.starts_with("LEEF:1.0|Secreton|Secret"));
         assert!(leef.contains("read"));
     }
 

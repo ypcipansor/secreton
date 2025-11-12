@@ -14,6 +14,9 @@ rust-version.workspace = true
 [dependencies]
 # Core dependencies
 secreton-core = { path = "../core" }
+secreton-monitoring = { path = "../monitoring" }
+secreton-errors = { path = "../errors" }
+secreton-config = { path = "../config" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -33,7 +36,8 @@ toml = { workspace = true }
 rand = { workspace = true }
 
 # System monitoring dependencies
-sysinfo = "0.30"
+sysinfo = { workspace = true }
+nix = { workspace = true }
 
 # HTTP server for metrics
 axum = { workspace = true }

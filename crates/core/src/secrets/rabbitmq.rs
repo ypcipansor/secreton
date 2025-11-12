@@ -1,11 +1,11 @@
 // RabbitMQ Secrets Engine - Dynamic RabbitMQ credential generation
 use chrono::{DateTime, Duration, Utc};
+use reqwest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use reqwest;
 
 #[derive(Debug, Error)]
 pub enum RabbitMQError {
@@ -26,40 +26,28 @@ pub type Result<T> = std::result::Result<T, RabbitMQError>;
 /// RabbitMQ configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RabbitMQConfig {
-    pub connection_uri: String,      // amqp://user:pass@host:port/vhost
-    pub username: String,            // Admin username
-    pub password: String,            // Admin password
-    pub verify_connection: bool,     // Verify connection on configure
-    pub username_template: String,   // Template for generated usernames
-    pub password_policy: PasswordPolicy,
+    pub connection_uri: String,    // amqp://user:pass@host:port/vhost
+    pub username: String,          // Admin username
+    pub password: String,          // Admin password
+    pub verify_connection: bool,   // Verify connection on configure
+    pub username_template: String, // Template for generated usernames
+    pub password_policy: secreton_common::utils::password::PasswordPolicy,
 }
-
-/// Password generation policy
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PasswordPolicy {
-    pub length: u32,
-    pub use_uppercase: bool,
-    pub use_lowercase: bool,
-    pub use_numbers: bool,
-    pub use_symbols: bool,
-}
-
-/// RabbitMQ role definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RabbitMQRole {
     pub name: String,
-    pub vhosts: Vec<VHostPermission>,  // Permissions per vhost
-    pub tags: Vec<String>,             // User tags (administrator, management, etc.)
-    pub ttl: Duration,                 // Credential TTL
+    pub vhosts: Vec<VHostPermission>, // Permissions per vhost
+    pub tags: Vec<String>,            // User tags (administrator, management, etc.)
+    pub ttl: Duration,                // Credential TTL
 }
 
 /// Permissions for a specific vhost
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VHostPermission {
     pub vhost: String,
-    pub configure: String,   // Configure permission regex
-    pub write: String,       // Write permission regex
-    pub read: String,        // Read permission regex
+    pub configure: String, // Configure permission regex
+    pub write: String,     // Write permission regex
+    pub read: String,      // Read permission regex
     pub topic_permissions: Vec<TopicPermission>,
 }
 
@@ -67,8 +55,8 @@ pub struct VHostPermission {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopicPermission {
     pub exchange: String,
-    pub write: String,       // Write permission regex
-    pub read: String,        // Read permission regex
+    pub write: String, // Write permission regex
+    pub read: String,  // Read permission regex
 }
 
 /// Generated RabbitMQ user
@@ -128,7 +116,12 @@ impl RabbitMQEngine {
             .basic_auth(&config.username, Some(&config.password))
             .send()
             .await
-            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to connect to RabbitMQ Management API: {}", e)))?;
+            .map_err(|e| {
+                RabbitMQError::RabbitMQError(format!(
+                    "Failed to connect to RabbitMQ Management API: {}",
+                    e
+                ))
+            })?;
 
         if !response.status().is_success() {
             return Err(RabbitMQError::RabbitMQError(format!(
@@ -138,8 +131,9 @@ impl RabbitMQEngine {
         }
 
         // Parse response to verify it's valid JSON
-        let _overview: serde_json::Value = response.json().await
-            .map_err(|e| RabbitMQError::RabbitMQError(format!("Invalid JSON response from RabbitMQ: {}", e)))?;
+        let _overview: serde_json::Value = response.json().await.map_err(|e| {
+            RabbitMQError::RabbitMQError(format!("Invalid JSON response from RabbitMQ: {}", e))
+        })?;
 
         Ok(())
     }
@@ -150,8 +144,9 @@ impl RabbitMQEngine {
         let url = url::Url::parse(connection_uri)
             .map_err(|e| RabbitMQError::ConfigError(format!("Invalid connection URI: {}", e)))?;
 
-        let host = url.host_str()
-            .ok_or_else(|| RabbitMQError::ConfigError("Missing host in connection URI".to_string()))?;
+        let host = url.host_str().ok_or_else(|| {
+            RabbitMQError::ConfigError("Missing host in connection URI".to_string())
+        })?;
         let port = url.port().unwrap_or(5672); // Default AMQP port
 
         // Management API typically runs on port 15672 (AMQP port + 10000)
@@ -242,22 +237,45 @@ impl RabbitMQEngine {
         Ok(user)
     }
 
-    /// Generate password based on policy
-    fn generate_password(&self, policy: &PasswordPolicy) -> String {
-        use secreton_common::utils::password::{generate_password_with_policy, PasswordPolicy as CommonPolicy};
+    /// Generate password according to policy
+    fn generate_password(
+        &self,
+        policy: &secreton_common::utils::password::PasswordPolicy,
+    ) -> String {
+        use rand::Rng;
+        let length = policy.min_length.max(8) as usize;
+        let mut rng = rand::thread_rng();
 
-        // Convert local policy to common policy
-        let common_policy = CommonPolicy {
-            min_length: policy.length as usize,
-            max_length: None,
-            require_uppercase: policy.use_uppercase,
-            require_lowercase: policy.use_lowercase,
-            require_numbers: policy.use_numbers,
-            require_special: policy.use_symbols,
-            allowed_special_chars: Some("!@#$%^&*".to_string()),
-        };
+        // Build charset based on policy
+        let mut charset = String::new();
+        if policy.require_uppercase {
+            charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        }
+        if policy.require_lowercase {
+            charset.push_str("abcdefghijklmnopqrstuvwxyz");
+        }
+        if policy.require_numbers {
+            charset.push_str("0123456789");
+        }
+        if policy.require_special {
+            if let Some(special) = &policy.allowed_special_chars {
+                charset.push_str(special);
+            } else {
+                charset.push_str("!@#$%^&*");
+            }
+        }
 
-        generate_password_with_policy(&common_policy)
+        if charset.is_empty() {
+            charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".to_string();
+        }
+
+        let charset_bytes = charset.as_bytes();
+        (0..length)
+            .map(|_| {
+                let idx = rng.gen_range(0..charset_bytes.len());
+                charset_bytes[idx] as char
+            })
+            .collect()
     }
 
     /// Create user in RabbitMQ
@@ -268,9 +286,9 @@ impl RabbitMQEngine {
         tags: &[String],
     ) -> Result<()> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| RabbitMQError::ConfigError("RabbitMQ not configured".to_string()))?;
 
         let management_url = self.get_management_url(&config.connection_uri)?;
         let client = reqwest::Client::new();
@@ -311,9 +329,9 @@ impl RabbitMQEngine {
         read: &str,
     ) -> Result<()> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| RabbitMQError::ConfigError("RabbitMQ not configured".to_string()))?;
 
         let management_url = self.get_management_url(&config.connection_uri)?;
         let client = reqwest::Client::new();
@@ -326,12 +344,19 @@ impl RabbitMQEngine {
         });
 
         let response = client
-            .put(&format!("{}/api/permissions/{}/{}", management_url, urlencoding::encode(vhost), username))
+            .put(&format!(
+                "{}/api/permissions/{}/{}",
+                management_url,
+                urlencoding::encode(vhost),
+                username
+            ))
             .basic_auth(&config.username, Some(&config.password))
             .json(&permissions_payload)
             .send()
             .await
-            .map_err(|e| RabbitMQError::RabbitMQError(format!("Failed to set permissions: {}", e)))?;
+            .map_err(|e| {
+                RabbitMQError::RabbitMQError(format!("Failed to set permissions: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -384,9 +409,9 @@ impl RabbitMQEngine {
     /// Delete user from RabbitMQ
     async fn delete_rabbitmq_user(&self, username: &str) -> Result<()> {
         let config = self.config.read().await;
-        let config = config.as_ref().ok_or_else(|| {
-            RabbitMQError::ConfigError("RabbitMQ not configured".to_string())
-        })?;
+        let config = config
+            .as_ref()
+            .ok_or_else(|| RabbitMQError::ConfigError("RabbitMQ not configured".to_string()))?;
 
         let management_url = self.get_management_url(&config.connection_uri)?;
         let client = reqwest::Client::new();
@@ -487,12 +512,14 @@ mod tests {
             password: "password".to_string(),
             verify_connection: false,
             username_template: "vault-{{random}}".to_string(),
-            password_policy: PasswordPolicy {
-                length: 24,
-                use_uppercase: true,
-                use_lowercase: true,
-                use_numbers: true,
-                use_symbols: true,
+            password_policy: secreton_common::utils::password::PasswordPolicy {
+                min_length: 24,
+                max_length: None,
+                require_uppercase: true,
+                require_lowercase: true,
+                require_numbers: true,
+                require_special: true,
+                allowed_special_chars: Some("!@#$%^&*".to_string()),
             },
         }
     }
@@ -506,10 +533,7 @@ mod tests {
 
         let cfg = engine.config.read().await;
         assert!(cfg.is_some());
-        assert_eq!(
-            cfg.as_ref().unwrap().username,
-            "admin"
-        );
+        assert_eq!(cfg.as_ref().unwrap().username, "admin");
     }
 
     #[tokio::test]
@@ -560,9 +584,9 @@ mod tests {
             name: "restricted-role".to_string(),
             vhosts: vec![VHostPermission {
                 vhost: "/production".to_string(),
-                configure: "".to_string(),           // No configure
-                write: "^app\\..*".to_string(),      // Only write to app.* queues
-                read: "^app\\..*".to_string(),       // Only read from app.* queues
+                configure: "".to_string(),      // No configure
+                write: "^app\\..*".to_string(), // Only write to app.* queues
+                read: "^app\\..*".to_string(),  // Only read from app.* queues
                 topic_permissions: vec![],
             }],
             tags: vec![],

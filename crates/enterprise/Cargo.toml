@@ -26,15 +26,13 @@ tokio.workspace = true
 # Cryptography
 secreton-crypto.workspace = true
 md5.workspace = true
+sha2.workspace = true
+
+# Randomness
+rand.workspace = true
 
 # Security
 secreton-security.workspace = true
-
-# PQC (Post-Quantum Cryptography)
-pqcrypto-traits.workspace = true
-pqcrypto-mldsa = { workspace = true, optional = true }
-pqcrypto-mlkem = { workspace = true, optional = true }
-pqcrypto-falcon = { workspace = true, optional = true }
 
 # HSM support
 #[cfg(feature = "hsm")]
@@ -55,4 +53,4 @@ postgres = ["tokio-postgres", "deadpool-postgres"]
 redis = ["dep:redis"]
 hsm = []
 ai = []
-quantum = ["pqcrypto-mldsa", "pqcrypto-mlkem", "pqcrypto-falcon"]
+# quantum = ["pqcrypto-mldsa", "pqcrypto-mlkem", "pqcrypto-falcon"]

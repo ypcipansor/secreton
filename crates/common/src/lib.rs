@@ -1,6 +1,6 @@
-//! # Brankas Common
+//! # Secreton Common
 //!
-//! Common types and utilities shared across all Brankas crates.
+//! Common types and utilities shared across all Secreton crates.
 //! Provides foundational abstractions for security levels, error handling,
 //! and common data structures.
 
@@ -28,6 +28,25 @@ pub enum SecurityLevel {
 }
 
 use std::str::FromStr;
+
+/// Basic error types for common crate
+#[derive(Debug, thiserror::Error)]
+pub enum CommonError {
+    #[error("Validation error: {message}")]
+    Validation { message: String },
+    #[error("Parse error: {message}")]
+    Parse { message: String },
+    #[error("Not found error: {message}")]
+    NotFound { message: String },
+    #[error("Cryptographic error: {message}")]
+    Cryptographic { message: String },
+}
+
+impl From<String> for CommonError {
+    fn from(message: String) -> Self {
+        CommonError::Validation { message }
+    }
+}
 
 impl SecurityLevel {
     /// Get security level name
@@ -74,7 +93,10 @@ impl FromStr for SecurityLevel {
 }
 
 /// Common result type for operations
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub type Result<T> = std::result::Result<T, CommonError>;
+
+/// Service initialization result
+pub type InitResult<T> = std::result::Result<T, ServiceInitError>;
 
 /// Common HTTP response structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,6 +332,7 @@ pub mod utils {
         }
 
         /// Generate a password that meets the specified policy requirements
+        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
         pub struct PasswordPolicy {
             pub min_length: usize,
             pub max_length: Option<usize>,
@@ -350,6 +373,26 @@ pub mod utils {
                     max_length: Some(max_length),
                     ..Default::default()
                 }
+            }
+
+            /// Validate the password policy
+            pub fn validate(&self) -> crate::Result<()> {
+                if self.min_length == 0 {
+                    return Err(crate::CommonError::Validation {
+                        message: "Minimum password length cannot be zero".to_string(),
+                    });
+                }
+
+                if let Some(max_len) = self.max_length {
+                    if max_len < self.min_length {
+                        return Err(crate::CommonError::Validation {
+                            message: "Maximum password length cannot be less than minimum length"
+                                .to_string(),
+                        });
+                    }
+                }
+
+                Ok(())
             }
         }
 
@@ -451,3 +494,132 @@ pub mod utils {
 pub fn generate_password() -> Result<String> {
     Ok(utils::password::generate_password(32))
 }
+
+/// Service health status
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServiceHealth {
+    Healthy,
+    Unhealthy(String),
+    Degraded(String),
+}
+
+/// Service initialization error
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceInitError {
+    #[error("Service initialization failed: {message}")]
+    InitializationFailed { message: String },
+    #[error("Service dependency missing: {dependency}")]
+    DependencyMissing { dependency: String },
+    #[error("Configuration error: {message}")]
+    ConfigurationError { message: String },
+}
+
+/// Service result type
+pub type ServiceResult<T> = std::result::Result<T, ServiceInitError>;
+
+/// Standard service trait for all services in the system
+#[async_trait::async_trait]
+pub trait Service {
+    async fn start(&self) -> ServiceResult<()>;
+    async fn stop(&self) -> ServiceResult<()>;
+    async fn health(&self) -> ServiceResult<ServiceHealth>;
+    fn name(&self) -> &str;
+    fn version(&self) -> &str;
+    fn uptime_seconds(&self) -> u64;
+}
+
+/// Service container trait for dependency injection
+#[async_trait::async_trait]
+pub trait ServiceContainer {
+    async fn initialize(&mut self) -> InitResult<()>;
+    async fn start_services(&self) -> InitResult<()>;
+    async fn stop_services(&self) -> InitResult<()>;
+    async fn health_check(&self) -> InitResult<ServiceHealth>;
+    fn get_service<T: 'static>(&self, name: &str) -> Option<&T>;
+    fn register_service<T: 'static + Send + Sync>(&mut self, name: String, service: T);
+}
+
+/// Standard service container implementation
+pub struct StandardServiceContainer {
+    services: std::collections::HashMap<String, Box<dyn std::any::Any + Send + Sync>>,
+}
+
+impl StandardServiceContainer {
+    pub fn new() -> Self {
+        Self {
+            services: std::collections::HashMap::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ServiceContainer for StandardServiceContainer {
+    async fn initialize(&mut self) -> InitResult<()> {
+        Ok(())
+    }
+
+    async fn start_services(&self) -> InitResult<()> {
+        Ok(())
+    }
+
+    async fn stop_services(&self) -> InitResult<()> {
+        Ok(())
+    }
+
+    async fn health_check(&self) -> InitResult<ServiceHealth> {
+        Ok(ServiceHealth::Healthy)
+    }
+
+    fn get_service<T: 'static>(&self, name: &str) -> Option<&T> {
+        self.services.get(name)?.downcast_ref::<T>()
+    }
+
+    fn register_service<T: 'static + Send + Sync>(&mut self, name: String, service: T) {
+        self.services.insert(name, Box::new(service));
+    }
+}
+
+/// CRUD service trait for entities with standard operations
+#[async_trait::async_trait]
+pub trait CrudService<T> {
+    async fn create(&self, entity: T) -> Result<T>;
+    async fn get(&self, id: &str) -> Result<T>;
+    async fn update(&self, id: &str, entity: T) -> Result<T>;
+    async fn delete(&self, id: &str) -> Result<()>;
+    async fn list(&self, params: ListParams) -> Result<PaginatedResponse<T>>;
+}
+
+/// Parameters for list operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListParams {
+    pub pagination: PaginationParams,
+    pub filters: std::collections::HashMap<String, String>,
+    pub search: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+}
+
+impl Default for ListParams {
+    fn default() -> Self {
+        Self {
+            pagination: PaginationParams::default(),
+            filters: std::collections::HashMap::new(),
+            search: None,
+            sort_by: None,
+            sort_order: Some("asc".to_string()),
+        }
+    }
+}
+
+/// Paginated response for list operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedResponse<T> {
+    pub data: Vec<T>,
+    pub total: u64,
+    pub page: u32,
+    pub limit: u32,
+    pub has_more: bool,
+}
+
+/// Password generation utilities
+pub use utils::password;

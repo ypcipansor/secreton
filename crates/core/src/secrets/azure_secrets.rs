@@ -297,7 +297,7 @@ impl AzureSecretsEngine {
         // Mock root credential rotation
         // In real implementation, this would:
         // 1. Generate new client secret for root SP
-        // 2. Update Vault configuration
+        // 2. Update Secret configuration
         // 3. Delete old secret
 
         Ok(())
@@ -321,7 +321,7 @@ impl AzureSecretsEngine {
     }
 
     /// Delete service principal from Azure
-    async fn delete_service_principal(&self, object_id: &str) -> Result<()> {
+    async fn delete_service_principal(&self, _object_id: &str) -> Result<()> {
         // Mock deletion
         // In real implementation, this would call Azure AD Graph API
         Ok(())
@@ -517,7 +517,7 @@ mod tests {
         let assignments = engine.list_role_assignments().await;
         let sp_assignments: Vec<_> = assignments
             .iter()
-            .filter(|a| {
+            .filter(|_a| {
                 let sps = futures::executor::block_on(engine.list_service_principals());
                 sps.contains(&creds.client_id)
             })

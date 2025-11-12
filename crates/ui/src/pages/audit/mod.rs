@@ -1,20 +1,20 @@
-use leptos::*;
+use leptos::prelude::*;
 
 #[component]
-pub fn AuditLog(cx: Scope) -> impl IntoView {
+pub fn audit_log() -> impl IntoView {
     // Dummy data
     let logs = vec![
         ("admin", "login", "-", "success"),
         ("admin", "get_secret", "myapp/db", "success"),
         ("user1", "get_secret", "myapp/db", "failed"),
     ];
-    view! { cx,
+    view! {
         <h2>"Audit Log"</h2>
-        <table border="1">
+        <table>
             <tr><th>User</th><th>Action</th><th>Path</th><th>Status</th></tr>
-            {logs.iter().map(|(u,a,p,s)| view! { cx,
+            {logs.iter().map(|&(u,a,p,s)| view! {
                 <tr><td>{u}</td><td>{a}</td><td>{p}</td><td>{s}</td></tr>
-            }).collect_view(cx)}
+            }).collect_view()}
         </table>
     }
-} 
+}

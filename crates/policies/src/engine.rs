@@ -6,7 +6,8 @@ use pest_derive::Parser;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use super::error::{PolicyError, PolicyResult};
+use super::error::PolicyResult;
+use secreton_errors::SecretonError;
 use super::model::{
     ConditionOperator, Policy, PolicyCondition, PolicyEffect, PolicyRule, PolicyType,
 };
@@ -115,7 +116,7 @@ impl PolicyEngine {
     /// Parse policy from string
     pub fn parse_policy(&self, policy_text: &str) -> PolicyResult<Policy> {
         let pairs = PolicyParser::parse(Rule::policy, policy_text)
-            .map_err(|e| PolicyError::ParseError { source: e })?;
+            .map_err(|e| SecretonError::PolicyParseError { source: Box::new(e) })?;
 
         self.build_policy_from_pairs(pairs)
     }
@@ -127,7 +128,7 @@ impl PolicyEngine {
     ) -> PolicyResult<Policy> {
         let pair = pairs
             .next()
-            .ok_or_else(|| PolicyError::InvalidPolicySyntax {
+            .ok_or_else(|| SecretonError::InvalidPolicySyntax {
                 details: "Empty policy".to_string(),
             })?;
 
@@ -256,7 +257,7 @@ impl PolicyEngine {
             ">" => Ok(ConditionOperator::GreaterThan),
             "<" => Ok(ConditionOperator::LessThan),
             "regex" => Ok(ConditionOperator::Regex),
-            _ => Err(PolicyError::InvalidCondition {
+            _ => Err(SecretonError::InvalidPolicyCondition {
                 condition: format!("Unknown operator: {}", pair.as_str()),
             }),
         }

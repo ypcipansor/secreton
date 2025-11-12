@@ -1,4 +1,4 @@
-//! Vault backend for secret storage
+//! Secret backend for secret storage
 
 use crate::error::*;
 use crate::model::*;
@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 /// In-memory vault backend for secret storage
-pub struct VaultBackend {
+pub struct SecretBackend {
     storage: RwLock<HashMap<String, Secret>>,
 }
 
-impl VaultBackend {
+impl SecretBackend {
     pub fn new() -> Self {
         Self {
             storage: RwLock::new(HashMap::new()),
@@ -55,7 +55,7 @@ impl VaultBackend {
     }
 }
 
-impl Default for VaultBackend {
+impl Default for SecretBackend {
     fn default() -> Self {
         Self::new()
     }

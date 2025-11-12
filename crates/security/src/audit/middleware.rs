@@ -9,10 +9,7 @@ use axum::{
 use std::{collections::HashMap, time::Instant};
 use uuid::Uuid;
 
-// TODO: Re-enable when auth module is implemented
-// use crate::auth::auth_impl::Claims;
-
-// Placeholder until auth module is implemented
+// Placeholder Claims struct for audit logging (contains minimal user identity info)
 #[derive(Debug, Clone)]
 pub struct Claims {
     pub sub: String,

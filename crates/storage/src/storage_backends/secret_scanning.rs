@@ -240,10 +240,10 @@ impl SecretScanner {
     fn get_remediation(&self, secret_type: &SecretType) -> String {
         match secret_type {
             SecretType::APIKey => {
-                "Revoke the exposed API key and generate a new one. Store in Vault.".to_string()
+                "Revoke the exposed API key and generate a new one. Store in Secret.".to_string()
             }
             SecretType::Password => {
-                "Reset the password immediately. Use environment variables or Vault.".to_string()
+                "Reset the password immediately. Use environment variables or Secret.".to_string()
             }
             SecretType::Token => {
                 "Revoke the token and generate a new one. Never commit tokens to git.".to_string()
@@ -254,7 +254,7 @@ impl SecretScanner {
             }
             SecretType::Certificate => "Revoke and reissue the certificate.".to_string(),
             SecretType::DatabaseURL => {
-                "Rotate database credentials. Use connection pooling with Vault.".to_string()
+                "Rotate database credentials. Use connection pooling with Secret.".to_string()
             }
         }
     }

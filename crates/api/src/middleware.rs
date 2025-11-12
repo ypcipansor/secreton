@@ -1,4 +1,4 @@
-//! HTTP middleware for the Brankas API
+//! HTTP middleware for the Secreton API
 //!
 //! Provides authentication, rate limiting, request tracing,
 //! and other middleware functionality.
@@ -10,7 +10,14 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use crate::auth::{extract_bearer_token, JwtAuthService};
+use crate::ApiState;
+use hex;
+use lru::LruCache;
+use secreton_errors::SecretonError;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use tokio::sync::RwLock;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -18,49 +25,59 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 use x509_parser::prelude::*;
 
-use crate::ApiState;
-use crate::auth::{AuthError, JwtAuthService, extract_bearer_token};
+/// Cached certificate entry with expiration
+#[derive(Debug, Clone)]
+struct CachedValidation {
+    validation: CertificateValidation,
+    expires_at: Instant,
+}
 
-/// Certificate cache for performance optimization
+impl CachedValidation {
+    fn is_expired(&self) -> bool {
+        Instant::now() > self.expires_at
+    }
+}
+
+/// Certificate cache with LRU eviction
 #[derive(Debug)]
-pub struct CertificateCache {
-    cache: Mutex<HashMap<String, (X509Certificate<'static>, Instant)>>,
+struct CertificateCache {
+    cache: RwLock<LruCache<String, CachedValidation>>,
     ttl: Duration,
 }
 
 impl CertificateCache {
-    pub fn new(ttl_seconds: u64) -> Self {
+    fn new(capacity: usize, ttl_seconds: u64) -> Self {
         Self {
-            cache: Mutex::new(HashMap::new()),
+            cache: RwLock::new(LruCache::new(NonZeroUsize::new(capacity).unwrap())),
             ttl: Duration::from_secs(ttl_seconds),
         }
     }
 
-    pub fn get(&self, cert_der: &str) -> Option<X509Certificate<'static>> {
-        let mut cache = self.cache.lock().unwrap();
-        if let Some((cert, timestamp)) = cache.get(cert_der) {
-            if timestamp.elapsed() < self.ttl {
-                return Some(cert.clone());
+    async fn get(&self, key: &str) -> Option<CertificateValidation> {
+        let mut cache = self.cache.write().await;
+        if let Some(entry) = cache.get(key) {
+            if !entry.is_expired() {
+                return Some(entry.validation.clone());
             } else {
-                cache.remove(cert_der);
+                // Remove expired entry
+                cache.pop(key);
             }
         }
         None
     }
 
-    pub fn insert(&self, cert_der: String, cert: X509Certificate<'static>) {
-        let mut cache = self.cache.lock().unwrap();
-        cache.insert(cert_der, (cert, Instant::now()));
+    async fn insert(&self, key: String, validation: CertificateValidation) {
+        let entry = CachedValidation {
+            validation,
+            expires_at: Instant::now() + self.ttl,
+        };
+        let mut cache = self.cache.write().await;
+        cache.put(key, entry);
     }
 }
 
-/// Global certificate cache
-static CERT_CACHE: Mutex<Option<Arc<CertificateCache>>> = Mutex::new(None);
-
-/// Initialize certificate cache
-pub fn init_certificate_cache(ttl_seconds: u64) {
-    let mut cache = CERT_CACHE.lock().unwrap();
-    *cache = Some(Arc::new(CertificateCache::new(ttl_seconds)));
+lazy_static::lazy_static! {
+    static ref CERTIFICATE_CACHE: Arc<CertificateCache> = Arc::new(CertificateCache::new(1000, 300)); // 1000 entries, 5 minute TTL
 }
 
 /// Certificate validation result
@@ -75,30 +92,22 @@ pub struct CertificateValidation {
 }
 
 /// Validate client certificate
-pub fn validate_client_certificate(
+pub async fn validate_client_certificate(
     cert_der: &[u8],
     _ca_cert_path: Option<&PathBuf>,
     allowed_subjects: &[String],
 ) -> CertificateValidation {
-    // TODO: Re-enable certificate caching when lifetime issues are resolved
+    // Generate cache key from certificate DER
+    let cert_key = hex::encode(cert_der);
+
     // Try cache first
-    // let cert_der_hex = hex::encode(cert_der);
-    // if let Some(cache) = get_cert_cache() {
-    //     if let Some(cached_cert) = cache.get(&cert_der_hex) {
-    //         return validate_cached_certificate(&cached_cert, allowed_subjects);
-    //     }
-    // }
+    if let Some(cached_validation) = CERTIFICATE_CACHE.get(&cert_key).await {
+        return cached_validation;
+    }
 
-    // Parse certificate
-    match X509Certificate::from_der(cert_der) {
-        Ok((_, cert)) => {
-            // TODO: Cache the parsed certificate when lifetime issues are resolved
-            // if let Some(cache) = get_cert_cache() {
-            //     cache.insert(cert_der_hex, cert.clone());
-            // }
-
-            validate_cached_certificate(&cert, allowed_subjects)
-        }
+    // Parse certificate and validate if not cached
+    let validation = match X509Certificate::from_der(cert_der) {
+        Ok((_, cert)) => validate_cached_certificate(&cert, allowed_subjects),
         Err(e) => {
             warn!("Failed to parse client certificate: {}", e);
             CertificateValidation {
@@ -110,7 +119,12 @@ pub fn validate_client_certificate(
                 not_after: None,
             }
         }
-    }
+    };
+
+    // Cache the validation result
+    CERTIFICATE_CACHE.insert(cert_key, validation.clone()).await;
+
+    validation
 }
 
 /// Validate cached certificate
@@ -225,27 +239,26 @@ pub async fn mtls_auth_middleware(
     _headers: HeaderMap,
     mut request: Request,
     next: Next,
-) -> Result<Response, AuthError> {
+) -> Result<Response, SecretonError> {
     // Skip mTLS for health/status endpoints
     let path = request.uri().path();
     if path == "/health" || path == "/version" || path.starts_with("/health") {
         return Ok(next.run(request).await);
     }
 
-    // TODO: Re-enable mTLS when TransitApiState has config field
-    // Check if mTLS is configured and required
-    if let Some(mtls_config) = None::<&crate::config::MtlsConfig> {
+    // Get mTLS config from state
+    if let Some(mtls_config) = _state.config.auth.mtls.as_ref() {
         if mtls_config.required {
             // Extract client certificate from TLS connection
             if let Some(client_cert_der) = extract_client_certificate_from_tls(&request) {
                 let start_time = std::time::Instant::now();
 
-                // Validate certificate
+                // Validate certificate asynchronously
                 let validation = validate_client_certificate(
                     &client_cert_der,
                     None,
                     &mtls_config.allowed_subjects,
-                );
+                ).await;
 
                 let validation_time = start_time.elapsed().as_millis() as u64;
 
@@ -254,10 +267,6 @@ pub async fn mtls_auth_middleware(
                         "mTLS authentication successful for subject: {:?} (validation: {}ms)",
                         validation.subject, validation_time
                     );
-
-                    // Record successful authentication metrics
-                    // TODO: Re-enable when tls_optimization is updated
-                    // record_tls_handshake(true, false, validation_time);
 
                     // Add certificate info to request extensions
                     request.extensions_mut().insert(validation);
@@ -268,13 +277,11 @@ pub async fn mtls_auth_middleware(
                         "mTLS authentication failed for subject: {:?} (validation: {}ms)",
                         validation.subject, validation_time
                     );
-                    // record_tls_handshake(false, false, validation_time);
-                    return Err(AuthError::InvalidCredentials);
+                    return Err(SecretonError::InvalidCredentials);
                 }
             } else {
                 warn!("mTLS required but no client certificate provided");
-                // record_tls_handshake(false, false, 0);
-                return Err(AuthError::MissingCredentials);
+                return Err(SecretonError::InvalidCredentials);
             }
         }
     }
@@ -366,7 +373,7 @@ pub async fn auth_middleware(
     headers: HeaderMap,
     mut request: Request,
     next: Next,
-) -> Result<Response, AuthError> {
+) -> Result<Response, SecretonError> {
     // Skip auth for health/status endpoints
     let path = request.uri().path();
     if path == "/health" || path == "/version" || path.starts_with("/health") {
@@ -384,10 +391,10 @@ pub async fn auth_middleware(
     // Extract authorization header
     let auth_header = headers
         .get("authorization")
-        .ok_or(AuthError::MissingAuthHeader)?;
+        .ok_or(SecretonError::MissingAuthHeader)?;
 
     // Extract bearer token
-    let token = extract_bearer_token(auth_header).ok_or(AuthError::InvalidAuthHeader)?;
+    let token = extract_bearer_token(auth_header).ok_or(SecretonError::InvalidAuthHeader)?;
 
     // Create auth service (in real implementation, this would be injected)
     let auth_config = crate::auth::AuthConfig::default();

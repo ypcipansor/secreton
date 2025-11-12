@@ -1,6 +1,7 @@
 //! Agent configuration management
 
-use secreton_core::CoreResult;
+use secreton_config::{AlertingConfig, LoggingConfig, MetricsConfig, SecurityConfig};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 
 /// Main agent configuration
@@ -24,18 +25,41 @@ pub struct AgentConfig {
     /// Health checking configuration
     pub health: HealthConfig,
 
-    /// Metrics configuration
-    pub metrics: MetricsConfig,
-
     /// Logging configuration
     pub logging: LoggingConfig,
+
+    /// Metrics configuration
+    pub metrics: MetricsConfig,
+}
+
+/// Health checking configuration (agent-specific)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthConfig {
+    /// Health check interval in seconds
+    pub check_interval_seconds: u64,
+
+    /// Enable agent health checks
+    pub agent_enabled: bool,
+
+    /// Health check timeout in seconds
+    pub timeout_seconds: u64,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_seconds: 60,
+            agent_enabled: true,
+            timeout_seconds: 30,
+        }
+    }
 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             agent_id: uuid::Uuid::new_v4().to_string(),
-            name: "Brankas Security Agent".to_string(),
+            name: "Secreton Security Agent".to_string(),
             monitoring: MonitoringConfig::default(),
             alerting: AlertingConfig::default(),
             security: SecurityConfig::default(),
@@ -47,425 +71,26 @@ impl Default for AgentConfig {
 }
 
 /// Monitoring configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonitoringConfig {
-    /// Check interval in seconds
-    pub check_interval_seconds: u64,
-
-    /// Enable file system monitoring
-    pub filesystem_enabled: bool,
-
-    /// Enable network monitoring
-    pub network_enabled: bool,
-
-    /// Enable process monitoring
-    pub process_enabled: bool,
-
-    /// Enable log file monitoring
-    pub logs_enabled: bool,
-
-    /// Maximum events to buffer
-    pub max_events_buffer: usize,
-}
-
-impl Default for MonitoringConfig {
-    fn default() -> Self {
-        Self {
-            check_interval_seconds: 30,
-            filesystem_enabled: true,
-            network_enabled: true,
-            process_enabled: true,
-            logs_enabled: true,
-            max_events_buffer: 1000,
-        }
-    }
-}
-
-/// Alerting configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlertingConfig {
-    /// Processing interval in seconds
-    pub processing_interval_seconds: u64,
-
-    /// Enable SMS alerts
-    pub sms_enabled: bool,
-
-    /// Email settings
-    pub email: EmailConfig,
-
-    /// SMS settings
-    pub sms: SmsConfig,
-
-    /// Webhook settings
-    pub webhook: WebhookConfig,
-
-    /// Slack settings
-    pub slack: SlackConfig,
-}
-
-impl Default for AlertingConfig {
-    fn default() -> Self {
-        Self {
-            processing_interval_seconds: 10,
-            sms_enabled: false,
-            email: EmailConfig::default(),
-            sms: SmsConfig::default(),
-            webhook: WebhookConfig::default(),
-            slack: SlackConfig::default(),
-        }
-    }
-}
+pub type MonitoringConfig = secreton_config::CoreConfig;
 
 /// Alert severity thresholds
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SeverityThresholds {
-    /// CPU usage threshold for warning (percentage)
-    pub cpu_warning_threshold: f64,
-
-    /// CPU usage threshold for critical (percentage)
-    pub cpu_critical_threshold: f64,
-
-    /// Memory usage threshold for warning (percentage)
-    pub memory_warning_threshold: f64,
-
-    /// Memory usage threshold for critical (percentage)
-    pub memory_critical_threshold: f64,
-
-    /// Disk usage threshold for warning (percentage)
-    pub disk_warning_threshold: f64,
-
-    /// Disk usage threshold for critical (percentage)
-    pub disk_critical_threshold: f64,
-
-    /// Failed login attempts threshold
-    pub failed_login_threshold: u32,
-
-    /// Suspicious activity threshold
-    pub suspicious_activity_threshold: u32,
-}
-
-impl Default for SeverityThresholds {
-    fn default() -> Self {
-        Self {
-            cpu_warning_threshold: 80.0,
-            cpu_critical_threshold: 95.0,
-            memory_warning_threshold: 85.0,
-            memory_critical_threshold: 95.0,
-            disk_warning_threshold: 90.0,
-            disk_critical_threshold: 98.0,
-            failed_login_threshold: 5,
-            suspicious_activity_threshold: 3,
-        }
-    }
-}
+pub type SeverityThresholds = secreton_config::CoreConfig;
 
 /// Email alert configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmailConfig {
-    /// SMTP server
-    pub smtp_server: String,
-
-    /// SMTP port
-    pub smtp_port: u16,
-
-    /// Username
-    pub username: String,
-
-    /// Password
-    pub password: String,
-
-    /// From address
-    pub from_address: String,
-
-    /// To addresses
-    pub to_addresses: Vec<String>,
-
-    /// Use TLS
-    pub use_tls: bool,
-}
-
-impl Default for EmailConfig {
-    fn default() -> Self {
-        Self {
-            smtp_server: "localhost".to_string(),
-            smtp_port: 587,
-            username: "".to_string(),
-            password: "".to_string(),
-            from_address: "secreton-agent@localhost".to_string(),
-            to_addresses: Vec::new(),
-            use_tls: true,
-        }
-    }
-}
+pub type EmailConfig = secreton_config::EmailConfig;
 
 /// SMS alert configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SmsConfig {
-    /// SMS provider (twilio, aws-sns, etc.)
-    pub provider: String,
-
-    /// Account SID (for Twilio)
-    pub account_sid: String,
-
-    /// Auth token (for Twilio)
-    pub auth_token: String,
-
-    /// From phone number
-    pub from_number: String,
-
-    /// To phone numbers
-    pub to_numbers: Vec<String>,
-}
-
-impl Default for SmsConfig {
-    fn default() -> Self {
-        Self {
-            provider: "twilio".to_string(),
-            account_sid: "".to_string(),
-            auth_token: "".to_string(),
-            from_number: "".to_string(),
-            to_numbers: Vec::new(),
-        }
-    }
-}
+pub type SmsConfig = secreton_config::SmsConfig;
 
 /// Webhook alert configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebhookConfig {
-    /// Webhook URL
-    pub url: String,
-
-    /// HTTP method
-    pub method: String,
-
-    /// Headers to include
-    pub headers: std::collections::HashMap<String, String>,
-
-    /// Request timeout in seconds
-    pub timeout_seconds: u64,
-
-    /// Retry attempts
-    pub retry_attempts: u32,
-}
-
-impl Default for WebhookConfig {
-    fn default() -> Self {
-        Self {
-            url: "".to_string(),
-            method: "POST".to_string(),
-            headers: std::collections::HashMap::new(),
-            timeout_seconds: 30,
-            retry_attempts: 3,
-        }
-    }
-}
+pub type WebhookConfig = secreton_config::WebhookConfig;
 
 /// Slack alert configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlackConfig {
-    /// Slack webhook URL
-    pub webhook_url: String,
-
-    /// Channel to post to
-    pub channel: String,
-
-    /// Username for the bot
-    pub username: String,
-
-    /// Icon emoji for the bot
-    pub icon_emoji: String,
-}
-
-impl Default for SlackConfig {
-    fn default() -> Self {
-        Self {
-            webhook_url: "".to_string(),
-            channel: "#security-alerts".to_string(),
-            username: "Brankas Agent".to_string(),
-            icon_emoji: ":shield:".to_string(),
-        }
-    }
-}
-
-/// Security configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityConfig {
-    /// Security scan interval in seconds
-    pub scan_interval_seconds: u64,
-
-    /// Enable intrusion detection
-    pub intrusion_detection_enabled: bool,
-
-    /// Enable malware scanning
-    pub malware_scan_enabled: bool,
-
-    /// Enable vulnerability scanning
-    pub vulnerability_scan_enabled: bool,
-
-    /// Enable compliance checking
-    pub compliance_check_enabled: bool,
-
-    /// Quarantine suspicious files
-    pub auto_quarantine: bool,
-
-    /// Block suspicious IPs
-    pub auto_block_ips: bool,
-
-    /// Enable encryption compliance checking
-    pub encryption_enabled: bool,
-
-    /// Enable access control compliance checking
-    pub access_control_enabled: bool,
-
-    /// Enable data protection compliance checking
-    pub data_protection_enabled: bool,
-}
-
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            scan_interval_seconds: 300, // 5 minutes
-            intrusion_detection_enabled: true,
-            malware_scan_enabled: true,
-            vulnerability_scan_enabled: true,
-            compliance_check_enabled: true,
-            auto_quarantine: false, // Require manual confirmation
-            auto_block_ips: false,  // Require manual confirmation
-            encryption_enabled: true,
-            access_control_enabled: true,
-            data_protection_enabled: true,
-        }
-    }
-}
-
-/// Health checking configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HealthConfig {
-    /// Health check interval in seconds
-    pub check_interval_seconds: u64,
-
-    /// Enable database health checks
-    pub database_enabled: bool,
-
-    /// Enable API health checks
-    pub api_enabled: bool,
-
-    /// Enable external service health checks
-    pub external_services_enabled: bool,
-
-    /// Health check timeout in seconds
-    pub timeout_seconds: u64,
-
-    /// External services to check
-    pub external_services: Vec<ExternalServiceConfig>,
-}
-
-impl Default for HealthConfig {
-    fn default() -> Self {
-        Self {
-            check_interval_seconds: 60,
-            database_enabled: true,
-            api_enabled: true,
-            external_services_enabled: true,
-            timeout_seconds: 30,
-            external_services: Vec::new(),
-        }
-    }
-}
-
-/// External service health check configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalServiceConfig {
-    /// Service name
-    pub name: String,
-
-    /// Service URL
-    pub url: String,
-
-    /// Expected HTTP status code
-    pub expected_status: u16,
-
-    /// Request timeout in seconds
-    pub timeout_seconds: u64,
-}
-
-/// Metrics configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MetricsConfig {
-    /// Metrics collection interval in seconds
-    pub collection_interval_seconds: u64,
-
-    /// Enable Prometheus metrics
-    pub prometheus_enabled: bool,
-
-    /// Prometheus metrics port
-    pub prometheus_port: u16,
-
-    /// Enable StatsD metrics
-    pub statsd_enabled: bool,
-
-    /// StatsD server address
-    pub statsd_address: String,
-
-    /// Metrics retention period in seconds
-    pub retention_seconds: u64,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            collection_interval_seconds: 60,
-            prometheus_enabled: true,
-            prometheus_port: 9090,
-            statsd_enabled: false,
-            statsd_address: "localhost:8125".to_string(),
-            retention_seconds: 86400 * 7, // 7 days
-        }
-    }
-}
-
-/// Logging configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingConfig {
-    /// Log level
-    pub level: String,
-
-    /// Log format (json or text)
-    pub format: String,
-
-    /// Enable file logging
-    pub file_enabled: bool,
-
-    /// Log file path
-    pub file_path: String,
-
-    /// Maximum log file size in MB
-    pub max_file_size_mb: u64,
-
-    /// Number of log files to retain
-    pub max_files: u32,
-
-    /// Enable structured logging
-    pub structured: bool,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            format: "text".to_string(),
-            file_enabled: true,
-            file_path: "/var/log/secreton-agent.log".to_string(),
-            max_file_size_mb: 100,
-            max_files: 10,
-            structured: true,
-        }
-    }
-}
+pub type SlackConfig = secreton_config::SlackConfig;
 
 impl AgentConfig {
     /// Load configuration from environment variables
-    pub async fn load_from_env() -> CoreResult<Self> {
+    pub async fn load_from_env() -> Result<Self, SecretonError> {
         let mut config = AgentConfig::default();
 
         // Override with environment variables
@@ -477,12 +102,6 @@ impl AgentConfig {
             config.name = name;
         }
 
-        if let Ok(interval) = std::env::var("BRANKAS_MONITOR_INTERVAL") {
-            if let Ok(interval_val) = interval.parse::<u64>() {
-                config.monitoring.check_interval_seconds = interval_val;
-            }
-        }
-
         if let Ok(log_level) = std::env::var("BRANKAS_LOG_LEVEL") {
             config.logging.level = log_level;
         }
@@ -491,7 +110,7 @@ impl AgentConfig {
     }
 
     /// Load configuration from file
-    pub async fn load_from_file(path: &str) -> CoreResult<Self> {
+    pub async fn load_from_file(path: &str) -> Result<Self, SecretonError> {
         let content = std::fs::read_to_string(path).map_err(secreton_core::CoreError::Io)?;
 
         let config: AgentConfig =
@@ -503,7 +122,7 @@ impl AgentConfig {
     }
 
     /// Convenience method to load config - tries file first, then env
-    pub async fn load() -> CoreResult<Self> {
+    pub async fn load() -> Result<Self, SecretonError> {
         // Try to load from common config file locations
         let config_paths = [
             "agent.toml",
@@ -521,18 +140,18 @@ impl AgentConfig {
         Self::load_from_env().await
     }
 
-    /// Get collection interval in seconds (convenience method)
-    pub fn collection_interval(&self) -> u64 {
-        self.monitoring.check_interval_seconds
-    }
-
-    /// Get report interval in seconds (convenience method)
-    pub fn report_interval(&self) -> u64 {
-        self.alerting.processing_interval_seconds
-    }
-
     /// Get metrics port (convenience method)
     pub fn metrics_port(&self) -> u16 {
         self.metrics.prometheus_port
+    }
+
+    /// Get collection interval (convenience method)
+    pub fn collection_interval(&self) -> u64 {
+        self.metrics.collection_interval_seconds
+    }
+
+    /// Get report interval (convenience method) - alias for collection_interval
+    pub fn report_interval(&self) -> u64 {
+        self.collection_interval()
     }
 }

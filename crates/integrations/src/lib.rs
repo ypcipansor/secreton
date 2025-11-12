@@ -6,10 +6,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod credentials;
 pub mod database_rotation;
 pub mod dynamic;
 pub mod error;
 pub mod snapshot;
+
+// Directory services
+#[cfg(feature = "ldap")]
+pub mod ldap;
+
+// Message queue services
+pub mod rabbitmq;
 
 // Cloud provider integrations
 // #[cfg(feature = "aws")]
@@ -113,12 +121,12 @@ pub enum IntegrationCredentials {
 pub enum IntegrationType {
     /// AWS Secrets Manager
     AwsSecretsManager,
-    /// Azure Key Vault
-    AzureKeyVault,
+    /// Azure Key Secret
+    AzureKeySecret,
     /// Google Cloud Secret Manager
     GcpSecretManager,
-    /// HashiCorp Vault
-    HashiCorpVault,
+    /// HashiCorp Secret
+    HashiCorpSecret,
     /// Kubernetes secrets
     Kubernetes,
     /// Jenkins CI/CD
