@@ -30,3 +30,19 @@ build/
 
 # Config files with secrets (in production)
 config/vault.toml
+
+# CI/CD artifacts
+*.lcov
+lcov.info
+geiger-report.json
+trivy-results.sarif
+
+# Coverage reports
+coverage/
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.bak

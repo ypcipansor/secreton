@@ -1,13 +1,13 @@
 version: 2
 updates:
-  # Rust dependencies
+  # Cargo dependencies
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 20
     reviewers:
       - "analisaperlengkapan"
     assignees:
@@ -16,19 +16,46 @@ updates:
       prefix: "deps"
       prefix-development: "deps-dev"
       include: "scope"
-
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 5
-    reviewers:
-      - "analisaperlengkapan"
-    assignees:
-      - "analisaperlengkapan"
-    commit-message:
-      prefix: "ci"
-      include: "scope"
+    groups:
+      # Group RustCrypto updates together
+      rustcrypto:
+        patterns:
+          - "aes*"
+          - "chacha20*"
+          - "sha*"
+          - "hmac*"
+          - "pbkdf2*"
+          - "argon2*"
+          - "scrypt*"
+          - "bcrypt*"
+          - "ring"
+          - "ed25519*"
+          - "x25519*"
+          - "p256"
+          - "p384"
+          - "k256"
+      # Group async ecosystem updates
+      async:
+        patterns:
+          - "tokio*"
+          - "async-*"
+          - "futures*"
+      # Group serde ecosystem
+      serde:
+        patterns:
+          - "serde*"
+          - "toml"
+          - "config"
+      # Group security crates
+      security:
+        patterns:
+          - "zeroize*"
+          - "secrecy*"
+          - "rustls*"
+      # Group database crates
+      database:
+        patterns:
+          - "tokio-postgres*"
+          - "deadpool*"
+          - "redis*"
+          - "mongodb*"

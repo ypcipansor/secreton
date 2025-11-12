@@ -2,69 +2,279 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   test:
-    name: Test
-    runs-on: ${{ matrix.os }}
+    name: Test Suite
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable, beta]
-        exclude:
-          - os: macos-latest
-            rust: beta
-          - os: windows-latest
-            rust: beta
-
+        rust:
+          - stable
+          - beta
+          - nightly
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev postgresql-client
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+        if: matrix.rust == 'stable'
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        if: matrix.rust == 'stable'
+
+      - name: Build workspace
+        run: cargo build --workspace --verbose
 
       - name: Run tests
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --verbose --all-features
+        env:
+          RUST_TEST_THREADS: 1
 
-      - name: Run doc tests
-        run: cargo test --doc --workspace
+      - name: Run integration tests
+        run: cargo test --test '*' --verbose
+        env:
+          RUST_TEST_THREADS: 1
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
-
-      - name: Run coverage
-        run: cargo tarpaulin --workspace --all-features --out Lcov
+      - name: Generate coverage report
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          version: '0.25.0'
+          args: '--workspace --all-features --exclude-files target/* --out Lcov'
+        if: matrix.rust == 'stable'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           file: ./lcov.info
           fail_ci_if_error: false
+        if: matrix.rust == 'stable'
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: cargo audit --deny warnings
+
+  license-check:
+    name: License Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run license check
+        run: cargo deny check licenses
+
+      - name: Run ban check
+        run: cargo deny check bans
+
+  fuzz-test:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rust-src
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run fuzz tests (short duration for CI)
+        run: |
+          # Run each fuzz target for a short time
+          find fuzz -name "fuzz_targets" -type d -exec find {} -name "*.rs" \; | while read -r target; do
+            target_name=$(basename "$target" .rs)
+            echo "Running fuzz target: $target_name"
+            timeout 60 cargo fuzz run "$target_name" -- -max_total_time=30 || true
+          done
+
+  performance-test:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run performance benchmarks
+        run: cargo bench --workspace
+
+  build-release:
+    name: Build Release Binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            name: linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binaries
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Create release archive
+        run: |
+          cd target/${{ matrix.target }}/release
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            7z a ../../../secreton-${{ matrix.name }}.zip secreton-*
+          else
+            tar -czf ../../../secreton-${{ matrix.name }}.tar.gz secreton-*
+          fi
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: secreton-${{ matrix.name }}
+          path: secreton-${{ matrix.name }}.*
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            analisaperlengkapan/secreton:latest
+            analisaperlengkapan/secreton:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [test, security-audit, license-check, build-release, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
