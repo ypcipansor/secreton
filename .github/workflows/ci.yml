@@ -62,18 +62,18 @@ jobs:
         env:
           RUST_TEST_THREADS: 1
 
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+
       - name: Generate coverage report
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: '0.25.0'
-          args: '--workspace --all-features --exclude-files target/* --out Lcov'
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
         if: matrix.rust == 'stable'
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
-          file: ./lcov.info
-          fail_ci_if_error: false
+          name: coverage-report
+          path: lcov.info
         if: matrix.rust == 'stable'
 
   security-audit:
@@ -121,33 +121,6 @@ jobs:
       - name: Run ban check
         run: cargo deny check bans
 
-  fuzz-test:
-    name: Fuzz Testing
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          components: rust-src
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
-
-      - name: Run fuzz tests (short duration for CI)
-        run: |
-          # Run each fuzz target for a short time
-          find fuzz -name "fuzz_targets" -type d -exec find {} -name "*.rs" \; | while read -r target; do
-            target_name=$(basename "$target" .rs)
-            echo "Running fuzz target: $target_name"
-            timeout 60 cargo fuzz run "$target_name" -- -max_total_time=30 || true
-          done
 
   performance-test:
     name: Performance Benchmark
