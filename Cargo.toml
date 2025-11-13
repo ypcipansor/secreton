@@ -266,7 +266,7 @@ axum-tracing-opentelemetry = "0.32"
 
 # Security monitoring and alerting
 sentry = "0.32"
-sentry-tracing = "0.32"
+sentry-tracing = "0.45"
 
 # Runtime security validation
 # bollard = "0.16"  # Docker API for container security - temporarily disabled
