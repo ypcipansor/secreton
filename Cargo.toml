@@ -230,7 +230,7 @@ xml = "0.8"
 
 # Kubernetes client
 kube = { version = "0.95", features = ["client", "rustls-tls"] }
-k8s-openapi = { version = "0.23", features = ["v1_30"] }
+k8s-openapi = { version = "0.26", features = ["v1_30"] }
 
 # Threading and concurrency
 parking_lot = "0.12"
