@@ -173,7 +173,7 @@ k256 = "0.13.4"  # secp256k1 (Bitcoin/Ethereum)
 x509-parser = "0.18.0"  # X.509 certificate parsing
 x509-cert = "0.2.5"  # X.509 certificate handling (RustCrypto)
 pem = "3.0.4"  # PEM encoding
-rcgen = "0.13.1"  # Certificate generation (pure Rust)
+rcgen = "0.14.5"  # Certificate generation (pure Rust)
 der = "0.7.9"  # DER encoding (RustCrypto)
 yasna = "0.5.2"  # ASN.1 encoding
 
