@@ -1156,7 +1156,7 @@ impl HESystem {
                 PublicKey {
                     key_id: key_id.to_string(),
                     scheme: HEScheme::Paillier,
-                    key_data: bincode::serialize(public_key).unwrap_or_default(),
+                    key_data: bincode::serde::encode_to_vec(public_key, bincode::config::standard()).unwrap_or_default(),
                     modulus: n.to_bytes_be().len() as u64 * 8, // bit length
                 }
             }
@@ -1165,7 +1165,7 @@ impl HESystem {
                 PublicKey {
                     key_id: key_id.to_string(),
                     scheme: HEScheme::ElGamal,
-                    key_data: bincode::serialize(public_key).unwrap_or_default(),
+                    key_data: bincode::serde::encode_to_vec(public_key, bincode::config::standard()).unwrap_or_default(),
                     modulus: p.to_bytes_be().len() as u64 * 8, // bit length
                 }
             }
