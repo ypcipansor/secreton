@@ -68,6 +68,12 @@ enum EtcdOperation {
     Delete(()),
 }
 
+impl Default for EtcdTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EtcdTransaction {
     pub fn new() -> Self {
         Self {
@@ -300,8 +306,8 @@ impl StorageBackend for EtcdStorage {
                     message: format!("Failed to parse etcd response: {}", e),
                 })?;
 
-        if let Some(kvs) = etcd_response.kvs {
-            if let Some(kv) = kvs.first() {
+        if let Some(kvs) = etcd_response.kvs
+            && let Some(kv) = kvs.first() {
                 let decoded = BASE64_STANDARD.decode(&kv.value).map_err(|e| {
                     StorageError::SerializationError {
                         message: format!("Failed to decode base64: {}", e),
@@ -320,7 +326,6 @@ impl StorageBackend for EtcdStorage {
 
                 return Ok(Some(entry));
             }
-        }
 
         Ok(None)
     }
@@ -433,11 +438,10 @@ impl StorageBackend for EtcdStorage {
                 })?;
 
                 // Apply filters
-                if let Some(owner) = params.owner_id {
-                    if entry.owner_id != owner {
+                if let Some(owner) = params.owner_id
+                    && entry.owner_id != owner {
                         continue;
                     }
-                }
                 if !params.include_expired && entry.is_expired() {
                     continue;
                 }

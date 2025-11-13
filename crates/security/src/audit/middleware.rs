@@ -118,12 +118,11 @@ pub async fn audit_middleware(
         metadata.insert("duration_ms".into(), duration.as_millis().to_string());
 
         // Try to extract error details
-        if !success {
-            if let Some(body) = response.body().size_hint().exact() {
+        if !success
+            && let Some(body) = response.body().size_hint().exact() {
                 // If we can get the body size, we could log it
                 metadata.insert("response_size".into(), body.to_string());
             }
-        }
 
         // Log the request
         let _ = logger

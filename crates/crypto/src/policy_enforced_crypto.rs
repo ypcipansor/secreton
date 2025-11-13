@@ -126,6 +126,12 @@ pub struct PolicyEnforcedCryptoOperations {
     migration_plans: Arc<RwLock<HashMap<String, MigrationPlan>>>,
 }
 
+impl Default for PolicyEnforcedCryptoOperations {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PolicyEnforcedCryptoOperations {
     pub fn new() -> Self {
         Self {

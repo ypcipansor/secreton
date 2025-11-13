@@ -281,11 +281,10 @@ impl KeyRotationService {
         // Check if rotation is already in progress
         {
             let _status = self._status.read().await;
-            if let Some(s) = _status.get(key_name) {
-                if *s == RotationStatus::InProgress {
+            if let Some(s) = _status.get(key_name)
+                && *s == RotationStatus::InProgress {
                     return Err(KeyRotationError::RotationInProgress(key_name.to_string()));
                 }
-            }
         }
 
         // Set _status to in progress
@@ -331,11 +330,10 @@ impl KeyRotationService {
         }
 
         // Optionally deprecate old version
-        if managed_key._config.min_encryption_version > old_version {
-            if let Some(old_key) = managed_key.get_version_mut(old_version) {
+        if managed_key._config.min_encryption_version > old_version
+            && let Some(old_key) = managed_key.get_version_mut(old_version) {
                 old_key.deprecate();
             }
-        }
 
         drop(keys);
 
@@ -410,7 +408,7 @@ impl KeyRotationService {
 
         history
             .iter()
-            .filter(|h| key_name.map_or(true, |_name| h.key_name == _name))
+            .filter(|h| key_name.is_none_or(|_name| h.key_name == _name))
             .rev()
             .take(limit)
             .cloned()

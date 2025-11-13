@@ -182,6 +182,7 @@ impl Default for PaginationParams {
 
 /// Query parameters for list operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct QueryParams {
     /// Pagination parameters
     pub pagination: PaginationParams,
@@ -191,15 +192,6 @@ pub struct QueryParams {
     pub search: Option<String>,
 }
 
-impl Default for QueryParams {
-    fn default() -> Self {
-        Self {
-            pagination: PaginationParams::default(),
-            filters: HashMap::new(),
-            search: None,
-        }
-    }
-}
 
 /// Common trait for entities with timestamps
 pub trait Timestamped {
@@ -383,14 +375,13 @@ pub mod utils {
                     });
                 }
 
-                if let Some(max_len) = self.max_length {
-                    if max_len < self.min_length {
+                if let Some(max_len) = self.max_length
+                    && max_len < self.min_length {
                         return Err(crate::CommonError::Validation {
                             message: "Maximum password length cannot be less than minimum length"
                                 .to_string(),
                         });
                     }
-                }
 
                 Ok(())
             }
@@ -447,11 +438,10 @@ pub mod utils {
             }
 
             // Apply max length if specified
-            if let Some(max_len) = policy.max_length {
-                if password.len() > max_len {
+            if let Some(max_len) = policy.max_length
+                && password.len() > max_len {
                     password = password[..max_len].to_string();
                 }
-            }
 
             // Shuffle the password for better randomness
             let mut chars: Vec<char> = password.chars().collect();
@@ -542,6 +532,12 @@ pub trait ServiceContainer {
 /// Standard service container implementation
 pub struct StandardServiceContainer {
     services: std::collections::HashMap<String, Box<dyn std::any::Any + Send + Sync>>,
+}
+
+impl Default for StandardServiceContainer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StandardServiceContainer {

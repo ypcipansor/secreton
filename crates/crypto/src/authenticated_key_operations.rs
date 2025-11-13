@@ -146,6 +146,12 @@ pub struct AuthenticatedKeyOperations {
     permission_cache: Arc<RwLock<HashMap<String, Vec<KeyPermission>>>>,
 }
 
+impl Default for AuthenticatedKeyOperations {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthenticatedKeyOperations {
     pub fn new() -> Self {
         Self {

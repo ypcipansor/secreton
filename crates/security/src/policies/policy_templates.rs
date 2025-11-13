@@ -97,11 +97,10 @@ impl PolicyTemplate {
     /// Validate that all required parameters are present
     pub fn validate_parameters(&self, values: &HashMap<String, String>) -> Result<()> {
         for param in &self.parameters {
-            if param.required && !values.contains_key(&param.name) {
-                if param.default_value.is_none() {
+            if param.required && !values.contains_key(&param.name)
+                && param.default_value.is_none() {
                     return Err(PolicyTemplateError::MissingParameter(param.name.clone()));
                 }
-            }
         }
         Ok(())
     }
@@ -115,11 +114,10 @@ impl PolicyTemplate {
     ) -> Result<RenderedPolicy> {
         // Apply defaults for missing parameters
         for param in &self.parameters {
-            if !values.contains_key(&param.name) {
-                if let Some(default) = &param.default_value {
+            if !values.contains_key(&param.name)
+                && let Some(default) = &param.default_value {
                     values.insert(param.name.clone(), default.clone());
                 }
-            }
         }
 
         // Validate all required parameters are present

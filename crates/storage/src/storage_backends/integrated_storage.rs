@@ -357,7 +357,7 @@ impl IntegratedRaftStorage {
             success_count += 1;
         }
 
-        let majority = (nodes.len() + 1) / 2 + 1;
+        let majority = nodes.len().div_ceil(2) + 1;
         Ok(success_count >= majority)
     }
 

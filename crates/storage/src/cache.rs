@@ -96,12 +96,11 @@ impl CacheBackend for InMemoryCache {
 
         match data.get(key) {
             Some(entry) => {
-                if let Some(expires_at) = entry.expires_at {
-                    if std::time::Instant::now() > expires_at {
+                if let Some(expires_at) = entry.expires_at
+                    && std::time::Instant::now() > expires_at {
                         stats.miss_count += 1;
                         return Ok(None);
                     }
-                }
 
                 stats.hit_count += 1;
                 Ok(Some(entry.data.clone()))
@@ -316,24 +315,22 @@ where
         let cache_key = Self::cache_key_for_id(id);
 
         // Try cache first
-        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
+        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
+            && let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
                 return Ok(Some(entry));
             }
-        }
 
         // Fall back to storage
         let entry = self.storage.get_by_id(id).await?;
 
         // Cache the result if found
-        if let Some(ref entry) = entry {
-            if let Ok(serialized) = bincode::serialize(entry) {
+        if let Some(ref entry) = entry
+            && let Ok(serialized) = bincode::serialize(entry) {
                 let _ = self
                     .cache
                     .set(&cache_key, serialized, Some(self.default_ttl))
                     .await;
             }
-        }
 
         Ok(entry)
     }
@@ -342,24 +339,22 @@ where
         let cache_key = Self::cache_key_for_path(path);
 
         // Try cache first
-        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
+        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
+            && let Ok(entry) = bincode::deserialize::<SecretEntry>(&cached_data) {
                 return Ok(Some(entry));
             }
-        }
 
         // Fall back to storage
         let entry = self.storage.get_by_path(path).await?;
 
         // Cache the result if found
-        if let Some(ref entry) = entry {
-            if let Ok(serialized) = bincode::serialize(entry) {
+        if let Some(ref entry) = entry
+            && let Ok(serialized) = bincode::serialize(entry) {
                 let _ = self
                     .cache
                     .set(&cache_key, serialized, Some(self.default_ttl))
                     .await;
             }
-        }
 
         Ok(entry)
     }

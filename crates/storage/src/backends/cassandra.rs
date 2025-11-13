@@ -41,6 +41,12 @@ enum CassandraOperation {
     Delete(()),
 }
 
+impl Default for CassandraTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CassandraTransaction {
     pub fn new() -> Self {
         Self {

@@ -198,7 +198,7 @@ impl SentinelEngine {
 
             if policy.code.contains("working_hours") {
                 let hour = Utc::now().hour();
-                if hour < 8 || hour > 18 {
+                if !(8..=18).contains(&hour) {
                     violations.push(Violation {
                         rule: "working_hours".to_string(),
                         message: "Access only allowed during working hours (8AM-6PM)".to_string(),
@@ -207,19 +207,16 @@ impl SentinelEngine {
                 }
             }
 
-            if policy.code.contains("max_ttl") {
-                if let Some(ttl) = context.metadata.get("ttl") {
-                    if let Ok(ttl_value) = ttl.parse::<i64>() {
-                        if ttl_value > 86400 {
+            if policy.code.contains("max_ttl")
+                && let Some(ttl) = context.metadata.get("ttl")
+                    && let Ok(ttl_value) = ttl.parse::<i64>()
+                        && ttl_value > 86400 {
                             violations.push(Violation {
                                 rule: "max_ttl".to_string(),
                                 message: "TTL exceeds maximum of 24 hours".to_string(),
                                 severity: "error".to_string(),
                             });
                         }
-                    }
-                }
-            }
         }
 
         violations
@@ -235,31 +232,29 @@ impl SentinelEngine {
     ) {
         match rule_name {
             "require_mfa" => {
-                if let Some(required) = rule_config.as_bool() {
-                    if required && !context.metadata.contains_key("mfa_verified") {
+                if let Some(required) = rule_config.as_bool()
+                    && required && !context.metadata.contains_key("mfa_verified") {
                         violations.push(Violation {
                             rule: rule_name.to_string(),
                             message: "MFA verification required".to_string(),
                             severity: "error".to_string(),
                         });
                     }
-                }
             }
             "block_production" => {
-                if let Some(block) = rule_config.as_bool() {
-                    if block && context.request_path.contains("production") {
+                if let Some(block) = rule_config.as_bool()
+                    && block && context.request_path.contains("production") {
                         violations.push(Violation {
                             rule: rule_name.to_string(),
                             message: "Production access blocked by policy".to_string(),
                             severity: "critical".to_string(),
                         });
                     }
-                }
             }
             "working_hours" => {
-                if let Some(hours) = rule_config.as_object() {
-                    if let (Some(start), Some(end)) = (hours.get("start"), hours.get("end")) {
-                        if let (Some(start_hour), Some(end_hour)) = (start.as_u64(), end.as_u64()) {
+                if let Some(hours) = rule_config.as_object()
+                    && let (Some(start), Some(end)) = (hours.get("start"), hours.get("end"))
+                        && let (Some(start_hour), Some(end_hour)) = (start.as_u64(), end.as_u64()) {
                             let current_hour = Utc::now().hour() as u64;
                             if current_hour < start_hour || current_hour > end_hour {
                                 violations.push(Violation {
@@ -272,23 +267,18 @@ impl SentinelEngine {
                                 });
                             }
                         }
-                    }
-                }
             }
             "max_ttl" => {
-                if let Some(max_ttl) = rule_config.as_u64() {
-                    if let Some(ttl) = context.metadata.get("ttl") {
-                        if let Ok(ttl_value) = ttl.parse::<u64>() {
-                            if ttl_value > max_ttl {
+                if let Some(max_ttl) = rule_config.as_u64()
+                    && let Some(ttl) = context.metadata.get("ttl")
+                        && let Ok(ttl_value) = ttl.parse::<u64>()
+                            && ttl_value > max_ttl {
                                 violations.push(Violation {
                                     rule: rule_name.to_string(),
                                     message: format!("TTL exceeds maximum of {} seconds", max_ttl),
                                     severity: "error".to_string(),
                                 });
                             }
-                        }
-                    }
-                }
             }
             "ip_whitelist" => {
                 if let Some(ips) = rule_config.as_array() {
