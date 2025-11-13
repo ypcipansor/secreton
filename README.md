@@ -45,6 +45,10 @@ Secreton is a comprehensive, enterprise-grade secrets management platform built 
 - **Git**: For version control
 - **Docker**: Optional, for containerized development
 
+Important
+
+This project is currently in a very early development/experimental stage. There are a lot of unimplemented/broken features at the moment. Contributions are welcome to help out with the progress!
+
 ## Installation
 
 ### Clone the Repository
