@@ -29,7 +29,7 @@ jobs:
           - nightly
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -63,7 +63,7 @@ jobs:
           - beta
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -93,7 +93,7 @@ jobs:
     needs: check
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -137,7 +137,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -184,7 +184,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -223,7 +223,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -256,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run cargo-deny
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -270,7 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
