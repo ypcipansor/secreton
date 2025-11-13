@@ -191,7 +191,7 @@ subtle = "2.6.1"  # Constant-time operations
 # sphincs-plus = "0.2"
 
 # Network and HTTP
-axum = { version = "0.7", features = ["macros", "multipart", "json", "tracing"] }
+axum = { version = "0.8", features = ["macros", "multipart", "json", "tracing"] }
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"
 hyper = { version = "1.7.0", features = ["full"] }
