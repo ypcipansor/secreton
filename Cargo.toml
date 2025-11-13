@@ -298,7 +298,7 @@ flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
 # API and HTTP
 http-body-util = "0.1"
 lazy_static = "1.4"
-lru = "0.12"
+lru = "0.16"
 governor = "0.6"
 headers = "0.4"
 utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
