@@ -1,0 +1,93 @@
+name: Auto Fix
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-fix:
+    name: Auto Fix and Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev
+
+      - name: Run cargo fix
+        run: |
+          cargo fix --workspace --all-features --allow-dirty --allow-staged || true
+        continue-on-error: true
+
+      - name: Run cargo fmt
+        run: cargo fmt --all
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git status --short
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: auto-fix and format code'
+          title: 'chore: Auto-fix and format code'
+          body: |
+            ## Auto-fix and Format
+            
+            This PR contains automatic fixes and formatting changes:
+            
+            ### Changes Made
+            - ✅ Applied `cargo fix --allow-dirty` to fix compiler warnings
+            - ✅ Applied `cargo fmt --all` for consistent formatting
+            
+            ### Review
+            Please review the changes to ensure they are correct before merging.
+            
+            ---
+            *This PR was automatically created by the Auto Fix workflow.*
+          branch: auto-fix/format-${{ github.run_number }}
+          base: ${{ github.ref_name }}
+          delete-branch: true
+          labels: |
+            automated
+            code-quality
+          assignees: ${{ github.repository_owner }}
+
+      - name: Summary
+        run: |
+          if [[ "${{ steps.check_changes.outputs.changes }}" == "true" ]]; then
+            echo "## ✅ Auto-fix Complete" >> $GITHUB_STEP_SUMMARY
+            echo "- Pull request created with automatic fixes" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ No Changes Needed" >> $GITHUB_STEP_SUMMARY
+            echo "- Code is already formatted and fixed" >> $GITHUB_STEP_SUMMARY
+          fi

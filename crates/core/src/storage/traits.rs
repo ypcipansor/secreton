@@ -77,15 +77,29 @@ pub trait StorageBackend: Send + Sync {
     async fn delete_policy(&self, name: &str) -> Result<(), CoreError>;
 
     // Additional policy methods
-    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool, CoreError>;
-    async fn get_policies_for_user(&self, user_id: &str, entity_alias: Option<&str>) -> Result<Vec<Policy>, CoreError>;
+    async fn check_policy(
+        &self,
+        username: &str,
+        path: &str,
+        action: &str,
+    ) -> Result<bool, CoreError>;
+    async fn get_policies_for_user(
+        &self,
+        user_id: &str,
+        entity_alias: Option<&str>,
+    ) -> Result<Vec<Policy>, CoreError>;
 
     // Token management methods
     async fn store_token(&self, token: &Token) -> Result<(), CoreError>;
     async fn get_token(&self, accessor: &str) -> Result<Option<Token>, CoreError>;
     async fn revoke_token(&self, accessor: &str) -> Result<(), CoreError>;
     async fn list_tokens(&self) -> Result<Vec<Token>, CoreError>;
-    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<(), CoreError>;
+    async fn insert_token(
+        &self,
+        user: &str,
+        token: &str,
+        expires_at: Option<&str>,
+    ) -> Result<(), CoreError>;
     async fn is_token_valid(&self, token: &str) -> Result<bool, CoreError>;
 
     // Lease management methods
@@ -116,8 +130,17 @@ pub trait StorageBackend: Send + Sync {
     async fn list_sentinel_policies(&self) -> Result<Vec<String>, CoreError>;
     async fn delete_sentinel_policy(&self, name: &str) -> Result<(), CoreError>;
     async fn insert_sentinel_policy_version(&self, p: &SentinelPolicy) -> Result<(), CoreError>;
-    async fn list_sentinel_policy_versions(&self, namespace: &str, name: &str) -> Result<Vec<SentinelPolicy>, CoreError>;
-    async fn delete_sentinel_policy_version(&self, namespace: &str, name: &str, version: u32) -> Result<(), CoreError>;
+    async fn list_sentinel_policy_versions(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Vec<SentinelPolicy>, CoreError>;
+    async fn delete_sentinel_policy_version(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: u32,
+    ) -> Result<(), CoreError>;
 
     // Audit logging methods
     async fn store_audit_log(&self, log: &super::types::AuditLog) -> Result<(), CoreError>;
@@ -126,7 +149,13 @@ pub trait StorageBackend: Send + Sync {
         user: Option<&str>,
         limit: usize,
     ) -> Result<Vec<super::types::AuditLog>, CoreError>;
-    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<(), CoreError>;
+    async fn log_audit(
+        &self,
+        user: &str,
+        action: &str,
+        path: &str,
+        status: &str,
+    ) -> Result<(), CoreError>;
 
     // Secret state management methods
     async fn is_sealed(&self) -> Result<bool, CoreError>;

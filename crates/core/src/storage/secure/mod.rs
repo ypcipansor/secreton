@@ -72,8 +72,8 @@ pub mod storage;
 pub mod types;
 
 // Re-exports for public API
-pub use types::{KeyConfig, KeyEntry};
 pub use storage::{SecureStorage, SharedSecureStorage};
+pub use types::{KeyConfig, KeyEntry};
 
 // Required imports for cryptographic operations
 use async_trait::async_trait;

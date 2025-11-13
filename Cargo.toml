@@ -305,7 +305,7 @@ utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
 mockito = "1.4"
 bollard = "0.16"
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 tokio-rustls = "0.26"
 tonic-build = "0.10"
 

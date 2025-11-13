@@ -135,7 +135,8 @@ impl RabbitmqEngine {
         self.create_rabbitmq_user(&username, &password, &[]).await?;
 
         // Set default permissions for the user
-        self.set_rabbitmq_permissions(&username, vhost, ".*", ".*", ".*").await?;
+        self.set_rabbitmq_permissions(&username, vhost, ".*", ".*", ".*")
+            .await?;
 
         let mut result = HashMap::new();
         result.insert("username".to_string(), Value::String(username.clone()));
@@ -149,7 +150,9 @@ impl RabbitmqEngine {
             "management_url".to_string(),
             Value::String(format!(
                 "{}/#/login/{}/{}",
-                self.get_management_url(&self.config.connection_uri)?, username, vhost
+                self.get_management_url(&self.config.connection_uri)?,
+                username,
+                vhost
             )),
         );
 
@@ -159,8 +162,9 @@ impl RabbitmqEngine {
     /// Get management API URL from connection URI
     fn get_management_url(&self, connection_uri: &str) -> SecretResult<String> {
         // Parse AMQP URI: amqp://user:pass@host:port/vhost
-        let url = url::Url::parse(connection_uri)
-            .map_err(|e| SecretError::InvalidConfiguration(format!("Invalid connection URI: {}", e)))?;
+        let url = url::Url::parse(connection_uri).map_err(|e| {
+            SecretError::InvalidConfiguration(format!("Invalid connection URI: {}", e))
+        })?;
 
         let host = url.host_str().ok_or_else(|| {
             SecretError::InvalidConfiguration("Missing host in connection URI".to_string())
@@ -174,7 +178,12 @@ impl RabbitmqEngine {
     }
 
     /// Create user in RabbitMQ via Management API
-    async fn create_rabbitmq_user(&self, username: &str, password: &str, tags: &[String]) -> SecretResult<()> {
+    async fn create_rabbitmq_user(
+        &self,
+        username: &str,
+        password: &str,
+        tags: &[String],
+    ) -> SecretResult<()> {
         let management_url = self.get_management_url(&self.config.connection_uri)?;
         let client = reqwest::Client::new();
 
@@ -190,7 +199,9 @@ impl RabbitmqEngine {
             .json(&user_payload)
             .send()
             .await
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("Failed to create user: {}", e)))?;
+            .map_err(|e| {
+                SecretError::BackendConnectionFailed(format!("Failed to create user: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -205,7 +216,14 @@ impl RabbitmqEngine {
     }
 
     /// Set permissions for user on vhost via Management API
-    async fn set_rabbitmq_permissions(&self, username: &str, vhost: &str, configure: &str, write: &str, read: &str) -> SecretResult<()> {
+    async fn set_rabbitmq_permissions(
+        &self,
+        username: &str,
+        vhost: &str,
+        configure: &str,
+        write: &str,
+        read: &str,
+    ) -> SecretResult<()> {
         let management_url = self.get_management_url(&self.config.connection_uri)?;
         let client = reqwest::Client::new();
 

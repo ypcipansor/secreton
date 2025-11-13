@@ -2,8 +2,7 @@
 
 use crate::error::PkiError;
 use crate::model::{
-    CertificateRequest, CertificateResponse, PkiConfig, SshKeyRequest,
-    SshKeyResponse,
+    CertificateRequest, CertificateResponse, PkiConfig, SshKeyRequest, SshKeyResponse,
 };
 use chrono::{Duration, Utc};
 use rcgen::{CertificateParams, DistinguishedName, DnType, Ia5String, SanType};
@@ -19,9 +18,7 @@ pub struct PkiEngine {
 
 impl PkiEngine {
     pub fn new(config: PkiConfig) -> Self {
-        Self {
-            config,
-        }
+        Self { config }
     }
 
     /// Generate a certificate from a request
@@ -117,21 +114,28 @@ impl PkiEngine {
         let algorithm = match &request.key_type {
             crate::model::SshKeyType::Rsa => Algorithm::Rsa { hash: None },
             crate::model::SshKeyType::Ed25519 => Algorithm::Ed25519,
-            crate::model::SshKeyType::Ecdsa => Algorithm::Ecdsa { curve: ssh_key::EcdsaCurve::NistP256 },
+            crate::model::SshKeyType::Ecdsa => Algorithm::Ecdsa {
+                curve: ssh_key::EcdsaCurve::NistP256,
+            },
         };
 
         // Generate private key
-        let private_key = PrivateKey::random(&mut rand::thread_rng(), algorithm)
-            .map_err(|e| PkiError::SshKeyGeneration(format!("Failed to generate private key: {}", e)))?;
+        let private_key = PrivateKey::random(&mut rand::thread_rng(), algorithm).map_err(|e| {
+            PkiError::SshKeyGeneration(format!("Failed to generate private key: {}", e))
+        })?;
 
         // Serialize to OpenSSH format
-        let private_key_pem = private_key.to_openssh(ssh_key::LineEnding::LF)
-            .map_err(|e| PkiError::SshKeyGeneration(format!("Failed to serialize private key: {}", e)))?;
+        let private_key_pem = private_key
+            .to_openssh(ssh_key::LineEnding::LF)
+            .map_err(|e| {
+                PkiError::SshKeyGeneration(format!("Failed to serialize private key: {}", e))
+            })?;
 
         // Generate public key
         let public_key = private_key.public_key();
-        let public_key_openssh = public_key.to_openssh()
-            .map_err(|e| PkiError::SshKeyGeneration(format!("Failed to serialize public key: {}", e)))?;
+        let public_key_openssh = public_key.to_openssh().map_err(|e| {
+            PkiError::SshKeyGeneration(format!("Failed to serialize public key: {}", e))
+        })?;
 
         // Calculate expiration
         let ttl = request.ttl.unwrap_or(self.config.default_lease_ttl);
@@ -147,14 +151,18 @@ impl PkiEngine {
     }
 
     /// Revoke a certificate
-    pub async fn revoke_certificate(&self, _request: &crate::model::RevocationRequest) -> Result<(), PkiError> {
+    pub async fn revoke_certificate(
+        &self,
+        _request: &crate::model::RevocationRequest,
+    ) -> Result<(), PkiError> {
         // Certificate revocation not implemented yet
-        Err(PkiError::CertificateGeneration("Certificate revocation not implemented".to_string()))
+        Err(PkiError::CertificateGeneration(
+            "Certificate revocation not implemented".to_string(),
+        ))
     }
 
     /// Get CA information
     pub async fn get_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
-
         // For now, generate a default self-signed CA
         // TODO: Implement proper CA certificate parsing when PEM crate API is available
         self.generate_default_ca_info().await
@@ -191,7 +199,8 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
         // Generate self-signed CA certificate
-        let cert = params.self_signed(&key_pair)
+        let cert = params
+            .self_signed(&key_pair)
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
         // Extract information
@@ -210,9 +219,13 @@ impl PkiEngine {
             subject,
             issuer,
             valid_from: chrono::DateTime::from_timestamp(not_before.unix_timestamp(), 0)
-                .ok_or_else(|| PkiError::InvalidCaConfiguration("Invalid validity start".to_string()))?,
+                .ok_or_else(|| {
+                    PkiError::InvalidCaConfiguration("Invalid validity start".to_string())
+                })?,
             valid_until: chrono::DateTime::from_timestamp(not_after.unix_timestamp(), 0)
-                .ok_or_else(|| PkiError::InvalidCaConfiguration("Invalid validity end".to_string()))?,
+                .ok_or_else(|| {
+                    PkiError::InvalidCaConfiguration("Invalid validity end".to_string())
+                })?,
         })
     }
 }
@@ -235,7 +248,10 @@ fn extract_dn_info(_cert: &rcgen::Certificate) -> HashMap<String, String> {
     let mut info = HashMap::new();
     info.insert("common_name".to_string(), "Secreton CA".to_string());
     info.insert("organization".to_string(), "Secreton Security".to_string());
-    info.insert("organizational_unit".to_string(), "Certificate Authority".to_string());
+    info.insert(
+        "organizational_unit".to_string(),
+        "Certificate Authority".to_string(),
+    );
     info.insert("country".to_string(), "US".to_string());
     info.insert("state".to_string(), "CA".to_string());
     info.insert("locality".to_string(), "San Francisco".to_string());

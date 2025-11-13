@@ -54,7 +54,6 @@ impl FileBackend {
         self.storage_path.join(format!("{}.json", id))
     }
 
-
     /// Read and deserialize a vault entry from file
     fn read_entry(&self, file_path: &Path) -> StorageResult<SecretEntry> {
         let content = fs::read_to_string(file_path).map_err(|e| StorageError::BackendError {

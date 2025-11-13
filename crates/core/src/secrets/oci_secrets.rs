@@ -69,7 +69,9 @@ impl OCIBackend {
         _role_set: &str,
     ) -> Result<HashMap<String, String>> {
         // Placeholder implementation
-        Err(OCIError::OCIError("OCI backend not implemented".to_string()))
+        Err(OCIError::OCIError(
+            "OCI backend not implemented".to_string(),
+        ))
     }
 
     /// Create a new role set

@@ -625,7 +625,10 @@ impl AlertManager {
         }
 
         // Create email message
-        let subject = format!("[{}] {}", notification.alert.severity, notification.alert.title);
+        let subject = format!(
+            "[{}] {}",
+            notification.alert.severity, notification.alert.title
+        );
         let body = format!(
             "Alert Details:\n\nTitle: {}\nDescription: {}\nSeverity: {}\nCategory: {}\nSource: {}\nTimestamp: {}\n\nPlease check the system immediately.",
             notification.alert.title,
@@ -641,8 +644,16 @@ impl AlertManager {
         for to_address in &self.config.email.to_addresses {
             // Build email for each recipient
             let email = lettre::Message::builder()
-                .from(self.config.email.from_address.parse().unwrap_or_else(|_| "alerts@secreton.local".parse().unwrap()))
-                .to(to_address.parse().unwrap_or_else(|_| "admin@secreton.local".parse().unwrap()))
+                .from(
+                    self.config
+                        .email
+                        .from_address
+                        .parse()
+                        .unwrap_or_else(|_| "alerts@secreton.local".parse().unwrap()),
+                )
+                .to(to_address
+                    .parse()
+                    .unwrap_or_else(|_| "admin@secreton.local".parse().unwrap()))
                 .subject(&subject)
                 .body(body.clone())
                 .unwrap();
@@ -782,16 +793,17 @@ impl AlertManager {
 
     /// Send SMS notification
     async fn send_sms_notification(&self, notification: &AlertNotification) -> bool {
-        if self.config.sms.account_sid.is_empty() || self.config.sms.auth_token.is_empty() || self.config.sms.from_number.is_empty() {
+        if self.config.sms.account_sid.is_empty()
+            || self.config.sms.auth_token.is_empty()
+            || self.config.sms.from_number.is_empty()
+        {
             return false;
         }
 
         // Create SMS message
         let message = format!(
             "[{}] {}: {}",
-            notification.alert.severity,
-            notification.alert.title,
-            notification.alert.description
+            notification.alert.severity, notification.alert.title, notification.alert.description
         );
 
         // Send SMS using Twilio API
@@ -808,7 +820,10 @@ impl AlertManager {
     }
 
     /// Send SMS via Twilio API
-    async fn send_twilio_sms(&self, message: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_twilio_sms(
+        &self,
+        message: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // For now, we'll use a simple HTTP request to Twilio API
         // In a real implementation, you'd use the twilio crate
 
@@ -817,10 +832,17 @@ impl AlertManager {
         let from_number = &self.config.sms.from_number;
 
         // Use the first configured recipient or a default
-        let to_number = self.config.sms.to_numbers.first()
+        let to_number = self
+            .config
+            .sms
+            .to_numbers
+            .first()
             .ok_or("No SMS recipients configured")?;
 
-        let url = format!("https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json", account_sid);
+        let url = format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+            account_sid
+        );
 
         let params = [
             ("From", from_number.as_str()),

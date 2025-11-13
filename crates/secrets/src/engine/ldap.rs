@@ -30,14 +30,22 @@ impl LdapEngine {
             return Ok(());
         }
 
-        let (conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url).await
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("Failed to connect to LDAP: {}", e)))?;
+        let (conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url)
+            .await
+            .map_err(|e| {
+                SecretError::BackendConnectionFailed(format!("Failed to connect to LDAP: {}", e))
+            })?;
 
-        let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password).await
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP bind failed: {}", e)))?;
+        let bind_result = ldap
+            .simple_bind(&self.config.bind_dn, &self.config.bind_password)
+            .await
+            .map_err(|e| {
+                SecretError::BackendConnectionFailed(format!("LDAP bind failed: {}", e))
+            })?;
 
-        bind_result.success()
-            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP authentication failed: {}", e)))?;
+        bind_result.success().map_err(|e| {
+            SecretError::BackendConnectionFailed(format!("LDAP authentication failed: {}", e))
+        })?;
 
         self.connection_pool = Some(conn);
         Ok(())

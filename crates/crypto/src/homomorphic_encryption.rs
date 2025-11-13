@@ -173,16 +173,47 @@ impl Paillier {
         } else if n < &BigUint::from(1373653u32) {
             vec![BigUint::from(2u32), BigUint::from(3u32)]
         } else if n < &BigUint::from(25326001u32) {
-            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32)]
+            vec![
+                BigUint::from(2u32),
+                BigUint::from(3u32),
+                BigUint::from(5u32),
+            ]
         } else if n < &BigUint::from(3215031751u64) {
-            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(8u32)]
+            vec![
+                BigUint::from(2u32),
+                BigUint::from(3u32),
+                BigUint::from(5u32),
+                BigUint::from(8u32),
+            ]
         } else if n < &BigUint::from(2152302898747u64) {
-            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(7u32), BigUint::from(11u32)]
+            vec![
+                BigUint::from(2u32),
+                BigUint::from(3u32),
+                BigUint::from(5u32),
+                BigUint::from(7u32),
+                BigUint::from(11u32),
+            ]
         } else if n < &BigUint::from(3474749660383u64) {
-            vec![BigUint::from(2u32), BigUint::from(325u32), BigUint::from(9375u32), BigUint::from(28178u32), BigUint::from(450775u32), BigUint::from(9780504u32), BigUint::from(1795265022u64)]
+            vec![
+                BigUint::from(2u32),
+                BigUint::from(325u32),
+                BigUint::from(9375u32),
+                BigUint::from(28178u32),
+                BigUint::from(450775u32),
+                BigUint::from(9780504u32),
+                BigUint::from(1795265022u64),
+            ]
         } else {
             // For larger numbers, use fewer witnesses (still very reliable)
-            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(7u32), BigUint::from(11u32), BigUint::from(13u32), BigUint::from(23u32)]
+            vec![
+                BigUint::from(2u32),
+                BigUint::from(3u32),
+                BigUint::from(5u32),
+                BigUint::from(7u32),
+                BigUint::from(11u32),
+                BigUint::from(13u32),
+                BigUint::from(23u32),
+            ]
         };
 
         for a in witnesses {
@@ -292,8 +323,7 @@ impl EncryptionKey {
     }
 }
 
-impl DecryptionKey {
-}
+impl DecryptionKey {}
 
 /// ElGamal public key
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,7 +457,8 @@ impl ElGamalSystem {
         hasher.update(&s.to_bytes_be());
         let key = hasher.finalize();
 
-        let c2: Vec<u8> = message.iter()
+        let c2: Vec<u8> = message
+            .iter()
             .zip(key.iter().cycle())
             .map(|(m, k)| m ^ k)
             .collect();
@@ -439,7 +470,10 @@ impl ElGamalSystem {
     }
 
     /// Decrypt ciphertext
-    pub fn decrypt(priv_key: &ElGamalPrivateKey, ciphertext: &ElGamalCiphertext) -> Result<Vec<u8>> {
+    pub fn decrypt(
+        priv_key: &ElGamalPrivateKey,
+        ciphertext: &ElGamalCiphertext,
+    ) -> Result<Vec<u8>> {
         let p = BigUint::from_bytes_be(&priv_key.p);
         let x = BigUint::from_bytes_be(&priv_key.x);
         let c1 = BigUint::from_bytes_be(&ciphertext.c1);
@@ -454,7 +488,9 @@ impl ElGamalSystem {
         let key = hasher.finalize();
 
         // Decrypt c2
-        let message: Vec<u8> = ciphertext.c2.iter()
+        let message: Vec<u8> = ciphertext
+            .c2
+            .iter()
             .zip(key.iter().cycle())
             .map(|(c, k)| c ^ k)
             .collect();
@@ -463,7 +499,11 @@ impl ElGamalSystem {
     }
 
     /// Homomorphic addition
-    pub fn add(pub_key: &ElGamalPublicKey, ct1: &ElGamalCiphertext, ct2: &ElGamalCiphertext) -> Result<ElGamalCiphertext> {
+    pub fn add(
+        pub_key: &ElGamalPublicKey,
+        ct1: &ElGamalCiphertext,
+        ct2: &ElGamalCiphertext,
+    ) -> Result<ElGamalCiphertext> {
         let p = BigUint::from_bytes_be(&pub_key.p);
 
         let c1_1 = BigUint::from_bytes_be(&ct1.c1);
@@ -473,7 +513,9 @@ impl ElGamalSystem {
         let c1_result = (c1_1 * c1_2) % &p;
 
         // XOR c2 values (approximation of homomorphic addition for XOR-based encryption)
-        let c2_result: Vec<u8> = ct1.c2.iter()
+        let c2_result: Vec<u8> = ct1
+            .c2
+            .iter()
             .zip(ct2.c2.iter())
             .map(|(a, b)| a ^ b)
             .collect();
@@ -485,7 +527,11 @@ impl ElGamalSystem {
     }
 
     /// Homomorphic multiplication by scalar
-    pub fn multiply(pub_key: &ElGamalPublicKey, ct: &ElGamalCiphertext, scalar: u64) -> Result<ElGamalCiphertext> {
+    pub fn multiply(
+        pub_key: &ElGamalPublicKey,
+        ct: &ElGamalCiphertext,
+        scalar: u64,
+    ) -> Result<ElGamalCiphertext> {
         let p = BigUint::from_bytes_be(&pub_key.p);
         let c1 = BigUint::from_bytes_be(&ct.c1);
         let scalar_big = BigUint::from(scalar);
@@ -496,7 +542,8 @@ impl ElGamalSystem {
         // For c2, approximate scalar multiplication with repeated XOR
         let mut c2_result = ct.c2.clone();
         for _ in 1..scalar {
-            c2_result = c2_result.iter()
+            c2_result = c2_result
+                .iter()
                 .zip(ct.c2.iter())
                 .map(|(a, b)| a ^ b)
                 .collect();
@@ -1048,13 +1095,15 @@ impl HESystem {
             .ok_or_else(|| HEError::CiphertextNotFound(ciphertext_id.to_string()))?;
 
         // Encrypt keywords using SHA256 hash for searchable encryption
-        let encrypted_keywords: Vec<Vec<u8>> =
-            keywords.iter().map(|k| {
+        let encrypted_keywords: Vec<Vec<u8>> = keywords
+            .iter()
+            .map(|k| {
                 use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
                 hasher.update(k.as_bytes());
                 hasher.finalize().to_vec()
-            }).collect();
+            })
+            .collect();
 
         let entry = SearchIndexEntry {
             entry_id: Uuid::new_v4().to_string(),

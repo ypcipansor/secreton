@@ -7,11 +7,14 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 20
+    open-pull-requests-limit: 25
     reviewers:
       - "analisaperlengkapan"
     assignees:
       - "analisaperlengkapan"
+    labels:
+      - "dependencies"
+      - "rust"
     commit-message:
       prefix: "deps"
       prefix-development: "deps-dev"
@@ -31,31 +34,137 @@ updates:
           - "ring"
           - "ed25519*"
           - "x25519*"
+          - "curve25519*"
           - "p256"
           - "p384"
           - "k256"
+          - "blake*"
+          - "digest"
+          - "signature"
+          - "elliptic-curve"
+        update-types:
+          - "minor"
+          - "patch"
       # Group async ecosystem updates
       async:
         patterns:
           - "tokio*"
           - "async-*"
           - "futures*"
+        update-types:
+          - "minor"
+          - "patch"
       # Group serde ecosystem
       serde:
         patterns:
           - "serde*"
           - "toml"
           - "config"
+        update-types:
+          - "minor"
+          - "patch"
       # Group security crates
       security:
         patterns:
           - "zeroize*"
           - "secrecy*"
           - "rustls*"
+          - "rustls-*"
+          - "webpki*"
+        update-types:
+          - "minor"
+          - "patch"
       # Group database crates
       database:
         patterns:
           - "tokio-postgres*"
+          - "postgres*"
           - "deadpool*"
           - "redis*"
           - "mongodb*"
+          - "mysql*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group AWS SDK updates
+      aws:
+        patterns:
+          - "aws-*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group HTTP/network crates
+      network:
+        patterns:
+          - "axum*"
+          - "hyper*"
+          - "reqwest*"
+          - "tower*"
+          - "tonic*"
+          - "warp"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group CLI crates
+      cli:
+        patterns:
+          - "clap*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group monitoring crates
+      monitoring:
+        patterns:
+          - "prometheus*"
+          - "opentelemetry*"
+          - "tracing*"
+          - "metrics*"
+          - "sentry*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "analisaperlengkapan"
+    assignees:
+      - "analisaperlengkapan"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "analisaperlengkapan"
+    assignees:
+      - "analisaperlengkapan"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "docker"
+      include: "scope"

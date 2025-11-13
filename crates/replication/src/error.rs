@@ -54,9 +54,7 @@ impl From<ReplicationError> for SecretonError {
             ReplicationError::SyncFailed(msg) => SecretonError::Internal {
                 message: format!("Sync failed: {}", msg),
             },
-            ReplicationError::NetworkError(msg) => SecretonError::Network {
-                message: msg,
-            },
+            ReplicationError::NetworkError(msg) => SecretonError::Network { message: msg },
             ReplicationError::ReplicationFailed(msg) => SecretonError::Internal {
                 message: format!("Replication failed: {}", msg),
             },

@@ -3,9 +3,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use secreton_secrets::error::SecretError;
 use serde::Serialize;
 use thiserror::Error;
-use secreton_secrets::error::SecretError;
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -81,25 +81,13 @@ impl From<SecretError> for AppError {
         match err {
             SecretError::EngineNotFound(_) => AppError::NotFound,
             SecretError::SecretNotFound(_) => AppError::NotFound,
-            SecretError::InvalidConfiguration(msg) => {
-                AppError::BadRequest(msg)
-            }
-            SecretError::InvalidSecretData(msg) => {
-                AppError::BadRequest(msg)
-            }
+            SecretError::InvalidConfiguration(msg) => AppError::BadRequest(msg),
+            SecretError::InvalidSecretData(msg) => AppError::BadRequest(msg),
             SecretError::InvalidPath(msg) => AppError::BadRequest(msg),
-            SecretError::InvalidOperation(msg) => {
-                AppError::BadRequest(msg)
-            }
-            SecretError::BackendConnectionFailed(_) => {
-                AppError::InternalError(err.to_string())
-            }
-            SecretError::BackendOperationFailed(_) => {
-                AppError::InternalError(err.to_string())
-            }
-            SecretError::NotImplemented(msg) => {
-                AppError::BadRequest(msg)
-            }
+            SecretError::InvalidOperation(msg) => AppError::BadRequest(msg),
+            SecretError::BackendConnectionFailed(_) => AppError::InternalError(err.to_string()),
+            SecretError::BackendOperationFailed(_) => AppError::InternalError(err.to_string()),
+            SecretError::NotImplemented(msg) => AppError::BadRequest(msg),
             _ => AppError::InternalError(err.to_string()),
         }
     }

@@ -4,7 +4,7 @@
 //! threshold signatures, _secret sharing, and multi-party computation.
 
 use chrono::{DateTime, Utc};
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -39,7 +39,10 @@ impl SecretKey {
     }
 
     pub fn public_key(&self) -> PublicKey {
-        let key_bytes: [u8; 32] = self.key_data.as_slice().try_into()
+        let key_bytes: [u8; 32] = self
+            .key_data
+            .as_slice()
+            .try_into()
             .expect("Invalid secret key length");
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let public = signing_key.verifying_key();
@@ -49,7 +52,10 @@ impl SecretKey {
     }
 
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
-        let key_bytes: [u8; 32] = self.key_data.as_slice().try_into()
+        let key_bytes: [u8; 32] = self
+            .key_data
+            .as_slice()
+            .try_into()
             .expect("Invalid secret key length");
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let signature = signing_key.sign(message);
@@ -69,13 +75,17 @@ pub struct PublicKey {
 
 impl PublicKey {
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<()> {
-        let key_bytes: [u8; 32] = self.key_data.as_slice().try_into()
+        let key_bytes: [u8; 32] = self
+            .key_data
+            .as_slice()
+            .try_into()
             .map_err(|_| SMPCError::ProtocolError("Invalid public key length".to_string()))?;
         let public = VerifyingKey::from_bytes(&key_bytes)
             .map_err(|_| SMPCError::ProtocolError("Invalid public key".to_string()))?;
         let sig = Signature::try_from(signature)
             .map_err(|_| SMPCError::ProtocolError("Invalid signature length".to_string()))?;
-        public.verify(message, &sig)
+        public
+            .verify(message, &sig)
             .map_err(|_| SMPCError::ProtocolError("Signature verification failed".to_string()))
     }
 
@@ -458,7 +468,9 @@ impl SMPCSystem {
 
         // Validate signature format
         if signature_data.len() != 64 {
-            return Err(SMPCError::ProtocolError("Invalid signature length".to_string()));
+            return Err(SMPCError::ProtocolError(
+                "Invalid signature length".to_string(),
+            ));
         }
 
         signature.partial_signatures.push(PartialSignature {
@@ -498,7 +510,9 @@ impl SMPCSystem {
         // Validate that all signatures are consistent (simplified check)
         for partial in &signature.partial_signatures {
             if partial.signature_data.len() != 64 {
-                return Err(SMPCError::ProtocolError("Invalid signature length in partial".to_string()));
+                return Err(SMPCError::ProtocolError(
+                    "Invalid signature length in partial".to_string(),
+                ));
             }
         }
 

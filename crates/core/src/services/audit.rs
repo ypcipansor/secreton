@@ -51,7 +51,9 @@ impl AuditService {
             user: user.unwrap_or("unknown").to_string(),
             display_name: None,
             client_ip: None,
-            resource: path.map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_string()),
+            resource: path
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
             operation: "unknown".to_string(), // TODO: add operation parameter
             method: None,
             request_id: None,
@@ -80,8 +82,19 @@ impl AuditService {
         user: &str,
         success: bool,
     ) -> Result<(), SecretonError> {
-        let status = if success { AuditStatus::Success } else { AuditStatus::Failure };
-        self.log_event(event_type, Some(user), None, status, std::collections::HashMap::new()).await
+        let status = if success {
+            AuditStatus::Success
+        } else {
+            AuditStatus::Failure
+        };
+        self.log_event(
+            event_type,
+            Some(user),
+            None,
+            status,
+            std::collections::HashMap::new(),
+        )
+        .await
     }
 
     /// Log secret operation
@@ -92,8 +105,19 @@ impl AuditService {
         path: &str,
         success: bool,
     ) -> Result<(), SecretonError> {
-        let status = if success { AuditStatus::Success } else { AuditStatus::Failure };
-        self.log_event(event_type, Some(user), Some(path), status, std::collections::HashMap::new()).await
+        let status = if success {
+            AuditStatus::Success
+        } else {
+            AuditStatus::Failure
+        };
+        self.log_event(
+            event_type,
+            Some(user),
+            Some(path),
+            status,
+            std::collections::HashMap::new(),
+        )
+        .await
     }
 
     /// Get all registered devices
