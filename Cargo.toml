@@ -307,7 +307,7 @@ mockito = "1.4"
 bollard = "0.16"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 tokio-rustls = "0.26"
-tonic-build = "0.10"
+tonic-build = "0.14"
 
 # Authentication and crypto utilities (audited)
 # jwt-simple = "0.12"  # JWT (pure Rust, no RSA dependency) - removed due to rsa dependency
