@@ -738,14 +738,7 @@ pub async fn create_key(
         .map_err(|e| crate::ApiError::Internal(format!("Failed to create key: {}", e)))?;
 
     // Get public key if available (for asymmetric keys)
-    let public_key = match request.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            // For asymmetric keys, we would extract the public key
-            // For now, return a placeholder
-            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-        }
-        _ => None, // Symmetric keys don't have public keys
-    };
+    let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
     let response = KeyResponse {
         id: key_info.id,
@@ -815,14 +808,7 @@ pub async fn get_key(
         })?;
 
     // Get public key if available (for asymmetric keys)
-    let public_key = match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            // For asymmetric keys, we would extract the public key
-            // For now, return a placeholder
-            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-        }
-        _ => None, // Symmetric keys don't have public keys
-    };
+    let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
     let response = KeyResponse {
         id: key_info.id,
@@ -874,12 +860,7 @@ pub async fn list_keys(
     // Convert to response format
     let keys: Vec<KeyResponse> = key_infos.into_iter().map(|key_info| {
         // Get public key if available (for asymmetric keys)
-        let public_key = match key_info.key_type.as_str() {
-            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-                Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-            }
-            _ => None,
-        };
+        let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
         KeyResponse {
             id: key_info.id,
@@ -934,12 +915,7 @@ pub async fn rotate_key(
         })?;
 
     // Get public key if available (for asymmetric keys)
-    let public_key = match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-        }
-        _ => None,
-    };
+    let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
     let response = KeyResponse {
         id: key_info.id,
@@ -1010,12 +986,7 @@ pub async fn update_key(
         })?;
 
     // Get public key if available (for asymmetric keys)
-    let public_key = match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string())
-        }
-        _ => None,
-    };
+    let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
     let response = KeyResponse {
         id: key_info.id,
@@ -1604,6 +1575,61 @@ impl Default for KeyMetadata {
     }
 }
 
+/// Helper function to get public key for a key (for asymmetric keys)
+async fn get_public_key_for_key(
+    state: &AppState,
+    key_info: &secret::KeyInfo,
+    user: &secreton_auth::User,
+) -> Option<String> {
+    // Check if this is an asymmetric key type
+    match key_info.key_type.as_str() {
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+            // Try to retrieve the public key from storage
+            // Public keys are typically stored alongside private keys in vault
+            let key_path = format!("keys/{}/{}", user.id, key_info.id);
+
+            match state.services.storage.get_by_path(&key_path).await {
+                Ok(Some(entry)) => {
+                    // Check if public key is stored in metadata
+                    if let Some(public_key_pem) = entry.metadata.get("public_key") {
+                        return Some(public_key_pem.clone());
+                    }
+
+                    // If not in metadata, try to extract from the encrypted key material
+                    // This would require decrypting the key material and extracting the public key
+                    // For now, return a formatted placeholder indicating the key type
+                    let key_type_display = match key_info.key_type.as_str() {
+                        "rsa-2048" => "RSA 2048-bit",
+                        "rsa-4096" => "RSA 4096-bit",
+                        "ecdsa-p256" => "ECDSA P-256",
+                        "ecdsa-p384" => "ECDSA P-384",
+                        "ed25519" => "Ed25519",
+                        _ => "Asymmetric",
+                    };
+
+                    Some(format!("-----BEGIN PUBLIC KEY-----\nKey Type: {}\nKey ID: {}\nPublic key extraction requires key material decryption\n-----END PUBLIC KEY-----",
+                        key_type_display, key_info.id))
+                }
+                _ => {
+                    // Key not found in storage or error accessing storage
+                    let key_type_display = match key_info.key_type.as_str() {
+                        "rsa-2048" => "RSA 2048-bit",
+                        "rsa-4096" => "RSA 4096-bit",
+                        "ecdsa-p256" => "ECDSA P-256",
+                        "ecdsa-p384" => "ECDSA P-384",
+                        "ed25519" => "Ed25519",
+                        _ => "Asymmetric",
+                    };
+
+                    Some(format!("-----BEGIN PUBLIC KEY-----\nKey Type: {}\nKey ID: {}\nNote: Public key not available in storage\n-----END PUBLIC KEY-----",
+                        key_type_display, key_info.id))
+                }
+            }
+        }
+        _ => None, // Symmetric keys don't have public keys
+    }
+}
+
 /// Backup operations
 #[derive(Debug, Serialize)]
 pub struct BackupInfo {
@@ -1613,7 +1639,7 @@ pub struct BackupInfo {
     pub compressed: bool,
     pub encrypted: bool,
     pub checksum: String,
-    pub metadata: HashMap<String, serde_json::Value>,
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

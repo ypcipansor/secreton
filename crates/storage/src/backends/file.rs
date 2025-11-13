@@ -54,14 +54,6 @@ impl FileBackend {
         self.storage_path.join(format!("{}.json", id))
     }
 
-    /// Generate file path for a vault entry by path (sanitized)
-    /// Currently unused but kept for future path-based lookups
-    #[allow(dead_code)]
-    fn path_entry_path(&self, path: &str) -> PathBuf {
-        // Sanitize path to avoid directory traversal
-        let sanitized = path.replace("/", "_").replace("\\", "_").replace("..", "");
-        self.storage_path.join(format!("{}.json", sanitized))
-    }
 
     /// Read and deserialize a vault entry from file
     fn read_entry(&self, file_path: &Path) -> StorageResult<SecretEntry> {

@@ -30,30 +30,17 @@ impl LdapEngine {
             return Ok(());
         }
 
-        // TODO: Implement LDAP connection when secreton_ldap_utils is available
-        // For now, return an error indicating the feature is not yet implemented
-        Err(SecretError::BackendConnectionFailed(
-            "LDAP connection requires secreton_ldap_utils dependency (not yet implemented)"
-                .to_string(),
-        ))
+        let (conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url).await
+            .map_err(|e| SecretError::BackendConnectionFailed(format!("Failed to connect to LDAP: {}", e)))?;
 
-        // Commented out until secreton_ldap_utils is available:
-        // use secreton_ldap_utils::LdapConfig as UtilsConfig;
-        // use secreton_ldap_utils::LdapConnection;
-        //
-        // let utils_config = UtilsConfig {
-        //     url: self.config.url.clone(),
-        //     bind_dn: self.config.bind_dn.clone(),
-        //     bind_password: self.config.bind_password.clone(),
-        //     tls_enabled: self.config.tls_enabled,
-        //     ca_cert: None,
-        // };
-        //
-        // let (_conn, mut ldap) = ldap3::LdapConnAsync::new(&self.config.url).await?;
-        // let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password).await?;
-        // bind_result.success()?;
-        // self.connection_pool = Some(_conn);
-        // Ok(())
+        let bind_result = ldap.simple_bind(&self.config.bind_dn, &self.config.bind_password).await
+            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP bind failed: {}", e)))?;
+
+        bind_result.success()
+            .map_err(|e| SecretError::BackendConnectionFailed(format!("LDAP authentication failed: {}", e)))?;
+
+        self.connection_pool = Some(conn);
+        Ok(())
     }
 }
 
@@ -159,16 +146,7 @@ impl SecretEngine for LdapEngine {
 impl LdapEngine {
     /// Generate a secure random password
     fn generate_password(&self, length: usize) -> String {
-        use rand::Rng;
-        const CHARSET: &[u8] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-        let mut rng = rand::thread_rng();
-        (0..length)
-            .map(|_| {
-                let idx = rng.gen_range(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect()
+        secreton_common::utils::password::generate_password(length)
     }
 
     /// Generate LDAP credentials for existing user
@@ -215,35 +193,10 @@ impl LdapEngine {
     }
 
     /// Create a new LDAP user
-    async fn create_ldap_user(&mut self, data: &HashMap<String, Value>) -> SecretResult<()> {
-        // Ensure connection
-        self.connect().await?;
-
-        let username = data
-            .get("username")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| SecretError::InvalidSecretData("username is required".to_string()))?;
-
-        let _password = data
-            .get("password")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| self.generate_password(12));
-
-        // Construct user DN
-        let _user_dn = format!("cn={},{}", username, self.config.user_dn);
-
-        // TODO: Implement user creation when secreton_ldap_utils is available
-        // For now, return an error
-        return Err(SecretError::BackendOperationFailed(
-            "LDAP user creation requires secreton_ldap_utils dependency (not yet implemented)"
-                .to_string(),
-        ));
-
-        // Commented out until secreton_ldap_utils is available:
-        // use secreton_ldap_utils::{LdapConfig, LdapConnection, LdapOperations, LdapSchema};
-        // let utils_config = LdapConfig { ... };
-        // let mut conn = LdapConnection::new(&utils_config).await?;
-        // LdapOperations::create_user(&mut conn, &user_dn, username, &password, LdapSchema::OpenLDAP).await?;
+    async fn create_ldap_user(&mut self, _data: &HashMap<String, Value>) -> SecretResult<()> {
+        // LDAP backend not fully implemented
+        Err(SecretError::BackendNotSupported(
+            "LDAP user creation not implemented".to_string(),
+        ))
     }
 }

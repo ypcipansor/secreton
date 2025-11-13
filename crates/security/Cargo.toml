@@ -52,7 +52,7 @@ prometheus = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 
 # WASM support
-# wasmtime = { workspace = true, optional = true }
+wasmi.workspace = true
 
 # Additional dependencies for security policies
 glob.workspace = true

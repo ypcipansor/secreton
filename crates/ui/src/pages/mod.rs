@@ -2,10 +2,15 @@
 //!
 //! Web interface pages for Secreton
 
+#[cfg(feature = "client")]
 pub mod admin;
+#[cfg(feature = "client")]
 pub mod audit;
+#[cfg(feature = "client")]
 pub mod dashboard;
+#[cfg(feature = "client")]
 pub mod login;
+#[cfg(feature = "client")]
 pub mod secrets;
 
 use serde::{Deserialize, Serialize};

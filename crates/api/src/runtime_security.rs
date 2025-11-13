@@ -370,7 +370,7 @@ pub async fn get_runtime_security_status(
         let status = validator.validate_runtime_security().await;
         Ok(Json(status))
     } else {
-        Err(AppError::Internal(
+        Err(AppError::InternalError(
             "Runtime security validator not initialized".to_string(),
         ))
     }
@@ -429,7 +429,7 @@ pub async fn runtime_security_health_check(
         let status = validator.validate_runtime_security().await;
         Ok(Json(status))
     } else {
-        Err(AppError::Internal(
+        Err(AppError::InternalError(
             "Runtime security validator not initialized".to_string(),
         ))
     }

@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 use thiserror::Error;
+use secreton_secrets::error::SecretError;
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -75,21 +76,31 @@ impl From<std::io::Error> for AppError {
     }
 }
 
-// TODO: Add implementation for the secrets_impl module when it's available
-// impl From<crate::secrets::secrets_impl::engine::SecretsError> for AppError {
-//     fn from(err: crate::secrets::secrets_impl::engine::SecretsError) -> Self {
-//         match err {
-//             crate::secrets::secrets_impl::engine::SecretsError::NotFound(_) => AppError::NotFound,
-//             crate::secrets::secrets_impl::engine::SecretsError::PermissionDenied(_) => {
-//                 AppError::Forbidden(err.to_string())
-//             }
-//             crate::secrets::secrets_impl::engine::SecretsError::InvalidData(msg) => {
-//                 AppError::BadRequest(msg)
-//             }
-//             crate::secrets::secrets_impl::engine::SecretsError::InvalidConfiguration(msg) => {
-//                 AppError::BadRequest(msg)
-//             }
-//             _ => AppError::InternalError(err.to_string()),
-//         }
-//     }
-// }
+impl From<SecretError> for AppError {
+    fn from(err: SecretError) -> Self {
+        match err {
+            SecretError::EngineNotFound(_) => AppError::NotFound,
+            SecretError::SecretNotFound(_) => AppError::NotFound,
+            SecretError::InvalidConfiguration(msg) => {
+                AppError::BadRequest(msg)
+            }
+            SecretError::InvalidSecretData(msg) => {
+                AppError::BadRequest(msg)
+            }
+            SecretError::InvalidPath(msg) => AppError::BadRequest(msg),
+            SecretError::InvalidOperation(msg) => {
+                AppError::BadRequest(msg)
+            }
+            SecretError::BackendConnectionFailed(_) => {
+                AppError::InternalError(err.to_string())
+            }
+            SecretError::BackendOperationFailed(_) => {
+                AppError::InternalError(err.to_string())
+            }
+            SecretError::NotImplemented(msg) => {
+                AppError::BadRequest(msg)
+            }
+            _ => AppError::InternalError(err.to_string()),
+        }
+    }
+}

@@ -135,7 +135,7 @@ impl ActiveDirectoryEngine {
         use ldap3::{LdapConnAsync, LdapConnSettings, Scope};
 
         // Create LDAP connection
-        let (conn, mut ldap) = if config.tls_enabled {
+        let (_conn, mut ldap) = if config.tls_enabled {
             LdapConnAsync::with_settings(LdapConnSettings::new().set_starttls(true), &config.url)
                 .await
         } else {

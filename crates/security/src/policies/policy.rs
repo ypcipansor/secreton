@@ -104,94 +104,16 @@ pub async fn evaluate_with_sentinel(
         if pol.policy_code == "egp" || pol.policy_code == "rgp" {
             // Execution WASM if policy_code wasm
             if pol.policy_code == "wasm" {
-                // TODO: Implement WASM policy evaluation when wasmtime is available
+                // WASM policy evaluation - simplified for now
+                // TODO: Implement proper WASM policy evaluation
                 tracing::warn!(
                     user = %user,
                     path = %path,
                     action = %action,
                     policy = %pol.name,
-                    "WASM policy evaluation not implemented - wasmtime dependency not available"
+                    "WASM policy evaluation not implemented, defaulting to deny"
                 );
                 return false;
-                /*
-                use wasmtime::{Engine, Module, Store, Instance};
-                let engine = Engine::default();
-                match Module::new(&engine, &pol.source_code) {
-                        Ok(module) => {
-                            let mut store = Store::new(&engine, ());
-                            match Instance::new(&mut store, &module, &[]) {
-                                Ok(instance) => {
-                                    if let Some(func) = instance.get_func(&mut store, "evaluate") {
-                                        // Assume function takes no args and returns i32 (0=false, 1=true)
-                                        match func.call(&mut store, &[], &mut []) {
-                                            Ok(results) => {
-                                                let allowed = if let Some(wasmtime::Val::I32(val)) = results.get(0) {
-                                                    *val != 0
-                                                } else {
-                                                    true // Default to allow if not i32
-                                                };
-                                                // Add audit logging
-                                                tracing::info!(
-                                                    user = %user,
-                                                    path = %path,
-                                                    action = %action,
-                                                    policy = %pol.name,
-                                                    result = if allowed { "allowed" } else { "denied" },
-                                                    "WASM policy evaluation completed"
-                                                );
-                                                if !allowed {
-                                                    return false;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    user = %user,
-                                                    path = %path,
-                                                    action = %action,
-                                                    policy = %pol.name,
-                                                    error = %e,
-                                                    "WASM policy evaluation failed, defaulting to deny"
-                                                );
-                                                return false;
-                                            }
-                                        }
-                                    } else {
-                                        tracing::warn!(
-                                            user = %user,
-                                            path = %path,
-                                            action = %action,
-                                            policy = %pol.name,
-                                            "WASM policy missing 'evaluate' function, defaulting to deny"
-                                        );
-                                        return false;
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        user = %user,
-                                        path = %path,
-                                        action = %action,
-                                        policy = %pol.name,
-                                        error = %e,
-                                        "WASM instance creation failed, defaulting to deny"
-                                    );
-                                    return false;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                user = %user,
-                                path = %path,
-                                action = %action,
-                                policy = %pol.name,
-                                error = %e,
-                                "WASM module compilation failed, defaulting to deny"
-                            );
-                            return false;
-                        }
-                    }
-                */
             } else {
                 // HCL/dummy: if policy_code contains "allow", allow
                 let allowed = pol.policy_code.contains("allow");

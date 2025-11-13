@@ -26,9 +26,8 @@ pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod transit;
 
-// Integration and quantum-safe crypto modules are now enabled
+// Integration modules are now enabled
 pub mod integration;
-pub mod quantum_safe_crypto;
 
 pub use advanced_key_manager::{
     AdvancedKeyManager, KeyManagerError, KeyState as AdvancedKeyState, KeyType as AdvancedKeyType,
@@ -55,7 +54,6 @@ pub use policy_enforced_crypto::{
     PolicyEnforcedCryptoOperations, PolicyEnforcedEncryptionRequest, PolicyEnforcementError,
     RemediationStatus, ViolationType,
 };
-pub use quantum_safe_crypto::*;
 pub use secure_multi_party_computation::{
     ComputationRequest, ComputationResult, DKGResult, PartialSignature, Participant, SMPCError,
     SMPCProtocol, SMPCSession, SMPCSystem, SecretShare, SessionState, ThresholdSignature,

@@ -168,8 +168,8 @@ impl PerformanceReplication {
             // Find operations not yet replicated to this cluster
             for operation in operations.iter_mut() {
                 if !operation.replicated_to.contains(node_id) {
-                    // Mock replication - real implementation would send to replica
-                    self.mock_replicate_operation(operation, &replica.address)
+                    // Replicate operation to replica
+                    self.replicate_operation(operation, &replica.address)
                         .await?;
 
                     operation.replicated_to.push(node_id.clone());
@@ -324,15 +324,35 @@ impl PerformanceReplication {
         }
     }
 
-    // Mock replication operation (would be replaced with actual network calls)
-    async fn mock_replicate_operation(
+    /// Replicate operation to a specific endpoint
+    async fn replicate_operation(
         &self,
-        _operation: &ReplicationOperation,
-        _endpoint: &str,
+        operation: &ReplicationOperation,
+        endpoint: &str,
     ) -> Result<(), ReplicationError> {
-        // Simulate network delay
-        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-        // Real implementation would POST operation to endpoint
+        let client = reqwest::Client::new();
+
+        // Construct the replication endpoint URL
+        let url = format!("{}/v1/replication/operations", endpoint.trim_end_matches('/'));
+
+        // Send POST request with the operation
+        let response = client
+            .post(&url)
+            .json(operation)
+            .send()
+            .await
+            .map_err(|e| ReplicationError::NetworkError(format!("Failed to send replication request: {}", e)))?;
+
+        // Check response status
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(ReplicationError::ReplicationFailed(format!(
+                "Replication failed with status {}: {}",
+                status, error_text
+            )));
+        }
+
         Ok(())
     }
 }

@@ -21,12 +21,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: actions-rs/cargo-cache@v1
 
       - name: Install security tools
         run: |
@@ -51,7 +51,7 @@ jobs:
             geiger-report.json
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v1
         with:
           scan-type: 'fs'
           scan-ref: '.'

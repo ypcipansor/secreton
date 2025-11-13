@@ -1,7 +1,14 @@
 //! Authentication HTTP handlers for Secreton
 
 use crate::server::AppState;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, response::Json};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    response::Json,
+};
+use axum_extra::headers::{Authorization, authorization::Bearer};
+use axum_extra::TypedHeader;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -89,78 +96,184 @@ pub async fn refresh_token(
 
 /// Logout handler
 pub async fn logout(
-    State(_state): State<Arc<AppState>>,
-    // TODO: Extract and revoke token
+    State(state): State<Arc<AppState>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
-    // For now, just return success
-    // In production, revoke the token
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({"message": "Logged out"})),
-    )
+    // Extract token from Authorization header
+    let token = bearer.token();
+
+    match state.auth_service.validate_token(token).await {
+        Ok(user_info) => {
+            // Revoke the token by adding it to blacklist
+            if let Err(e) = state.auth_service.revoke_token(token).await {
+                tracing::warn!("Failed to revoke token for user {}: {:?}", user_info.username, e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to revoke token"})),
+                );
+            }
+
+            tracing::info!("User {} logged out successfully", user_info.username);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({"message": "Logged out successfully"})),
+            )
+        }
+        Err(_) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        ),
+    }
 }
 
 /// Get current user info
 pub async fn me(
-    State(_state): State<Arc<AppState>>,
-    // TODO: Extract token and get user info
+    State(state): State<Arc<AppState>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
-    // For now, return mock user info
-    // In production, validate token and return user data
-    let user_info = UserInfoResponse {
-        id: "user-id".to_string(),
-        username: "username".to_string(),
-        roles: vec!["user".to_string()],
-    };
-    (StatusCode::OK, Json(user_info))
+    let token = bearer.token();
+
+    match state.auth_service.validate_token(token).await {
+        Ok(user_info) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "id": user_info.id.unwrap_or_default(),
+                "username": user_info.username,
+                "roles": user_info.roles
+            })),
+        ),
+        Err(_) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        ),
+    }
 }
 
 /// Change password handler
 pub async fn change_password(
-    State(_state): State<Arc<AppState>>,
-    Json(_req): Json<ChangePasswordRequest>,
-    // TODO: Extract user from token and change password
+    State(state): State<Arc<AppState>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    Json(req): Json<ChangePasswordRequest>,
 ) -> impl IntoResponse {
-    // For now, just return success
-    // In production, validate current password and update
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({"message": "Password changed"})),
-    )
+    let token = bearer.token();
+
+    match state.auth_service.validate_token(token).await {
+        Ok(user_info) => {
+            match state.auth_service.change_password(
+                &user_info.id.unwrap_or_default(),
+                &req.current_password,
+                &req.new_password,
+            ).await {
+                Ok(_) => {
+                    tracing::info!("User {} changed password successfully", user_info.username);
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({"message": "Password changed successfully"})),
+                    )
+                }
+                Err(e) => {
+                    tracing::warn!("Password change failed for user {}: {:?}", user_info.username, e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"error": "Failed to change password"})),
+                    )
+                }
+            }
+        }
+        Err(_) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        ),
+    }
 }
 
 /// Register user handler
 pub async fn register_user(
-    State(_state): State<Arc<AppState>>,
-    Json(_req): Json<RegisterUserRequest>,
-    // TODO: Create new user
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RegisterUserRequest>,
 ) -> impl IntoResponse {
-    // For now, just return success
-    // In production, create user account
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({"message": "User registered"})),
-    )
+    // Validate input
+    if req.username.is_empty() || req.password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Username and password are required"})),
+        );
+    }
+
+    // Check password strength (basic validation)
+    if req.password.len() < 8 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must be at least 8 characters long"})),
+        );
+    }
+
+    match state.auth_service.register_user(
+        &req.username,
+        &req.password,
+        req.email.as_deref(),
+        &["user".to_string()], // Default role
+    ).await {
+        Ok(user_info) => {
+            tracing::info!("User {} registered successfully", req.username);
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "message": "User registered successfully",
+                    "user_id": user_info.id
+                })),
+            )
+        }
+        Err(e) => {
+            tracing::warn!("User registration failed for {}: {:?}", req.username, e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Failed to register user"})),
+            )
+        }
+    }
 }
 
 /// List users handler
 pub async fn list_users(
-    State(_state): State<Arc<AppState>>,
-    // TODO: Check admin permissions and list users
+    State(state): State<Arc<AppState>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
-    // For now, return mock users
-    // In production, return actual users
-    let users = vec![
-        UserInfoResponse {
-            id: "1".to_string(),
-            username: "admin".to_string(),
-            roles: vec!["admin".to_string(), "user".to_string()],
-        },
-        UserInfoResponse {
-            id: "2".to_string(),
-            username: "user".to_string(),
-            roles: vec!["user".to_string()],
-        },
-    ];
-    (StatusCode::OK, Json(users))
+    let token = bearer.token();
+
+    match state.auth_service.validate_token(token).await {
+        Ok(user_info) => {
+            // Check if user has admin role
+            if !user_info.roles.contains(&"admin".to_string()) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "Admin role required to list users"})),
+                );
+            }
+
+            match state.auth_service.list_users().await {
+                Ok(users) => {
+                    let user_responses: Vec<serde_json::Value> = users.into_iter().map(|user| {
+                        serde_json::json!({
+                            "id": user.id.unwrap_or_default(),
+                            "username": user.username,
+                            "roles": user.roles
+                        })
+                    }).collect();
+                    (StatusCode::OK, Json(serde_json::json!(user_responses)))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to list users: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": "Failed to list users"})),
+                    )
+                }
+            }
+        }
+        Err(_) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        ),
+    }
 }

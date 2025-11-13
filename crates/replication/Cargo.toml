@@ -21,3 +21,4 @@ tokio = { workspace = true, features = ["full"] }
 async-trait.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }

@@ -75,6 +75,16 @@ pub enum SshKeyType {
     Ecdsa,
 }
 
+impl std::fmt::Display for SshKeyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SshKeyType::Rsa => write!(f, "rsa"),
+            SshKeyType::Ed25519 => write!(f, "ed25519"),
+            SshKeyType::Ecdsa => write!(f, "ecdsa"),
+        }
+    }
+}
+
 /// SSH key request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshKeyRequest {

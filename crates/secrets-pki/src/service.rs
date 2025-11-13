@@ -62,10 +62,8 @@ impl PkiService {
 
     /// Get CA information
     pub async fn get_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
-        // Simplified implementation
-        Err(PkiError::InvalidCaConfiguration(
-            "CA info not implemented".to_string(),
-        ))
+        let engine = self.engine.read().await;
+        engine.get_ca_info().await
     }
 }
 

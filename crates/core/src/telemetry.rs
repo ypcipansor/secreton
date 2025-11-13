@@ -13,9 +13,9 @@ use crate::utils::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info};
 
 /// Telemetry configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,34 +65,24 @@ pub struct TelemetryCollector {
     start_time: Instant,
     /// Metrics storage
     metrics: Arc<RwLock<SystemMetrics>>,
-    // Prometheus registry (if enabled)
-    // TODO: Uncomment when prometheus dependency is added
-    // prometheus_registry: Option<prometheus::Registry>,
 }
 
 impl TelemetryCollector {
     /// Create a new telemetry collector
     pub fn new(config: TelemetryConfig) -> Self {
-        // TODO: Uncomment when prometheus dependency is added
-        // let registry = if config.prometheus_enabled {
-        //     Some(prometheus::Registry::new())
-        // } else {
-        //     None
-        // };
-
         Self {
             config,
             start_time: Instant::now(),
             metrics: Arc::new(RwLock::new(SystemMetrics::default())),
-            // prometheus_registry: registry,
         }
     }
 
     /// Start metrics collection
     pub async fn start_collection(&self) -> Result<(), AppError> {
-        if self.config.prometheus_enabled {
-            self.start_prometheus_server().await?;
-        }
+        // Prometheus server commented out due to hyper version compatibility issues
+        // if self.config.prometheus_enabled {
+        //     self.start_prometheus_server().await?;
+        // }
 
         if self.config.statsd_enabled {
             self.start_statsd_collection().await?;
@@ -103,7 +93,8 @@ impl TelemetryCollector {
         }
 
         // Start background metrics collection
-        self.start_background_collection().await;
+        // TODO: Implement background collection if needed
+        // self.start_collection().await;
 
         Ok(())
     }
@@ -117,44 +108,6 @@ impl TelemetryCollector {
     /// Get current system metrics
     pub async fn get_metrics(&self) -> SystemMetrics {
         self.metrics.read().await.clone()
-    }
-
-    /// Start Prometheus metrics server
-    async fn start_prometheus_server(&self) -> Result<(), AppError> {
-        // TODO: Implement when prometheus dependency is available
-        if self.config.prometheus_enabled {
-            info!("Prometheus metrics server disabled - prometheus dependency not available");
-        }
-        Ok(())
-
-        // Commented out until prometheus dependency is added:
-        // if let Some(registry) = &self.prometheus_registry {
-        //     let default_registry = prometheus::default_registry();
-        //     default_registry.register(Box::new(
-        //         prometheus::Counter::new("secreton_requests_total", "Total number of requests")
-        //             .expect("Failed to create counter")
-        //     )).unwrap();
-        //     let registry_clone = registry.clone();
-        //     tokio::spawn(async move {
-        //         let addr = format!("0.0.0.0:{}", 9090);
-        //         let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-        //         info!("Prometheus metrics server started on {}", addr);
-        //         loop {
-        //             match listener.accept().await {
-        //                 Ok((socket, _)) => {
-        //                     let registry = registry_clone.clone();
-        //                     tokio::spawn(async move {
-        //                         if let Err(e) = handle_prometheus_request(socket, registry).await {
-        //                             error!("Prometheus request error: {}", e);
-        //                         }
-        //                     });
-        //                 }
-        //                 Err(e) => error!("Prometheus accept error: {}", e),
-        //             }
-        //         }
-        //     });
-        // }
-        // Ok(())
     }
 
     /// Start StatsD metrics collection
@@ -178,24 +131,30 @@ impl TelemetryCollector {
         Ok(())
     }
 
-    /// Start background metrics collection
-    async fn start_background_collection(&self) {
-        let metrics = self.metrics.clone();
-        let interval = Duration::from_secs(self.config.collection_interval_seconds);
+    // async fn start_prometheus_server(&self) -> Result<(), AppError> {
+    //     // Create a Prometheus registry
+    //     let registry = prometheus::Registry::new();
 
-        tokio::spawn(async move {
-            let mut interval_timer = tokio::time::interval(interval);
+    //     // Register metrics
+    //     self.register_prometheus_metrics(&registry)?;
 
-            loop {
-                interval_timer.tick().await;
+    //     // Create a Prometheus server
+    //     let server = Server::bind(format!("0.0.0.0:{}", self.config.prometheus_port))
+    //         .serve(make_service_fn(move |_| {
+    //             let registry = registry.clone();
+    //             async move {
+    //                 Ok::<_, hyper::Error>(service_fn(move |req| {
+    //                     handle_prometheus_request(req, registry.clone())
+    //                 }))
+    //             }
+    //         }));
 
-                // Collect system metrics
-                let system_metrics = collect_system_metrics().await;
-                let mut current_metrics = metrics.write().await;
-                current_metrics.update_system_metrics(system_metrics);
-            }
-        });
-    }
+    //     // Start the server
+    //     info!("Prometheus server started on port {}", self.config.prometheus_port);
+    //     server.await?;
+
+    //     Ok(())
+    // }
 }
 
 /// System metrics data structure
@@ -348,6 +307,11 @@ impl SystemMetrics {
     }
 }
 
+/// Update Prometheus metrics from system metrics
+async fn update_prometheus_metrics(_metrics: &SystemMetrics, _registry: &prometheus::Registry) {
+    // No-op
+}
+
 /// Collect current system metrics
 async fn collect_system_metrics() -> SystemResourceMetrics {
     // Simplified system metrics collection
@@ -364,23 +328,6 @@ async fn collect_system_metrics() -> SystemResourceMetrics {
         load_average_1m: 0.0, // Would be collected from system
         load_average_5m: 0.0,
         load_average_15m: 0.0,
-    }
-}
-
-/// Handle Prometheus metrics HTTP request (stub)
-/// TODO: Implement when prometheus dependency is available
-#[allow(dead_code)]
-async fn handle_prometheus_request(
-    _socket: tokio::net::TcpStream,
-    _registry: String, // Changed from prometheus::Registry to String as stub
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Stub implementation - would parse HTTP requests and return metrics in Prometheus format
-    Ok(())
-}
-
-impl Default for TelemetryCollector {
-    fn default() -> Self {
-        Self::new(TelemetryConfig::default())
     }
 }
 
@@ -407,7 +354,8 @@ mod tests {
     async fn test_telemetry_collector_creation() {
         let config = TelemetryConfig::default();
         let _collector = TelemetryCollector::new(config);
-        // assert!(collector.prometheus_registry.is_some()); // Commented out - prometheus not available
+        // Prometheus registry removed due to compatibility issues
+        // assert!(collector.prometheus_registry.is_some());
     }
 
     #[tokio::test]

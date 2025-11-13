@@ -130,11 +130,11 @@ hkdf = "0.12.4"  # HKDF key derivation
 
 # Encoding (pure Rust)
 hex = "0.4.3"
-base32 = "0.5.1"
+base32 = "0.4.0"
 base64 = "0.22.1"
 data-encoding = "2.6.0"
 
-# Random number generation (audited)
+serde_bytes = "0.11.5"
 rand = "0.8.5"  # Cryptographically secure RNG
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 rand_chacha = "0.3.1"  # ChaCha RNG
@@ -191,7 +191,7 @@ subtle = "2.6.1"  # Constant-time operations
 # sphincs-plus = "0.2"
 
 # Network and HTTP
-axum = { version = "0.8", features = ["macros", "multipart", "json", "tracing"] }
+axum = { version = "0.7", features = ["macros", "multipart", "json", "tracing"] }
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"
 hyper = { version = "1.7.0", features = ["full"] }
@@ -214,7 +214,7 @@ aws-sdk-ec2 = "1.95.0"
 aws-sdk-secretsmanager = "1.91.0"
 
 # Authentication protocols
-jsonwebtoken = { version = "9.3", workspace = true }
+jsonwebtoken = "9.3"
 oauth2 = { version = "4.4" }
 openidconnect = "3.5"
 saml = "0.4"
@@ -322,7 +322,7 @@ mysql_async = { version = "0.36", default-features = false, features = ["default
 
 # WebAssembly (pure Rust, audited)
 # wasmtime = "35.0.0"  # Removed to avoid old ring
-wasmi = "0.32.5"  # Alternative WASM interpreter (lighter)
+wasmi = "0.51.1"  # Alternative WASM interpreter (lighter)
 
 # HTTP frameworks
 warp = "0.3"  # Alternative HTTP framework

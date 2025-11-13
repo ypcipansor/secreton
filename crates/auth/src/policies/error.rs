@@ -70,9 +70,3 @@ impl From<ValidationErrors> for SecretonError {
         }
     }
 }
-
-// Helper function for formatting role chains (currently unused but kept for future use)
-#[allow(dead_code)]
-fn format_role_chain(chain: &[String]) -> String {
-    chain.join(" -> ")
-}

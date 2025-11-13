@@ -5,8 +5,7 @@
 use crate::CoreError;
 use crate::models::plugin::PluginCatalogEntry;
 use async_trait::async_trait;
-// TODO: Uncomment when secreton_auth_methods crate is available
-// use secreton_auth_methods::model::MfaMethod;
+use secreton_auth::MfaMethod;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
@@ -14,23 +13,14 @@ use std::collections::HashMap;
 // Import the actual types from their respective crates
 use crate::models::pki::{PkiCa, PkiCert};
 use crate::models::sentinel::SentinelPolicy;
-// TODO: Uncomment when secreton_auth_methods crate is available
-// use secreton_auth_methods::token::token::Token;
 use secreton_auth::token::Token;
 use secreton_security::policies::audit::AuditDevice;
 use secreton_security::policies::policy::Policy;
 use secreton_storage::models::lease::Lease;
 
-// Stub type for MfaMethod until secreton_auth_methods is available
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MfaMethod {
-    pub method_type: String,
-    pub enabled: bool,
-}
-
 use super::types::StorageEntry;
 
-/// Storage engine trait for simple key-value operations
+// Storage engine trait for simple key-value operations
 #[async_trait]
 pub trait StorageEngine: Send + Sync + 'static {
     async fn get(&self, key: &str) -> Result<Option<StorageEntry>, CoreError>;
@@ -70,6 +60,7 @@ pub trait StorageBackend: Send + Sync {
     async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, CoreError>;
     async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, CoreError>;
     async fn delete_secret_version(&self, path: &str, version: u32) -> Result<(), CoreError>;
+    async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError>;
 
     // User management methods
     async fn create_user(&self, username: &str, password: &str) -> Result<(), CoreError>;
@@ -85,11 +76,17 @@ pub trait StorageBackend: Send + Sync {
     async fn list_policies(&self) -> Result<Vec<String>, CoreError>;
     async fn delete_policy(&self, name: &str) -> Result<(), CoreError>;
 
+    // Additional policy methods
+    async fn check_policy(&self, username: &str, path: &str, action: &str) -> Result<bool, CoreError>;
+    async fn get_policies_for_user(&self, user_id: &str, entity_alias: Option<&str>) -> Result<Vec<Policy>, CoreError>;
+
     // Token management methods
     async fn store_token(&self, token: &Token) -> Result<(), CoreError>;
     async fn get_token(&self, accessor: &str) -> Result<Option<Token>, CoreError>;
     async fn revoke_token(&self, accessor: &str) -> Result<(), CoreError>;
     async fn list_tokens(&self) -> Result<Vec<Token>, CoreError>;
+    async fn insert_token(&self, user: &str, token: &str, expires_at: Option<&str>) -> Result<(), CoreError>;
+    async fn is_token_valid(&self, token: &str) -> Result<bool, CoreError>;
 
     // Lease management methods
     async fn store_lease(&self, lease: &Lease) -> Result<(), CoreError>;
@@ -118,6 +115,9 @@ pub trait StorageBackend: Send + Sync {
     async fn get_sentinel_policy(&self, name: &str) -> Result<Option<SentinelPolicy>, CoreError>;
     async fn list_sentinel_policies(&self) -> Result<Vec<String>, CoreError>;
     async fn delete_sentinel_policy(&self, name: &str) -> Result<(), CoreError>;
+    async fn insert_sentinel_policy_version(&self, p: &SentinelPolicy) -> Result<(), CoreError>;
+    async fn list_sentinel_policy_versions(&self, namespace: &str, name: &str) -> Result<Vec<SentinelPolicy>, CoreError>;
+    async fn delete_sentinel_policy_version(&self, namespace: &str, name: &str, version: u32) -> Result<(), CoreError>;
 
     // Audit logging methods
     async fn store_audit_log(&self, log: &super::types::AuditLog) -> Result<(), CoreError>;
@@ -126,6 +126,7 @@ pub trait StorageBackend: Send + Sync {
         user: Option<&str>,
         limit: usize,
     ) -> Result<Vec<super::types::AuditLog>, CoreError>;
+    async fn log_audit(&self, user: &str, action: &str, path: &str, status: &str) -> Result<(), CoreError>;
 
     // Secret state management methods
     async fn is_sealed(&self) -> Result<bool, CoreError>;

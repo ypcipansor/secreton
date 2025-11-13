@@ -1,3 +1,4 @@
+#![cfg(feature = "client")]
 use leptos::prelude::*;
 use reqwest::Client;
 use serde_json::Value;
@@ -86,9 +87,15 @@ pub fn secrets() -> impl IntoView {
 
 #[component]
 pub fn secret_detail() -> impl IntoView {
-    // let path = leptos_router::use_params_map(cx)
-    //     .with(|params| params.get("path").cloned().unwrap_or_default());
-    let path = Arc::new("dummy".to_string()); // Placeholder
+    let path = web_sys::window()
+        .unwrap()
+        .location()
+        .pathname()
+        .unwrap()
+        .strip_prefix("/secrets/")
+        .unwrap_or("")
+        .to_string();
+    let path = Arc::new(path);
     let token = web_sys::window()
         .unwrap()
         .local_storage()

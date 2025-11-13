@@ -3,25 +3,82 @@
 //! Provides a unified authentication service that integrates with the
 //! auth crate for comprehensive authentication and token management.
 
+use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::{rand_core::OsRng, SaltString, PasswordHash}};
+
 use secreton_auth::{JwtTokenService, TokenConfig, TokenPair, UserInfo};
 use secreton_errors::SecretonError;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Unified authentication service for the core server
 #[derive(Clone)]
 pub struct AuthService {
     token_service: JwtTokenService,
     config: TokenConfig,
-    // TODO: Add user storage backend when available
-    // user_store: Arc<dyn UserStore>,
+    user_store: Arc<RwLock<HashMap<String, UserRecord>>>,
+    token_blacklist: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
+}
+
+/// Internal user record for storage
+#[derive(Debug, Clone)]
+struct UserRecord {
+    id: String,
+    username: String,
+    email: Option<String>,
+    password_hash: String,
+    roles: Vec<String>,
+    policies: Vec<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl AuthService {
     /// Create a new authentication service
     pub fn new(token_service: JwtTokenService, config: TokenConfig) -> Self {
+        let mut user_store = HashMap::new();
+
+        // Initialize with default users (in production, this would come from database)
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let admin_hash = argon2.hash_password(b"password", &salt).unwrap().to_string();
+
+        let salt = SaltString::generate(&mut OsRng);
+        let user_hash = argon2.hash_password(b"password", &salt).unwrap().to_string();
+
+        user_store.insert(
+            "admin".to_string(),
+            UserRecord {
+                id: "admin-user-id".to_string(),
+                username: "admin".to_string(),
+                email: None,
+                password_hash: admin_hash,
+                roles: vec!["admin".to_string(), "user".to_string()],
+                policies: vec!["default".to_string()],
+                created_at: chrono::Utc::now(),
+                last_login: None,
+            },
+        );
+
+        user_store.insert(
+            "user".to_string(),
+            UserRecord {
+                id: "user-user-id".to_string(),
+                username: "user".to_string(),
+                email: None,
+                password_hash: user_hash,
+                roles: vec!["user".to_string()],
+                policies: vec!["default".to_string()],
+                created_at: chrono::Utc::now(),
+                last_login: None,
+            },
+        );
+
         Self {
             token_service,
             config,
+            user_store: Arc::new(RwLock::new(user_store)),
+            token_blacklist: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -32,31 +89,46 @@ impl AuthService {
         password: &str,
         _method: &str,
     ) -> Result<TokenPair, SecretonError> {
-        // For now, use simple hardcoded authentication
-        // In production, this would integrate with auth crate authentication methods
-        let (user_id, roles, policies) = if username == "admin" && password == "password" {
-            (
-                "admin-user-id".to_string(),
-                vec!["admin".to_string(), "user".to_string()],
-                vec!["default".to_string()],
-            )
-        } else if username == "user" && password == "password" {
-            (
-                "user-user-id".to_string(),
-                vec!["user".to_string()],
-                vec!["default".to_string()],
-            )
-        } else {
+        let user_store = self.user_store.read().await;
+
+        let user = user_store.get(username).ok_or_else(|| {
+            SecretonError::Authentication {
+                message: "Invalid credentials".to_string(),
+            }
+        })?;
+
+        // Verify password
+        let parsed_hash = PasswordHash::parse(&user.password_hash, argon2::password_hash::Encoding::B64).unwrap();
+        let argon2 = Argon2::default();
+        let password_valid = argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok();
+
+        if !password_valid {
             return Err(SecretonError::Authentication {
                 message: "Invalid credentials".to_string(),
             });
-        };
+        }
+
+        // Update last login
+        let user_id = user.id.clone();
+        let user_username = user.username.clone();
+        let user_email = user.email.clone();
+        let user_roles = user.roles.clone();
+        let user_policies = user.policies.clone();
+        drop(user_store);
+        let mut user_store = self.user_store.write().await;
+        if let Some(user_record) = user_store.get_mut(username) {
+            user_record.last_login = Some(chrono::Utc::now());
+        }
 
         let token_pair = self
             .token_service
             .create_token_pair(
-                &user_id, username, None, &roles, &policies,
-                false, // MFA not required for hardcoded auth
+                &user_id,
+                &user_username,
+                user_email.as_deref(),
+                &user_roles,
+                &user_policies,
+                false, // MFA not required for now
             )
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token creation failed: {}", e),
@@ -79,6 +151,15 @@ impl AuthService {
 
     /// Validate an access token and return user information
     pub async fn validate_token(&self, token: &str) -> Result<UserInfo, SecretonError> {
+        // Check if token is blacklisted
+        let blacklist = self.token_blacklist.read().await;
+        if blacklist.contains_key(token) {
+            return Err(SecretonError::Authentication {
+                message: "Token has been revoked".to_string(),
+            });
+        }
+        drop(blacklist);
+
         let claims = self
             .token_service
             .validate_access_token(token)
@@ -95,6 +176,16 @@ impl AuthService {
             metadata: HashMap::new(),
             last_login: None,
         })
+    }
+
+    /// Revoke/blacklist a token
+    pub async fn revoke_token(&self, token: &str) -> Result<(), SecretonError> {
+        let mut blacklist = self.token_blacklist.write().await;
+        // Add token to blacklist with expiration time (use access token TTL)
+        let expiry = chrono::Utc::now() + chrono::Duration::hours(1); // Default 1 hour TTL
+        blacklist.insert(token.to_string(), expiry);
+        tracing::info!("Token revoked and added to blacklist");
+        Ok(())
     }
 
     /// Change a user's password
