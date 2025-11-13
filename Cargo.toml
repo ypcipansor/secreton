@@ -226,7 +226,7 @@ ldap3 = { version = "0.12.1" }
 radius-rust = "0.4.4"
 
 # XML parsing for SAML
-xml = "0.8"
+xml = "1.1"
 
 # Kubernetes client
 kube = { version = "0.95", features = ["client", "rustls-tls"] }
