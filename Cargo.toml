@@ -257,7 +257,7 @@ comfy-table = "7.1"
 
 # Metrics and monitoring
 prometheus = "0.14.0"  # Updated to address protobuf vulnerability
-opentelemetry = "0.21"
+opentelemetry = "0.31"
 opentelemetry-jaeger = "0.20"
 tracing-opentelemetry = "0.22"
 metrics = "0.23"
