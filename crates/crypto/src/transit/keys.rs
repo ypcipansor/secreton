@@ -309,8 +309,9 @@ impl TransitKey {
                 let shared_secret = x25519(**private_key_bytes, ephemeral_public);
 
                 // Derive AES key from shared secret using HKDF
+                let hkdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret);
                 let mut aes_key = [0u8; 32];
-                hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret)
+                hkdf
                     .expand(b"secreton-x25519-aes", &mut aes_key)
                     .map_err(|_| {
                         CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string())
