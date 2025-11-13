@@ -1,4 +1,4 @@
-// Key Rotation Engine - Automated encryption _key rotation for Transit/PKI
+// Key Rotation Engine - Automated encryption key rotation for Transit/PKI
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -315,8 +315,8 @@ impl KeyRotationService {
             error: None,
         };
 
-        // Generate new _key version
-        let new_key_data = self.generate_key_data(&managed_key.key_type);
+        // Generate new key version
+        let new_key_data = self.generate_key_data(&managed_key.key_type)?;
         let new_key_version = KeyVersion::new(new_version, new_key_data);
 
         // Add new version
@@ -490,13 +490,30 @@ impl KeyRotationService {
         Ok(())
     }
 
-    /// Generate _key _data based on _key type (placeholder implementation)
-    fn generate_key_data(&self, key_type: &KeyType) -> Vec<u8> {
+    /// Generate key data based on key type using cryptographically secure random generation
+    fn generate_key_data(&self, key_type: &KeyType) -> Result<Vec<u8>> {
         match key_type {
-            KeyType::Transit => vec![0; 32],      // AES-256
-            KeyType::PKI => vec![0; 256],         // RSA-2048 placeholder
-            KeyType::TokenSigning => vec![0; 64], // ED25519 placeholder
-            KeyType::SealKey => vec![0; 32],      // AES-256
+            KeyType::Transit => {
+                // AES-256 key
+                crate::generate_random_bytes(32)
+                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate Transit key: {}", e)))
+            }
+            KeyType::PKI => {
+                // RSA-2048 key material (placeholder for actual RSA key generation)
+                // In production, this would generate actual RSA key pairs
+                crate::generate_random_bytes(256)
+                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate PKI key: {}", e)))
+            }
+            KeyType::TokenSigning => {
+                // Ed25519 key (32 bytes)
+                crate::generate_random_bytes(32)
+                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate TokenSigning key: {}", e)))
+            }
+            KeyType::SealKey => {
+                // AES-256 key for sealing
+                crate::generate_random_bytes(32)
+                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate SealKey: {}", e)))
+            }
         }
     }
 }

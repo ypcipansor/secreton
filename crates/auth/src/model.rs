@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 /// User information structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,12 +16,46 @@ pub struct UserInfo {
 }
 
 /// MFA method enum
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum MfaMethod {
     Totp,
     Sms,
     Email,
     Hardware,
+    Push,
+    WebAuthn,
+    Recovery,
+}
+
+impl MfaMethod {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MfaMethod::Totp => "totp",
+            MfaMethod::Sms => "sms",
+            MfaMethod::Email => "email",
+            MfaMethod::Hardware => "hardware",
+            MfaMethod::Push => "push",
+            MfaMethod::WebAuthn => "webauthn",
+            MfaMethod::Recovery => "recovery",
+        }
+    }
+}
+
+impl FromStr for MfaMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "totp" => Ok(MfaMethod::Totp),
+            "sms" => Ok(MfaMethod::Sms),
+            "email" => Ok(MfaMethod::Email),
+            "hardware" => Ok(MfaMethod::Hardware),
+            "push" => Ok(MfaMethod::Push),
+            "webauthn" => Ok(MfaMethod::WebAuthn),
+            "recovery" => Ok(MfaMethod::Recovery),
+            _ => Err(format!("Unknown MFA method: {}", s)),
+        }
+    }
 }
 
 /// MFA configuration

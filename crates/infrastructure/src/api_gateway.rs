@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum GatewayError {

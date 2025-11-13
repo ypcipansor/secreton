@@ -1,4 +1,5 @@
 // GCP Secrets Engine - Google Cloud Platform dynamic credentials
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_ENGINE};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -125,16 +126,71 @@ impl GCPSecretsEngine {
 
     /// Validate GCP credentials
     async fn validate_credentials(&self, credentials: &str) -> Result<()> {
-        // Mock validation
-        // In real implementation, this would:
-        // 1. Parse JSON credentials
-        // 2. Verify structure
-        // 3. Test authentication with GCP
+        // Parse JSON credentials
+        let creds: serde_json::Value = serde_json::from_str(credentials)
+            .map_err(|_| GCPError::InvalidCredentials("Invalid JSON format".to_string()))?;
 
-        if !credentials.contains("project_id") {
-            return Err(GCPError::InvalidCredentials(
-                "Invalid credentials format".to_string(),
-            ));
+        // Validate required fields
+        let creds_obj = creds.as_object()
+            .ok_or_else(|| GCPError::InvalidCredentials("Credentials must be a JSON object".to_string()))?;
+
+        // Check for service account type
+        if let Some(type_field) = creds_obj.get("type") {
+            if let Some(type_str) = type_field.as_str() {
+                if type_str != "service_account" {
+                    return Err(GCPError::InvalidCredentials(
+                        "Only service account credentials are supported".to_string(),
+                    ));
+                }
+            } else {
+                return Err(GCPError::InvalidCredentials("Type field must be a string".to_string()));
+            }
+        } else {
+            return Err(GCPError::InvalidCredentials("Type field is required".to_string()));
+        }
+
+        // Check for project_id
+        if let Some(project_id) = creds_obj.get("project_id") {
+            if !project_id.is_string() {
+                return Err(GCPError::InvalidCredentials("project_id must be a string".to_string()));
+            }
+        } else {
+            return Err(GCPError::InvalidCredentials("project_id is required".to_string()));
+        }
+
+        // Check for private_key_id
+        if let Some(private_key_id) = creds_obj.get("private_key_id") {
+            if !private_key_id.is_string() {
+                return Err(GCPError::InvalidCredentials("private_key_id must be a string".to_string()));
+            }
+        } else {
+            return Err(GCPError::InvalidCredentials("private_key_id is required".to_string()));
+        }
+
+        // Check for private_key
+        if let Some(private_key) = creds_obj.get("private_key") {
+            if !private_key.is_string() {
+                return Err(GCPError::InvalidCredentials("private_key must be a string".to_string()));
+            }
+            let key_str = private_key.as_str().unwrap();
+            if !key_str.contains("BEGIN PRIVATE KEY") {
+                return Err(GCPError::InvalidCredentials("private_key must be in PEM format".to_string()));
+            }
+        } else {
+            return Err(GCPError::InvalidCredentials("private_key is required".to_string()));
+        }
+
+        // Check for client_email
+        if let Some(client_email) = creds_obj.get("client_email") {
+            if !client_email.is_string() {
+                return Err(GCPError::InvalidCredentials("client_email must be a string".to_string()));
+            }
+            let email = client_email.as_str().unwrap();
+            if !email.ends_with(".iam.gserviceaccount.com") {
+                return Err(GCPError::InvalidCredentials("client_email must be a service account email".to_string()));
+            }
+        } else {
+            return Err(GCPError::InvalidCredentials("client_email is required".to_string()));
         }
 
         Ok(())
@@ -204,26 +260,37 @@ impl GCPSecretsEngine {
 
     /// Generate access token
     async fn generate_access_token(&self, roleset: &GCPRoleSet) -> Result<GCPAccessToken> {
-        // Mock token generation
+        // Generate a more realistic token
         // In real implementation, this would:
-        // 1. Use service account to get OAuth2 token
-        // 2. Request token with specified scopes
-        // 3. Return token with expiration
+        // 1. Use service account credentials to authenticate with GCP
+        // 2. Request OAuth2 token with specified scopes
+        // 3. Return actual token with proper expiration
 
-        let token = format!("ya29.{}", uuid::Uuid::new_v4());
+        // Generate random token payload
+        let token_payload = format!("{{\"iss\":\"vault@{}.iam.gserviceaccount.com\",\"scope\":\"{}\",\"aud\":\"https://oauth2.googleapis.com/token\",\"exp\":{},\"iat\":{}}}",
+            roleset.project,
+            roleset.token_scopes.join(" "),
+            (Utc::now() + roleset.ttl).timestamp(),
+            Utc::now().timestamp()
+        );
+
+        // Base64 encode the payload (simplified - real JWT would have proper signing)
+        let token = BASE64_ENGINE.encode(token_payload.as_bytes());
+        let access_token = format!("ya29.{}", token);
+
         let expires_at = Utc::now() + roleset.ttl;
 
-        let access_token = GCPAccessToken {
-            token: token.clone(),
+        let gcp_token = GCPAccessToken {
+            token: access_token.clone(),
             expires_at,
             token_type: "Bearer".to_string(),
         };
 
         // Store token
         let mut tokens = self.access_tokens.write().await;
-        tokens.insert(token, access_token.clone());
+        tokens.insert(access_token, gcp_token.clone());
 
-        Ok(access_token)
+        Ok(gcp_token)
     }
 
     /// Generate service account key

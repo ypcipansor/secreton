@@ -21,6 +21,9 @@ pub enum MfaMethod {
     Sms,
     Email,
     Hardware,
+    Push,
+    WebAuthn,
+    Recovery,
 }
 
 /// MFA enrollment status
@@ -138,6 +141,18 @@ impl CombinedMfaService {
                 } else {
                     Ok(false)
                 }
+            }
+            MfaMethod::Push => {
+                // Push notification MFA - not implemented yet
+                Ok(false)
+            }
+            MfaMethod::WebAuthn => {
+                // WebAuthn MFA - not implemented yet
+                Ok(false)
+            }
+            MfaMethod::Recovery => {
+                // Recovery code MFA - not implemented yet
+                Ok(false)
             }
         }
     }

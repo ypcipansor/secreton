@@ -26,7 +26,7 @@ impl OciEngine {
 
     /// Generate instance principal credentials
     pub async fn generate_instance_principal(
-        &self,
+        &mut self,
         role_name: &str,
         ttl_seconds: u64,
     ) -> Result<HashMap<String, Value>, SecretError> {
@@ -49,7 +49,7 @@ impl OciEngine {
 
     /// Generate API key credentials
     pub async fn generate_api_key(
-        &self,
+        &mut self,
         user_name: &str,
         ttl_seconds: u64,
     ) -> Result<HashMap<String, Value>, SecretError> {
@@ -69,7 +69,7 @@ impl OciEngine {
 
     /// Generate resource principal credentials
     pub async fn generate_resource_principal(
-        &self,
+        &mut self,
         resource_type: &str,
         resource_id: &str,
         ttl_seconds: u64,
@@ -93,14 +93,14 @@ impl OciEngine {
     }
 
     /// List compartments
-    pub async fn list_compartments(&self) -> Result<Vec<HashMap<String, Value>>, SecretError> {
+    pub async fn list_compartments(&mut self) -> Result<Vec<HashMap<String, Value>>, SecretError> {
         tracing::info!("Listing OCI compartments");
         self.backend.list_compartments().await
     }
 
     /// Get vault secrets
     pub async fn get_vault_secrets(
-        &self,
+        &mut self,
         vault_id: &str,
     ) -> Result<Vec<HashMap<String, Value>>, SecretError> {
         tracing::info!("Getting OCI vault secrets for vault: {}", vault_id);
@@ -109,7 +109,7 @@ impl OciEngine {
 
     /// Create vault secret
     pub async fn create_vault_secret(
-        &self,
+        &mut self,
         vault_id: &str,
         secret_name: &str,
         secret_value: &str,
@@ -127,7 +127,7 @@ impl OciEngine {
 
     /// Rotate credentials
     pub async fn rotate_credentials(
-        &self,
+        &mut self,
         credential_type: &str,
     ) -> Result<HashMap<String, Value>, SecretError> {
         tracing::info!("Rotating OCI credentials of type: {}", credential_type);
@@ -193,13 +193,13 @@ impl OciEngine {
     }
 
     /// Test connectivity
-    pub async fn test_connectivity(&self) -> Result<bool, SecretError> {
+    pub async fn test_connectivity(&mut self) -> Result<bool, SecretError> {
         tracing::info!("Testing OCI connectivity");
         self.backend.test_connectivity().await
     }
 
     /// Get engine status
-    pub async fn status(&self) -> Result<HashMap<String, Value>, SecretError> {
+    pub async fn status(&mut self) -> Result<HashMap<String, Value>, SecretError> {
         let mut status = HashMap::new();
 
         status.insert("engine_type".to_string(), Value::String("oci".to_string()));

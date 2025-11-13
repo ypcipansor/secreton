@@ -34,13 +34,14 @@ secreton-storage.workspace = true
 # Certificate generation dependencies
 rcgen.workspace = true
 x509-cert.workspace = true
+x509-parser.workspace = true
 pem.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 time = "0.3"  # Required for rcgen compatibility
 
 # SSH dependencies
-# ssh-key.workspace = true  # Not available in workspace
+ssh-key = "0.6"
 
 # Random number generation
 rand.workspace = true

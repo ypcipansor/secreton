@@ -131,8 +131,12 @@ impl RabbitmqEngine {
         // Default vhost
         let vhost = self.config.vhost.as_deref().unwrap_or("/");
 
-        // TODO: Implement when secreton_rabbitmq_utils is available
-        // For now, return mock credentials
+        // Create user via RabbitMQ Management API
+        self.create_rabbitmq_user(&username, &password, &[]).await?;
+
+        // Set default permissions for the user
+        self.set_rabbitmq_permissions(&username, vhost, ".*", ".*", ".*").await?;
+
         let mut result = HashMap::new();
         result.insert("username".to_string(), Value::String(username.clone()));
         result.insert("password".to_string(), Value::String(password));
@@ -145,30 +149,97 @@ impl RabbitmqEngine {
             "management_url".to_string(),
             Value::String(format!(
                 "{}/#/login/{}/{}",
-                self.config.connection_uri, username, vhost
+                self.get_management_url(&self.config.connection_uri)?, username, vhost
             )),
         );
 
-        tracing::warn!(
-            "RabbitMQ credentials generated with stub implementation - secreton_rabbitmq_utils not available"
-        );
         Ok(result)
+    }
 
-        // Commented out until secreton_rabbitmq_utils is available:
-        // let utils_config = secreton_rabbitmq_utils::RabbitMqConfig {
-        //     connection_uri: self.config.connection_uri.clone(),
-        //     username: self.config.username.clone(),
-        //     password: self.config.password.clone(),
-        //     vhost: self.config.vhost.clone(),
-        //     default_lease_ttl: self.config.default_lease_ttl,
-        // };
-        // let creds_data = secreton_rabbitmq_utils::RabbitMqOperations::generate_credentials(
-        //     &utils_config, &username, &password, "management", vhost, ".*", ".*", ".*"
-        // ).await?;
-        // let mut result = HashMap::new();
-        // for (key, value) in creds_data {
-        //     result.insert(key, Value::String(value.as_str().unwrap_or("").to_string()));
-        // }
-        // Ok(result)
+    /// Get management API URL from connection URI
+    fn get_management_url(&self, connection_uri: &str) -> SecretResult<String> {
+        // Parse AMQP URI: amqp://user:pass@host:port/vhost
+        let url = url::Url::parse(connection_uri)
+            .map_err(|e| SecretError::InvalidConfiguration(format!("Invalid connection URI: {}", e)))?;
+
+        let host = url.host_str().ok_or_else(|| {
+            SecretError::InvalidConfiguration("Missing host in connection URI".to_string())
+        })?;
+        let port = url.port().unwrap_or(5672); // Default AMQP port
+
+        // Management API typically runs on port 15672 (AMQP port + 10000)
+        let management_port = port + 10000;
+
+        Ok(format!("http://{}:{}", host, management_port))
+    }
+
+    /// Create user in RabbitMQ via Management API
+    async fn create_rabbitmq_user(&self, username: &str, password: &str, tags: &[String]) -> SecretResult<()> {
+        let management_url = self.get_management_url(&self.config.connection_uri)?;
+        let client = reqwest::Client::new();
+
+        // Create user payload
+        let user_payload = serde_json::json!({
+            "password": password,
+            "tags": tags.join(",")
+        });
+
+        let response = client
+            .put(&format!("{}/api/users/{}", management_url, username))
+            .basic_auth(&self.config.username, Some(&self.config.password))
+            .json(&user_payload)
+            .send()
+            .await
+            .map_err(|e| SecretError::BackendConnectionFailed(format!("Failed to create user: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(SecretError::BackendOperationFailed(format!(
+                "Failed to create user {}: {} - {}",
+                username, status, error_text
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Set permissions for user on vhost via Management API
+    async fn set_rabbitmq_permissions(&self, username: &str, vhost: &str, configure: &str, write: &str, read: &str) -> SecretResult<()> {
+        let management_url = self.get_management_url(&self.config.connection_uri)?;
+        let client = reqwest::Client::new();
+
+        // Set permissions payload
+        let permissions_payload = serde_json::json!({
+            "configure": configure,
+            "write": write,
+            "read": read
+        });
+
+        let response = client
+            .put(&format!(
+                "{}/api/permissions/{}/{}",
+                management_url,
+                urlencoding::encode(vhost),
+                username
+            ))
+            .basic_auth(&self.config.username, Some(&self.config.password))
+            .json(&permissions_payload)
+            .send()
+            .await
+            .map_err(|e| {
+                SecretError::BackendConnectionFailed(format!("Failed to set permissions: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(SecretError::BackendOperationFailed(format!(
+                "Failed to set permissions for user {} on vhost {}: {} - {}",
+                username, vhost, status, error_text
+            )));
+        }
+
+        Ok(())
     }
 }

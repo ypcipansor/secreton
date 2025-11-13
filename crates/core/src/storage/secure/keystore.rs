@@ -47,11 +47,11 @@ pub trait KeyStore: Send + Sync {
 /// This implementation stores keys in memory and is suitable for testing
 /// or single-instance deployments. Keys are lost when the process terminates.
 #[derive(Debug, Clone)]
-pub struct MemoryKeyStore {
+pub struct MemoryKeyStoreImpl {
     keys: Arc<RwLock<HashMap<String, KeyEntry>>>,
 }
 
-impl MemoryKeyStore {
+impl MemoryKeyStoreImpl {
     /// Create a new empty memory key store
     pub fn new() -> Self {
         Self {
@@ -61,7 +61,7 @@ impl MemoryKeyStore {
 }
 
 #[async_trait]
-impl KeyStore for MemoryKeyStore {
+impl KeyStore for MemoryKeyStoreImpl {
     async fn store_key(&self, entry: KeyEntry) -> Result<(), anyhow::Error> {
         let mut keys = self.keys.write().await;
         keys.insert(entry.id.clone(), entry);

@@ -20,6 +20,12 @@ pub enum ReplicationError {
     #[error("Sync failed: {0}")]
     SyncFailed(String),
 
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    #[error("Replication failed: {0}")]
+    ReplicationFailed(String),
+
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
@@ -47,6 +53,12 @@ impl From<ReplicationError> for SecretonError {
             }
             ReplicationError::SyncFailed(msg) => SecretonError::Internal {
                 message: format!("Sync failed: {}", msg),
+            },
+            ReplicationError::NetworkError(msg) => SecretonError::Network {
+                message: msg,
+            },
+            ReplicationError::ReplicationFailed(msg) => SecretonError::Internal {
+                message: format!("Replication failed: {}", msg),
             },
             ReplicationError::ConnectionError(msg) => SecretonError::Network {
                 message: format!("Connection error: {}", msg),

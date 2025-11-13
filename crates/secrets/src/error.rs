@@ -59,6 +59,9 @@ pub enum SecretError {
 
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+
+    #[error("Backend not supported: {0}")]
+    BackendNotSupported(String),
 }
 
 impl From<SecretError> for SecretonError {

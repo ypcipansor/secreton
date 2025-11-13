@@ -73,7 +73,6 @@ pub mod types;
 
 // Re-exports for public API
 pub use types::{KeyConfig, KeyEntry};
-// pub use keystore::{KeyStore, MemoryKeyStore};
 pub use storage::{SecureStorage, SharedSecureStorage};
 
 // Required imports for cryptographic operations

@@ -9,46 +9,14 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use deadpool_postgres::Pool;
 use secreton_auth::{token::Token, token::TokenStatus, token::TokenType};
-// TODO: Uncomment when secreton_auth_methods crate is available
-// use secreton_auth_methods::model::MfaMethod;
-// TODO: Uncomment when secreton_policies crate is available
-// use secreton_policies::{Policy, PolicyEffect, PolicyRule, PolicyType};
+use secreton_auth::MfaMethod;
 use secreton_auth::policies::{Policy, PolicyEffect, PolicyRule, PolicyType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
-use std::str::FromStr;
 use uuid::Uuid;
 
-impl FromStr for MfaMethod {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "totp" => Ok(MfaMethod::Totp),
-            "sms" => Ok(MfaMethod::Sms),
-            "push" => Ok(MfaMethod::Push),
-            "hardware" => Ok(MfaMethod::Hardware),
-            "webauthn" => Ok(MfaMethod::WebAuthn),
-            "email" => Ok(MfaMethod::Email),
-            "recovery" => Ok(MfaMethod::Recovery),
-            _ => Err(format!("Unknown MFA method: {}", s)),
-        }
-    }
-}
-
-// Stub types until the crates are available
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum MfaMethod {
-    Totp,
-    Sms,
-    Push,
-    Hardware,
-    WebAuthn,
-    Email,
-    Recovery,
-}
 pub mod mfa;
 pub mod secret;
 pub mod secure;

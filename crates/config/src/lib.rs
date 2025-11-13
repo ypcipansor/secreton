@@ -1305,6 +1305,9 @@ pub struct SmsConfig {
     /// From number
     pub from_number: String,
 
+    /// To numbers (recipients)
+    pub to_numbers: Vec<String>,
+
     /// Rate limiting
     pub rate_limit: SmsRateLimit,
 }
@@ -1316,6 +1319,7 @@ impl Default for SmsConfig {
             account_sid: String::new(),
             auth_token: String::new(),
             from_number: String::new(),
+            to_numbers: Vec::new(),
             rate_limit: SmsRateLimit::default(),
         }
     }

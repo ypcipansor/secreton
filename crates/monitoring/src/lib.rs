@@ -20,6 +20,7 @@
 //! - `health/`: Health check implementations
 //! - `metrics/`: Metrics collection and reporting
 
+use lettre::AsyncTransport;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -618,14 +619,60 @@ impl AlertManager {
     }
 
     /// Send email notification
-    async fn send_email_notification(&self, _notification: &AlertNotification) -> bool {
-        // TODO: Implement email sending
-        // For now, just log the notification
-        tracing::info!(
-            "Email notification would be sent: {}",
-            _notification.alert.title
+    async fn send_email_notification(&self, notification: &AlertNotification) -> bool {
+        if self.config.email.smtp_server.is_empty() || self.config.email.to_addresses.is_empty() {
+            return false;
+        }
+
+        // Create email message
+        let subject = format!("[{}] {}", notification.alert.severity, notification.alert.title);
+        let body = format!(
+            "Alert Details:\n\nTitle: {}\nDescription: {}\nSeverity: {}\nCategory: {}\nSource: {}\nTimestamp: {}\n\nPlease check the system immediately.",
+            notification.alert.title,
+            notification.alert.description,
+            notification.alert.severity,
+            notification.alert.category,
+            notification.alert.source,
+            notification.alert.timestamp
         );
-        true
+
+        // Send to all configured addresses
+        let mut all_success = true;
+        for to_address in &self.config.email.to_addresses {
+            // Build email for each recipient
+            let email = lettre::Message::builder()
+                .from(self.config.email.from_address.parse().unwrap_or_else(|_| "alerts@secreton.local".parse().unwrap()))
+                .to(to_address.parse().unwrap_or_else(|_| "admin@secreton.local".parse().unwrap()))
+                .subject(&subject)
+                .body(body.clone())
+                .unwrap();
+
+            // Create SMTP transport
+            let smtp_server = &self.config.email.smtp_server;
+            let smtp_port = self.config.email.smtp_port;
+            let creds = lettre::transport::smtp::authentication::Credentials::new(
+                self.config.email.smtp_username.clone(),
+                self.config.email.smtp_password.clone(),
+            );
+
+            let mailer = lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(smtp_server)
+                .unwrap()
+                .port(smtp_port)
+                .credentials(creds)
+                .build();
+
+            match mailer.send(email).await {
+                Ok(_) => {
+                    tracing::info!("Email notification sent successfully to {}", to_address);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send email notification to {}: {}", to_address, e);
+                    all_success = false;
+                }
+            }
+        }
+
+        all_success
     }
 
     /// Send webhook notification
@@ -734,14 +781,66 @@ impl AlertManager {
     }
 
     /// Send SMS notification
-    async fn send_sms_notification(&self, _notification: &AlertNotification) -> bool {
-        // TODO: Implement SMS sending
-        // For now, just log the notification
-        tracing::info!(
-            "SMS notification would be sent: {}",
-            _notification.alert.title
+    async fn send_sms_notification(&self, notification: &AlertNotification) -> bool {
+        if self.config.sms.account_sid.is_empty() || self.config.sms.auth_token.is_empty() || self.config.sms.from_number.is_empty() {
+            return false;
+        }
+
+        // Create SMS message
+        let message = format!(
+            "[{}] {}: {}",
+            notification.alert.severity,
+            notification.alert.title,
+            notification.alert.description
         );
-        true
+
+        // Send SMS using Twilio API
+        match self.send_twilio_sms(&message).await {
+            Ok(_) => {
+                tracing::info!("SMS notification sent successfully");
+                true
+            }
+            Err(e) => {
+                tracing::error!("Failed to send SMS notification: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Send SMS via Twilio API
+    async fn send_twilio_sms(&self, message: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // For now, we'll use a simple HTTP request to Twilio API
+        // In a real implementation, you'd use the twilio crate
+
+        let account_sid = &self.config.sms.account_sid;
+        let auth_token = &self.config.sms.auth_token;
+        let from_number = &self.config.sms.from_number;
+
+        // Use the first configured recipient or a default
+        let to_number = self.config.sms.to_numbers.first()
+            .ok_or("No SMS recipients configured")?;
+
+        let url = format!("https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json", account_sid);
+
+        let params = [
+            ("From", from_number.as_str()),
+            ("To", to_number),
+            ("Body", message),
+        ];
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .basic_auth(account_sid, Some(auth_token))
+            .form(&params)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Twilio API error: {}", response.status()).into())
+        }
     }
 
     /// Clean up old alerts

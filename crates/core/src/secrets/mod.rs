@@ -8,6 +8,5 @@ pub mod ldap_secrets;
 pub mod mongodb_atlas;
 pub mod nomad;
 pub mod oci_secrets;
-pub mod rabbitmq;
 pub mod terraform_cloud;
 pub mod totp;

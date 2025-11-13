@@ -1,4 +1,4 @@
-// Secret Usage Analytics - Track access _patterns and generate insights
+// Secret Usage Analytics - Track access patterns and generate insights
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -41,7 +41,7 @@ pub struct AnalyticsConfig {
 pub struct AccessEvent {
     pub event_id: String,
     pub secret_path: String,
-    pub accessor: String, // User or service _name
+    pub accessor: String, // User or service name
     pub access_type: AccessType,
     pub timestamp: DateTime<Utc>,
     pub metadata: HashMap<String, String>,
@@ -130,7 +130,7 @@ impl SecretUsageAnalytics {
 
         let events: Vec<_> = access_events
             .iter()
-            .filter(|_e| _e.secret_path == secret_path)
+            .filter(|e| e.secret_path == secret_path)
             .collect();
 
         if events.is_empty() {
@@ -139,10 +139,10 @@ impl SecretUsageAnalytics {
 
         let access_count = events.len() as u64;
         let unique_accessors: HashSet<String> =
-            events.iter().map(|_e| _e.accessor.clone()).collect();
+            events.iter().map(|e| e.accessor.clone()).collect();
 
-        let first_accessed = events.iter().map(|_e| _e.timestamp).min().unwrap();
-        let last_accessed = events.iter().map(|_e| _e.timestamp).max().unwrap();
+        let first_accessed = events.iter().map(|e| e.timestamp).min().unwrap();
+        let last_accessed = events.iter().map(|e| e.timestamp).max().unwrap();
 
         let days = (last_accessed - first_accessed).num_days().max(1) as f64;
         let access_frequency = access_count as f64 / days;
@@ -167,7 +167,7 @@ impl SecretUsageAnalytics {
 
         let filtered_events: Vec<_> = access_events
             .iter()
-            .filter(|_e| _e.timestamp >= time_range_start && _e.timestamp <= time_range_end)
+            .filter(|e| e.timestamp >= time_range_start && e.timestamp <= time_range_end)
             .collect();
 
         // Count accesses per _secret
@@ -219,11 +219,11 @@ impl SecretUsageAnalytics {
 
         let recently_accessed: HashSet<_> = access_events
             .iter()
-            .filter(|_e| _e.timestamp >= threshold)
-            .map(|_e| &_e.secret_path)
+            .filter(|e| e.timestamp >= threshold)
+            .map(|e| &e.secret_path)
             .collect();
 
-        let all_secrets: HashSet<_> = access_events.iter().map(|_e| &_e.secret_path).collect();
+        let all_secrets: HashSet<_> = access_events.iter().map(|e| &e.secret_path).collect();
 
         all_secrets
             .difference(&recently_accessed)
@@ -237,7 +237,7 @@ impl SecretUsageAnalytics {
 
         let events: Vec<_> = access_events
             .iter()
-            .filter(|_e| _e.secret_path == secret_path)
+            .filter(|e| e.secret_path == secret_path)
             .collect();
 
         if events.is_empty() {
@@ -317,10 +317,10 @@ impl SecretUsageAnalytics {
     pub async fn list_events(&self, secret_path: Option<&str>) -> Vec<AccessEvent> {
         let access_events = self.access_events.read().await;
 
-        if let Some(_path) = secret_path {
+        if let Some(path) = secret_path {
             access_events
                 .iter()
-                .filter(|_e| _e.secret_path == _path)
+                .filter(|e| e.secret_path == path)
                 .cloned()
                 .collect()
         } else {
@@ -330,9 +330,9 @@ impl SecretUsageAnalytics {
 
     /// Clear old events
     pub async fn clear_old_events(&self) -> Result<usize> {
-        let _config = self._config.read().await;
-        let retention_days = _config.retention_days;
-        drop(_config);
+        let config = self._config.read().await;
+        let retention_days = config.retention_days;
+        drop(config);
 
         let threshold = Utc::now() - chrono::Duration::days(retention_days as i64);
 
@@ -349,16 +349,16 @@ impl SecretUsageAnalytics {
         let access_events = self.access_events.read().await;
 
         let total_events = access_events.len();
-        let unique_secrets: HashSet<_> = access_events.iter().map(|_e| &_e.secret_path).collect();
-        let unique_accessors: HashSet<_> = access_events.iter().map(|_e| &_e.accessor).collect();
+        let unique_secrets: HashSet<_> = access_events.iter().map(|e| &e.secret_path).collect();
+        let unique_accessors: HashSet<_> = access_events.iter().map(|e| &e.accessor).collect();
 
         let read_count = access_events
             .iter()
-            .filter(|_e| _e.access_type == AccessType::Read)
+            .filter(|e| e.access_type == AccessType::Read)
             .count();
         let write_count = access_events
             .iter()
-            .filter(|_e| _e.access_type == AccessType::Write)
+            .filter(|e| e.access_type == AccessType::Write)
             .count();
 
         AnalyticsStatistics {
@@ -400,7 +400,7 @@ mod tests {
 
         analytics
             .record_access(
-                "_secret/db/_password".to_string(),
+                "secret/db/password".to_string(),
                 "user1".to_string(),
                 AccessType::Read,
                 HashMap::new(),
@@ -408,7 +408,7 @@ mod tests {
             .await
             .unwrap();
 
-        let events = analytics.list_events(Some("_secret/db/_password")).await;
+        let events = analytics.list_events(Some("secret/db/password")).await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].accessor, "user1");
     }
@@ -420,8 +420,8 @@ mod tests {
         for i in 0..10 {
             analytics
                 .record_access(
-                    "_secret/api/_key".to_string(),
-                    format!("_user{}", i % 3),
+                    "secret/api/key".to_string(),
+                    format!("user{}", i % 3),
                     AccessType::Read,
                     HashMap::new(),
                 )
@@ -430,7 +430,7 @@ mod tests {
         }
 
         let metrics = analytics
-            .get_usage_metrics("_secret/api/_key")
+            .get_usage_metrics("secret/api/key")
             .await
             .unwrap();
         assert_eq!(metrics.access_count, 10);
@@ -448,7 +448,7 @@ mod tests {
         for _ in 0..5 {
             analytics
                 .record_access(
-                    "_secret/db/_password".to_string(),
+                    "secret/db/password".to_string(),
                     "user1".to_string(),
                     AccessType::Read,
                     HashMap::new(),
@@ -460,7 +460,7 @@ mod tests {
         for _ in 0..3 {
             analytics
                 .record_access(
-                    "_secret/api/_key".to_string(),
+                    "secret/api/key".to_string(),
                     "user2".to_string(),
                     AccessType::Read,
                     HashMap::new(),
@@ -470,7 +470,7 @@ mod tests {
         }
 
         let report = analytics.generate_usage_report(start, end).await.unwrap();
-        // Report should contain access _data (exact count may vary based on timing)
+        // Report should contain access data (exact count may vary based on timing)
         assert!(report.total_accesses > 0);
         assert!(!report.most_accessed.is_empty());
     }
@@ -482,7 +482,7 @@ mod tests {
         // Recent access
         analytics
             .record_access(
-                "_secret/active".to_string(),
+                "secret/active".to_string(),
                 "user1".to_string(),
                 AccessType::Read,
                 HashMap::new(),
@@ -493,7 +493,7 @@ mod tests {
         // Old access (simulate by not accessing for threshold)
         analytics
             .record_access(
-                "_secret/unused".to_string(),
+                "secret/unused".to_string(),
                 "user2".to_string(),
                 AccessType::Read,
                 HashMap::new(),
@@ -506,7 +506,7 @@ mod tests {
             let mut events = analytics.access_events.write().await;
             if let Some(event) = events
                 .iter_mut()
-                .find(|_e| _e.secret_path == "_secret/unused")
+                .find(|e| e.secret_path == "secret/unused")
             {
                 event.timestamp = Utc::now() - chrono::Duration::days(31);
             }
@@ -514,7 +514,7 @@ mod tests {
 
         let unused = analytics.identify_unused_secrets(30).await;
         assert_eq!(unused.len(), 1);
-        assert!(unused.contains(&"_secret/unused".to_string()));
+        assert!(unused.contains(&"secret/unused".to_string()));
     }
 
     #[tokio::test]
@@ -525,7 +525,7 @@ mod tests {
         for hour in [9, 10, 11, 14, 15, 16, 17] {
             analytics
                 .record_access(
-                    "_secret/business".to_string(),
+                    "secret/business".to_string(),
                     "user1".to_string(),
                     AccessType::Read,
                     HashMap::new(),
@@ -549,7 +549,7 @@ mod tests {
         }
 
         let pattern = analytics
-            .get_access_patterns("_secret/business")
+            .get_access_patterns("secret/business")
             .await
             .unwrap();
         assert!(pattern.peak_hours.len() > 0);
@@ -561,7 +561,7 @@ mod tests {
 
         analytics
             .record_access(
-                "_secret/test".to_string(),
+                "secret/test".to_string(),
                 "user1".to_string(),
                 AccessType::Read,
                 HashMap::new(),
@@ -570,6 +570,6 @@ mod tests {
             .unwrap();
 
         let json = analytics.export_analytics("json").await.unwrap();
-        assert!(json.contains("_secret/test"));
+        assert!(json.contains("secret/test"));
     }
 }

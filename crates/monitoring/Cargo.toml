@@ -31,3 +31,5 @@ reqwest.workspace = true
 secreton-common.workspace = true
 secreton-errors.workspace = true
 secreton-config.workspace = true
+lettre = { version = "0.11.19", features = ["smtp-transport", "tokio1-native-tls"] }
+twilio = "1.1.0"

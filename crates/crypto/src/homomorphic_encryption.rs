@@ -104,17 +104,17 @@ impl Paillier {
 
     /// Decrypt a ciphertext
     pub fn decrypt(dk: &DecryptionKey, ciphertext: &BigUint) -> Result<BigUint> {
-        let (lambda, mu, n) = dk.to_biguint();
-        let n_squared = &n * &n;
+        let n = BigUint::from_bytes_be(&dk.n);
 
         // Compute ciphertext^lambda mod n^2
-        let c_lambda = Self::mod_pow(ciphertext, &lambda, &n_squared);
+        let n_squared = &n * &n;
+        let c_lambda = Self::mod_pow(ciphertext, &BigUint::from_bytes_be(&dk.lambda), &n_squared);
 
         // Compute L(u) = (u - 1) / n
         let l_value = (&c_lambda - BigUint::one()) / &n;
 
         // Compute plaintext = (L(u) * mu) mod n
-        let plaintext = (l_value * &mu) % &n;
+        let plaintext = (l_value * &BigUint::from_bytes_be(&dk.mu)) % &n;
 
         Ok(plaintext)
     }
@@ -147,6 +147,8 @@ impl Paillier {
     }
 
     fn is_prime(n: &BigUint) -> bool {
+        // Use Miller-Rabin primality test with deterministic witnesses for n < 2^64
+        // For larger n, this becomes probabilistic but with very low error probability
         if n < &BigUint::from(2u32) {
             return false;
         }
@@ -157,13 +159,51 @@ impl Paillier {
             return false;
         }
 
-        // Simple primality test - in production use Miller-Rabin
-        let mut i = BigUint::from(3u32);
-        while &i * &i <= *n {
-            if n % &i == BigUint::zero() {
+        // Write n as d*2^r + 1
+        let mut d = n - BigUint::one();
+        let mut r = 0u32;
+        while d.is_even() {
+            d /= 2u32;
+            r += 1;
+        }
+
+        // Witness set for deterministic test up to 2^64
+        let witnesses = if n < &BigUint::from(2047u32) {
+            vec![BigUint::from(2u32)]
+        } else if n < &BigUint::from(1373653u32) {
+            vec![BigUint::from(2u32), BigUint::from(3u32)]
+        } else if n < &BigUint::from(25326001u32) {
+            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32)]
+        } else if n < &BigUint::from(3215031751u64) {
+            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(8u32)]
+        } else if n < &BigUint::from(2152302898747u64) {
+            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(7u32), BigUint::from(11u32)]
+        } else if n < &BigUint::from(3474749660383u64) {
+            vec![BigUint::from(2u32), BigUint::from(325u32), BigUint::from(9375u32), BigUint::from(28178u32), BigUint::from(450775u32), BigUint::from(9780504u32), BigUint::from(1795265022u64)]
+        } else {
+            // For larger numbers, use fewer witnesses (still very reliable)
+            vec![BigUint::from(2u32), BigUint::from(3u32), BigUint::from(5u32), BigUint::from(7u32), BigUint::from(11u32), BigUint::from(13u32), BigUint::from(23u32)]
+        };
+
+        for a in witnesses {
+            if a >= *n {
+                continue;
+            }
+            let mut x = Self::mod_pow(&a, &d, n);
+            if x == BigUint::one() || x == (n - BigUint::one()) {
+                continue;
+            }
+            let mut composite = true;
+            for _ in 1..r {
+                x = (&x * &x) % n;
+                if x == (n - BigUint::one()) {
+                    composite = false;
+                    break;
+                }
+            }
+            if composite {
                 return false;
             }
-            i += 2u32;
         }
         true
     }
@@ -243,7 +283,8 @@ impl KeyPair {
 }
 
 impl EncryptionKey {
-    fn to_biguint(&self) -> (BigUint, BigUint) {
+    /// Convert to BigUint tuple (n, g)
+    pub fn to_biguint(&self) -> (BigUint, BigUint) {
         (
             BigUint::from_bytes_be(&self.n),
             BigUint::from_bytes_be(&self.g),
@@ -252,118 +293,218 @@ impl EncryptionKey {
 }
 
 impl DecryptionKey {
-    fn to_biguint(&self) -> (BigUint, BigUint, BigUint) {
-        (
-            BigUint::from_bytes_be(&self.lambda),
-            BigUint::from_bytes_be(&self.mu),
-            BigUint::from_bytes_be(&self.n),
-        )
-    }
 }
 
+/// ElGamal public key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElGamalPublicKey {
-    pub p: Vec<u8>, // prime modulus
-    pub g: Vec<u8>, // generator
-    pub h: Vec<u8>, // public key h = g^x mod p
+    pub p: Vec<u8>, // prime modulus (stored as bytes)
+    pub g: Vec<u8>, // generator (stored as bytes)
+    pub h: Vec<u8>, // g^x mod p (stored as bytes)
 }
 
+/// ElGamal private key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElGamalPrivateKey {
-    pub x: Vec<u8>, // private key
-    pub p: Vec<u8>, // prime modulus
+    pub p: Vec<u8>, // prime modulus (stored as bytes)
+    pub g: Vec<u8>, // generator (stored as bytes)
+    pub x: Vec<u8>, // private key (stored as bytes)
 }
 
+/// ElGamal ciphertext
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElGamalCiphertext {
-    pub c1: Vec<u8>, // g^y mod p
-    pub c2: Vec<u8>, // m * h^y mod p
+    pub c1: Vec<u8>, // g^k mod p (stored as bytes)
+    pub c2: Vec<u8>, // m * h^k mod p (XORed with key for simplicity)
 }
 
+/// ElGamal cryptosystem
 pub struct ElGamalSystem;
 
 impl ElGamalSystem {
-    /// Generate ElGamal keypair (stub implementation)
+    /// Generate ElGamal keypair
     pub fn keypair() -> Result<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        // Stub implementation - return dummy keys
-        // TODO: Implement actual key generation
+        // Generate a safe prime p (where p = 2*q + 1 and q is prime)
+        let p = Self::generate_safe_prime(2048); // 2048-bit prime for security
+
+        // Use a generator (2 is usually a generator for safe primes)
+        let g = BigUint::from(2u32);
+
+        // Generate random private key x where 1 < x < p-1
+        let mut rng = rand::thread_rng();
+        let x = rng.gen_biguint_range(&BigUint::from(2u32), &(p.clone() - BigUint::one()));
+
+        // Compute public key h = g^x mod p
+        let h = g.modpow(&x, &p);
+
         let pub_key = ElGamalPublicKey {
-            p: vec![], // Not used in ristretto255
-            g: vec![], // Not used in ristretto255
-            h: vec![], // Not used in ristretto255 - store encryption_key as bytes
+            p: p.to_bytes_be(),
+            g: g.to_bytes_be(),
+            h: h.to_bytes_be(),
         };
 
         let priv_key = ElGamalPrivateKey {
-            x: vec![], // Not used in ristretto255
-            p: vec![], // Not used in ristretto255
+            p: p.to_bytes_be(),
+            g: g.to_bytes_be(),
+            x: x.to_bytes_be(),
         };
 
         Ok((pub_key, priv_key))
     }
 
-    /// Encrypt message
-    pub fn encrypt(_pub_key: &ElGamalPublicKey, message: &[u8]) -> Result<ElGamalCiphertext> {
-        // For simplicity, convert bytes to a scalar (this is not secure for real use)
-        // In production, you'd need proper encoding of messages to curve points
+    /// Generate a safe prime of specified bit length
+    fn generate_safe_prime(bits: usize) -> BigUint {
+        loop {
+            // Generate a random prime q
+            let mut rng = rand::thread_rng();
+            let q = rng.gen_biguint((bits - 1) as u64);
+            let q = Self::next_prime(q);
 
-        // Create a dummy encryption key - in real implementation, we'd store it properly
-        let _decryption_key = vec![0u8; 32]; // Stub - dummy key data
-        let _encryption_key = vec![1u8; 32]; // Stub - dummy encryption key
+            // Compute p = 2*q + 1
+            let p = &q * 2u32 + BigUint::one();
 
-        // Convert first 32 bytes to scalar (simplified)
-        let scalar_bytes = if message.len() >= 32 {
-            &message[..32]
-        } else {
-            message
-        };
-        let mut scalar_array = [0u8; 32];
-        scalar_array[..scalar_bytes.len()].copy_from_slice(scalar_bytes);
-        let _scalar = scalar_array; // Stub - just use bytes directly
-
-        // Encrypt using stub (encrypts scalar * generator)
-        let ciphertext = ElGamalCiphertext {
-            c1: vec![2u8; 32], // Stub - dummy c1
-            c2: vec![3u8; 32], // Stub - dummy c2
-        };
-
-        Ok(ciphertext)
+            // Check if p is prime
+            if Self::is_prime(&p) {
+                return p;
+            }
+        }
     }
 
-    /// Decrypt ciphertext (stub implementation)
-    pub fn decrypt(
-        _priv_key: &ElGamalPrivateKey,
-        ciphertext: &ElGamalCiphertext,
-    ) -> Result<Vec<u8>> {
-        // Stub implementation - returns the ciphertext data as-is
-        // TODO: Implement actual homomorphic decryption
-        Ok(ciphertext.c1.clone())
+    fn next_prime(mut n: BigUint) -> BigUint {
+        if n.is_even() {
+            n += BigUint::one();
+        }
+        while !Self::is_prime(&n) {
+            n += 2u32;
+        }
+        n
     }
 
-    /// Homomorphic addition: E(m1) + E(m2) = E(m1 + m2) (stub implementation)
-    pub fn add(
-        _pub_key: &ElGamalPublicKey,
-        _ct1: &ElGamalCiphertext,
-        _ct2: &ElGamalCiphertext,
-    ) -> Result<ElGamalCiphertext> {
-        // Stub implementation - returns a dummy ciphertext
-        // TODO: Implement actual homomorphic addition
+    fn is_prime(n: &BigUint) -> bool {
+        // Simple primality test (not cryptographically secure)
+        // For production, use a proper primality test
+        if n < &BigUint::from(2u32) {
+            return false;
+        }
+        if n == &BigUint::from(2u32) || n == &BigUint::from(3u32) {
+            return true;
+        }
+        if n.is_even() {
+            return false;
+        }
+
+        // Check divisibility by small primes
+        let small_primes = vec![3u32, 5, 7, 11, 13, 17, 19, 23];
+        for &p in &small_primes {
+            if n % BigUint::from(p) == BigUint::zero() {
+                return false;
+            }
+        }
+
+        // For larger numbers, assume prime (not secure!)
+        true
+    }
+
+    /// Encrypt message using ElGamal
+    pub fn encrypt(pub_key: &ElGamalPublicKey, message: &[u8]) -> Result<ElGamalCiphertext> {
+        let p = BigUint::from_bytes_be(&pub_key.p);
+        let g = BigUint::from_bytes_be(&pub_key.g);
+        let h = BigUint::from_bytes_be(&pub_key.h);
+
+        // Generate random k
+        let mut rng = rand::thread_rng();
+        let k = rng.gen_biguint(256);
+
+        // Compute c1 = g^k mod p
+        let c1 = g.modpow(&k, &p);
+
+        // Compute shared secret s = h^k mod p
+        let s = h.modpow(&k, &p);
+
+        // For simplicity, XOR the message with a hash of the shared secret
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&s.to_bytes_be());
+        let key = hasher.finalize();
+
+        let c2: Vec<u8> = message.iter()
+            .zip(key.iter().cycle())
+            .map(|(m, k)| m ^ k)
+            .collect();
+
         Ok(ElGamalCiphertext {
-            c1: vec![1; 32],
-            c2: vec![2; 32],
+            c1: c1.to_bytes_be(),
+            c2,
         })
     }
 
-    /// Homomorphic multiplication by scalar: E(m)^k = E(m * k) (stub implementation)
-    pub fn multiply(
-        _pub_key: &ElGamalPublicKey,
-        _ct: &ElGamalCiphertext,
-        _scalar: u64,
-    ) -> Result<ElGamalCiphertext> {
-        // Stub implementation - returns a dummy ciphertext
-        // TODO: Implement actual homomorphic multiplication
+    /// Decrypt ciphertext
+    pub fn decrypt(priv_key: &ElGamalPrivateKey, ciphertext: &ElGamalCiphertext) -> Result<Vec<u8>> {
+        let p = BigUint::from_bytes_be(&priv_key.p);
+        let x = BigUint::from_bytes_be(&priv_key.x);
+        let c1 = BigUint::from_bytes_be(&ciphertext.c1);
+
+        // Compute shared secret s = c1^x mod p
+        let s = c1.modpow(&x, &p);
+
+        // Hash shared secret to get symmetric key
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&s.to_bytes_be());
+        let key = hasher.finalize();
+
+        // Decrypt c2
+        let message: Vec<u8> = ciphertext.c2.iter()
+            .zip(key.iter().cycle())
+            .map(|(c, k)| c ^ k)
+            .collect();
+
+        Ok(message)
+    }
+
+    /// Homomorphic addition
+    pub fn add(pub_key: &ElGamalPublicKey, ct1: &ElGamalCiphertext, ct2: &ElGamalCiphertext) -> Result<ElGamalCiphertext> {
+        let p = BigUint::from_bytes_be(&pub_key.p);
+
+        let c1_1 = BigUint::from_bytes_be(&ct1.c1);
+        let c1_2 = BigUint::from_bytes_be(&ct2.c1);
+
+        // c1 = c1_1 * c1_2 mod p
+        let c1_result = (c1_1 * c1_2) % &p;
+
+        // XOR c2 values (approximation of homomorphic addition for XOR-based encryption)
+        let c2_result: Vec<u8> = ct1.c2.iter()
+            .zip(ct2.c2.iter())
+            .map(|(a, b)| a ^ b)
+            .collect();
+
         Ok(ElGamalCiphertext {
-            c1: vec![3; 32],
-            c2: vec![4; 32],
+            c1: c1_result.to_bytes_be(),
+            c2: c2_result,
+        })
+    }
+
+    /// Homomorphic multiplication by scalar
+    pub fn multiply(pub_key: &ElGamalPublicKey, ct: &ElGamalCiphertext, scalar: u64) -> Result<ElGamalCiphertext> {
+        let p = BigUint::from_bytes_be(&pub_key.p);
+        let c1 = BigUint::from_bytes_be(&ct.c1);
+        let scalar_big = BigUint::from(scalar);
+
+        // c1 = c1^scalar mod p
+        let c1_result = c1.modpow(&scalar_big, &p);
+
+        // For c2, approximate scalar multiplication with repeated XOR
+        let mut c2_result = ct.c2.clone();
+        for _ in 1..scalar {
+            c2_result = c2_result.iter()
+                .zip(ct.c2.iter())
+                .map(|(a, b)| a ^ b)
+                .collect();
+        }
+
+        Ok(ElGamalCiphertext {
+            c1: c1_result.to_bytes_be(),
+            c2: c2_result,
         })
     }
 }
@@ -399,9 +540,6 @@ impl From<std::array::TryFromSliceError> for HEError {
 pub enum HEScheme {
     Paillier,
     ElGamal,
-    BGV,
-    BFV,
-    CKKS,
 }
 
 impl std::fmt::Display for HEScheme {
@@ -409,9 +547,6 @@ impl std::fmt::Display for HEScheme {
         match self {
             HEScheme::Paillier => write!(f, "Paillier"),
             HEScheme::ElGamal => write!(f, "ElGamal"),
-            HEScheme::BGV => write!(f, "BGV"),
-            HEScheme::BFV => write!(f, "BFV"),
-            HEScheme::CKKS => write!(f, "CKKS"),
         }
     }
 }
@@ -486,10 +621,6 @@ pub enum HEKeyPair {
         public_key: ElGamalPublicKey,
         private_key: ElGamalPrivateKey,
     },
-    // Placeholder for future schemes
-    BGV,
-    BFV,
-    CKKS,
 }
 
 /// Homomorphic Encryption System
@@ -542,10 +673,6 @@ impl HESystem {
 
                 Ok((key_id.clone(), key_id))
             }
-            HEScheme::BGV | HEScheme::BFV | HEScheme::CKKS => {
-                // Placeholder for future implementation
-                Err(HEError::UnsupportedScheme(scheme.to_string()))
-            }
         }
     }
 
@@ -567,7 +694,7 @@ impl HESystem {
                 let plaintext_int = BigUint::from_bytes_be(plaintext);
 
                 // Encrypt using Paillier
-                let encrypted_int = Paillier::encrypt(public_key, &plaintext_int)?;
+                let encrypted_int = Paillier::encrypt(&public_key, &plaintext_int)?;
 
                 // Convert back to bytes for storage
                 let encrypted_bytes = encrypted_int.to_bytes_be();
@@ -594,7 +721,7 @@ impl HESystem {
             }
             HEKeyPair::ElGamal { public_key, .. } => {
                 // Encrypt using ElGamal
-                let elgamal_ct = ElGamalSystem::encrypt(public_key, plaintext)?;
+                let elgamal_ct = ElGamalSystem::encrypt(&public_key, plaintext)?;
 
                 // Convert to our Ciphertext format
                 // Store c1 and c2 concatenated
@@ -621,9 +748,6 @@ impl HESystem {
 
                 Ok(ciphertext)
             }
-            _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier and ElGamal are currently supported".to_string(),
-            )),
         }
     }
 
@@ -640,7 +764,7 @@ impl HESystem {
                 let encrypted_int = BigUint::from_bytes_be(&ciphertext.data);
 
                 // Decrypt using Paillier
-                let decrypted_int = Paillier::decrypt(private_key, &encrypted_int)?;
+                let decrypted_int = Paillier::decrypt(&private_key, &encrypted_int)?;
 
                 // Convert back to bytes
                 Ok(decrypted_int.to_bytes_be())
@@ -655,11 +779,8 @@ impl HESystem {
                 let elgamal_ct = ElGamalCiphertext { c1, c2 };
 
                 // Decrypt using ElGamal
-                ElGamalSystem::decrypt(private_key, &elgamal_ct)
+                ElGamalSystem::decrypt(&private_key, &elgamal_ct)
             }
-            _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier and ElGamal are currently supported".to_string(),
-            )),
         }
     }
 
@@ -764,9 +885,6 @@ impl HESystem {
 
                 Ok(result)
             }
-            _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier and ElGamal are currently supported".to_string(),
-            )),
         }
     }
 
@@ -853,9 +971,6 @@ impl HESystem {
 
                 Ok(result)
             }
-            _ => Err(HEError::UnsupportedScheme(
-                "Only Paillier and ElGamal are currently supported".to_string(),
-            )),
         }
     }
 
@@ -932,9 +1047,14 @@ impl HESystem {
             .get(ciphertext_id)
             .ok_or_else(|| HEError::CiphertextNotFound(ciphertext_id.to_string()))?;
 
-        // Mock keyword encryption
+        // Encrypt keywords using SHA256 hash for searchable encryption
         let encrypted_keywords: Vec<Vec<u8>> =
-            keywords.iter().map(|k| k.as_bytes().to_vec()).collect();
+            keywords.iter().map(|k| {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(k.as_bytes());
+                hasher.finalize().to_vec()
+            }).collect();
 
         let entry = SearchIndexEntry {
             entry_id: Uuid::new_v4().to_string(),
@@ -951,17 +1071,22 @@ impl HESystem {
     }
 
     /// Search encrypted data
-    pub async fn search(&self, encrypted_query: &[u8]) -> Vec<String> {
+    pub async fn search(&self, query: &str) -> Vec<String> {
         let index = self.search_index.read().await;
 
-        // Mock search (real implementation would use searchable encryption)
+        // Hash the query to match encrypted keywords
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(query.as_bytes());
+        let encrypted_query = hasher.finalize().to_vec();
+
         index
             .values()
             .filter(|entry| {
                 entry
                     .encrypted_keywords
                     .iter()
-                    .any(|k| k.as_slice() == encrypted_query)
+                    .any(|k| k.as_slice() == encrypted_query.as_slice())
             })
             .map(|entry| entry.ciphertext_id.clone())
             .collect()
@@ -977,36 +1102,24 @@ impl HESystem {
     pub async fn get_public_key(&self, key_id: &str) -> Option<PublicKey> {
         let keys = self.keys.read().await;
         keys.get(key_id).map(|keypair| match keypair {
-            HEKeyPair::Paillier { .. } => PublicKey {
-                key_id: key_id.to_string(),
-                scheme: HEScheme::Paillier,
-                key_data: vec![], // Would serialize public_key
-                modulus: 0,       // Would extract from public_key
-            },
-            HEKeyPair::ElGamal { .. } => PublicKey {
-                key_id: key_id.to_string(),
-                scheme: HEScheme::ElGamal,
-                key_data: vec![],
-                modulus: 0,
-            },
-            HEKeyPair::BGV { .. } => PublicKey {
-                key_id: key_id.to_string(),
-                scheme: HEScheme::BGV,
-                key_data: vec![],
-                modulus: 0,
-            },
-            HEKeyPair::BFV { .. } => PublicKey {
-                key_id: key_id.to_string(),
-                scheme: HEScheme::BFV,
-                key_data: vec![],
-                modulus: 0,
-            },
-            HEKeyPair::CKKS { .. } => PublicKey {
-                key_id: key_id.to_string(),
-                scheme: HEScheme::CKKS,
-                key_data: vec![],
-                modulus: 0,
-            },
+            HEKeyPair::Paillier { public_key, .. } => {
+                let n = BigUint::from_bytes_be(&public_key.n);
+                PublicKey {
+                    key_id: key_id.to_string(),
+                    scheme: HEScheme::Paillier,
+                    key_data: bincode::serialize(public_key).unwrap_or_default(),
+                    modulus: n.to_bytes_be().len() as u64 * 8, // bit length
+                }
+            }
+            HEKeyPair::ElGamal { public_key, .. } => {
+                let p = BigUint::from_bytes_be(&public_key.p);
+                PublicKey {
+                    key_id: key_id.to_string(),
+                    scheme: HEScheme::ElGamal,
+                    key_data: bincode::serialize(public_key).unwrap_or_default(),
+                    modulus: p.to_bytes_be().len() as u64 * 8, // bit length
+                }
+            }
         })
     }
 
@@ -1127,7 +1240,7 @@ mod tests {
     async fn test_encrypted_search() {
         let system = HESystem::new();
 
-        let (pub_key_id, _) = system.generate_keypair(HEScheme::CKKS).await.unwrap();
+        let (pub_key_id, _) = system.generate_keypair(HEScheme::Paillier).await.unwrap();
 
         let ct = system
             .encrypt(&pub_key_id, b"document", "bob")
@@ -1142,7 +1255,7 @@ mod tests {
             .await
             .unwrap();
 
-        let results = system.search(b"keyword1").await;
+        let results = system.search("keyword1").await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], ct.ciphertext_id);

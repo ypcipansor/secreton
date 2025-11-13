@@ -42,6 +42,7 @@ rand.workspace = true
 regex.workspace = true
 
 bincode.workspace = true
+serde_bytes.workspace = true
 
 # Elliptic curve cryptography
 p256.workspace = true
@@ -52,7 +53,6 @@ ed25519-dalek.workspace = true
 signature.workspace = true
 
 # Workspace dependencies
-# secreton-storage.workspace = true  # TODO: Resolve cyclic dependency
 generic-array.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
