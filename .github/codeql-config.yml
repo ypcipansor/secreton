@@ -1,0 +1,25 @@
+name: "CodeQL Configuration for Secreton"
+
+# Disable default queries and use security-extended
+queries:
+  - uses: security-and-quality
+
+# Paths to exclude from analysis
+paths-ignore:
+  - target/**
+  - tests/**
+  - '**/*.md'
+  - '**/*.txt'
+  - 'docs/**'
+  - '.github/**'
+  
+# Paths to include (if needed for specific analysis)
+paths:
+  - crates/**
+
+# Query filters
+query-filters:
+  - exclude:
+      id: cpp/fixme-comment
+  - exclude:
+      id: rust/unused-value
