@@ -57,6 +57,12 @@ enum MySQLOperation {
     Delete(()),
 }
 
+impl Default for MySQLTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MySQLTransaction {
     pub fn new() -> Self {
         Self {
@@ -340,7 +346,7 @@ impl StorageBackend for MySQLStorage {
                 entry.security_level as u8,
                 &metadata_json,
                 &tags_json,
-                entry.version as u32,
+                entry.version,
                 &entry.owner_id.to_string(),
                 entry.created_at.naive_utc(),
                 entry.updated_at.naive_utc(),
@@ -441,7 +447,7 @@ impl StorageBackend for MySQLStorage {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = self.build_list_query(&params.path_prefix.as_deref().unwrap_or(""));
+        let query = self.build_list_query(params.path_prefix.as_deref().unwrap_or(""));
 
         let rows: Vec<mysql::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty() {
             conn.exec(&query, ())
@@ -469,11 +475,10 @@ impl StorageBackend for MySQLStorage {
         // Apply filters
         let mut filtered_entries = Vec::new();
         for entry in entries {
-            if let Some(owner_id) = params.owner_id {
-                if entry.owner_id != owner_id {
+            if let Some(owner_id) = params.owner_id
+                && entry.owner_id != owner_id {
                     continue;
                 }
-            }
             if !params.include_expired && entry.is_expired() {
                 continue;
             }

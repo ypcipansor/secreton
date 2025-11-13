@@ -248,7 +248,7 @@ impl AutoUnsealService {
         // In production: aws_sdk_kms::Client::decrypt()
         let encoded = ciphertext
             .strip_prefix("aws_kms:")
-            .ok_or_else(|| AutoUnsealError::InvalidKey)?;
+            .ok_or(AutoUnsealError::InvalidKey)?;
 
         base64::decode(encoded).map_err(|e| AutoUnsealError::KmsOperationFailed(e.to_string()))
     }
@@ -278,7 +278,7 @@ impl AutoUnsealService {
     ) -> Result<Vec<u8>, AutoUnsealError> {
         let encoded = ciphertext
             .strip_prefix("gcp_kms:")
-            .ok_or_else(|| AutoUnsealError::InvalidKey)?;
+            .ok_or(AutoUnsealError::InvalidKey)?;
 
         base64::decode(encoded).map_err(|e| AutoUnsealError::KmsOperationFailed(e.to_string()))
     }
@@ -304,7 +304,7 @@ impl AutoUnsealService {
     ) -> Result<Vec<u8>, AutoUnsealError> {
         let encoded = ciphertext
             .strip_prefix("azure_kv:")
-            .ok_or_else(|| AutoUnsealError::InvalidKey)?;
+            .ok_or(AutoUnsealError::InvalidKey)?;
 
         base64::decode(encoded).map_err(|e| AutoUnsealError::KmsOperationFailed(e.to_string()))
     }
@@ -345,7 +345,7 @@ mod base64 {
 
     pub fn decode(s: &str) -> Result<Vec<u8>, String> {
         // Simplified base64 decoding
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err("Invalid base64".to_string());
         }
 

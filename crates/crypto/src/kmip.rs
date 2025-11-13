@@ -787,7 +787,7 @@ impl KmipClient {
         });
 
         let response = client
-            .post(&format!("http://{}/kmip", self.server_endpoint))
+            .post(format!("http://{}/kmip", self.server_endpoint))
             .header("Content-Type", "application/json")
             .json(&query_body)
             .send()
@@ -839,7 +839,7 @@ impl KmipClient {
         });
 
         let response = client
-            .post(&format!("http://{}/kmip", self.server_endpoint))
+            .post(format!("http://{}/kmip", self.server_endpoint))
             .header("Content-Type", "application/json")
             .json(&create_body)
             .send()
@@ -876,7 +876,7 @@ impl KmipClient {
         });
 
         let response = client
-            .post(&format!("http://{}/kmip", self.server_endpoint))
+            .post(format!("http://{}/kmip", self.server_endpoint))
             .header("Content-Type", "application/json")
             .json(&get_body)
             .send()

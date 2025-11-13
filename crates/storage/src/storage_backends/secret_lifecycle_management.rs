@@ -216,7 +216,7 @@ impl SecretLifecycleManagement {
             .get_mut(secret_path)
             .ok_or_else(|| LifecycleError::LifecycleError("Lifecycle not found".to_string()))?;
 
-        lifecycle.expires_at = lifecycle.expires_at + Duration::days(additional_days as i64);
+        lifecycle.expires_at += Duration::days(additional_days as i64);
         lifecycle.status = SecretStatus::Active;
         lifecycle.ttl_days += additional_days;
 

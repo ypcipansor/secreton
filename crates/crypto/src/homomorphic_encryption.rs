@@ -454,7 +454,7 @@ impl ElGamalSystem {
         // For simplicity, XOR the message with a hash of the shared secret
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(&s.to_bytes_be());
+        hasher.update(s.to_bytes_be());
         let key = hasher.finalize();
 
         let c2: Vec<u8> = message
@@ -484,7 +484,7 @@ impl ElGamalSystem {
         // Hash shared secret to get symmetric key
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(&s.to_bytes_be());
+        hasher.update(s.to_bytes_be());
         let key = hasher.finalize();
 
         // Decrypt c2
@@ -741,7 +741,7 @@ impl HESystem {
                 let plaintext_int = BigUint::from_bytes_be(plaintext);
 
                 // Encrypt using Paillier
-                let encrypted_int = Paillier::encrypt(&public_key, &plaintext_int)?;
+                let encrypted_int = Paillier::encrypt(public_key, &plaintext_int)?;
 
                 // Convert back to bytes for storage
                 let encrypted_bytes = encrypted_int.to_bytes_be();
@@ -768,7 +768,7 @@ impl HESystem {
             }
             HEKeyPair::ElGamal { public_key, .. } => {
                 // Encrypt using ElGamal
-                let elgamal_ct = ElGamalSystem::encrypt(&public_key, plaintext)?;
+                let elgamal_ct = ElGamalSystem::encrypt(public_key, plaintext)?;
 
                 // Convert to our Ciphertext format
                 // Store c1 and c2 concatenated
@@ -811,7 +811,7 @@ impl HESystem {
                 let encrypted_int = BigUint::from_bytes_be(&ciphertext.data);
 
                 // Decrypt using Paillier
-                let decrypted_int = Paillier::decrypt(&private_key, &encrypted_int)?;
+                let decrypted_int = Paillier::decrypt(private_key, &encrypted_int)?;
 
                 // Convert back to bytes
                 Ok(decrypted_int.to_bytes_be())
@@ -826,7 +826,7 @@ impl HESystem {
                 let elgamal_ct = ElGamalCiphertext { c1, c2 };
 
                 // Decrypt using ElGamal
-                ElGamalSystem::decrypt(&private_key, &elgamal_ct)
+                ElGamalSystem::decrypt(private_key, &elgamal_ct)
             }
         }
     }

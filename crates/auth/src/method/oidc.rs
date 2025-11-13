@@ -5,20 +5,37 @@ use crate::service::*;
 use async_trait::async_trait;
 use chrono::Utc;
 use oauth2::basic::BasicClient;
-use oauth2::reqwest::async_http_client;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
+use reqwest::Client;
 use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Type alias for OIDC client with auth and token endpoints set
+type OidcClient = oauth2::Client<
+    oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
+    oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    oauth2::StandardTokenIntrospectionResponse<
+        oauth2::EmptyExtraTokenFields,
+        oauth2::basic::BasicTokenType,
+    >,
+    oauth2::StandardRevocableToken,
+    oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
+    oauth2::EndpointSet,    // HasAuthUrl
+    oauth2::EndpointNotSet, // HasDeviceAuthUrl
+    oauth2::EndpointNotSet, // HasIntrospectionUrl
+    oauth2::EndpointNotSet, // HasRevocationUrl
+    oauth2::EndpointSet,    // HasTokenUrl
+>;
 
 /// OIDC authentication method
 pub struct OidcAuthMethod {
     enabled: bool,
     config: Option<AuthMethod>,
     oidc_config: Option<OidcClientConfig>,
-    client: Option<BasicClient>,
+    client: Option<OidcClient>,
 }
 
 impl OidcAuthMethod {
@@ -34,15 +51,13 @@ impl OidcAuthMethod {
     /// Set OIDC configuration
     pub fn set_oidc_config(&mut self, config: OidcClientConfig) {
         // Build OAuth2 client first before moving config
-        let client = BasicClient::new(
-            ClientId::new(config.client_id.clone()),
-            Some(ClientSecret::new(config.client_secret.clone())),
-            AuthUrl::new(config.auth_url.clone()).expect("Invalid auth URL"),
-            Some(TokenUrl::new(config.token_url.clone()).expect("Invalid token URL")),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(config.redirect_url.clone()).expect("Invalid redirect URL"),
-        );
+        let client = BasicClient::new(ClientId::new(config.client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+            .set_auth_uri(AuthUrl::new(config.auth_url.clone()).expect("Invalid auth URL"))
+            .set_token_uri(TokenUrl::new(config.token_url.clone()).expect("Invalid token URL"))
+            .set_redirect_uri(
+                RedirectUrl::new(config.redirect_url.clone()).expect("Invalid redirect URL"),
+            );
 
         self.client = Some(client);
         self.oidc_config = Some(config);
@@ -63,9 +78,11 @@ impl OidcAuthMethod {
         // Generate authorization URL
         let (auth_url, csrf_token) = client
             .authorize_url(CsrfToken::new_random)
-            .add_scope(Scope::new("openid".to_string()))
-            .add_scope(Scope::new("profile".to_string()))
-            .add_scope(Scope::new("email".to_string()))
+            .add_scopes(vec![
+                Scope::new("openid".to_string()),
+                Scope::new("profile".to_string()),
+                Scope::new("email".to_string()),
+            ])
             .set_pkce_challenge(pkce_challenge)
             .url();
 
@@ -100,7 +117,7 @@ impl OidcAuthMethod {
         let _token_result = client
             .exchange_code(AuthorizationCode::new(code.to_string()))
             .set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier.to_string()))
-            .request_async(async_http_client)
+            .request_async(&Client::new())
             .await
             .map_err(|e| SecretonError::Authentication {
                 message: format!("OIDC token exchange failed: {e}"),

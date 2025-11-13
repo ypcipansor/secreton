@@ -45,6 +45,12 @@ enum MongoDBOperation {
     Delete(()),
 }
 
+impl Default for MongoDBTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MongoDBTransaction {
     pub fn new() -> Self {
         Self {
@@ -491,7 +497,7 @@ impl StorageBackend for MongoDBStorage {
             }
         })?;
 
-        Ok(count as u64)
+        Ok(count)
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
@@ -540,22 +546,22 @@ impl StorageBackend for MongoDBStorage {
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        let total_entries: u64;
+        
         let mut total_size_bytes = 0u64;
         let mut entries_by_security_level = HashMap::new();
-        let entries_created_today: u64;
-        let entries_updated_today: u64;
-        let expired_entries: u64;
+        
+        
+        
 
         // Get total count
-        total_entries = self
+        let total_entries: u64 = self
             .collection
             .count_documents(Document::new())
             .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to count total entries: {}", e),
-            })? as u64;
+            })?;
 
         // Get statistics by security level
         let pipeline =
@@ -607,12 +613,12 @@ impl StorageBackend for MongoDBStorage {
                 "$lte": end_of_day.and_utc().timestamp_millis()
             }
         };
-        entries_created_today = self.collection.count_documents(filter).await.map_err(|e| {
+        let entries_created_today: u64 = self.collection.count_documents(filter).await.map_err(|e| {
             StorageError::BackendError {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to count entries created today: {}", e),
             }
-        })? as u64;
+        })?;
 
         // Get entries updated today
         let filter = bson_doc! {
@@ -621,22 +627,22 @@ impl StorageBackend for MongoDBStorage {
                 "$lte": end_of_day.and_utc().timestamp_millis()
             }
         };
-        entries_updated_today = self.collection.count_documents(filter).await.map_err(|e| {
+        let entries_updated_today: u64 = self.collection.count_documents(filter).await.map_err(|e| {
             StorageError::BackendError {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to count entries updated today: {}", e),
             }
-        })? as u64;
+        })?;
 
         // Get expired entries
         let now = chrono::Utc::now().timestamp_millis();
         let filter = bson_doc! { "expires_at": { "$lte": now } };
-        expired_entries = self.collection.count_documents(filter).await.map_err(|e| {
+        let expired_entries: u64 = self.collection.count_documents(filter).await.map_err(|e| {
             StorageError::BackendError {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to count expired entries: {}", e),
             }
-        })? as u64;
+        })?;
 
         // Calculate average entry size (approximate)
         let pipeline = vec![
@@ -659,11 +665,9 @@ impl StorageBackend for MongoDBStorage {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to get average size result: {}", e),
             })?
-        {
-            if let Ok(avg_size) = result.get_f64("avg_size") {
+            && let Ok(avg_size) = result.get_f64("avg_size") {
                 total_size_bytes = (avg_size * total_entries as f64) as u64;
             }
-        }
 
         let average_entry_size = if total_entries > 0 {
             total_size_bytes as f64 / total_entries as f64

@@ -478,11 +478,10 @@ impl PolicyEngine {
     pub fn check_permission(&self, user: &str, permission: Permission) -> bool {
         if let Some(roles) = self.policies.access_control.rbac.user_roles.get(user) {
             for role_name in roles {
-                if let Some(role) = self.policies.access_control.rbac.roles.get(role_name) {
-                    if role.permissions.contains(&permission) {
+                if let Some(role) = self.policies.access_control.rbac.roles.get(role_name)
+                    && role.permissions.contains(&permission) {
                         return true;
                     }
-                }
             }
         }
         false
@@ -503,11 +502,10 @@ impl PolicyEngine {
         // Check user role restrictions
         if let Some(roles) = self.policies.access_control.rbac.user_roles.get(user) {
             for role_name in roles {
-                if let Some(role) = self.policies.access_control.rbac.roles.get(role_name) {
-                    if let Some(allowed_types) = &role.key_restrictions.allowed_key_types {
+                if let Some(role) = self.policies.access_control.rbac.roles.get(role_name)
+                    && let Some(allowed_types) = &role.key_restrictions.allowed_key_types {
                         return allowed_types.contains(key_type);
                     }
-                }
             }
         }
 
