@@ -511,7 +511,7 @@ impl TransitKey {
                     })?;
 
                 // Decrypt with AES-GCM
-                let cipher = Aes256Gcm::new(aes_key);
+                let cipher = Aes256Gcm::new(&aes_key);
 
 
 
