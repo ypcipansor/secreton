@@ -229,7 +229,7 @@ radius-rust = "0.4.4"
 xml = "1.1"
 
 # Kubernetes client
-kube = { version = "0.95", features = ["client", "rustls-tls"] }
+kube = { version = "2.0", features = ["client", "rustls-tls"] }
 k8s-openapi = { version = "0.26", features = ["v1_30"] }
 
 # Threading and concurrency
