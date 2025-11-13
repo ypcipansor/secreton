@@ -5,7 +5,8 @@ use crate::model::{
     CertificateRequest, CertificateResponse, PkiConfig, SshKeyRequest, SshKeyResponse,
 };
 use chrono::{Duration, Utc};
-use rcgen::{CertificateParams, DistinguishedName, DnType, Ia5String, SanType};
+use rcgen::string::Ia5String;
+use rcgen::{CertificateParams, DistinguishedName, DnType, SanType};
 use ssh_key::{Algorithm, PrivateKey};
 use std::collections::HashMap;
 

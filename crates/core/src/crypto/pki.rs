@@ -1,4 +1,5 @@
 use chrono::{Duration, Utc};
+use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, KeyUsagePurpose};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -252,15 +253,15 @@ impl CertificateBuilder {
                 .iter()
                 .map(|name| {
                     if name.contains("@") {
-                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
+                        Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
                     } else if name.parse::<std::net::IpAddr>().is_ok() {
                         if let Ok(ip) = name.parse::<std::net::IpAddr>() {
                             Ok(rcgen::SanType::IpAddress(ip))
                         } else {
-                            rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                            Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
                         }
                     } else {
-                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                        Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -326,15 +327,15 @@ impl CertificateBuilder {
                 .iter()
                 .map(|name| {
                     if name.contains("@") {
-                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
+                        Ia5String::try_from(name.as_str()).map(rcgen::SanType::Rfc822Name)
                     } else if name.parse::<std::net::IpAddr>().is_ok() {
                         if let Ok(ip) = name.parse::<std::net::IpAddr>() {
                             Ok(rcgen::SanType::IpAddress(ip))
                         } else {
-                            rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                            Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
                         }
                     } else {
-                        rcgen::Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
+                        Ia5String::try_from(name.as_str()).map(rcgen::SanType::DnsName)
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()

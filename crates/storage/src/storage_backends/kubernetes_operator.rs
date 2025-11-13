@@ -361,7 +361,10 @@ impl KubernetesOperator {
 
         let mut data = BTreeMap::new();
         for (key, value) in &secret.data {
-            data.insert(key.clone(), k8s_openapi::ByteString(base64::encode(value).into_bytes()));
+            data.insert(
+                key.clone(),
+                k8s_openapi::ByteString(base64::encode(value).into_bytes()),
+            );
         }
 
         let mut labels = BTreeMap::new();
@@ -402,7 +405,10 @@ impl KubernetesOperator {
 
         let mut data = BTreeMap::new();
         for (key, value) in &secret.data {
-            data.insert(key.clone(), k8s_openapi::ByteString(base64::encode(value).into_bytes()));
+            data.insert(
+                key.clone(),
+                k8s_openapi::ByteString(base64::encode(value).into_bytes()),
+            );
         }
 
         let secrets: Api<K8sSecretType> = Api::namespaced(self.client.clone(), &secret.namespace);
