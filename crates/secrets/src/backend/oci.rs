@@ -16,7 +16,7 @@ pub struct OciBackend {
     private_key: String,
     region: String,
     identity_client: Option<()>, // Placeholder for IdentityClient
-    vault_client: Option<()>, // Placeholder for SecretClient
+    vault_client: Option<()>,    // Placeholder for SecretClient
 }
 
 impl OciBackend {

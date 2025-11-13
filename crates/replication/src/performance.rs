@@ -333,7 +333,10 @@ impl PerformanceReplication {
         let client = reqwest::Client::new();
 
         // Construct the replication endpoint URL
-        let url = format!("{}/v1/replication/operations", endpoint.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/replication/operations",
+            endpoint.trim_end_matches('/')
+        );
 
         // Send POST request with the operation
         let response = client
@@ -341,7 +344,9 @@ impl PerformanceReplication {
             .json(operation)
             .send()
             .await
-            .map_err(|e| ReplicationError::NetworkError(format!("Failed to send replication request: {}", e)))?;
+            .map_err(|e| {
+                ReplicationError::NetworkError(format!("Failed to send replication request: {}", e))
+            })?;
 
         // Check response status
         if !response.status().is_success() {

@@ -3,7 +3,10 @@
 //! Provides a unified authentication service that integrates with the
 //! auth crate for comprehensive authentication and token management.
 
-use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::{rand_core::OsRng, SaltString, PasswordHash}};
+use argon2::{
+    Argon2, PasswordHasher, PasswordVerifier,
+    password_hash::{PasswordHash, SaltString, rand_core::OsRng},
+};
 
 use secreton_auth::{JwtTokenService, TokenConfig, TokenPair, UserInfo};
 use secreton_errors::SecretonError;
@@ -41,10 +44,16 @@ impl AuthService {
         // Initialize with default users (in production, this would come from database)
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        let admin_hash = argon2.hash_password(b"password", &salt).unwrap().to_string();
+        let admin_hash = argon2
+            .hash_password(b"password", &salt)
+            .unwrap()
+            .to_string();
 
         let salt = SaltString::generate(&mut OsRng);
-        let user_hash = argon2.hash_password(b"password", &salt).unwrap().to_string();
+        let user_hash = argon2
+            .hash_password(b"password", &salt)
+            .unwrap()
+            .to_string();
 
         user_store.insert(
             "admin".to_string(),
@@ -91,16 +100,19 @@ impl AuthService {
     ) -> Result<TokenPair, SecretonError> {
         let user_store = self.user_store.read().await;
 
-        let user = user_store.get(username).ok_or_else(|| {
-            SecretonError::Authentication {
+        let user = user_store
+            .get(username)
+            .ok_or_else(|| SecretonError::Authentication {
                 message: "Invalid credentials".to_string(),
-            }
-        })?;
+            })?;
 
         // Verify password
-        let parsed_hash = PasswordHash::parse(&user.password_hash, argon2::password_hash::Encoding::B64).unwrap();
+        let parsed_hash =
+            PasswordHash::parse(&user.password_hash, argon2::password_hash::Encoding::B64).unwrap();
         let argon2 = Argon2::default();
-        let password_valid = argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok();
+        let password_valid = argon2
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok();
 
         if !password_valid {
             return Err(SecretonError::Authentication {

@@ -495,24 +495,34 @@ impl KeyRotationService {
         match key_type {
             KeyType::Transit => {
                 // AES-256 key
-                crate::generate_random_bytes(32)
-                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate Transit key: {}", e)))
+                crate::generate_random_bytes(32).map_err(|e| {
+                    KeyRotationError::RotationFailed(format!(
+                        "Failed to generate Transit key: {}",
+                        e
+                    ))
+                })
             }
             KeyType::PKI => {
                 // RSA-2048 key material (placeholder for actual RSA key generation)
                 // In production, this would generate actual RSA key pairs
-                crate::generate_random_bytes(256)
-                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate PKI key: {}", e)))
+                crate::generate_random_bytes(256).map_err(|e| {
+                    KeyRotationError::RotationFailed(format!("Failed to generate PKI key: {}", e))
+                })
             }
             KeyType::TokenSigning => {
                 // Ed25519 key (32 bytes)
-                crate::generate_random_bytes(32)
-                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate TokenSigning key: {}", e)))
+                crate::generate_random_bytes(32).map_err(|e| {
+                    KeyRotationError::RotationFailed(format!(
+                        "Failed to generate TokenSigning key: {}",
+                        e
+                    ))
+                })
             }
             KeyType::SealKey => {
                 // AES-256 key for sealing
-                crate::generate_random_bytes(32)
-                    .map_err(|e| KeyRotationError::RotationFailed(format!("Failed to generate SealKey: {}", e)))
+                crate::generate_random_bytes(32).map_err(|e| {
+                    KeyRotationError::RotationFailed(format!("Failed to generate SealKey: {}", e))
+                })
             }
         }
     }

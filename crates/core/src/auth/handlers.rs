@@ -1,14 +1,9 @@
 //! Authentication HTTP handlers for Secreton
 
 use crate::server::AppState;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    response::Json,
-};
-use axum_extra::headers::{Authorization, authorization::Bearer};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, response::Json};
 use axum_extra::TypedHeader;
+use axum_extra::headers::{Authorization, authorization::Bearer};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -106,7 +101,11 @@ pub async fn logout(
         Ok(user_info) => {
             // Revoke the token by adding it to blacklist
             if let Err(e) = state.auth_service.revoke_token(token).await {
-                tracing::warn!("Failed to revoke token for user {}: {:?}", user_info.username, e);
+                tracing::warn!(
+                    "Failed to revoke token for user {}: {:?}",
+                    user_info.username,
+                    e
+                );
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({"error": "Failed to revoke token"})),
@@ -159,11 +158,15 @@ pub async fn change_password(
 
     match state.auth_service.validate_token(token).await {
         Ok(user_info) => {
-            match state.auth_service.change_password(
-                &user_info.id.unwrap_or_default(),
-                &req.current_password,
-                &req.new_password,
-            ).await {
+            match state
+                .auth_service
+                .change_password(
+                    &user_info.id.unwrap_or_default(),
+                    &req.current_password,
+                    &req.new_password,
+                )
+                .await
+            {
                 Ok(_) => {
                     tracing::info!("User {} changed password successfully", user_info.username);
                     (
@@ -172,7 +175,11 @@ pub async fn change_password(
                     )
                 }
                 Err(e) => {
-                    tracing::warn!("Password change failed for user {}: {:?}", user_info.username, e);
+                    tracing::warn!(
+                        "Password change failed for user {}: {:?}",
+                        user_info.username,
+                        e
+                    );
                     (
                         StatusCode::BAD_REQUEST,
                         Json(serde_json::json!({"error": "Failed to change password"})),
@@ -208,12 +215,16 @@ pub async fn register_user(
         );
     }
 
-    match state.auth_service.register_user(
-        &req.username,
-        &req.password,
-        req.email.as_deref(),
-        &["user".to_string()], // Default role
-    ).await {
+    match state
+        .auth_service
+        .register_user(
+            &req.username,
+            &req.password,
+            req.email.as_deref(),
+            &["user".to_string()], // Default role
+        )
+        .await
+    {
         Ok(user_info) => {
             tracing::info!("User {} registered successfully", req.username);
             (
@@ -253,13 +264,16 @@ pub async fn list_users(
 
             match state.auth_service.list_users().await {
                 Ok(users) => {
-                    let user_responses: Vec<serde_json::Value> = users.into_iter().map(|user| {
-                        serde_json::json!({
-                            "id": user.id.unwrap_or_default(),
-                            "username": user.username,
-                            "roles": user.roles
+                    let user_responses: Vec<serde_json::Value> = users
+                        .into_iter()
+                        .map(|user| {
+                            serde_json::json!({
+                                "id": user.id.unwrap_or_default(),
+                                "username": user.username,
+                                "roles": user.roles
+                            })
                         })
-                    }).collect();
+                        .collect();
                     (StatusCode::OK, Json(serde_json::json!(user_responses)))
                 }
                 Err(e) => {

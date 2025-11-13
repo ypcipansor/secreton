@@ -208,7 +208,12 @@ impl TOTPEngine {
                 let timestamp = Utc::now().timestamp() as u64;
                 let counter = timestamp / period as u64;
 
-                let code = self.generate_otp_code(&config.secret, counter, config.digits, config.algorithm.clone())?;
+                let code = self.generate_otp_code(
+                    &config.secret,
+                    counter,
+                    config.digits,
+                    config.algorithm.clone(),
+                )?;
                 let valid_until = Utc::now() + Duration::seconds(period as i64);
 
                 Ok(GeneratedCode {
@@ -219,7 +224,12 @@ impl TOTPEngine {
             }
             KeyType::HOTP => {
                 let counter = config.counter.unwrap_or(0);
-                let code = self.generate_otp_code(&config.secret, counter, config.digits, config.algorithm.clone())?;
+                let code = self.generate_otp_code(
+                    &config.secret,
+                    counter,
+                    config.digits,
+                    config.algorithm.clone(),
+                )?;
 
                 // Increment counter
                 config.counter = Some(counter + 1);
@@ -234,7 +244,13 @@ impl TOTPEngine {
     }
 
     /// Generate OTP code from secret and counter
-    fn generate_otp_code(&self, secret: &str, counter: u64, digits: u32, algorithm: Algorithm) -> Result<String> {
+    fn generate_otp_code(
+        &self,
+        secret: &str,
+        counter: u64,
+        digits: u32,
+        algorithm: Algorithm,
+    ) -> Result<String> {
         use base32::decode;
         use hmac::{Hmac, Mac};
         use sha1::Sha1;
@@ -281,7 +297,6 @@ impl TOTPEngine {
         Ok(format!("{:0width$}", code, width = digits as usize))
     }
 
-
     /// Validate OTP code
     pub async fn validate_code(&self, name: &str, code: &str) -> Result<bool> {
         let keys = self.keys.read().await;
@@ -305,8 +320,12 @@ impl TOTPEngine {
                             current_counter.saturating_sub(offset as u64)
                         };
 
-                        let expected =
-                            self.generate_otp_code(&config.secret, counter, config.digits, config.algorithm.clone())?;
+                        let expected = self.generate_otp_code(
+                            &config.secret,
+                            counter,
+                            config.digits,
+                            config.algorithm.clone(),
+                        )?;
                         if expected == code {
                             return Ok(true);
                         }
@@ -318,7 +337,12 @@ impl TOTPEngine {
             KeyType::HOTP => {
                 // For HOTP, validate against current counter
                 let counter = config.counter.unwrap_or(0);
-                let expected = self.generate_otp_code(&config.secret, counter, config.digits, config.algorithm.clone())?;
+                let expected = self.generate_otp_code(
+                    &config.secret,
+                    counter,
+                    config.digits,
+                    config.algorithm.clone(),
+                )?;
                 Ok(expected == code)
             }
         }
@@ -338,7 +362,8 @@ impl TOTPEngine {
             .map_err(|_| OTPError::OTPError("Failed to generate QR code".to_string()))?;
 
         // Convert to PNG image
-        let image = qr_code.render::<qrcode::render::unicode::Dense1x2>()
+        let image = qr_code
+            .render::<qrcode::render::unicode::Dense1x2>()
             .dark_color(qrcode::render::unicode::Dense1x2::Light)
             .light_color(qrcode::render::unicode::Dense1x2::Dark)
             .build();

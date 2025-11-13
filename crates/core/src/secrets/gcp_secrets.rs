@@ -131,8 +131,9 @@ impl GCPSecretsEngine {
             .map_err(|_| GCPError::InvalidCredentials("Invalid JSON format".to_string()))?;
 
         // Validate required fields
-        let creds_obj = creds.as_object()
-            .ok_or_else(|| GCPError::InvalidCredentials("Credentials must be a JSON object".to_string()))?;
+        let creds_obj = creds.as_object().ok_or_else(|| {
+            GCPError::InvalidCredentials("Credentials must be a JSON object".to_string())
+        })?;
 
         // Check for service account type
         if let Some(type_field) = creds_obj.get("type") {
@@ -143,54 +144,78 @@ impl GCPSecretsEngine {
                     ));
                 }
             } else {
-                return Err(GCPError::InvalidCredentials("Type field must be a string".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "Type field must be a string".to_string(),
+                ));
             }
         } else {
-            return Err(GCPError::InvalidCredentials("Type field is required".to_string()));
+            return Err(GCPError::InvalidCredentials(
+                "Type field is required".to_string(),
+            ));
         }
 
         // Check for project_id
         if let Some(project_id) = creds_obj.get("project_id") {
             if !project_id.is_string() {
-                return Err(GCPError::InvalidCredentials("project_id must be a string".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "project_id must be a string".to_string(),
+                ));
             }
         } else {
-            return Err(GCPError::InvalidCredentials("project_id is required".to_string()));
+            return Err(GCPError::InvalidCredentials(
+                "project_id is required".to_string(),
+            ));
         }
 
         // Check for private_key_id
         if let Some(private_key_id) = creds_obj.get("private_key_id") {
             if !private_key_id.is_string() {
-                return Err(GCPError::InvalidCredentials("private_key_id must be a string".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "private_key_id must be a string".to_string(),
+                ));
             }
         } else {
-            return Err(GCPError::InvalidCredentials("private_key_id is required".to_string()));
+            return Err(GCPError::InvalidCredentials(
+                "private_key_id is required".to_string(),
+            ));
         }
 
         // Check for private_key
         if let Some(private_key) = creds_obj.get("private_key") {
             if !private_key.is_string() {
-                return Err(GCPError::InvalidCredentials("private_key must be a string".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "private_key must be a string".to_string(),
+                ));
             }
             let key_str = private_key.as_str().unwrap();
             if !key_str.contains("BEGIN PRIVATE KEY") {
-                return Err(GCPError::InvalidCredentials("private_key must be in PEM format".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "private_key must be in PEM format".to_string(),
+                ));
             }
         } else {
-            return Err(GCPError::InvalidCredentials("private_key is required".to_string()));
+            return Err(GCPError::InvalidCredentials(
+                "private_key is required".to_string(),
+            ));
         }
 
         // Check for client_email
         if let Some(client_email) = creds_obj.get("client_email") {
             if !client_email.is_string() {
-                return Err(GCPError::InvalidCredentials("client_email must be a string".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "client_email must be a string".to_string(),
+                ));
             }
             let email = client_email.as_str().unwrap();
             if !email.ends_with(".iam.gserviceaccount.com") {
-                return Err(GCPError::InvalidCredentials("client_email must be a service account email".to_string()));
+                return Err(GCPError::InvalidCredentials(
+                    "client_email must be a service account email".to_string(),
+                ));
             }
         } else {
-            return Err(GCPError::InvalidCredentials("client_email is required".to_string()));
+            return Err(GCPError::InvalidCredentials(
+                "client_email is required".to_string(),
+            ));
         }
 
         Ok(())
@@ -267,7 +292,8 @@ impl GCPSecretsEngine {
         // 3. Return actual token with proper expiration
 
         // Generate random token payload
-        let token_payload = format!("{{\"iss\":\"vault@{}.iam.gserviceaccount.com\",\"scope\":\"{}\",\"aud\":\"https://oauth2.googleapis.com/token\",\"exp\":{},\"iat\":{}}}",
+        let token_payload = format!(
+            "{{\"iss\":\"vault@{}.iam.gserviceaccount.com\",\"scope\":\"{}\",\"aud\":\"https://oauth2.googleapis.com/token\",\"exp\":{},\"iat\":{}}}",
             roleset.project,
             roleset.token_scopes.join(" "),
             (Utc::now() + roleset.ttl).timestamp(),

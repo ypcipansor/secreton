@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{info};
+use tracing::info;
 
 /// Telemetry configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

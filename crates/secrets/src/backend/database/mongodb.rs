@@ -11,9 +11,7 @@ pub struct MongodbBackend {
 
 impl MongodbBackend {
     pub fn new(connection_string: String) -> Self {
-        Self {
-            connection_string,
-        }
+        Self { connection_string }
     }
 
     /// Test connection to MongoDB

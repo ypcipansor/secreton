@@ -286,7 +286,8 @@ mod tests {
         audit_logs: Arc<RwLock<Vec<crate::storage::types::AuditLog>>>,
         is_sealed: Arc<RwLock<bool>>,
         master_key: Arc<RwLock<Option<Vec<u8>>>>,
-        audit_devices: Arc<RwLock<HashMap<String, Box<dyn secreton_security::policies::audit::AuditDevice>>>>,
+        audit_devices:
+            Arc<RwLock<HashMap<String, Box<dyn secreton_security::policies::audit::AuditDevice>>>>,
         pki_cas: Arc<RwLock<HashMap<String, crate::models::pki::PkiCa>>>,
         pki_certs: Arc<RwLock<HashMap<String, crate::models::pki::PkiCert>>>,
         plugins: Arc<RwLock<HashMap<String, crate::models::plugin::PluginCatalogEntry>>>,
@@ -323,26 +324,41 @@ mod tests {
             self
         }
 
-        async fn store_secret_versioned(&self, path: &str, data: &Value) -> Result<u32, crate::CoreError> {
+        async fn store_secret_versioned(
+            &self,
+            path: &str,
+            data: &Value,
+        ) -> Result<u32, crate::CoreError> {
             let mut store = self.data.write().await;
             let mut versions_store = self.secret_versions.write().await;
 
             // Get current version number
-            let current_version = versions_store.get(path).map(|v| v.len() as u32).unwrap_or(0) + 1;
+            let current_version = versions_store
+                .get(path)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0)
+                + 1;
 
             // Store the data
             let key = format!("{}:{}", path, current_version);
-            let json_data = serde_json::to_vec(data).map_err(|_| crate::CoreError::Internal { message: "Serialization failed".to_string() })?;
+            let json_data = serde_json::to_vec(data).map_err(|_| crate::CoreError::Internal {
+                message: "Serialization failed".to_string(),
+            })?;
             store.insert(key, json_data);
 
             // Store version history
-            let versions = versions_store.entry(path.to_string()).or_insert_with(Vec::new);
+            let versions = versions_store
+                .entry(path.to_string())
+                .or_insert_with(Vec::new);
             versions.push((current_version, data.clone()));
 
             Ok(current_version)
         }
 
-        async fn get_latest_secret(&self, path: &str) -> Result<Option<(Value, u32)>, crate::CoreError> {
+        async fn get_latest_secret(
+            &self,
+            path: &str,
+        ) -> Result<Option<(Value, u32)>, crate::CoreError> {
             let versions_store = self.secret_versions.read().await;
             if let Some(versions) = versions_store.get(path) {
                 if let Some((version, data)) = versions.last() {
@@ -355,25 +371,47 @@ mod tests {
             }
         }
 
-        async fn delete_secret_version(&self, _path: &str, _version: u32) -> Result<(), crate::CoreError> {
+        async fn delete_secret_version(
+            &self,
+            _path: &str,
+            _version: u32,
+        ) -> Result<(), crate::CoreError> {
             Ok(())
         }
 
         // Stub implementations for other required methods
-        async fn store_mfa_secret(&self, user_id: &str, secret: &str, method: secreton_auth::MfaMethod) -> Result<(), crate::CoreError> {
+        async fn store_mfa_secret(
+            &self,
+            user_id: &str,
+            secret: &str,
+            method: secreton_auth::MfaMethod,
+        ) -> Result<(), crate::CoreError> {
             let mut mfa_store = self.mfa_secrets.write().await;
             let key = format!("{}:{}", user_id, method.as_str());
             mfa_store.insert(key, secret.to_string());
             Ok(())
         }
 
-        async fn get_mfa_secret(&self, user_id: &str, method: secreton_auth::MfaMethod) -> Result<String, crate::CoreError> {
+        async fn get_mfa_secret(
+            &self,
+            user_id: &str,
+            method: secreton_auth::MfaMethod,
+        ) -> Result<String, crate::CoreError> {
             let mfa_store = self.mfa_secrets.read().await;
             let key = format!("{}:{}", user_id, method.as_str());
-            mfa_store.get(&key).cloned().ok_or_else(|| crate::CoreError::NotFound { resource: "MFA secret not found".to_string() })
+            mfa_store
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| crate::CoreError::NotFound {
+                    resource: "MFA secret not found".to_string(),
+                })
         }
 
-        async fn delete_mfa_secret(&self, user_id: &str, method: secreton_auth::MfaMethod) -> Result<(), crate::CoreError> {
+        async fn delete_mfa_secret(
+            &self,
+            user_id: &str,
+            method: secreton_auth::MfaMethod,
+        ) -> Result<(), crate::CoreError> {
             let mut mfa_store = self.mfa_secrets.write().await;
             let key = format!("{}:{}", user_id, method.as_str());
             mfa_store.remove(&key);
@@ -385,13 +423,22 @@ mod tests {
             let totp_key = format!("{}:{}", user_id, "totp");
             Ok(mfa_store.contains_key(&totp_key))
         }
-        async fn get_user_mfa_methods(&self, user_id: &str) -> Result<Vec<secreton_auth::MfaMethod>, crate::CoreError> {
+        async fn get_user_mfa_methods(
+            &self,
+            user_id: &str,
+        ) -> Result<Vec<secreton_auth::MfaMethod>, crate::CoreError> {
             let mfa_store = self.mfa_secrets.read().await;
             let mut methods = Vec::new();
 
             // Check each possible MFA method
-            for method in &[secreton_auth::MfaMethod::Totp, secreton_auth::MfaMethod::Sms, secreton_auth::MfaMethod::Email,
-                           secreton_auth::MfaMethod::Hardware, secreton_auth::MfaMethod::Push, secreton_auth::MfaMethod::WebAuthn] {
+            for method in &[
+                secreton_auth::MfaMethod::Totp,
+                secreton_auth::MfaMethod::Sms,
+                secreton_auth::MfaMethod::Email,
+                secreton_auth::MfaMethod::Hardware,
+                secreton_auth::MfaMethod::Push,
+                secreton_auth::MfaMethod::WebAuthn,
+            ] {
                 let key = format!("{}:{}", user_id, method.as_str());
                 if mfa_store.contains_key(&key) {
                     methods.push(method.clone());
@@ -401,13 +448,22 @@ mod tests {
             Ok(methods)
         }
 
-        async fn get_mfa_status(&self, user_id: &str) -> Result<HashMap<secreton_auth::MfaMethod, bool>, crate::CoreError> {
+        async fn get_mfa_status(
+            &self,
+            user_id: &str,
+        ) -> Result<HashMap<secreton_auth::MfaMethod, bool>, crate::CoreError> {
             let mfa_store = self.mfa_secrets.read().await;
             let mut status = HashMap::new();
 
             // Check status for each possible MFA method
-            for method in &[secreton_auth::MfaMethod::Totp, secreton_auth::MfaMethod::Sms, secreton_auth::MfaMethod::Email,
-                           secreton_auth::MfaMethod::Hardware, secreton_auth::MfaMethod::Push, secreton_auth::MfaMethod::WebAuthn] {
+            for method in &[
+                secreton_auth::MfaMethod::Totp,
+                secreton_auth::MfaMethod::Sms,
+                secreton_auth::MfaMethod::Email,
+                secreton_auth::MfaMethod::Hardware,
+                secreton_auth::MfaMethod::Push,
+                secreton_auth::MfaMethod::WebAuthn,
+            ] {
                 let key = format!("{}:{}", user_id, method.as_str());
                 status.insert(method.clone(), mfa_store.contains_key(&key));
             }
@@ -415,7 +471,11 @@ mod tests {
             Ok(status)
         }
 
-        async fn enable_mfa(&self, user_id: &str, method: secreton_auth::MfaMethod) -> Result<(), crate::CoreError> {
+        async fn enable_mfa(
+            &self,
+            user_id: &str,
+            method: secreton_auth::MfaMethod,
+        ) -> Result<(), crate::CoreError> {
             let mut mfa_store = self.mfa_secrets.write().await;
             let key = format!("{}:{}", user_id, method.as_str());
             // Generate a random secret for the MFA method
@@ -427,7 +487,8 @@ mod tests {
         async fn disable_mfa(&self, user_id: &str) -> Result<(), crate::CoreError> {
             let mut mfa_store = self.mfa_secrets.write().await;
             // Remove all MFA methods for the user
-            let keys_to_remove: Vec<String> = mfa_store.keys()
+            let keys_to_remove: Vec<String> = mfa_store
+                .keys()
                 .filter(|key| key.starts_with(&format!("{}:", user_id)))
                 .cloned()
                 .collect();
@@ -443,28 +504,46 @@ mod tests {
             Ok(())
         }
 
-        async fn store_mfa_recovery_codes(&self, user_id: &str, codes: &[String]) -> Result<(), crate::CoreError> {
+        async fn store_mfa_recovery_codes(
+            &self,
+            user_id: &str,
+            codes: &[String],
+        ) -> Result<(), crate::CoreError> {
             let mut recovery_store = self.mfa_recovery_codes.write().await;
             recovery_store.insert(user_id.to_string(), codes.to_vec());
             Ok(())
         }
 
-        async fn get_mfa_recovery_codes(&self, user_id: &str) -> Result<Vec<String>, crate::CoreError> {
+        async fn get_mfa_recovery_codes(
+            &self,
+            user_id: &str,
+        ) -> Result<Vec<String>, crate::CoreError> {
             let recovery_store = self.mfa_recovery_codes.read().await;
             Ok(recovery_store.get(user_id).cloned().unwrap_or_default())
         }
 
-        async fn get_secret_versions(&self, path: &str) -> Result<Vec<(u32, Value)>, crate::CoreError> {
+        async fn get_secret_versions(
+            &self,
+            path: &str,
+        ) -> Result<Vec<(u32, Value)>, crate::CoreError> {
             let versions_store = self.secret_versions.read().await;
             Ok(versions_store.get(path).cloned().unwrap_or_default())
         }
-        async fn create_user(&self, username: &str, password: &str) -> Result<(), crate::CoreError> {
+        async fn create_user(
+            &self,
+            username: &str,
+            password: &str,
+        ) -> Result<(), crate::CoreError> {
             let mut users = self.users.write().await;
             users.insert(username.to_string(), password.to_string());
             Ok(())
         }
 
-        async fn authenticate_user(&self, username: &str, password: &str) -> Result<bool, crate::CoreError> {
+        async fn authenticate_user(
+            &self,
+            username: &str,
+            password: &str,
+        ) -> Result<bool, crate::CoreError> {
             let users = self.users.read().await;
             if let Some(stored_password) = users.get(username) {
                 Ok(stored_password == password)
@@ -473,9 +552,16 @@ mod tests {
             }
         }
 
-        async fn assign_role_to_user(&self, username: &str, role: &str) -> Result<(), crate::CoreError> {
+        async fn assign_role_to_user(
+            &self,
+            username: &str,
+            role: &str,
+        ) -> Result<(), crate::CoreError> {
             let mut roles = self.roles.write().await;
-            roles.entry(username.to_string()).or_insert_with(Vec::new).push(role.to_string());
+            roles
+                .entry(username.to_string())
+                .or_insert_with(Vec::new)
+                .push(role.to_string());
             Ok(())
         }
 
@@ -505,13 +591,20 @@ mod tests {
             Ok(roles.get(role).cloned().unwrap_or_default())
         }
 
-        async fn store_policy(&self, name: &str, policy: &secreton_security::policies::policy::Policy) -> Result<(), crate::CoreError> {
+        async fn store_policy(
+            &self,
+            name: &str,
+            policy: &secreton_security::policies::policy::Policy,
+        ) -> Result<(), crate::CoreError> {
             let mut policies = self.policies.write().await;
             policies.insert(name.to_string(), policy.clone());
             Ok(())
         }
 
-        async fn get_policy(&self, name: &str) -> Result<Option<secreton_security::policies::policy::Policy>, crate::CoreError> {
+        async fn get_policy(
+            &self,
+            name: &str,
+        ) -> Result<Option<secreton_security::policies::policy::Policy>, crate::CoreError> {
             let policies = self.policies.read().await;
             Ok(policies.get(name).cloned())
         }
@@ -527,13 +620,19 @@ mod tests {
             Ok(())
         }
 
-        async fn store_token(&self, token: &secreton_auth::token::Token) -> Result<(), crate::CoreError> {
+        async fn store_token(
+            &self,
+            token: &secreton_auth::token::Token,
+        ) -> Result<(), crate::CoreError> {
             let mut tokens = self.tokens.write().await;
             tokens.insert(token.accessor.clone(), token.clone());
             Ok(())
         }
 
-        async fn get_token(&self, accessor: &str) -> Result<Option<secreton_auth::token::Token>, crate::CoreError> {
+        async fn get_token(
+            &self,
+            accessor: &str,
+        ) -> Result<Option<secreton_auth::token::Token>, crate::CoreError> {
             let tokens = self.tokens.read().await;
             Ok(tokens.get(accessor).cloned())
         }
@@ -548,13 +647,19 @@ mod tests {
             let tokens = self.tokens.read().await;
             Ok(tokens.values().cloned().collect())
         }
-        async fn store_lease(&self, lease: &secreton_storage::models::lease::Lease) -> Result<(), crate::CoreError> {
+        async fn store_lease(
+            &self,
+            lease: &secreton_storage::models::lease::Lease,
+        ) -> Result<(), crate::CoreError> {
             let mut leases = self.leases.write().await;
             leases.insert(lease.id.clone(), lease.clone());
             Ok(())
         }
 
-        async fn get_lease(&self, lease_id: &str) -> Result<Option<secreton_storage::models::lease::Lease>, crate::CoreError> {
+        async fn get_lease(
+            &self,
+            lease_id: &str,
+        ) -> Result<Option<secreton_storage::models::lease::Lease>, crate::CoreError> {
             let leases = self.leases.read().await;
             Ok(leases.get(lease_id).cloned())
         }
@@ -565,17 +670,25 @@ mod tests {
             Ok(())
         }
 
-        async fn list_leases(&self) -> Result<Vec<secreton_storage::models::lease::Lease>, crate::CoreError> {
+        async fn list_leases(
+            &self,
+        ) -> Result<Vec<secreton_storage::models::lease::Lease>, crate::CoreError> {
             let leases = self.leases.read().await;
             Ok(leases.values().cloned().collect())
         }
-        async fn store_pki_ca(&self, ca: &crate::models::pki::PkiCa) -> Result<(), crate::CoreError> {
+        async fn store_pki_ca(
+            &self,
+            ca: &crate::models::pki::PkiCa,
+        ) -> Result<(), crate::CoreError> {
             let mut pki_cas = self.pki_cas.write().await;
             pki_cas.insert(ca.common_name.clone(), ca.clone());
             Ok(())
         }
 
-        async fn get_pki_ca(&self, name: &str) -> Result<Option<crate::models::pki::PkiCa>, crate::CoreError> {
+        async fn get_pki_ca(
+            &self,
+            name: &str,
+        ) -> Result<Option<crate::models::pki::PkiCa>, crate::CoreError> {
             let pki_cas = self.pki_cas.read().await;
             Ok(pki_cas.get(name).cloned())
         }
@@ -590,13 +703,19 @@ mod tests {
             pki_cas.remove(name);
             Ok(())
         }
-        async fn store_pki_cert(&self, cert: &crate::models::pki::PkiCert) -> Result<(), crate::CoreError> {
+        async fn store_pki_cert(
+            &self,
+            cert: &crate::models::pki::PkiCert,
+        ) -> Result<(), crate::CoreError> {
             let mut pki_certs = self.pki_certs.write().await;
             pki_certs.insert(cert.serial_number.clone(), cert.clone());
             Ok(())
         }
 
-        async fn get_pki_cert(&self, serial: &str) -> Result<Option<crate::models::pki::PkiCert>, crate::CoreError> {
+        async fn get_pki_cert(
+            &self,
+            serial: &str,
+        ) -> Result<Option<crate::models::pki::PkiCert>, crate::CoreError> {
             let pki_certs = self.pki_certs.read().await;
             Ok(pki_certs.get(serial).cloned())
         }
@@ -611,13 +730,19 @@ mod tests {
             pki_certs.remove(serial);
             Ok(())
         }
-        async fn store_plugin(&self, plugin: &crate::models::plugin::PluginCatalogEntry) -> Result<(), crate::CoreError> {
+        async fn store_plugin(
+            &self,
+            plugin: &crate::models::plugin::PluginCatalogEntry,
+        ) -> Result<(), crate::CoreError> {
             let mut plugins = self.plugins.write().await;
             plugins.insert(plugin.name.clone(), plugin.clone());
             Ok(())
         }
 
-        async fn get_plugin(&self, name: &str) -> Result<Option<crate::models::plugin::PluginCatalogEntry>, crate::CoreError> {
+        async fn get_plugin(
+            &self,
+            name: &str,
+        ) -> Result<Option<crate::models::plugin::PluginCatalogEntry>, crate::CoreError> {
             let plugins = self.plugins.read().await;
             Ok(plugins.get(name).cloned())
         }
@@ -632,13 +757,19 @@ mod tests {
             plugins.remove(name);
             Ok(())
         }
-        async fn store_sentinel_policy(&self, policy: &crate::models::sentinel::SentinelPolicy) -> Result<(), crate::CoreError> {
+        async fn store_sentinel_policy(
+            &self,
+            policy: &crate::models::sentinel::SentinelPolicy,
+        ) -> Result<(), crate::CoreError> {
             let mut sentinel_policies = self.sentinel_policies.write().await;
             sentinel_policies.insert(policy.name.clone(), policy.clone());
             Ok(())
         }
 
-        async fn get_sentinel_policy(&self, name: &str) -> Result<Option<crate::models::sentinel::SentinelPolicy>, crate::CoreError> {
+        async fn get_sentinel_policy(
+            &self,
+            name: &str,
+        ) -> Result<Option<crate::models::sentinel::SentinelPolicy>, crate::CoreError> {
             let sentinel_policies = self.sentinel_policies.read().await;
             Ok(sentinel_policies.get(name).cloned())
         }
@@ -654,16 +785,27 @@ mod tests {
             Ok(())
         }
 
-        async fn store_audit_log(&self, log: &crate::storage::types::AuditLog) -> Result<(), crate::CoreError> {
+        async fn store_audit_log(
+            &self,
+            log: &crate::storage::types::AuditLog,
+        ) -> Result<(), crate::CoreError> {
             let mut audit_logs = self.audit_logs.write().await;
             audit_logs.push(log.clone());
             Ok(())
         }
 
-        async fn get_audit_logs(&self, user: Option<&str>, limit: usize) -> Result<Vec<crate::storage::types::AuditLog>, crate::CoreError> {
+        async fn get_audit_logs(
+            &self,
+            user: Option<&str>,
+            limit: usize,
+        ) -> Result<Vec<crate::storage::types::AuditLog>, crate::CoreError> {
             let audit_logs = self.audit_logs.read().await;
             let mut filtered_logs: Vec<_> = if let Some(user_id) = user {
-                audit_logs.iter().filter(|log| log.user.as_deref() == Some(user_id)).cloned().collect()
+                audit_logs
+                    .iter()
+                    .filter(|log| log.user.as_deref() == Some(user_id))
+                    .cloned()
+                    .collect()
             } else {
                 audit_logs.clone()
             };
@@ -703,7 +845,10 @@ mod tests {
             Ok(master_key.clone())
         }
 
-        async fn register_audit_device(&self, device: Box<dyn secreton_security::policies::audit::AuditDevice>) -> Result<(), crate::CoreError> {
+        async fn register_audit_device(
+            &self,
+            device: Box<dyn secreton_security::policies::audit::AuditDevice>,
+        ) -> Result<(), crate::CoreError> {
             // For mock purposes, we'll store by a generated name
             let name = format!("device_{}", self.audit_devices.read().await.len());
             let mut audit_devices = self.audit_devices.write().await;
@@ -711,7 +856,10 @@ mod tests {
             Ok(())
         }
 
-        async fn get_audit_devices(&self) -> Result<Vec<Box<dyn secreton_security::policies::audit::AuditDevice>>, crate::CoreError> {
+        async fn get_audit_devices(
+            &self,
+        ) -> Result<Vec<Box<dyn secreton_security::policies::audit::AuditDevice>>, crate::CoreError>
+        {
             // For mock purposes, return empty vector since we can't easily clone boxed trait objects
             // In a real implementation, this would return actual device references
             Ok(vec![])
@@ -799,7 +947,11 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_secret(&self, _path: &str, _namespace: &str) -> Result<(), crate::CoreError> {
+        async fn delete_secret(
+            &self,
+            _path: &str,
+            _namespace: &str,
+        ) -> Result<(), crate::CoreError> {
             // Mock implementation
             Ok(())
         }
@@ -813,7 +965,9 @@ mod tests {
                 b"test-master-key-secret-32-bytes",
                 std::sync::Arc::new(crate::storage::secure::MemoryKeyStore::new()),
                 None,
-            ).await.unwrap()
+            )
+            .await
+            .unwrap(),
         );
 
         // Setup mock storage backend
@@ -827,7 +981,8 @@ mod tests {
         let data = json!({ "username": "testuser", "password": "testpass" });
 
         // Create secret
-        let metadata = manager.create_secret(path, data.clone(), "test-user", None)
+        let metadata = manager
+            .create_secret(path, data.clone(), "test-user", None)
             .await
             .expect("Failed to create secret");
 
@@ -835,7 +990,8 @@ mod tests {
         assert_eq!(metadata.current_version, 1);
 
         // Retrieve secret
-        let secret = manager.get_secret(path)
+        let secret = manager
+            .get_secret(path)
             .await
             .expect("Failed to get secret")
             .expect("Secret not found");

@@ -311,8 +311,7 @@ impl TransitKey {
                 // Derive AES key from shared secret using HKDF
                 let hkdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret);
                 let mut aes_key = [0u8; 32];
-                hkdf
-                    .expand(b"secreton-x25519-aes", &mut aes_key)
+                hkdf.expand(b"secreton-x25519-aes", &mut aes_key)
                     .map_err(|_| {
                         CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string())
                     })?;
@@ -512,8 +511,6 @@ impl TransitKey {
 
                 // Decrypt with AES-GCM
                 let cipher = Aes256Gcm::new(&aes_key);
-
-
 
                 let mut decrypted = cipher
                     .decrypt(&nonce, encrypted_bytes.as_slice())

@@ -234,7 +234,11 @@ impl SecretEngine for TotpEngine {
         }
 
         // Validate base32 secret
-        if base32::decode(base32::Alphabet::RFC4648 { padding: false }, &secret.to_uppercase()).is_none()
+        if base32::decode(
+            base32::Alphabet::RFC4648 { padding: false },
+            &secret.to_uppercase(),
+        )
+        .is_none()
         {
             return Err(SecretError::InvalidSecretData(
                 "Invalid base32 secret".to_string(),

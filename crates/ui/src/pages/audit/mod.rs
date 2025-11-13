@@ -10,11 +10,41 @@ pub fn audit_log() -> impl IntoView {
             // In a real implementation, this would make an API call to fetch audit logs
             // For now, we'll simulate with some realistic data
             vec![
-                ("admin".to_string(), "login".to_string(), "-".to_string(), "success".to_string(), "2024-01-15T10:30:00Z".to_string()),
-                ("admin".to_string(), "get_secret".to_string(), "myapp/db".to_string(), "success".to_string(), "2024-01-15T10:35:00Z".to_string()),
-                ("user1".to_string(), "get_secret".to_string(), "myapp/db".to_string(), "failed".to_string(), "2024-01-15T11:00:00Z".to_string()),
-                ("user2".to_string(), "create_secret".to_string(), "app/config".to_string(), "success".to_string(), "2024-01-15T11:15:00Z".to_string()),
-                ("admin".to_string(), "delete_secret".to_string(), "old/backup".to_string(), "success".to_string(), "2024-01-15T12:00:00Z".to_string()),
+                (
+                    "admin".to_string(),
+                    "login".to_string(),
+                    "-".to_string(),
+                    "success".to_string(),
+                    "2024-01-15T10:30:00Z".to_string(),
+                ),
+                (
+                    "admin".to_string(),
+                    "get_secret".to_string(),
+                    "myapp/db".to_string(),
+                    "success".to_string(),
+                    "2024-01-15T10:35:00Z".to_string(),
+                ),
+                (
+                    "user1".to_string(),
+                    "get_secret".to_string(),
+                    "myapp/db".to_string(),
+                    "failed".to_string(),
+                    "2024-01-15T11:00:00Z".to_string(),
+                ),
+                (
+                    "user2".to_string(),
+                    "create_secret".to_string(),
+                    "app/config".to_string(),
+                    "success".to_string(),
+                    "2024-01-15T11:15:00Z".to_string(),
+                ),
+                (
+                    "admin".to_string(),
+                    "delete_secret".to_string(),
+                    "old/backup".to_string(),
+                    "success".to_string(),
+                    "2024-01-15T12:00:00Z".to_string(),
+                ),
             ]
         },
     );
