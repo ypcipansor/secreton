@@ -9,7 +9,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum GatewayError {
@@ -363,6 +362,7 @@ impl Default for ApiGateway {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_add_route() {

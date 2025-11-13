@@ -214,7 +214,7 @@ aws-sdk-ec2 = "1.95.0"
 aws-sdk-secretsmanager = "1.91.0"
 
 # Authentication protocols
-jsonwebtoken = "9.3"
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 oauth2 = { version = "5.0", features = ["reqwest"] }
 openidconnect = "3.5"
 saml = "0.4"
