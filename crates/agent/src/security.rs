@@ -128,7 +128,8 @@ pub enum ActionResult {
 
 /// Blocked IP entry
 #[derive(Debug, Clone)]
-struct BlockedIp {
+#[allow(dead_code)]
+pub struct BlockedIp {
     ip: IpAddr,
     blocked_at: SystemTime,
     reason: String,
@@ -137,7 +138,8 @@ struct BlockedIp {
 
 /// Quarantined file entry
 #[derive(Debug, Clone)]
-struct QuarantinedFile {
+#[allow(dead_code)]
+pub struct QuarantinedFile {
     path: PathBuf,
     quarantined_at: SystemTime,
     reason: String,
@@ -515,6 +517,7 @@ impl SecurityEnforcer {
         // In a real implementation, this would calculate file hashes and compare against signature database
 
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct MalwareFileInfo {
             path: PathBuf,
             signature: String,
@@ -580,6 +583,7 @@ impl SecurityEnforcer {
         &self,
     ) -> Result<Option<Vec<VulnerabilityInfo>>, SecretonError> {
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct VulnerabilityInfo {
             cve_id: String,
             package_name: String,
@@ -916,6 +920,7 @@ impl SecurityEnforcer {
 
 // Helper struct for malware file information (defined at module level)
 #[derive(Debug)]
+#[allow(dead_code)]
 struct MalwareFileInfo {
     path: PathBuf,
     signature: String,
@@ -924,6 +929,7 @@ struct MalwareFileInfo {
 
 // Helper struct for vulnerability information (defined at module level)
 #[derive(Debug)]
+#[allow(dead_code)]
 struct VulnerabilityInfo {
     cve_id: String,
     package_name: String,
