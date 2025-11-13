@@ -85,7 +85,7 @@ impl InMemoryTotpService {
     fn generate_secret() -> String {
         let mut rng = rand::thread_rng();
         let bytes: Vec<u8> = (0..32).map(|_| rng.r#gen()).collect();
-        encode(base32::Alphabet::RFC4648 { padding: false }, &bytes)
+        encode(base32::Alphabet::Rfc4648 { padding: false }, &bytes)
     }
 
     /// Generate TOTP code from secret and time
@@ -95,7 +95,7 @@ impl InMemoryTotpService {
         period: u32,
         digits: u32,
     ) -> Result<String, SecretonError> {
-        let secret_bytes = decode(base32::Alphabet::RFC4648 { padding: false }, secret)
+        let secret_bytes = decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
             .ok_or_else(|| SecretonError::Configuration {
                 message: "Invalid base32 secret".to_string(),
             })?;
