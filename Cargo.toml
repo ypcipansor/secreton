@@ -292,7 +292,7 @@ log = "0.4.22"  # Logging facade
 sha1 = "0.10.6"  # SHA1 (legacy only, use SHA2/SHA3 for new code)
 md5 = "0.7.0"  # MD5 (legacy only, BROKEN, use SHA2/SHA3)
 urlencoding = "2.1.3"  # URL encoding
-libloading = "0.8.5"  # Dynamic library loading
+libloading = "0.9.0"  # Dynamic library loading
 flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
 
 # API and HTTP
