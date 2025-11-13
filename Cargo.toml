@@ -325,7 +325,7 @@ mysql_async = { version = "0.36", default-features = false, features = ["default
 wasmi = "0.51.1"  # Alternative WASM interpreter (lighter)
 
 # HTTP frameworks
-warp = "0.3"  # Alternative HTTP framework
+warp = "0.4"  # Alternative HTTP framework
 
 # PQC (Post-Quantum Cryptography) - NIST standardized algorithms
 # Pure Rust implementations, actively maintained
