@@ -1,905 +1,518 @@
-# 🔐 Secreton
+# Secreton
 
-[![CI](https://github.com/analisaperlengkapan/secreton/workflows/CI/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust](https://img.shields.io/badge/rust-1.90+-orange.svg)](https://www.rust-lang.org)
-[![Security Rating](https://img.shields.io/badge/security-A%2B-brightgreen)](https://github.com/analisaperlengkapan/secreton)
+Advanced Security System with Quantum-Safe Cryptography
 
-**Secreton** is an enterprise-grade vault system providing advanced security with quantum-safe cryptography, zero-trust architecture, and comprehensive secret management capabilities. Built in Rust for memory safety and performance, Secreton offers a modern alternative to traditional vault systems.
+Secreton is a comprehensive, enterprise-grade secrets management platform built in Rust. It provides secure storage, encryption, access control, and audit logging for sensitive data, similar to HashiCorp Vault but with enhanced quantum-safe cryptography and zero-trust architecture.
 
-## ✨ Key Features
+## Features
 
-### 🔒 Security-First Design
-- **Quantum-Safe Cryptography**: Post-quantum algorithms ready for the future
-- **Zero-Trust Architecture**: Security by default with comprehensive RBAC
-- **Memory Safety**: Built in Rust with zero C dependencies
-- **Audited Crypto Stack**: Uses RustCrypto suite (audited, memory-safe)
-- **HSM Integration**: Hardware security module support
+### Core Security Capabilities
+- **Quantum-Safe Cryptography**: Uses RustCrypto suite with support for post-quantum algorithms
+- **Zero-Trust Architecture**: Every request requires authentication and authorization
+- **Multi-Algorithm Encryption**: AES-GCM, ChaCha20Poly1305, RSA, ECC support
+- **Key Management**: Automatic key rotation, versioning, and lifecycle policies
+- **Audit Logging**: Comprehensive compliance and security event logging
 
-### 🔐 Authentication Methods
-- **Token-based**: Built-in token authentication
-- **User/Password**: Traditional credentials
-- **LDAP/Active Directory**: Enterprise directory integration
-- **OIDC/OAuth2**: Modern identity providers (Google, GitHub, Microsoft, Okta)
-- **Kubernetes**: Service account authentication
-- **AWS IAM**: Cloud provider authentication
-- **Certificate**: X.509 certificate authentication
-- **RADIUS**: Network authentication
-- **SAML**: Enterprise SSO
+### Secrets Engines
+- **KV Secrets**: Key-value secret storage with versioning
+- **PKI Secrets**: Certificate authority and certificate management
+- **Database Secrets**: Dynamic database credential generation
+- **Transit Engine**: Encryption as a service for data encryption/decryption
 
-### 🗄️ Secret Engines
-- **KV v2**: Versioned key-value storage with rollback
-- **Transit**: Encryption-as-a-service with key management
-- **Database**: Dynamic database credentials
-- **PKI**: Certificate authority and management
-- **SSH**: SSH key signing and management
-- **TOTP**: Time-based one-time passwords
-- **Cloud Integrations**: AWS, Azure, GCP secret management
+### Authentication Methods
+- **JWT Tokens**: Bearer token authentication with configurable TTL
+- **OAuth2**: Integration with Google, GitHub, Microsoft, and Okta
+- **Multi-Factor Authentication**: TOTP and hardware token support
+- **Role-Based Access Control**: Granular permissions and policies
 
-### 🚀 Enterprise Features
-- **High Availability**: Raft-based clustering
-- **Disaster Recovery**: Automated backup and replication
-- **Audit Logging**: Comprehensive security audit trails
-- **Compliance**: NIST, SOX, GDPR compliance frameworks
-- **Monitoring**: Prometheus metrics and OpenTelemetry
-- **Multi-Region**: Geographic distribution support
+### Infrastructure
+- **Multi-Database Support**: PostgreSQL (recommended), SQLite, Redis
+- **Replication**: High availability with data replication
+- **Monitoring**: Prometheus metrics and health checks
+- **API Gateway**: RESTful HTTP API with OpenAPI documentation
+- **Agent**: Sidecar helper for auto-authentication and secret injection
 
-## 🚀 Quick Start
+### Enterprise Features
+- **Compliance**: PCI DSS, SOX, FIPS 140-2, Common Criteria support
+- **Granular Revocation**: Fine-grained token and permission revocation
+- **Secret Versioning**: Historical secret versions with rollback
+- **Integrations**: AWS, Kubernetes, cloud provider integrations
 
-### Prerequisites
+## Prerequisites
 
-- **Rust** 1.90 or higher
-- **PostgreSQL** 12+ (recommended) or SQLite for development
-- **Linux/macOS/Windows** support
+- **Rust**: 1.90 or later (latest stable recommended)
+- **PostgreSQL**: 15+ (recommended for production)
+- **Git**: For version control
+- **Docker**: Optional, for containerized development
 
-### Installation
+## Installation
 
-#### Option 1: Build from Source
+### Clone the Repository
 
 ```bash
-# Clone the repository
 git clone https://github.com/analisaperlengkapan/secreton.git
 cd secreton
+```
 
-# Build all components
+### Install Rust Toolchain
+
+```bash
+rustup update stable
+rustup component add rustfmt clippy
+```
+
+### Install Development Tools (Optional)
+
+```bash
+cargo install cargo-watch cargo-tarpaulin cargo-audit
+```
+
+### Build the Project
+
+```bash
+# Build all workspace crates
+cargo build --workspace
+
+# Build with all features enabled
+cargo build --workspace --all-features
+
+# Build release version
 cargo build --workspace --release
-
-# Install CLI tool
-cargo install --path crates/cli
-
-# Install API server
-cargo install --path crates/api
-
-# Install agent
-cargo install --path crates/agent
 ```
 
-#### Option 2: Download Pre-built Binaries
+## Configuration
+
+### Environment Setup
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` with your configuration:
+```dotenv
+# Server configuration
+BRANKAS_SERVER__HOST=127.0.0.1
+BRANKAS_SERVER__PORT=8080
+BRANKAS_SERVER__LOG_LEVEL=info
+BRANKAS_SERVER__STORAGE_PATH=./data
+
+# Database configuration (PostgreSQL recommended)
+BRANKAS_DATABASE__URL=postgresql://secreton_user:secure_password@localhost:5432/secreton_db
+BRANKAS_DATABASE__MAX_CONNECTIONS=20
+
+# Authentication configuration
+BRANKAS_AUTH__TOKEN_TTL=3600
+BRANKAS_AUTH__REFRESH_TOKEN_TTL=2592000
+BRANKAS_AUTH__JWT_SECRET=your-secure-random-jwt-secret-here
+```
+
+### Database Setup
+
+For development with PostgreSQL:
 
 ```bash
-# Download for your platform
-wget https://github.com/analisaperlengkapan/secreton/releases/latest/download/secreton-linux-x64.tar.gz
-tar -xzf secreton-linux-x64.tar.gz
-sudo cp secreton-* /usr/local/bin/
+# Using Docker
+docker run --name secreton-dev-db \
+  -e POSTGRES_PASSWORD=secure_password \
+  -e POSTGRES_USER=secreton_user \
+  -e POSTGRES_DB=secreton_db \
+  -p 5432:5432 \
+  -d postgres:15
 ```
 
-### Basic Setup
+For production, configure PostgreSQL with proper security settings and connection pooling.
 
-1. **Initialize Configuration**
-   ```bash
-   # Copy default configuration
-   cp config/default.toml config/local.toml
-   
-   # Edit configuration
-   nano config/local.toml
-   ```
+### OAuth Configuration (Optional)
 
-2. **Setup Database**
-   ```bash
-   # PostgreSQL (recommended)
-   createdb secreton_db
-   createuser secreton_user
-   psql -c "ALTER USER secreton_user PASSWORD 'secure_password';"
-   psql -c "GRANT ALL PRIVILEGES ON DATABASE secreton_db TO secreton_user;"
-   ```
-
-3. **Start the Server**
-   ```bash
-   # Start API server
-   secreton-api --config config/local.toml
-   
-   # Or use Docker
-   docker run -d --name secreton \
-     -v $(pwd)/config:/app/config \
-     -v $(pwd)/data:/app/data \
-     -p 8200:8200 \
-     secreton:latest
-   ```
-
-4. **Verify Installation**
-   ```bash
-   # Check health
-   curl http://localhost:8200/health
-   
-   # Expected response
-   {
-     "success": true,
-     "data": {
-       "status": "healthy",
-       "version": "0.1.0",
-       "service": "secreton-api"
-     }
-   }
-   ```
-
-## 📖 Comprehensive Usage Guide
-
-### 1. Server Configuration
-
-#### Basic Configuration (`config/local.toml`)
+Configure OAuth providers in your configuration file:
 
 ```toml
-[server]
-host = "127.0.0.1"
-port = 8200
-log_level = "info"
-storage_path = "./data"
+[oauth.google]
+client_id = "your-google-client-id"
+client_secret = "your-google-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/google/callback"
 
-[database]
-url = "postgresql://secreton_user:secure_password@localhost:5432/secreton_db"
-max_connections = 20
-min_connections = 5
-
-[auth]
-token_ttl = 3600  # 1 hour
-refresh_token_ttl = 2592000  # 30 days
-jwt_secret = "your-secure-random-secret-here"
-
-[security]
-default_auth_method = "token"
-auth_methods = ["token", "userpass", "ldap"]
-audit_enabled = true
+[oauth.github]
+client_id = "your-github-client-id"
+client_secret = "your-github-client-secret"
+redirect_uri = "https://api.secreton.com/auth/oauth/github/callback"
 ```
 
-#### High Availability Configuration
+## Running the Application
 
-```toml
-[storage]
-backend_type = "raft"
-node_id = "secreton-node-1"
-data_dir = "./data/raft"
-bind_addr = "127.0.0.1:8201"
-advertise_addr = "127.0.0.1:8201"
-peers = ["node2:8201", "node3:8201"]
-
-[storage.raft]
-snapshot_enabled = true
-snapshot_interval_secs = 120
-log_retention_count = 10000
-```
-
-### 2. Authentication Setup
-
-#### Token Authentication
+### Start the API Server
 
 ```bash
-# Create initial root token
-curl -X POST http://localhost:8200/auth/token/create \
-  -H "X-Vault-Token: your-root-token" \
-  -d '{
-    "policies": ["root"],
-    "ttl": "24h",
-    "renewable": true
-  }'
+# Run the API server
+cargo run -p secreton-api --bin api_server
+
+# Or with custom port
+PORT=9090 cargo run -p secreton-api --bin api_server
 ```
 
-#### User/Password Authentication
+The API server will start on `http://127.0.0.1:8080` (or your configured port).
+
+### Start the Agent (Optional)
 
 ```bash
-# Enable userpass auth
-curl -X POST http://localhost:8200/auth/userpass enable \
-  -H "X-Vault-Token: your-root-token"
-
-# Create user
-curl -X POST http://localhost:8200/auth/userpass/users/john \
-  -H "X-Vault-Token: your-root-token" \
-  -d '{
-    "password": "secure-password",
-    "policies": ["default", "developer"]
-  }'
-
-# Login
-curl -X POST http://localhost:8200/auth/userpass/login/john \
-  -d '{
-    "password": "secure-password"
-  }'
-```
-
-#### LDAP Authentication
-
-```bash
-# Configure LDAP
-curl -X POST http://localhost:8200/auth/ldap/config \
-  -H "X-Vault-Token: your-root-token" \
-  -d '{
-    "url": "ldap://ldap.example.com",
-    "bind_dn": "cn=vault,ou=users,dc=example,dc=com",
-    "bind_pass": "ldap-password",
-    "user_dn": "ou=users,dc=example,dc=com",
-    "user_filter": "(cn={{.Username}})",
-    "group_dn": "ou=groups,dc=example,dc=com",
-    "group_filter": "(member:1.2.840.113556.1.4.1941:={{.UserDN}})"
-  }'
-```
-
-### 3. Secret Management
-
-#### KV v2 Store
-
-```bash
-# Store a secret
-curl -X POST http://localhost:8200/v1/secret/data/myapp/config \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "data": {
-      "database_url": "postgresql://user:pass@db:5432/app",
-      "api_key": "sk-1234567890abcdef",
-      "debug": "true"
-    }
-  }'
-
-# Retrieve a secret
-curl -X GET http://localhost:8200/v1/secret/data/myapp/config \
-  -H "X-Vault-Token: your-token"
-
-# List secrets
-curl -X LIST http://localhost:8200/v1/secret/metadata \
-  -H "X-Vault-Token: your-token"
-
-# Delete a secret
-curl -X DELETE http://localhost:8200/v1/secret/data/myapp/config \
-  -H "X-Vault-Token: your-token"
-```
-
-#### Versioning and Rollback
-
-```bash
-# Get secret versions
-curl -X GET http://localhost:8200/v1/secret/metadata/myapp/config \
-  -H "X-Vault-Token: your-token"
-
-# Restore previous version
-curl -X POST http://localhost:8200/v1/secret/restore/myapp/config \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "versions": [2]
-  }'
-```
-
-### 4. Transit Encryption Engine
-
-#### Key Management
-
-```bash
-# Create encryption key
-curl -X POST http://localhost:8200/v1/transit/keys/myapp-key \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "type": "aes256-gcm",
-    "exportable": false
-  }'
-
-# List keys
-curl -X GET http://localhost:8200/v1/transit/keys \
-  -H "X-Vault-Token: your-token"
-
-# Rotate key
-curl -X POST http://localhost:8200/v1/transit/keys/myapp-key/rotate \
-  -H "X-Vault-Token: your-token"
-```
-
-#### Encryption/Decryption
-
-```bash
-# Encrypt data
-curl -X POST http://localhost:8200/v1/transit/encrypt/myapp-key \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "plaintext": "dGhpcyBpcyBhIHNlY3JldA==",
-    "context": "c29tZS1jb250ZXh0"
-  }'
-
-# Decrypt data
-curl -X POST http://localhost:8200/v1/transit/decrypt/myapp-key \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "ciphertext": "vault:v1:abc123...",
-    "context": "c29tZS1jb250ZXh0"
-  }'
-
-# Sign data
-curl -X POST http://localhost:8200/v1/transit/sign/myapp-key \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "input": "dGhpcyBpcyBzaWduZWQ=",
-    "signature_algorithm": "sha2-256"
-  }'
-```
-
-### 5. Database Secret Engine
-
-#### Configuration
-
-```bash
-# Enable database engine
-curl -X POST http://localhost:8200/v1/database/config/postgresql \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "plugin_name": "postgresql-database-plugin",
-    "connection_url": "postgresql://{{username}}:{{password}}@db:5432/vault",
-    "allowed_roles": ["readonly", "readwrite"],
-    "username": "vault_user",
-    "password": "vault_password"
-  }'
-
-# Create role
-curl -X POST http://localhost:8200/v1/database/roles/readonly \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "db_name": "postgresql",
-    "creation_statements": ["CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{{name}}\";"],
-    "default_ttl": "1h",
-    "max_ttl": "24h"
-  }'
-```
-
-#### Usage
-
-```bash
-# Generate credentials
-curl -X GET http://localhost:8200/v1/database/creds/readonly \
-  -H "X-Vault-Token: your-token"
-
-# Renew credentials
-curl -X POST http://localhost:8200/v1/database/lease/renew \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "lease_id": "database/creds/readonly/...",
-    "increment": "12h"
-  }'
-```
-
-### 6. PKI Certificate Authority
-
-#### Setup CA
-
-```bash
-# Enable PKI engine
-curl -X POST http://localhost:8200/v1/pki/root/generate/internal \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "common_name": "My Company CA",
-    "ttl": "87600h",
-    "key_type": "rsa",
-    "key_bits": 4096
-  }'
-
-# Configure URLs
-curl -X POST http://localhost:8200/v1/pki/config/urls \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "issuing_certificates": ["http://localhost:8200/v1/pki/ca"],
-    "crl_distribution_points": ["http://localhost:8200/v1/pki/crl"]
-  }'
-```
-
-#### Issue Certificates
-
-```bash
-# Create role
-curl -X POST http://localhost:8200/v1/pki/roles/myapp \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "allowed_domains": ["myapp.example.com"],
-    "allow_subdomains": true,
-    "max_ttl": "72h",
-    "key_bits": 2048
-  }'
-
-# Issue certificate
-curl -X POST http://localhost:8200/v1/pki/issue/myapp \
-  -H "X-Vault-Token: your-token" \
-  -d '{
-    "common_name": "web.myapp.example.com",
-    "ttl": "24h"
-  }'
-```
-
-## 🛠️ CLI Usage
-
-The Secreton CLI provides a convenient command-line interface for common operations.
-
-### Installation
-
-```bash
-cargo install --path crates/cli
-```
-
-### Basic Commands
-
-```bash
-# Check server status
-secreton-cli status --server http://localhost:8200
-
-# Transit operations
-secreton-cli transit create-key myapp-key
-secreton-cli transit list-keys
-secreton-cli transit encrypt myapp-key --data "secret message"
-secreton-cli transit decrypt myapp-key --data "vault:v1:..."
-
-# Secret operations
-secreton-cli secret put myapp/config data="value" api_key="secret"
-secreton-cli secret get myapp/config
-secreton-cli secret list
-secreton-cli secret delete myapp/config
-```
-
-### Configuration
-
-Create `~/.secreton/config.toml`:
-
-```toml
-server_url = "http://localhost:8200"
-token = "your-vault-token"
-timeout = 30
-```
-
-## 🤖 Agent Usage
-
-The Secreton Agent provides auto-authentication, template rendering, and secret injection capabilities.
-
-### Configuration (`agent.yaml`)
-
-```yaml
-server_url: "https://vault1:8200"
-server_urls:
-  - "https://vault1:8200"
-  - "https://vault2:8200"
-
-auth_method: userpass
-auth_config:
-  username: "myuser"
-  password: "mypassword"
-
-templates:
-  - source: "secret/data/myapp/config"
-    dest: "/etc/myapp/config.json"
-    mode: "interval"
-    
-interval: 60
-sink: "file,env,child"
-
-log_file: "logs/agent.log"
-log_format: "json"
-audit_file: "logs/audit.log"
-
-run:
-  - "bash"
-  - "start_myapp.sh"
-  
-notify:
-  webhook: "https://hooks.slack.com/services/xxx"
-  
-restart_child: true
-restart_delay: 5
-```
-
-### Running the Agent
-
-```bash
-# Build and run
-cargo build --release -p secreton-agent
-./target/release/secreton-agent --config agent.yaml
-
-# Or with Docker
-docker run -d --name secreton-agent \
-  -v $(pwd)/agent.yaml:/app/agent.yaml \
-  -v $(pwd)/templates:/app/templates \
-  secreton-agent:latest
+# Run the agent for auto-authentication
+cargo run -p secreton-agent
 ```
 
 ### Health Check
 
-```bash
-curl http://localhost:9900/healthz
+Verify the server is running:
 
-# Response
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+Expected response:
+```json
 {
-  "status": "ok",
-  "token_valid": true,
-  "child_running": true,
-  "last_error": null
+  "status": "healthy",
+  "version": "0.1.0",
+  "uptime": "0s"
 }
 ```
 
-## 🔧 Advanced Configuration
+## Usage
 
-### Performance Tuning
+### Authentication
 
-```toml
-[server]
-max_request_size = "32MB"
-request_timeout = "30s"
-graceful_shutdown_timeout = "30s"
-
-[database]
-max_connections = 100
-connection_timeout = 10
-idle_timeout = 300
-max_lifetime = 1800
-
-[performance]
-worker_threads = 4
-max_blocking_threads = 512
-```
-
-### Security Hardening
-
-```toml
-[security]
-mfa_required = true
-password_policy = "strong"
-session_timeout = 3600
-max_login_attempts = 5
-lockout_duration = 900
-
-[tls]
-enabled = true
-cert_file = "/path/to/cert.pem"
-key_file = "/path/to/key.pem"
-ca_file = "/path/to/ca.pem"
-verify_incoming = true
-```
-
-### Monitoring and Metrics
-
-```toml
-[monitoring]
-prometheus_enabled = true
-prometheus_address = "0.0.0.0:9090"
-jaeger_enabled = true
-jaeger_endpoint = "http://jaeger:14268/api/traces"
-
-[logging]
-level = "info"
-format = "json"
-file = "/var/log/secreton.log"
-audit_file = "/var/log/secreton-audit.log"
-```
-
-## 📊 Monitoring and Observability
-
-### Prometheus Metrics
-
-Available at `http://localhost:9090/metrics`:
-
-- `secreton_requests_total` - Total API requests
-- `secreton_request_duration_seconds` - Request latency
-- `secreton_active_tokens` - Active authentication tokens
-- `secreton_secret_operations_total` - Secret operations
-- `secreton_crypto_operations_total` - Cryptographic operations
-
-### Health Endpoints
+#### Login with Username/Password
 
 ```bash
-# Basic health
-curl http://localhost:8200/health
-
-# Detailed status
-curl http://localhost:8200/security/status
-
-# Security metrics
-curl http://localhost:8200/security/metrics
+curl -X POST http://127.0.0.1:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "secure_password"
+  }'
 ```
 
-### Audit Logs
-
-Audit logs are written in JSONL format:
-
+Response:
 ```json
-{"timestamp":"2024-01-01T12:00:00Z","action":"authenticate","actor":"user1","status":"success","ip":"192.168.1.100"}
-{"timestamp":"2024-01-01T12:01:00Z","action":"secret_read","actor":"user1","resource":"secret/data/app/config","status":"success"}
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "refresh_token_here",
+  "expires_in": 3600
+}
 ```
 
-## 🐳 Docker Deployment
+#### OAuth Login
 
-### Single Node
+Redirect users to OAuth endpoints:
+- Google: `GET /auth/oauth/google`
+- GitHub: `GET /auth/oauth/github`
+- Microsoft: `GET /auth/oauth/microsoft`
+- Okta: `GET /auth/oauth/okta`
 
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  secreton:
-    image: secreton:latest
-    ports:
-      - "8200:8200"
-    environment:
-      - SECRETON_SERVER__HOST=0.0.0.0
-      - SECRETON_SERVER__PORT=8200
-      - SECRETON_DATABASE__URL=postgresql://postgres:password@db:5432/secreton
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config
-    depends_on:
-      - db
-      
-  db:
-    image: postgres:15
-    environment:
-      - POSTGRES_DB=secreton
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+### Secret Operations
 
-volumes:
-  postgres_data:
-```
-
-### High Availability Cluster
-
-```yaml
-# docker-compose-ha.yml
-version: '3.8'
-services:
-  secreton-1:
-    image: secreton:latest
-    ports: ["8200:8200", "8201:8201"]
-    environment:
-      - SECRETON_SERVER__HOST=0.0.0.0
-      - SECRETON_STORAGE__BACKEND_TYPE=raft
-      - SECRETON_STORAGE__NODE_ID=secreton-1
-      - SECRETON_STORAGE__PEERS=secreton-2:8201,secreton-3:8201
-    volumes: ["secreton-1-data:/app/data"]
-    
-  secreton-2:
-    image: secreton:latest
-    ports: ["8202:8200", "8203:8201"]
-    environment:
-      - SECRETON_STORAGE__NODE_ID=secreton-2
-      - SECRETON_STORAGE__PEERS=secreton-1:8201,secreton-3:8201
-    volumes: ["secreton-2-data:/app/data"]
-    
-  secreton-3:
-    image: secreton:latest
-    ports: ["8204:8200", "8205:8201"]
-    environment:
-      - SECRETON_STORAGE__NODE_ID=secreton-3
-      - SECRETON_STORAGE__PEERS=secreton-1:8201,secreton-2:8201
-    volumes: ["secreton-3-data:/app/data"]
-
-volumes:
-  secreton-1-data:
-  secreton-2-data:
-  secreton-3-data:
-```
-
-## ☸️ Kubernetes Deployment
-
-### Basic Deployment
-
-```yaml
-# secreton-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: secreton
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: secreton
-  template:
-    metadata:
-      labels:
-        app: secreton
-    spec:
-      containers:
-      - name: secreton
-        image: secreton:latest
-        ports:
-        - containerPort: 8200
-        - containerPort: 8201
-        env:
-        - name: SECRETON_SERVER__HOST
-          value: "0.0.0.0"
-        - name: SECRETON_DATABASE__URL
-          valueFrom:
-            secretKeyRef:
-              name: secreton-db
-              key: url
-        volumeMounts:
-        - name: data
-          mountPath: /app/data
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: secreton-data
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: secreton
-spec:
-  selector:
-    app: secreton
-  ports:
-  - name: api
-    port: 8200
-    targetPort: 8200
-  - name: raft
-    port: 8201
-    targetPort: 8201
-  type: ClusterIP
-```
-
-### Agent as Sidecar
-
-```yaml
-# app-with-agent.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: myapp
-spec:
-  containers:
-  - name: myapp
-    image: myapp:latest
-    env:
-    - name: DATABASE_URL
-      valueFrom:
-        secretKeyRef:
-          name: app-config
-          key: database_url
-    - name: API_KEY
-      valueFrom:
-        secretKeyRef:
-          name: app-config
-          key: api_key
-    volumeMounts:
-    - name: config
-      mountPath: /etc/myapp
-      
-  - name: secreton-agent
-    image: secreton-agent:latest
-    env:
-    - name: VAULT_ADDR
-      value: "http://secreton:8200"
-    - name: VAULT_ROLE
-      value: "myapp-role"
-    volumeMounts:
-    - name: config
-      mountPath: /etc/myapp
-    - name: agent-config
-      mountPath: /etc/secreton-agent
-    command: ["/app/secreton-agent"]
-    args: ["-config", "/etc/secreton-agent/config.yaml"]
-    
-  volumes:
-  - name: config
-    emptyDir: {}
-  - name: agent-config
-    configMap:
-      name: secreton-agent-config
-```
-
-## 🔒 Security Best Practices
-
-### Production Deployment
-
-1. **Network Security**
-   - Use TLS/mTLS for all communications
-   - Deploy in private networks
-   - Implement proper firewall rules
-
-2. **Access Control**
-   - Enable MFA for all users
-   - Use principle of least privilege
-   - Regular token rotation
-
-3. **Data Protection**
-   - Enable audit logging
-   - Use HSM for key protection
-   - Regular backup and recovery testing
-
-4. **Monitoring**
-   - Set up alerts for security events
-   - Monitor failed authentication attempts
-   - Track unusual access patterns
-
-### Compliance
-
-Secreton supports compliance with:
-- **NIST Cybersecurity Framework**
-- **SOC 2 Type II**
-- **GDPR**
-- **HIPAA**
-- **PCI DSS**
-
-## 🛠️ Development
-
-### Building from Source
+All secret operations require authentication. Include the JWT token in the Authorization header:
 
 ```bash
-# Clone repository
-git clone https://github.com/analisaperlengkapan/secreton.git
-cd secreton
+AUTH_TOKEN="your_jwt_token_here"
+```
 
-# Install Rust
-rustup update stable
-rustup component add rustfmt clippy
+#### Create a Secret
 
-# Build
-cargo build --workspace --release
+```bash
+curl -X POST http://127.0.0.1:8080/secret/secrets/myapp/database \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "username": "db_user",
+      "password": "db_password",
+      "host": "localhost",
+      "port": 5432
+    }
+  }'
+```
 
-# Run tests
+#### Retrieve a Secret
+
+```bash
+curl -X GET http://127.0.0.1:8080/secret/secrets/myapp/database \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+Response:
+```json
+{
+  "data": {
+    "username": "db_user",
+    "password": "db_password",
+    "host": "localhost",
+    "port": 5432
+  },
+  "metadata": {
+    "version": 1,
+    "created_time": "2025-01-13T10:00:00Z",
+    "deletion_time": "",
+    "destroyed": false
+  }
+}
+```
+
+#### Update a Secret
+
+```bash
+curl -X PUT http://127.0.0.1:8080/secret/secrets/myapp/database \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "username": "db_user",
+      "password": "new_db_password",
+      "host": "localhost",
+      "port": 5432
+    }
+  }'
+```
+
+#### Delete a Secret
+
+```bash
+curl -X DELETE http://127.0.0.1:8080/secret/secrets/myapp/database \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+#### List Secrets
+
+```bash
+curl -X GET "http://127.0.0.1:8080/secret/secrets?path=myapp" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+### Key Management
+
+#### Create an Encryption Key
+
+```bash
+curl -X POST http://127.0.0.1:8080/secret/keys \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-encryption-key",
+    "type": "aes256-gcm96",
+    "usage": "encrypt/decrypt"
+  }'
+```
+
+#### Encrypt Data
+
+```bash
+curl -X POST http://127.0.0.1:8080/secret/encrypt \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key_name": "my-encryption-key",
+    "plaintext": "SGVsbG8gV29ybGQ="  // base64 encoded
+  }'
+```
+
+#### Decrypt Data
+
+```bash
+curl -X POST http://127.0.0.1:8080/secret/decrypt \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key_name": "my-encryption-key",
+    "ciphertext": "encrypted_data_here"
+  }'
+```
+
+### User Management (Admin Only)
+
+#### Create a User
+
+```bash
+curl -X POST http://127.0.0.1:8080/admin/users \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "newuser",
+    "password": "secure_password",
+    "email": "user@example.com",
+    "roles": ["user"]
+  }'
+```
+
+#### List Users
+
+```bash
+curl -X GET http://127.0.0.1:8080/admin/users \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+### System Monitoring
+
+#### Get System Metrics
+
+```bash
+curl -X GET http://127.0.0.1:8080/admin/metrics \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+#### Get Prometheus Metrics
+
+```bash
+curl -X GET http://127.0.0.1:8080/metrics
+```
+
+## API Reference
+
+### Base URL
+```
+http://127.0.0.1:8080
+```
+
+### Authentication Endpoints
+- `POST /auth/login` - User login
+- `POST /auth/refresh` - Refresh JWT token
+- `POST /auth/logout` - Logout user
+- `GET /auth/oauth/{provider}` - OAuth login initiation
+- `GET /auth/oauth/{provider}/callback` - OAuth callback
+
+### Secret Endpoints
+- `GET /secret/secrets/{path}` - Get secret
+- `POST /secret/secrets/{path}` - Create secret
+- `PUT /secret/secrets/{path}` - Update secret
+- `DELETE /secret/secrets/{path}` - Delete secret
+- `GET /secret/secrets` - List secrets
+
+### Key Management Endpoints
+- `GET /secret/keys` - List keys
+- `POST /secret/keys` - Create key
+- `GET /secret/keys/{key_id}` - Get key info
+- `PUT /secret/keys/{key_id}` - Update key
+- `DELETE /secret/keys/{key_id}` - Delete key
+- `POST /secret/keys/{key_id}/rotate` - Rotate key
+
+### Encryption Endpoints
+- `POST /secret/encrypt` - Encrypt data
+- `POST /secret/decrypt` - Decrypt data
+- `POST /secret/sign` - Sign data
+- `POST /secret/verify` - Verify signature
+
+### Administrative Endpoints
+- `GET /admin/users` - List users
+- `POST /admin/users` - Create user
+- `GET /admin/users/{user_id}` - Get user
+- `PUT /admin/users/{user_id}` - Update user
+- `DELETE /admin/users/{user_id}` - Delete user
+- `GET /admin/roles` - List roles
+- `POST /admin/roles` - Create role
+- `GET /admin/config` - Get system config
+- `PUT /admin/config` - Update system config
+- `GET /admin/metrics` - Get system metrics
+
+### System Endpoints
+- `GET /health` - Health check
+- `GET /version` - Version info
+- `GET /metrics` - Prometheus metrics
+
+## Development
+
+### Code Style
+
+Format code with `rustfmt`:
+```bash
+cargo fmt --all
+```
+
+Lint with `clippy`:
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+### Testing
+
+Run all tests:
+```bash
 cargo test --workspace --all-features
 ```
 
-### Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Architecture
-
-Secreton follows a modular architecture:
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   API Server    │    │   CLI Tool      │    │   Agent         │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-┌─────────────────────────────────────────────────────────────────┐
-│                    Core Business Logic                          │
-├─────────────────┬─────────────────┬─────────────────┬───────────┤
-│   Auth          │   Secrets       │   Crypto        │   Storage  │
-└─────────────────┴─────────────────┴─────────────────┴───────────┘
+Run tests with coverage:
+```bash
+cargo tarpaulin --workspace --all-features --out Lcov
 ```
 
-## 📚 Documentation
+Run specific crate tests:
+```bash
+cargo test -p secreton-api
+cargo test -p secreton-crypto
+```
 
-- [API Reference](https://docs.secreton.com/api)
-- [Configuration Guide](https://docs.secreton.com/config)
-- [Security Guide](https://docs.secreton.com/security)
-- [Deployment Guide](https://docs.secreton.com/deployment)
+### Watch Mode
 
-## 🤝 Community
+Use `cargo-watch` for iterative development:
+```bash
+cargo watch -x test
+```
 
-- **Discord**: [Join our community](https://discord.gg/secreton)
-- **GitHub**: [Report issues](https://github.com/analisaperlengkapan/secreton/issues)
-- **Discussions**: [Join discussions](https://github.com/analisaperlengkapan/secreton/discussions)
-- **Twitter**: [@SecretonVault](https://twitter.com/SecretonVault)
+### Security Audit
 
-## 📄 License
+Run security audit:
+```bash
+cargo audit
+```
 
-Secreton is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
+## Architecture
 
-## 🙏 Acknowledgments
+Secreton is organized as a Rust workspace with multiple crates:
 
-- Built with [Rust](https://www.rust-lang.org/) for memory safety
-- Cryptography by [RustCrypto](https://github.com/RustCrypto)
-- Inspired by [HashiCorp Vault](https://www.vaultproject.io/)
-- Icons by [Feather Icons](https://feathericons.com/)
+- `secreton-api`: HTTP REST API server using Axum
+- `secreton-agent`: Sidecar agent for auto-authentication
+- `secreton-auth`: Authentication and authorization logic
+- `secreton-core`: Core business logic and services
+- `secreton-crypto`: Cryptographic operations using RustCrypto
+- `secreton-storage`: Storage backends (PostgreSQL, SQLite, Redis)
+- `secreton-security`: Security monitoring and audit logging
+- `secreton-errors`: Unified error handling
+- `secreton-config`: Configuration management
+- `secreton-common`: Shared utilities and types
 
----
+## Contributing
 
-**Secreton** - Enterprise-grade security, built for the future. 🚀
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
-If you find Secreton useful, please give us a ⭐ on GitHub!
+### Quick Start for Contributors
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes
+4. Run tests: `cargo test --workspace --all-features`
+5. Format code: `cargo fmt --all`
+6. Lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+7. Commit your changes
+8. Push to your fork
+9. Create a Pull Request
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+For support and questions:
+- Open an issue on GitHub
+- Check the documentation in [CONTRIBUTING.md](CONTRIBUTING.md)
+- Review the codebase and tests for examples
+
+## Security
+
+Secreton takes security seriously. If you discover a security vulnerability, please report it responsibly by emailing the maintainers or opening a security advisory on GitHub.
+
+Key security features:
+- Memory-safe Rust implementation
+- Zeroize for sensitive data cleanup
+- Comprehensive audit logging
+- Quantum-safe cryptographic algorithms
+- Zero-trust architecture</content>
+<parameter name="filePath">/workspaces/secreton/README.md

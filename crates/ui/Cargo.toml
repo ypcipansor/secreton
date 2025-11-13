@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+
 [dependencies]
 secreton-core.workspace = true
 secreton-crypto.workspace = true
@@ -26,16 +27,18 @@ uuid.workspace = true
 chrono.workspace = true
 tokio.workspace = true
 
-# Web framework
+# Server-side web framework
 axum.workspace = true
-leptos.workspace = true
-leptos_router.workspace = true
-web-sys.workspace = true
-wasm-bindgen-futures.workspace = true
 
-# HTTP client
-reqwest.workspace = true
-rust-embed.workspace = true
+# Client-side (optional) dependencies for Leptos UI (wasm)
+leptos.workspace = { optional = true }
+leptos_router.workspace = { optional = true }
+web-sys.workspace = { optional = true }
+wasm-bindgen-futures.workspace = { optional = true }
+
+# HTTP client and asset embedding for client build (optional)
+reqwest.workspace = { optional = true }
+rust-embed.workspace = { optional = true }
 mime_guess.workspace = true
 
 # CLI tools
@@ -43,8 +46,7 @@ clap = { workspace = true, optional = true }
 rpassword = { workspace = true, optional = true }
 
 [features]
-default = []
-cli = ["clap", "rpassword"]
+client = ["leptos", "leptos_router", "web-sys", "wasm-bindgen-futures", "reqwest", "rust-embed"]
 
 [[bin]]
 name = "secreton-user"

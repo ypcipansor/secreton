@@ -1,3 +1,4 @@
+#![cfg(feature = "client")]
 use leptos::prelude::*;
 use reqwest::Client;
 use serde_json::Value;

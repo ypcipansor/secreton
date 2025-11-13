@@ -1,3 +1,4 @@
+#![cfg(feature = "client")]
 use leptos::prelude::ElementChild;
 use leptos::*;
 

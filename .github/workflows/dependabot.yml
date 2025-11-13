@@ -17,12 +17,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: actions-rs/cargo-cache@v1
 
       - name: Run tests
         run: cargo test --workspace --all-features
@@ -35,14 +35,15 @@ jobs:
           cargo install cargo-audit
           cargo audit
 
-      - name: Auto-merge for Dependabot PRs
-        if: github.event_name == 'pull_request_target'
-        run: |
-          # Check if PR is from dependabot
-          if [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
-            # Auto-approve and merge minor/patch updates
-            gh pr review --approve ${{ github.event.pull_request.number }}
-            gh pr merge ${{ github.event.pull_request.number }} --auto --squash
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Auto-approve Dependabot PR
+        if: github.actor == 'dependabot[bot]'
+        uses: hmarr/auto-approve-action@v2.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge Dependabot PR
+        if: github.actor == 'dependabot[bot]'
+        uses: peter-evans/merge@v2
+        with:
+          pull-request: ${{ github.event.pull_request.number }}
+          merge-method: squash
