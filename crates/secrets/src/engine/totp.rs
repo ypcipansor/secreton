@@ -70,7 +70,7 @@ impl TotpEngine {
     fn generate_totp(&self, key: &TotpKey, time: u64) -> SecretResult<String> {
         // Decode base32 secret
         let secret = base32::decode(
-            base32::Alphabet::RFC4648 { padding: false },
+            base32::Alphabet::Rfc4648 { padding: false },
             &key.secret.to_uppercase(),
         )
         .ok_or_else(|| SecretError::InvalidSecretData("Invalid base32 secret".to_string()))?;
@@ -235,7 +235,7 @@ impl SecretEngine for TotpEngine {
 
         // Validate base32 secret
         if base32::decode(
-            base32::Alphabet::RFC4648 { padding: false },
+            base32::Alphabet::Rfc4648 { padding: false },
             &secret.to_uppercase(),
         )
         .is_none()
