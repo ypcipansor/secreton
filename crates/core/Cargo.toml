@@ -141,7 +141,7 @@ flate2.workspace = true
 # google-cloud-secretmanager = "0.16"
 # google-cloud-bigquery = "0.16"
 # google-cloud-iam = "0.16"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Prometheus monitoring
 prometheus = "0.13"
