@@ -502,20 +502,17 @@ impl TransitKey {
                 let shared_secret = x25519(**private_key_bytes, ephemeral_public);
 
                 // Derive AES key from shared secret
-                let mut aes_key = [0u8; 32];
+                let mut aes_key = Key::<Aes256Gcm>::default();
                 hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret)
-                    .expand(b"secreton-x25519-aes", &mut aes_key)
+                    .expand(b"secreton-x25519-aes", aes_key.as_mut_slice())
                     .map_err(|_| {
                         CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string())
                     })?;
 
                 // Decrypt with AES-GCM
-                let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|_| {
-                    CryptoError::InvalidKeyLength {
-                        expected: 32,
-                        actual: aes_key.len(),
-                    }
-                })?;
+                let cipher = Aes256Gcm::new(aes_key);
+
+
 
                 let mut decrypted = cipher
                     .decrypt(&nonce, encrypted_bytes.as_slice())
