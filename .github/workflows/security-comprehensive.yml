@@ -135,7 +135,7 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-3.0, AGPL-3.0
-          allow-licenses: Apache-2.0, MIT, BSD-3-Clause, BSD-2-Clause, ISC
+          allow-licenses: Apache-2.0, MIT, BSD-3-Clause, BSD-2-Clause, ISC, 0BSD
 
   osv-scanner:
     name: OSV Scanner
