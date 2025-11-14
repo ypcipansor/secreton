@@ -1,5 +1,4 @@
 # Secreton Vault - Raft Integrated Storage Configuration
-# Compatible with HashiCorp Vault integrated storage approach
 
 [server]
 host = "127.0.0.1"
