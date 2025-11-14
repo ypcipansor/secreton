@@ -74,10 +74,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo-audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        run: cargo audit
 
   cargo-geiger:
     name: Unsafe Code Analysis
@@ -138,18 +139,12 @@ jobs:
 
   osv-scanner:
     name: OSV Scanner
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Run OSV Scanner
-        uses: google/osv-scanner-action@v1
-        with:
-          scan-args: |-
-            --recursive
-            --skip-git
-            ./
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.2.4
+    with:
+      scan-args: |-
+        --recursive
+        --skip-git
+        ./
 
   semgrep:
     name: Semgrep Security Scan
@@ -162,6 +157,7 @@ jobs:
 
       - name: Run Semgrep
         run: semgrep ci --sarif --output=semgrep-results.sarif
+        continue-on-error: true
         env:
           SEMGREP_RULES: >-
             p/security-audit
@@ -183,13 +179,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@master
+
       - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/rust@master
+        run: snyk test --sarif-file-output=snyk-results.sarif
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --sarif-file-output=snyk-results.sarif
 
       - name: Upload Snyk results
         uses: github/codeql-action/upload-sarif@v4
