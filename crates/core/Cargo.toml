@@ -143,7 +143,7 @@ flate2.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
 
 # Prometheus monitoring
-prometheus = "0.13"
+prometheus = { workspace = true }
 
 # LDAP Dependencies
 ldap3.workspace = true
