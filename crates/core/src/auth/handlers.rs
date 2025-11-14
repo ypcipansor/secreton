@@ -105,10 +105,7 @@ pub async fn refresh_token(
 }
 
 /// Logout handler
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+pub async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     // Extract token from Authorization header
     let Some(token) = extract_bearer_token(&headers) else {
         return (
@@ -146,10 +143,7 @@ pub async fn logout(
 }
 
 /// Get current user info
-pub async fn me(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+pub async fn me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     let Some(token) = extract_bearer_token(&headers) else {
         return (
             StatusCode::UNAUTHORIZED,

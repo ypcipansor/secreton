@@ -157,9 +157,10 @@ impl SecretMigrationService {
         {
             let progress = self.progress.read().await;
             if let Some(p) = progress.get(migration_id)
-                && p.status == MigrationStatus::InProgress {
-                    return Err(MigrationError::InProgress(migration_id.to_string()));
-                }
+                && p.status == MigrationStatus::InProgress
+            {
+                return Err(MigrationError::InProgress(migration_id.to_string()));
+            }
         }
 
         let plan = self.get_plan(migration_id).await?;

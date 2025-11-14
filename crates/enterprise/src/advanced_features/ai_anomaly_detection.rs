@@ -3,7 +3,7 @@
 //! Provides ML-based anomaly detection, behavioral analysis, threat scoring,
 //! pattern recognition, and auto-remediation recommendations.
 
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

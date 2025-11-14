@@ -101,8 +101,7 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 }
 
 /// Core configuration - shared across all components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoreConfig {
     /// Server configuration
     pub server: ServerConfig,
@@ -119,7 +118,6 @@ pub struct CoreConfig {
     /// Metrics configuration
     pub metrics: MetricsConfig,
 }
-
 
 impl Config for CoreConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -583,8 +581,7 @@ pub enum CloudProvider {
 }
 
 /// Cloud credentials
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CloudCredentials {
     /// Access key ID
     pub access_key_id: String,
@@ -595,7 +592,6 @@ pub struct CloudCredentials {
     /// Session token (optional)
     pub session_token: Option<String>,
 }
-
 
 impl Config for CloudCredentials {
     fn validate(&self) -> SecretonResult<()> {
@@ -616,15 +612,13 @@ impl Config for CloudCredentials {
 }
 
 /// Crypto integration configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CryptoIntegrationConfig {
     pub api: ApiConfig,
     pub storage: CryptoStorageConfig,
     pub rate_limit: CryptoRateLimitConfig,
     pub performance: PerformanceConfig,
 }
-
 
 impl Config for CryptoIntegrationConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -794,12 +788,11 @@ impl Config for KmipConfig {
                 message: "KMIP port cannot be zero".to_string(),
             });
         }
-        if self.tls_enabled
-            && (self.cert_path.is_none() || self.key_path.is_none()) {
-                return Err(SecretonError::Configuration {
-                    message: "Certificate and key paths required when TLS is enabled".to_string(),
-                });
-            }
+        if self.tls_enabled && (self.cert_path.is_none() || self.key_path.is_none()) {
+            return Err(SecretonError::Configuration {
+                message: "Certificate and key paths required when TLS is enabled".to_string(),
+            });
+        }
         Ok(())
     }
 }
@@ -1016,8 +1009,7 @@ impl Config for AgentSecurityConfig {
 }
 
 /// Security configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SecurityConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
@@ -1040,7 +1032,6 @@ pub struct SecurityConfig {
     /// Agent security enforcement settings
     pub agent: AgentSecurityConfig,
 }
-
 
 impl Config for SecurityConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -1712,8 +1703,7 @@ impl Config for MetricsConfig {
 }
 
 /// Integrations configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IntegrationsConfig {
     /// General integration settings
     pub general: Option<IntegrationConfig>,
@@ -1728,7 +1718,6 @@ pub struct IntegrationsConfig {
     /// Plugin system
     pub plugin: Option<PluginConfig>,
 }
-
 
 impl Config for IntegrationsConfig {
     fn validate(&self) -> SecretonResult<()> {

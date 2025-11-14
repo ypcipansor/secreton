@@ -169,9 +169,10 @@ impl DatabaseRootRotation {
         // Check rotation _status
         let _status = self.rotation_status.read().await;
         if let Some(current_status) = _status.get(_database_name)
-            && *current_status == RotationStatus::InProgress {
-                return Err(RootRotationError::RotationInProgress);
-            }
+            && *current_status == RotationStatus::InProgress
+        {
+            return Err(RootRotationError::RotationInProgress);
+        }
         drop(_status);
 
         // Set _status to in progress

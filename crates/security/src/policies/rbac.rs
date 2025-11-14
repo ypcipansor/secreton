@@ -59,9 +59,10 @@ pub fn resolve_user_roles(
     for policy in policies {
         if let Some(alias) = &policy.entity_alias
             && let Some(user_alias) = entity_alias
-                && alias == user_alias {
-                    roles.push(policy.role.clone());
-                }
+            && alias == user_alias
+        {
+            roles.push(policy.role.clone());
+        }
         // fallback: user_id langsung sebagai role
         if policy.role == user_id {
             roles.push(policy.role.clone());

@@ -511,13 +511,15 @@ impl StorageBackend for MockStorageBackend {
             .filter(|entry| {
                 // Simple filtering logic
                 if let Some(prefix) = &params.path_prefix
-                    && !entry.path.starts_with(prefix) {
-                        return false;
-                    }
+                    && !entry.path.starts_with(prefix)
+                {
+                    return false;
+                }
                 if let Some(owner) = params.owner_id
-                    && entry.owner_id != owner {
-                        return false;
-                    }
+                    && entry.owner_id != owner
+                {
+                    return false;
+                }
                 !entry.is_expired() || params.include_expired
             })
             .cloned()
