@@ -181,8 +181,7 @@ impl Default for PaginationParams {
 }
 
 /// Query parameters for list operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct QueryParams {
     /// Pagination parameters
     pub pagination: PaginationParams,
@@ -191,7 +190,6 @@ pub struct QueryParams {
     /// Search query
     pub search: Option<String>,
 }
-
 
 /// Common trait for entities with timestamps
 pub trait Timestamped {
@@ -376,12 +374,13 @@ pub mod utils {
                 }
 
                 if let Some(max_len) = self.max_length
-                    && max_len < self.min_length {
-                        return Err(crate::CommonError::Validation {
-                            message: "Maximum password length cannot be less than minimum length"
-                                .to_string(),
-                        });
-                    }
+                    && max_len < self.min_length
+                {
+                    return Err(crate::CommonError::Validation {
+                        message: "Maximum password length cannot be less than minimum length"
+                            .to_string(),
+                    });
+                }
 
                 Ok(())
             }
@@ -439,9 +438,10 @@ pub mod utils {
 
             // Apply max length if specified
             if let Some(max_len) = policy.max_length
-                && password.len() > max_len {
-                    password = password[..max_len].to_string();
-                }
+                && password.len() > max_len
+            {
+                password = password[..max_len].to_string();
+            }
 
             // Shuffle the password for better randomness
             let mut chars: Vec<char> = password.chars().collect();

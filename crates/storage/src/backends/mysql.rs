@@ -476,9 +476,10 @@ impl StorageBackend for MySQLStorage {
         let mut filtered_entries = Vec::new();
         for entry in entries {
             if let Some(owner_id) = params.owner_id
-                && entry.owner_id != owner_id {
-                    continue;
-                }
+                && entry.owner_id != owner_id
+            {
+                continue;
+            }
             if !params.include_expired && entry.is_expired() {
                 continue;
             }

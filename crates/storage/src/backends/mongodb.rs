@@ -546,12 +546,8 @@ impl StorageBackend for MongoDBStorage {
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        
         let mut total_size_bytes = 0u64;
         let mut entries_by_security_level = HashMap::new();
-        
-        
-        
 
         // Get total count
         let total_entries: u64 = self
@@ -613,12 +609,13 @@ impl StorageBackend for MongoDBStorage {
                 "$lte": end_of_day.and_utc().timestamp_millis()
             }
         };
-        let entries_created_today: u64 = self.collection.count_documents(filter).await.map_err(|e| {
-            StorageError::BackendError {
-                backend: "mongodb".to_string(),
-                message: format!("Failed to count entries created today: {}", e),
-            }
-        })?;
+        let entries_created_today: u64 =
+            self.collection.count_documents(filter).await.map_err(|e| {
+                StorageError::BackendError {
+                    backend: "mongodb".to_string(),
+                    message: format!("Failed to count entries created today: {}", e),
+                }
+            })?;
 
         // Get entries updated today
         let filter = bson_doc! {
@@ -627,12 +624,13 @@ impl StorageBackend for MongoDBStorage {
                 "$lte": end_of_day.and_utc().timestamp_millis()
             }
         };
-        let entries_updated_today: u64 = self.collection.count_documents(filter).await.map_err(|e| {
-            StorageError::BackendError {
-                backend: "mongodb".to_string(),
-                message: format!("Failed to count entries updated today: {}", e),
-            }
-        })?;
+        let entries_updated_today: u64 =
+            self.collection.count_documents(filter).await.map_err(|e| {
+                StorageError::BackendError {
+                    backend: "mongodb".to_string(),
+                    message: format!("Failed to count entries updated today: {}", e),
+                }
+            })?;
 
         // Get expired entries
         let now = chrono::Utc::now().timestamp_millis();
@@ -665,9 +663,10 @@ impl StorageBackend for MongoDBStorage {
                 backend: "mongodb".to_string(),
                 message: format!("Failed to get average size result: {}", e),
             })?
-            && let Ok(avg_size) = result.get_f64("avg_size") {
-                total_size_bytes = (avg_size * total_entries as f64) as u64;
-            }
+            && let Ok(avg_size) = result.get_f64("avg_size")
+        {
+            total_size_bytes = (avg_size * total_entries as f64) as u64;
+        }
 
         let average_entry_size = if total_entries > 0 {
             total_size_bytes as f64 / total_entries as f64

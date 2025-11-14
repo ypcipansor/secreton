@@ -278,21 +278,24 @@ impl RaftStateMachine {
 
         // Check path prefix
         if let Some(prefix) = &params.path_prefix
-            && !entry.path.starts_with(prefix) {
-                return false;
-            }
+            && !entry.path.starts_with(prefix)
+        {
+            return false;
+        }
 
         // Check security level
         if let Some(min_level) = params.security_level
-            && entry.security_level < min_level {
-                return false;
-            }
+            && entry.security_level < min_level
+        {
+            return false;
+        }
 
         // Check owner
         if let Some(owner_id) = params.owner_id
-            && entry.owner_id != owner_id {
-                return false;
-            }
+            && entry.owner_id != owner_id
+        {
+            return false;
+        }
 
         // Check tags
         if !params.tags.is_empty() && !params.tags.iter().any(|tag| entry.tags.contains(tag)) {

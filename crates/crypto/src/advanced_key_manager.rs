@@ -220,9 +220,10 @@ impl AdvancedKeyManager {
 
         // Deprecate current version
         if let Some(version_list) = versions.get_mut(key_id)
-            && let Some(current) = version_list.last_mut() {
-                current.deprecated_at = Some(Utc::now());
-            }
+            && let Some(current) = version_list.last_mut()
+        {
+            current.deprecated_at = Some(Utc::now());
+        }
 
         // Create new version
         let new_version_entry = KeyVersion {

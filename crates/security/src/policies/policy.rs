@@ -45,10 +45,11 @@ impl PolicySet {
             {
                 // Evaluasi control group
                 if let Some(cg) = &rule.control_group
-                    && cg.approved_by.len() < cg.required_approvals as usize {
-                        // Belum cukup approval
-                        return false;
-                    }
+                    && cg.approved_by.len() < cg.required_approvals as usize
+                {
+                    // Belum cukup approval
+                    return false;
+                }
                 // Evaluasi MFA
                 if rule.mfa == Some(true) {
                     if let Some(ctx) = context {

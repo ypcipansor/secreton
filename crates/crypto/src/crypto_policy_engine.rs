@@ -197,12 +197,13 @@ impl CryptoPolicyEngine {
         // Check minimum key size
         let algo_name = format!("{:?}", request.algorithm);
         if let Some(&min_size) = policy.min_key_sizes.get(&algo_name)
-            && request.key_size < min_size {
-                violations.push(format!(
-                    "Key size {} below minimum {}",
-                    request.key_size, min_size
-                ));
-            }
+            && request.key_size < min_size
+        {
+            violations.push(format!(
+                "Key size {} below minimum {}",
+                request.key_size, min_size
+            ));
+        }
 
         // Audit the operation
         let audit = CryptoAudit {

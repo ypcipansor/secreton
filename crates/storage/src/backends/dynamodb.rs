@@ -266,9 +266,10 @@ impl DynamoDBStorage {
 
             if let Some(table) = result.table
                 && let Some(table_status) = table.table_status
-                    && table_status == aws_sdk_dynamodb::types::TableStatus::Active {
-                        break;
-                    }
+                && table_status == aws_sdk_dynamodb::types::TableStatus::Active
+            {
+                break;
+            }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
@@ -610,9 +611,10 @@ impl StorageBackend for DynamoDBStorage {
         let mut filtered_entries = Vec::new();
         for entry in entries {
             if let Some(owner_id) = params.owner_id
-                && entry.owner_id != owner_id {
-                    continue;
-                }
+                && entry.owner_id != owner_id
+            {
+                continue;
+            }
             if !params.include_expired && entry.is_expired() {
                 continue;
             }
