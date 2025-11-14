@@ -1,4 +1,4 @@
-# Secreton Vault - Raft Integrated Storage Configuration
+# Secreton  - Raft Integrated Storage Configuration
 
 [server]
 host = "127.0.0.1"
