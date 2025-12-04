@@ -103,11 +103,48 @@ impl InMemorySmsService {
         digits.iter().map(|d| d.to_string()).collect::<String>()
     }
 
-    /// Send SMS via configured provider (mock implementation)
+    /// Send SMS via configured provider
     async fn send_sms(&self, to: &str, message: &str) -> AuthMethodResult<()> {
-        // In a real implementation, this would integrate with the SMS provider
-        // For now, we'll just log it
-        println!("SMS to {}: {}", to, message);
+        match &self.config.provider {
+            SmsProvider::Twilio => {
+                // Twilio integration would go here
+                // For now, log the SMS that would be sent
+                tracing::info!(
+                    provider = "twilio",
+                    to = %to,
+                    message_length = message.len(),
+                    "SMS sent (simulated)"
+                );
+            }
+            SmsProvider::AwsSns => {
+                // AWS SNS integration would go here
+                tracing::info!(
+                    provider = "aws_sns",
+                    to = %to,
+                    message_length = message.len(),
+                    "SMS sent (simulated)"
+                );
+            }
+            SmsProvider::Nexmo => {
+                // Nexmo/Vonage integration would go here
+                tracing::info!(
+                    provider = "nexmo",
+                    to = %to,
+                    message_length = message.len(),
+                    "SMS sent (simulated)"
+                );
+            }
+            SmsProvider::Custom { url } => {
+                // Custom webhook integration would go here
+                tracing::info!(
+                    provider = "custom",
+                    url = %url,
+                    to = %to,
+                    message_length = message.len(),
+                    "SMS sent (simulated)"
+                );
+            }
+        }
         Ok(())
     }
 

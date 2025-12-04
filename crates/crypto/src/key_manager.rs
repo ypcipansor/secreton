@@ -20,6 +20,12 @@ pub struct InMemoryKeyStorage {
     keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
 }
 
+impl Default for InMemoryKeyStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryKeyStorage {
     pub fn new() -> Self {
         Self {

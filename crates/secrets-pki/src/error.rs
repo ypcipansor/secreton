@@ -20,6 +20,9 @@ pub enum PkiError {
     #[error("Certificate already revoked: {0}")]
     CertificateAlreadyRevoked(String),
 
+    #[error("Certificate revocation error: {0}")]
+    CertificateRevocation(String),
+
     #[error("Invalid CA configuration: {0}")]
     InvalidCaConfiguration(String),
 

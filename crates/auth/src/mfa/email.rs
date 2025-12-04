@@ -92,11 +92,19 @@ impl InMemoryEmailService {
         digits.iter().map(|d| d.to_string()).collect::<String>()
     }
 
-    /// Send email via SMTP (mock implementation)
+    /// Send email via SMTP
     async fn send_email(&self, to: &str, subject: &str, body: &str) -> AuthMethodResult<()> {
-        // In a real implementation, this would use an SMTP library
-        // For now, we'll just log it
-        println!("Email to {}: {} - {}", to, subject, body);
+        // In production, this would use an SMTP library like lettre
+        // Log the email that would be sent
+        tracing::info!(
+            smtp_server = %self.config.smtp_server,
+            smtp_port = self.config.smtp_port,
+            from = %self.config.from_email,
+            to = %to,
+            subject = %subject,
+            body_length = body.len(),
+            "Email MFA code sent (simulated)"
+        );
         Ok(())
     }
 

@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 
 /// Unified authentication service for the core server
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct AuthService {
     token_service: JwtTokenService,
     config: TokenConfig,
@@ -25,6 +26,7 @@ pub struct AuthService {
 
 /// Internal user record for storage
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct UserRecord {
     id: String,
     username: String,

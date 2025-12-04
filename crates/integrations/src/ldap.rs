@@ -233,11 +233,11 @@ impl LdapOperations {
 
         let mod_op = match schema {
             LdapSchema::ActiveDirectory => Mod::Replace(
-                "unicodePwd",
-                std::collections::HashSet::from([encoded_password.into_bytes()]),
+                "unicodePwd".to_string(),
+                std::collections::HashSet::from([String::from_utf8_lossy(&encoded_password.clone().into_bytes()).to_string()]),
             ),
             LdapSchema::OpenLDAP => Mod::Replace(
-                "userPassword",
+                "userPassword".to_string(),
                 std::collections::HashSet::from([encoded_password]),
             ),
         };

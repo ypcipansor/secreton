@@ -1,14 +1,14 @@
 //! RADIUS authentication method
+//!
+//! Provides RADIUS-based authentication using the radius-rust library.
 
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
 use chrono::Utc;
 use radius_rust::protocol::dictionary::Dictionary;
-use radius_rust::protocol::error::RadiusError;
-use radius_rust::protocol::radius_packet::{
-    RadiusAttribute, RadiusMsgType, RadiusPacket, TypeCode,
-};
+use radius_rust::protocol::radius_packet::{RadiusAttribute, RadiusPacket, TypeCode};
+use secreton_errors::SecretonError;
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::time::Duration;
@@ -19,7 +19,14 @@ pub struct RadiusAuthMethod {
     enabled: bool,
     config: Option<AuthMethod>,
     radius_config: Option<RadiusConfig>,
+    #[allow(dead_code)]
     dictionary: Dictionary,
+}
+
+impl Default for RadiusAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RadiusAuthMethod {
@@ -46,9 +53,9 @@ impl RadiusAuthMethod {
         let config = self
             .radius_config
             .as_ref()
-            .ok_or(SecretonError::ConfigurationError(
-                "RADIUS config not set".to_string(),
-            ))?;
+            .ok_or(SecretonError::Configuration {
+                message: "RADIUS config not set".to_string(),
+            })?;
 
         // Create UDP socket
         let socket = UdpSocket::bind("0.0.0.0:0")
@@ -62,83 +69,54 @@ impl RadiusAuthMethod {
             .connect((config.host.as_str(), config.port))
             .map_err(|e| SecretonError::RadiusError(format!("Failed to connect: {}", e)))?;
 
-        // Generate random authenticator
-        let authenticator: [u8; 16] = rand::random();
+        // Initialize Access-Request packet using radius-rust API
+        let mut packet = RadiusPacket::initialise_packet(TypeCode::AccessRequest);
 
-        // Create Access-Request packet
-        let mut packet = Packet::new(PacketType::AccessRequest, 1, authenticator);
+        // Build attributes list
+        let mut attributes = Vec::new();
 
-        // Add attributes
-        let user_name_attr_id = self
-            .dictionary
-            .attributes()
-            .iter()
-            .find(|attr| attr.name() == "User-Name")
-            .map(|attr| attr.code())
-            .unwrap_or(1);
+        // Add User-Name attribute (type 1)
+        if let Some(attr) =
+            RadiusAttribute::create_by_id(&self.dictionary, 1, username.as_bytes().to_vec())
+        {
+            attributes.push(attr);
+        }
 
-        packet.add_attribute(Attribute::new(
-            user_name_attr_id,
-            Value::String(username.as_bytes().to_vec()),
-        ));
+        // Encode User-Password attribute (type 2) with MD5 encryption per RFC 2865
+        let encrypted_password =
+            Self::encode_radius_password(password, packet.authenticator(), &config.secret);
+        if let Some(attr) =
+            RadiusAttribute::create_by_id(&self.dictionary, 2, encrypted_password)
+        {
+            attributes.push(attr);
+        }
 
-        let user_password_attr_id = self
-            .dictionary
-            .attributes()
-            .iter()
-            .find(|attr| attr.name() == "User-Password")
-            .map(|attr| attr.code())
-            .unwrap_or(2);
-
-        packet.add_attribute(Attribute::new(
-            user_password_attr_id,
-            Value::String(password.as_bytes().to_vec()),
-        ));
-
-        // Add NAS-IP-Address if configured
+        // Add NAS-IP-Address if configured (type 4)
         if let Some(nas_ip) = &config.nas_ip_address {
-            if let Ok(ip_bytes) = nas_ip.parse::<std::net::IpAddr>() {
-                let ip_bytes = match ip_bytes {
-                    std::net::IpAddr::V4(ipv4) => ipv4.octets().to_vec(),
-                    std::net::IpAddr::V6(ipv6) => ipv6.octets().to_vec(),
-                };
-                let nas_ip_attr_id = self
-                    .dictionary
-                    .attributes()
-                    .iter()
-                    .find(|attr| attr.name() == "NAS-IP-Address")
-                    .map(|attr| attr.code())
-                    .unwrap_or(4);
-
-                packet.add_attribute(Attribute::new(nas_ip_attr_id, Value::IpAddr(ip_bytes)));
+            if let Ok(ip) = nas_ip.parse::<std::net::Ipv4Addr>() {
+                if let Some(attr) =
+                    RadiusAttribute::create_by_id(&self.dictionary, 4, ip.octets().to_vec())
+                {
+                    attributes.push(attr);
+                }
             }
         }
 
-        // Add NAS-Identifier if configured
+        // Add NAS-Identifier if configured (type 32)
         if let Some(nas_id) = &config.nas_identifier {
-            let nas_id_attr_id = self
-                .dictionary
-                .attributes()
-                .iter()
-                .find(|attr| attr.name() == "NAS-Identifier")
-                .map(|attr| attr.code())
-                .unwrap_or(32);
-
-            packet.add_attribute(Attribute::new(
-                nas_id_attr_id,
-                Value::String(nas_id.as_bytes().to_vec()),
-            ));
+            if let Some(attr) =
+                RadiusAttribute::create_by_id(&self.dictionary, 32, nas_id.as_bytes().to_vec())
+            {
+                attributes.push(attr);
+            }
         }
 
-        // Calculate response authenticator with shared secret
-        let request_data = packet.encode();
-        let response_authenticator =
-            md5::compute(&[&request_data[..], config.secret.as_bytes()].concat()).0;
+        // Set attributes on the packet
+        packet.set_attributes(attributes);
 
-        packet.authenticator = response_authenticator;
+        // Encode and send the packet
+        let encoded_packet = packet.to_bytes();
 
-        // Send packet
-        let encoded_packet = packet.encode();
         socket
             .send(&encoded_packet)
             .map_err(|e| SecretonError::RadiusError(format!("Failed to send packet: {}", e)))?;
@@ -149,58 +127,44 @@ impl RadiusAuthMethod {
             SecretonError::RadiusError(format!("Failed to receive response: {}", e))
         })?;
 
-        let response_packet = Packet::decode(&buffer[..size]).map_err(|e| {
-            SecretonError::RadiusError(format!("Failed to decode response: {:?}", e))
-        })?;
+        // Decode response packet
+        let response_packet =
+            RadiusPacket::initialise_packet_from_bytes(&self.dictionary, &buffer[..size]).map_err(
+                |e| SecretonError::RadiusError(format!("Failed to decode response: {:?}", e)),
+            )?;
 
-        // Verify response authenticator
-        let expected_authenticator = md5::compute(
-            &[
-                &[response_packet.code as u8],
-                &response_packet.identifier.to_be_bytes(),
-                &response_packet.length.to_be_bytes()[..],
-                &request_data[4..],
-                config.secret.as_bytes(),
-            ]
-            .concat(),
-        )
-        .0;
+        // Verify response authenticator (RFC 2865)
+        // ResponseAuth = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
+        let is_valid = Self::verify_response_authenticator(
+            &buffer[..size],
+            packet.authenticator(),
+            &config.secret,
+        );
 
-        if response_packet.authenticator != expected_authenticator {
+        if !is_valid {
             return Err(SecretonError::RadiusError(
                 "Invalid response authenticator".to_string(),
             ));
         }
 
-        // Parse response
-        match response_packet.code {
-            PacketType::AccessAccept => {
-                // Extract attributes
+        // Parse response based on type code
+        match response_packet.code() {
+            TypeCode::AccessAccept => {
+                // Extract attributes from response
                 let mut groups = Vec::new();
                 let mut vlan_id = None;
 
-                for attr in &response_packet.attributes {
-                    match attr.attribute_type {
-                        1 => { // User-Name
-                            // Already have username
-                        }
-                        11 => {
-                            // Filter-Id (often used for groups)
-                            if let Value::String(data) = &attr.value {
-                                if let Ok(group) = std::str::from_utf8(data) {
-                                    groups.push(group.to_string());
-                                }
-                            }
-                        }
-                        64 => {
-                            // Tunnel-Private-Group-Id (VLAN)
-                            if let Value::String(data) = &attr.value {
-                                if let Ok(vlan) = std::str::from_utf8(data) {
-                                    vlan_id = Some(vlan.to_string());
-                                }
-                            }
-                        }
-                        _ => {}
+                // Get Filter-Id attributes (type 11) - often used for group assignment
+                if let Some(filter_attr) = response_packet.attribute_by_id(11) {
+                    if let Ok(group) = std::str::from_utf8(filter_attr.value()) {
+                        groups.push(group.to_string());
+                    }
+                }
+
+                // Get Tunnel-Private-Group-Id (type 81) - used for VLAN assignment
+                if let Some(vlan_attr) = response_packet.attribute_by_id(81) {
+                    if let Ok(vlan) = std::str::from_utf8(vlan_attr.value()) {
+                        vlan_id = Some(vlan.to_string());
                     }
                 }
 
@@ -210,16 +174,80 @@ impl RadiusAuthMethod {
                     vlan_id,
                 })
             }
-            PacketType::AccessReject => Ok(RadiusResponse {
+            TypeCode::AccessReject => Ok(RadiusResponse {
                 accepted: false,
                 groups: vec![],
                 vlan_id: None,
             }),
-            _ => Err(SecretonError::RadiusError(format!(
-                "Unexpected packet type: {:?}",
-                response_packet.code
+            TypeCode::AccessChallenge => {
+                // Handle challenge-response if needed in future
+                Err(SecretonError::RadiusError(
+                    "Access challenge not supported".to_string(),
+                ))
+            }
+            other => Err(SecretonError::RadiusError(format!(
+                "Unexpected response type: {:?}",
+                other
             ))),
         }
+    }
+
+    /// Encode password per RFC 2865 User-Password attribute encryption
+    fn encode_radius_password(password: &str, authenticator: &[u8], secret: &str) -> Vec<u8> {
+        let password_bytes = password.as_bytes();
+        let padded_len = ((password_bytes.len() + 15) / 16) * 16;
+        let mut padded_password = vec![0u8; padded_len.max(16)];
+        padded_password[..password_bytes.len()].copy_from_slice(password_bytes);
+
+        let mut result = Vec::with_capacity(padded_password.len());
+        let mut prev_cipher = authenticator.to_vec();
+
+        for chunk in padded_password.chunks(16) {
+            // MD5(secret + prev_cipher)
+            let mut hash_input = Vec::with_capacity(secret.len() + prev_cipher.len());
+            hash_input.extend_from_slice(secret.as_bytes());
+            hash_input.extend_from_slice(&prev_cipher);
+            let hash = md5::compute(&hash_input);
+
+            let cipher: Vec<u8> = chunk
+                .iter()
+                .zip(hash.iter())
+                .map(|(p, h)| p ^ h)
+                .collect();
+
+            result.extend_from_slice(&cipher);
+            prev_cipher = cipher;
+        }
+
+        result
+    }
+
+    /// Verify RADIUS response authenticator per RFC 2865
+    /// ResponseAuth = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
+    fn verify_response_authenticator(
+        response_bytes: &[u8],
+        request_authenticator: &[u8],
+        secret: &str,
+    ) -> bool {
+        if response_bytes.len() < 20 {
+            return false;
+        }
+
+        // Extract response authenticator (bytes 4-19)
+        let response_authenticator = &response_bytes[4..20];
+
+        // Build the data to hash: Code + ID + Length + RequestAuth + Attributes + Secret
+        let mut hash_input = Vec::with_capacity(response_bytes.len() + secret.len());
+        hash_input.extend_from_slice(&response_bytes[..4]); // Code, ID, Length
+        hash_input.extend_from_slice(request_authenticator); // Original request authenticator
+        if response_bytes.len() > 20 {
+            hash_input.extend_from_slice(&response_bytes[20..]); // Attributes
+        }
+        hash_input.extend_from_slice(secret.as_bytes());
+
+        let expected = md5::compute(&hash_input);
+
+        response_authenticator == expected.as_slice()
     }
 }
 
@@ -234,8 +262,8 @@ impl AuthMethodImpl for RadiusAuthMethod {
 
         // Parse RADIUS configuration from config
         if let (Some(host), Some(shared_secret)) = (
-            config.config.get("host"),
-            config.config.get("shared_secret"),
+            config.config.get("host").and_then(|v| v.as_str()),
+            config.config.get("shared_secret").and_then(|v| v.as_str()),
         ) {
             let radius_config = RadiusConfig {
                 host: host.to_string(),
@@ -249,6 +277,11 @@ impl AuthMethodImpl for RadiusAuthMethod {
                 nas_identifier: config
                     .config
                     .get("nas_identifier")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                nas_ip_address: config
+                    .config
+                    .get("nas_ip_address")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
                 dial_timeout: Some(
@@ -275,7 +308,7 @@ impl AuthMethodImpl for RadiusAuthMethod {
 
     async fn authenticate(&self, credentials: &AuthCredentials) -> AuthMethodResult<AuthResult> {
         if !self.is_enabled() {
-            return Err(SecretonError::MethodDisabled);
+            return Err(SecretonError::AuthMethodDisabled);
         }
 
         match credentials {
@@ -283,15 +316,17 @@ impl AuthMethodImpl for RadiusAuthMethod {
                 let radius_response = self.authenticate_with_radius(username, password).await?;
 
                 if !radius_response.accepted {
-                    return Err(SecretonError::InvalidCredentials(
-                        "Invalid RADIUS credentials".to_string(),
-                    ));
+                    return Err(SecretonError::Authentication {
+                        message: "RADIUS authentication rejected".to_string(),
+                    });
                 }
 
                 let user_info = UserInfo {
+                    id: Some(Uuid::new_v4().to_string()),
                     username: username.to_string(),
-                    id: Uuid::new_v4(), // Generate UUID since RADIUS doesn't provide separate user ID
-                    groups: radius_response.groups,
+                    email: None,
+                    display_name: None,
+                    roles: radius_response.groups,
                     metadata: {
                         let mut meta = HashMap::new();
                         if let Some(vlan) = radius_response.vlan_id {
@@ -299,37 +334,30 @@ impl AuthMethodImpl for RadiusAuthMethod {
                         }
                         meta
                     },
-                    email: None,
-                    display_name: None,
-                    created_at: Utc::now(),
                     last_login: Some(Utc::now()),
                 };
 
                 Ok(AuthResult {
-                    authenticated: true,
+                    success: true,
                     user_info: Some(user_info),
-                    policies: vec![], // Policies would be determined by groups
-                    lease_duration: None,
-                    renewable: Some(true),
+                    policies: vec![],
                     token: None,
-                    accessor: None,
                     metadata: HashMap::new(),
                     mfa_required: false,
-                    mfa_methods: Vec::new(),
                 })
             }
-            _ => Err(SecretonError::InvalidCredentials(
-                "Invalid RADIUS credentials".to_string(),
-            )),
+            _ => Err(SecretonError::Authentication {
+                message: "RADIUS requires username/password credentials".to_string(),
+            }),
         }
     }
 
     async fn validate_token(&self, _token: &str) -> AuthMethodResult<UserInfo> {
-        Err(SecretonError::MethodNotSupported)
+        Err(SecretonError::AuthMethodNotSupported)
     }
 
     async fn revoke_token(&self, _token: &str) -> AuthMethodResult<()> {
-        Err(SecretonError::MethodNotSupported)
+        Err(SecretonError::AuthMethodNotSupported)
     }
 
     fn is_enabled(&self) -> bool {
@@ -348,18 +376,89 @@ impl AuthMethodImpl for RadiusAuthMethod {
 /// RADIUS configuration
 #[derive(Clone, Debug)]
 pub struct RadiusConfig {
+    /// RADIUS server hostname or IP
     pub host: String,
+    /// RADIUS server port (default 1812 for authentication)
     pub port: u16,
-    pub shared_secret: String,
-    pub timeout_seconds: u64,
+    /// Shared secret between client and server
+    pub secret: String,
+    /// NAS IP address to include in requests
     pub nas_ip_address: Option<String>,
+    /// NAS identifier to include in requests
     pub nas_identifier: Option<String>,
+    /// Connection timeout in seconds
+    pub dial_timeout: Option<u64>,
+    /// Read timeout in seconds
+    pub read_timeout: Option<u64>,
 }
 
 /// RADIUS authentication response
 #[derive(Clone, Debug)]
 pub struct RadiusResponse {
+    /// Whether authentication was accepted
     pub accepted: bool,
+    /// Groups assigned to the user (from Filter-Id attributes)
     pub groups: Vec<String>,
+    /// VLAN ID if assigned (from Tunnel-Private-Group-Id)
     pub vlan_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_password_encoding() {
+        // Test vector from RFC 2865
+        let authenticator = [0u8; 16];
+        let secret = "test_secret";
+        let password = "test_password";
+
+        let encoded = RadiusAuthMethod::encode_radius_password(password, &authenticator, secret);
+
+        // Should be padded to 16 bytes minimum
+        assert!(encoded.len() >= 16);
+        assert_eq!(encoded.len() % 16, 0);
+    }
+
+    #[test]
+    fn test_radius_config() {
+        let config = RadiusConfig {
+            host: "127.0.0.1".to_string(),
+            port: 1812,
+            secret: "testing123".to_string(),
+            nas_ip_address: Some("10.0.0.1".to_string()),
+            nas_identifier: Some("secreton-nas".to_string()),
+            dial_timeout: Some(30),
+            read_timeout: Some(30),
+        };
+
+        assert_eq!(config.port, 1812);
+        assert_eq!(config.host, "127.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn test_radius_method_init() {
+        let mut method = RadiusAuthMethod::new();
+        assert!(!method.is_enabled());
+
+        let auth_config = AuthMethod {
+            method_type: AuthMethodType::Radius,
+            path: "radius".to_string(),
+            enabled: true,
+            config: {
+                let mut c = serde_json::Map::new();
+                c.insert("host".to_string(), serde_json::json!("127.0.0.1"));
+                c.insert("shared_secret".to_string(), serde_json::json!("test"));
+                serde_json::Value::Object(c)
+            },
+            description: None,
+            default_lease_ttl: None,
+            max_lease_ttl: None,
+        };
+
+        method.init(&auth_config).await.unwrap();
+        assert!(method.is_enabled());
+        assert!(method.radius_config.is_some());
+    }
 }

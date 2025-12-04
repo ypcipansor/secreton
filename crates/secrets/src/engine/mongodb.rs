@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// MongoDB secret engine
+/// Note: Fields are placeholders pending full MongoDB integration
+#[allow(dead_code)]
 pub struct MongodbEngine {
     config: MongodbConfig,
     enabled: bool,
@@ -29,6 +31,7 @@ impl MongodbEngine {
     }
 
     /// Generate MongoDB credentials
+    #[allow(dead_code)]
     async fn generate_mongodb_credentials(
         &self,
         _data: &HashMap<String, Value>,
@@ -39,16 +42,19 @@ impl MongodbEngine {
     }
 
     /// Generate unique username for MongoDB
+    #[allow(dead_code)]
     fn generate_username(&self, _base_username: &str) -> String {
         "not_available".to_string()
     }
 
     /// Generate a secure password
+    #[allow(dead_code)]
     fn generate_password(&self, _length: usize) -> String {
         "not_available".to_string()
     }
 
     /// Create user in MongoDB
+    #[allow(dead_code)]
     async fn create_mongodb_user(
         &self,
         _client: &(),

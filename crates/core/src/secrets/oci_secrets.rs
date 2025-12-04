@@ -49,6 +49,7 @@ pub struct OCIRoleSet {
 }
 
 /// OCI backend for generating temporary credentials
+#[allow(dead_code)]
 pub struct OCIBackend {
     config: OCIConfig,
     role_sets: Arc<RwLock<HashMap<String, OCIRoleSet>>>,

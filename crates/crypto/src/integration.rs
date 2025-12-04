@@ -168,6 +168,12 @@ impl Default for IntegrationConfig {
     }
 }
 
+impl Default for TransitIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransitIntegration {
     /// Create a new transit integration with default configuration
     pub fn new() -> Self {
@@ -306,7 +312,7 @@ impl TransitIntegration {
         F: FnOnce(&mut IntegrationMetrics),
     {
         let mut metrics = self.metrics.write().await;
-        f(&mut *metrics);
+        f(&mut metrics);
         metrics.last_updated = Utc::now();
     }
 

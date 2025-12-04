@@ -58,6 +58,7 @@ impl Default for TelemetryConfig {
 
 /// System metrics collector
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct TelemetryCollector {
     /// Configuration
     config: TelemetryConfig,
@@ -308,11 +309,13 @@ impl SystemMetrics {
 }
 
 /// Update Prometheus metrics from system metrics
+#[allow(dead_code)]
 async fn update_prometheus_metrics(_metrics: &SystemMetrics, _registry: &prometheus::Registry) {
     // No-op
 }
 
 /// Collect current system metrics
+#[allow(dead_code)]
 async fn collect_system_metrics() -> SystemResourceMetrics {
     // Simplified system metrics collection
     // In a real implementation, this would use system monitoring libraries
@@ -363,7 +366,7 @@ mod tests {
         let collector = TelemetryCollector::new(TelemetryConfig::default());
 
         let metric = Metric {
-            name: "test_counter".to_string(),
+            name: "requests_total".to_string(),
             value: MetricValue::Counter(1),
             tags: HashMap::new(),
             timestamp: chrono::Utc::now(),

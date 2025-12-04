@@ -55,6 +55,7 @@ impl From<LDAPSecretsError> for SecretonError {
 
 /// LDIF operation types
 #[derive(Debug)]
+#[allow(dead_code)]
 enum LDIFOperation {
     Add {
         dn: String,
@@ -340,6 +341,7 @@ impl LDAPSecretsEngine {
     }
 
     /// Parse LDIF content into operations
+    #[allow(dead_code)]
     fn parse_ldif(&self, ldif: &str) -> Result<Vec<LDIFOperation>> {
         let mut operations = Vec::new();
         let lines: Vec<&str> = ldif.lines().collect();
@@ -403,6 +405,7 @@ impl LDAPSecretsEngine {
     }
 
     /// Parse LDIF attributes for add operations
+    #[allow(dead_code)]
     fn parse_ldif_attributes(
         &self,
         lines: &[&str],

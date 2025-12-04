@@ -103,6 +103,7 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 
 /// Core configuration - shared across all components
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CoreConfig {
     /// Server configuration
     pub server: ServerConfig,
@@ -120,17 +121,6 @@ pub struct CoreConfig {
     pub metrics: MetricsConfig,
 }
 
-impl Default for CoreConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            storage: StorageConfig::default(),
-            security: SecurityConfig::default(),
-            logging: LoggingConfig::default(),
-            metrics: MetricsConfig::default(),
-        }
-    }
-}
 
 impl Config for CoreConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -595,6 +585,7 @@ pub enum CloudProvider {
 
 /// Cloud credentials
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CloudCredentials {
     /// Access key ID
     pub access_key_id: String,
@@ -606,15 +597,6 @@ pub struct CloudCredentials {
     pub session_token: Option<String>,
 }
 
-impl Default for CloudCredentials {
-    fn default() -> Self {
-        Self {
-            access_key_id: String::new(),
-            secret_access_key: String::new(),
-            session_token: None,
-        }
-    }
-}
 
 impl Config for CloudCredentials {
     fn validate(&self) -> SecretonResult<()> {
@@ -636,6 +618,7 @@ impl Config for CloudCredentials {
 
 /// Crypto integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CryptoIntegrationConfig {
     pub api: ApiConfig,
     pub storage: CryptoStorageConfig,
@@ -643,16 +626,6 @@ pub struct CryptoIntegrationConfig {
     pub performance: PerformanceConfig,
 }
 
-impl Default for CryptoIntegrationConfig {
-    fn default() -> Self {
-        Self {
-            api: ApiConfig::default(),
-            storage: CryptoStorageConfig::default(),
-            rate_limit: CryptoRateLimitConfig::default(),
-            performance: PerformanceConfig::default(),
-        }
-    }
-}
 
 impl Config for CryptoIntegrationConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -822,13 +795,12 @@ impl Config for KmipConfig {
                 message: "KMIP port cannot be zero".to_string(),
             });
         }
-        if self.tls_enabled {
-            if self.cert_path.is_none() || self.key_path.is_none() {
+        if self.tls_enabled
+            && (self.cert_path.is_none() || self.key_path.is_none()) {
                 return Err(SecretonError::Configuration {
                     message: "Certificate and key paths required when TLS is enabled".to_string(),
                 });
             }
-        }
         Ok(())
     }
 }
@@ -1046,6 +1018,7 @@ impl Config for AgentSecurityConfig {
 
 /// Security configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SecurityConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
@@ -1054,7 +1027,7 @@ pub struct SecurityConfig {
     pub mfa: MfaConfig,
 
     /// Password policy
-    pub password_policy: secreton_common::utils::password::PasswordPolicy,
+    pub password_policy: PasswordPolicy,
 
     /// Session configuration
     pub session: SessionConfig,
@@ -1069,19 +1042,6 @@ pub struct SecurityConfig {
     pub agent: AgentSecurityConfig,
 }
 
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            jwt: JwtConfig::default(),
-            mfa: MfaConfig::default(),
-            password_policy: PasswordPolicy::default(),
-            session: SessionConfig::default(),
-            audit: AuditConfig::default(),
-            rate_limiting: RateLimitConfig::default(),
-            agent: AgentSecurityConfig::default(),
-        }
-    }
-}
 
 impl Config for SecurityConfig {
     fn validate(&self) -> SecretonResult<()> {
@@ -1754,6 +1714,7 @@ impl Config for MetricsConfig {
 
 /// Integrations configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct IntegrationsConfig {
     /// General integration settings
     pub general: Option<IntegrationConfig>,
@@ -1769,18 +1730,6 @@ pub struct IntegrationsConfig {
     pub plugin: Option<PluginConfig>,
 }
 
-impl Default for IntegrationsConfig {
-    fn default() -> Self {
-        Self {
-            general: None,
-            backup_recovery: None,
-            cicd_pipeline: None,
-            distributed_tracing: None,
-            secret_migration: None,
-            plugin: None,
-        }
-    }
-}
 
 impl Config for IntegrationsConfig {
     fn validate(&self) -> SecretonResult<()> {

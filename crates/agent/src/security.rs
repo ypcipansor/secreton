@@ -8,6 +8,41 @@ use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+// Serialization helpers for SystemTime and Duration
+fn serialize_system_time<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    serializer.serialize_u64(duration.as_secs())
+}
+
+fn deserialize_system_time<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: u64 = serde::Deserialize::deserialize(deserializer)?;
+    Ok(UNIX_EPOCH + Duration::from_secs(secs))
+}
+
+fn serialize_duration_opt<S>(duration: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match duration {
+        Some(d) => serializer.serialize_some(&d.as_secs()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_duration_opt<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<u64> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(opt.map(Duration::from_secs))
+}
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::sync::mpsc;
@@ -126,22 +161,59 @@ pub enum ActionResult {
     Pending,
 }
 
-/// Blocked IP entry
-#[derive(Debug, Clone)]
-struct BlockedIp {
-    ip: IpAddr,
-    blocked_at: SystemTime,
-    reason: String,
-    duration: Option<Duration>,
+/// Blocked IP entry for tracking blocked network addresses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockedIp {
+    /// The blocked IP address
+    pub ip: IpAddr,
+    /// Timestamp when the IP was blocked
+    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
+    pub blocked_at: SystemTime,
+    /// Reason for blocking this IP
+    pub reason: String,
+    /// Duration of the block (None for permanent)
+    #[serde(serialize_with = "serialize_duration_opt", deserialize_with = "deserialize_duration_opt")]
+    pub duration: Option<Duration>,
 }
 
-/// Quarantined file entry
-#[derive(Debug, Clone)]
-struct QuarantinedFile {
-    path: PathBuf,
-    quarantined_at: SystemTime,
-    reason: String,
-    hash: String,
+/// Quarantined file entry for tracking suspicious files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuarantinedFile {
+    /// Path to the quarantined file
+    pub path: PathBuf,
+    /// Timestamp when the file was quarantined
+    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
+    pub quarantined_at: SystemTime,
+    /// Reason for quarantining
+    pub reason: String,
+    /// SHA-256 hash of the file
+    pub hash: String,
+}
+
+/// Malware file information from scan results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MalwareFileInfo {
+    /// Path to the infected file
+    pub path: PathBuf,
+    /// Malware signature identifier
+    pub signature: String,
+    /// File size in bytes
+    pub size: u64,
+}
+
+/// Vulnerability information from package scans
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnerabilityInfo {
+    /// CVE identifier
+    pub cve_id: String,
+    /// Affected package name
+    pub package_name: String,
+    /// Package version
+    pub package_version: String,
+    /// Vulnerability description
+    pub description: String,
+    /// Severity level
+    pub severity: ThreatLevel,
 }
 
 /// Security enforcer
@@ -513,14 +585,6 @@ impl SecurityEnforcer {
     ) -> Result<Option<Vec<MalwareFileInfo>>, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would calculate file hashes and compare against signature database
-
-        #[derive(Debug)]
-        struct MalwareFileInfo {
-            path: PathBuf,
-            signature: String,
-            size: u64,
-        }
-
         // Mock implementation - return empty results
         Ok(None)
     }
@@ -579,15 +643,6 @@ impl SecurityEnforcer {
     async fn scan_installed_packages(
         &self,
     ) -> Result<Option<Vec<VulnerabilityInfo>>, SecretonError> {
-        #[derive(Debug)]
-        struct VulnerabilityInfo {
-            cve_id: String,
-            package_name: String,
-            package_version: String,
-            description: String,
-            severity: ThreatLevel,
-        }
-
         // This is a simplified implementation
         // In a real implementation, this would query the package manager and cross-reference with CVE database
 
@@ -914,20 +969,4 @@ impl SecurityEnforcer {
     }
 }
 
-// Helper struct for malware file information (defined at module level)
-#[derive(Debug)]
-struct MalwareFileInfo {
-    path: PathBuf,
-    signature: String,
-    size: u64,
-}
 
-// Helper struct for vulnerability information (defined at module level)
-#[derive(Debug)]
-struct VulnerabilityInfo {
-    cve_id: String,
-    package_name: String,
-    package_version: String,
-    description: String,
-    severity: ThreatLevel,
-}

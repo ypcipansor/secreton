@@ -35,6 +35,7 @@ impl AuditService {
         event_type: AuditEventType,
         user: Option<&str>,
         path: Option<&str>,
+        operation: Option<&str>,
         status: AuditStatus,
         metadata: std::collections::HashMap<String, serde_json::Value>,
     ) -> Result<(), SecretonError> {
@@ -54,7 +55,7 @@ impl AuditService {
             resource: path
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
-            operation: "unknown".to_string(), // TODO: add operation parameter
+            operation: operation.unwrap_or("unknown").to_string(),
             method: None,
             request_id: None,
             token_accessor: None,
@@ -91,6 +92,7 @@ impl AuditService {
             event_type,
             Some(user),
             None,
+            Some("authenticate"),
             status,
             std::collections::HashMap::new(),
         )
@@ -103,6 +105,7 @@ impl AuditService {
         event_type: AuditEventType,
         user: &str,
         path: &str,
+        operation: &str,
         success: bool,
     ) -> Result<(), SecretonError> {
         let status = if success {
@@ -114,6 +117,7 @@ impl AuditService {
             event_type,
             Some(user),
             Some(path),
+            Some(operation),
             status,
             std::collections::HashMap::new(),
         )

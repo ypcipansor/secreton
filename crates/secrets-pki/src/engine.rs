@@ -2,23 +2,50 @@
 
 use crate::error::PkiError;
 use crate::model::{
-    CertificateRequest, CertificateResponse, PkiConfig, SshKeyRequest, SshKeyResponse,
+    CertificateRequest, CertificateResponse, PkiConfig, RevocationReason, SshKeyRequest,
+    SshKeyResponse,
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rcgen::{CertificateParams, DistinguishedName, DnType, Ia5String, SanType};
 use ssh_key::{Algorithm, PrivateKey};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Revoked certificate entry
+#[derive(Debug, Clone)]
+pub struct RevokedCertificate {
+    pub serial_number: String,
+    pub revocation_time: DateTime<Utc>,
+    pub reason: RevocationReason,
+}
 
 /// PKI secret engine for certificate management
 pub struct PkiEngine {
     config: PkiConfig,
-    // In a full implementation, this would include certificate storage,
-    // revocation lists, etc.
+    /// Certificate revocation list (serial_number -> revocation info)
+    revoked_certificates: Arc<RwLock<HashMap<String, RevokedCertificate>>>,
+    /// Issued certificates (serial_number -> certificate details)
+    issued_certificates: Arc<RwLock<HashMap<String, IssuedCertificate>>>,
+}
+
+/// Issued certificate record
+#[derive(Debug, Clone)]
+pub struct IssuedCertificate {
+    pub serial_number: String,
+    pub common_name: String,
+    pub certificate_pem: String,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 impl PkiEngine {
     pub fn new(config: PkiConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            revoked_certificates: Arc::new(RwLock::new(HashMap::new())),
+            issued_certificates: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     /// Generate a certificate from a request
@@ -94,6 +121,19 @@ impl PkiEngine {
         // Generate serial number (simplified)
         let serial_number = format!("{:x}", rand::random::<u64>());
 
+        // Store issued certificate for tracking
+        let issued_cert = IssuedCertificate {
+            serial_number: serial_number.clone(),
+            common_name: request.common_name.clone(),
+            certificate_pem: cert_pem.clone(),
+            issued_at: not_before_chrono,
+            expires_at: not_after_chrono,
+        };
+        self.issued_certificates
+            .write()
+            .await
+            .insert(serial_number.clone(), issued_cert);
+
         Ok(CertificateResponse {
             certificate: cert_pem,
             private_key: key_pem,
@@ -153,12 +193,115 @@ impl PkiEngine {
     /// Revoke a certificate
     pub async fn revoke_certificate(
         &self,
-        _request: &crate::model::RevocationRequest,
+        request: &crate::model::RevocationRequest,
     ) -> Result<(), PkiError> {
-        // Certificate revocation not implemented yet
-        Err(PkiError::CertificateGeneration(
-            "Certificate revocation not implemented".to_string(),
-        ))
+        // Check if the certificate exists
+        let issued_certs = self.issued_certificates.read().await;
+        if !issued_certs.contains_key(&request.serial_number) {
+            return Err(PkiError::CertificateNotFound(request.serial_number.clone()));
+        }
+        drop(issued_certs);
+
+        // Check if already revoked
+        let revoked = self.revoked_certificates.read().await;
+        if revoked.contains_key(&request.serial_number) {
+            return Err(PkiError::CertificateRevocation(format!(
+                "Certificate {} is already revoked",
+                request.serial_number
+            )));
+        }
+        drop(revoked);
+
+        // Add to revocation list
+        let revoked_cert = RevokedCertificate {
+            serial_number: request.serial_number.clone(),
+            revocation_time: Utc::now(),
+            reason: request.reason.clone(),
+        };
+
+        self.revoked_certificates
+            .write()
+            .await
+            .insert(request.serial_number.clone(), revoked_cert);
+
+        tracing::info!(
+            "Certificate {} revoked with reason: {:?}",
+            request.serial_number,
+            request.reason
+        );
+
+        Ok(())
+    }
+
+    /// Check if a certificate is revoked
+    pub async fn is_certificate_revoked(&self, serial_number: &str) -> bool {
+        self.revoked_certificates
+            .read()
+            .await
+            .contains_key(serial_number)
+    }
+
+    /// Get certificate revocation information
+    pub async fn get_revocation_info(
+        &self,
+        serial_number: &str,
+    ) -> Option<RevokedCertificate> {
+        self.revoked_certificates
+            .read()
+            .await
+            .get(serial_number)
+            .cloned()
+    }
+
+    /// Generate a Certificate Revocation List (CRL)
+    pub async fn generate_crl(&self) -> Result<crate::model::CrlResponse, PkiError> {
+        let revoked = self.revoked_certificates.read().await;
+        let now = Utc::now();
+        let next_update = now + Duration::hours(24); // CRL valid for 24 hours
+
+        // Build CRL data (simplified PEM representation)
+        let mut crl_data = String::new();
+        crl_data.push_str("-----BEGIN X509 CRL-----\n");
+        crl_data.push_str(&format!("# CRL Generated: {}\n", now.to_rfc3339()));
+        crl_data.push_str(&format!("# Next Update: {}\n", next_update.to_rfc3339()));
+        crl_data.push_str(&format!("# Total Revoked Certificates: {}\n", revoked.len()));
+        
+        for (serial, info) in revoked.iter() {
+            crl_data.push_str(&format!(
+                "# Serial: {} | Revoked: {} | Reason: {:?}\n",
+                serial,
+                info.revocation_time.to_rfc3339(),
+                info.reason
+            ));
+        }
+        
+        crl_data.push_str("-----END X509 CRL-----\n");
+
+        Ok(crate::model::CrlResponse {
+            crl: crl_data,
+            last_update: now,
+            next_update,
+        })
+    }
+
+    /// List all revoked certificates
+    pub async fn list_revoked_certificates(&self) -> Vec<RevokedCertificate> {
+        self.revoked_certificates
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// List all issued certificates
+    pub async fn list_issued_certificates(&self) -> Vec<IssuedCertificate> {
+        self.issued_certificates
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Get CA information
@@ -207,12 +350,12 @@ impl PkiEngine {
         let subject = extract_dn_info(&cert);
         let issuer = extract_dn_info(&cert);
 
-        // Get key info
-        let key_info = extract_key_info(&cert);
+        // Get key info - pass key_pair not certificate
+        let key_info = extract_key_info(&key_pair);
 
         Ok(CaInfo {
             certificate: cert.pem(),
-            public_key: key_pair.public_key_pem(),
+            public_key: key_info.public_key_pem,
             key_type: key_info.key_type,
             key_bits: key_info.key_bits,
             signature_algorithm: "SHA256withRSA".to_string(), // default
@@ -230,14 +373,13 @@ impl PkiEngine {
     }
 }
 
-/// Extract key information from certificate
-fn extract_key_info(_cert: &rcgen::Certificate) -> KeyInfo {
-    // For rcgen certificates, we can't easily extract key information from the built certificate
-    // This is a simplified implementation - in practice, you'd store key info during generation
+/// Extract key information from certificate and key pair
+fn extract_key_info(key_pair: &rcgen::KeyPair) -> KeyInfo {
+    // Get the public key PEM from the key pair
     KeyInfo {
-        public_key_pem: "-----BEGIN PUBLIC KEY-----\nRSA key information not available from built certificate\n-----END PUBLIC KEY-----".to_string(),
-        key_type: "RSA".to_string(), // Default assumption
-        key_bits: 2048, // Default RSA key size
+        public_key_pem: key_pair.public_key_pem(),
+        key_type: "ECDSA".to_string(), // rcgen uses ECDSA by default
+        key_bits: 256, // P-256 curve
     }
 }
 

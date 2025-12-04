@@ -66,6 +66,12 @@ enum S3Operation {
     Delete(()),
 }
 
+impl Default for S3Transaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl S3Transaction {
     pub fn new() -> Self {
         Self {
@@ -376,14 +382,11 @@ impl StorageBackend for S3Storage {
                     if let Some(version_str) = key
                         .strip_prefix(&format!("{}/v", self.config.prefix.trim_end_matches('/')))
                         .and_then(|s| s.split('/').next())
-                    {
-                        if let Ok(version) = version_str.parse::<u32>() {
-                            if version > latest_version {
+                        && let Ok(version) = version_str.parse::<u32>()
+                            && version > latest_version {
                                 latest_version = version;
                                 latest_key = Some(key.clone());
                             }
-                        }
-                    }
                 }
             }
         }
@@ -526,11 +529,10 @@ impl StorageBackend for S3Storage {
         // Apply filters
         let mut filtered_entries = Vec::new();
         for entry in entries {
-            if let Some(owner_id) = params.owner_id {
-                if entry.owner_id != owner_id {
+            if let Some(owner_id) = params.owner_id
+                && entry.owner_id != owner_id {
                     continue;
                 }
-            }
             if !params.include_expired && entry.is_expired() {
                 continue;
             }

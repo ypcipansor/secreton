@@ -339,8 +339,7 @@ impl ControlGroupService {
 
     /// Check if path matches pattern (simple wildcard)
     fn path_matches(&self, path: &str, pattern: &str) -> bool {
-        if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
+        if let Some(prefix) = pattern.strip_suffix('*') {
             path.starts_with(prefix)
         } else {
             path == pattern

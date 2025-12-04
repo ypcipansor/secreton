@@ -9,6 +9,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// OCI backend for generating temporary credentials
+/// Note: Fields are placeholders pending OCI SDK integration
+#[allow(dead_code)]
 pub struct OciBackend {
     tenancy_ocid: String,
     user_ocid: String,
@@ -21,6 +23,7 @@ pub struct OciBackend {
 
 impl OciBackend {
     /// Create OCI client configuration and initialize clients
+    #[allow(dead_code)]
     async fn create_oci_clients(&mut self) -> Result<(), SecretError> {
         // OCI SDK not available - return error
         Err(SecretError::BackendNotSupported(

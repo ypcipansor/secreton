@@ -11,8 +11,11 @@ use uuid::Uuid;
 
 use super::email::*;
 use super::hardware::*;
+use super::push::*;
+use super::recovery::*;
 use super::sms::*;
 use super::totp::*;
+use super::webauthn::*;
 
 /// MFA method types
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +45,9 @@ pub struct MfaValidationRequest {
     pub method: MfaMethod,
     pub code: Option<String>,
     pub hardware_request: Option<HardwareAuthenticationRequest>,
+    pub push_notification_id: Option<Uuid>,
+    pub push_response: Option<PushResponse>,
+    pub webauthn_response: Option<AuthenticationResponse>,
 }
 
 /// MFA service trait
@@ -80,6 +86,9 @@ pub struct CombinedMfaService {
     sms_service: Arc<dyn SmsService>,
     email_service: Arc<dyn EmailService>,
     hardware_service: Arc<dyn HardwareService>,
+    push_service: Arc<dyn PushService>,
+    webauthn_service: Arc<dyn WebAuthnService>,
+    recovery_service: Arc<dyn RecoveryCodeService>,
     enrollments: RwLock<HashMap<Uuid, MfaEnrollment>>,
 }
 
@@ -89,12 +98,18 @@ impl CombinedMfaService {
         sms_service: Arc<dyn SmsService>,
         email_service: Arc<dyn EmailService>,
         hardware_service: Arc<dyn HardwareService>,
+        push_service: Arc<dyn PushService>,
+        webauthn_service: Arc<dyn WebAuthnService>,
+        recovery_service: Arc<dyn RecoveryCodeService>,
     ) -> Self {
         Self {
             totp_service,
             sms_service,
             email_service,
             hardware_service,
+            push_service,
+            webauthn_service,
+            recovery_service,
             enrollments: RwLock::new(HashMap::new()),
         }
     }
@@ -143,16 +158,42 @@ impl CombinedMfaService {
                 }
             }
             MfaMethod::Push => {
-                // Push notification MFA - not implemented yet
-                Ok(false)
+                // Push notification MFA validation
+                if let (Some(notification_id), Some(response)) =
+                    (&request.push_notification_id, &request.push_response)
+                {
+                    let push_request = PushValidationRequest {
+                        entity_id: request.entity_id,
+                        notification_id: *notification_id,
+                        response: response.clone(),
+                    };
+                    self.push_service.validate(push_request).await
+                } else {
+                    Ok(false)
+                }
             }
             MfaMethod::WebAuthn => {
-                // WebAuthn MFA - not implemented yet
-                Ok(false)
+                // WebAuthn MFA validation
+                if let Some(webauthn_response) = &request.webauthn_response {
+                    self.webauthn_service
+                        .complete_authentication(webauthn_response.clone())
+                        .await
+                } else {
+                    Ok(false)
+                }
             }
             MfaMethod::Recovery => {
-                // Recovery code MFA - not implemented yet
-                Ok(false)
+                // Recovery code MFA validation
+                if let Some(code) = &request.code {
+                    let recovery_request = RecoveryCodeValidationRequest {
+                        entity_id: request.entity_id,
+                        code: code.clone(),
+                        request_ip: None,
+                    };
+                    self.recovery_service.validate(recovery_request).await
+                } else {
+                    Ok(false)
+                }
             }
         }
     }
@@ -188,6 +229,7 @@ impl MfaService for CombinedMfaService {
             }
 
             // Validate using the specific method
+            drop(enrollments);
             self.validate_method(&request).await
         } else {
             Ok(false)
@@ -220,6 +262,7 @@ impl MfaService for CombinedMfaService {
     async fn remove_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<()> {
         let mut enrollments = self.enrollments.write().await;
         enrollments.remove(&entity_id);
+        drop(enrollments);
 
         // Also remove from individual services
         let _ = self.totp_service.remove_enrollment(entity_id).await;
@@ -235,6 +278,29 @@ impl MfaService for CombinedMfaService {
                     .await;
             }
         }
+
+        // Remove push device enrollments
+        if let Ok(push_devices) = self.push_service.list_devices(entity_id).await {
+            for device in push_devices {
+                let _ = self
+                    .push_service
+                    .remove_enrollment(entity_id, &device.device_id)
+                    .await;
+            }
+        }
+
+        // Remove WebAuthn credentials
+        if let Ok(webauthn_creds) = self.webauthn_service.list_credentials(entity_id).await {
+            for cred in webauthn_creds {
+                let _ = self
+                    .webauthn_service
+                    .remove_credential(entity_id, &cred.credential_id)
+                    .await;
+            }
+        }
+
+        // Revoke recovery codes
+        let _ = self.recovery_service.revoke_codes(entity_id).await;
 
         Ok(())
     }

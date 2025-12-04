@@ -39,6 +39,12 @@ enum CockroachDBOperation {
     Delete(()),
 }
 
+impl Default for CockroachDBTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CockroachDBTransaction {
     pub fn new() -> Self {
         Self {
@@ -276,7 +282,7 @@ impl StorageBackend for CockroachDBStorage {
                     message: format!("Failed to query by ID: {}", e),
                 })?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             Ok(Some(Self::row_to_vault_entry(row)?))
         } else {
             Ok(None)
@@ -293,7 +299,7 @@ impl StorageBackend for CockroachDBStorage {
                     message: format!("Failed to query by path: {}", e),
                 })?;
 
-        if let Some(row) = rows.get(0) {
+        if let Some(row) = rows.first() {
             Ok(Some(Self::row_to_vault_entry(row)?))
         } else {
             Ok(None)

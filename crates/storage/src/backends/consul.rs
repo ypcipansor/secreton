@@ -65,6 +65,12 @@ enum ConsulOperation {
     Delete(()),
 }
 
+impl Default for ConsulTransaction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConsulTransaction {
     pub fn new() -> Self {
         Self {
@@ -133,8 +139,8 @@ impl ConsulStorage {
             reqwest::Client::builder().timeout(std::time::Duration::from_secs(config.timeout));
 
         // Add TLS configuration if enabled
-        if config.tls_enabled {
-            if let Some(ca_cert) = &config.tls_ca_cert {
+        if config.tls_enabled
+            && let Some(ca_cert) = &config.tls_ca_cert {
                 let cert = reqwest::Certificate::from_pem(ca_cert.as_bytes()).map_err(|e| {
                     StorageError::ConfigurationError {
                         message: format!("Invalid CA certificate: {}", e),
@@ -142,7 +148,6 @@ impl ConsulStorage {
                 })?;
                 client_builder = client_builder.add_root_certificate(cert);
             }
-        }
 
         let client = client_builder
             .build()
@@ -373,11 +378,10 @@ impl StorageBackend for ConsulStorage {
         for key in keys {
             if let Some(entry) = self.get_by_path(&key).await? {
                 // Apply filters
-                if let Some(owner) = params.owner_id {
-                    if entry.owner_id != owner {
+                if let Some(owner) = params.owner_id
+                    && entry.owner_id != owner {
                         continue;
                     }
-                }
                 if !params.include_expired && entry.is_expired() {
                     continue;
                 }

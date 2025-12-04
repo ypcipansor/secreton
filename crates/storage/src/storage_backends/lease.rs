@@ -115,17 +115,17 @@ impl From<Lease> for EnhancedLease {
     }
 }
 
-impl Into<Lease> for EnhancedLease {
-    fn into(self) -> Lease {
+impl From<EnhancedLease> for Lease {
+    fn from(val: EnhancedLease) -> Self {
         Lease {
-            id: self.id,
-            user: self._user,
-            resource: self.resource,
-            resource_type: self.resource_type,
-            issued_at: self.issued_at,
-            expired_at: self.expired_at,
-            status: self._status,
-            namespace: self.namespace,
+            id: val.id,
+            user: val._user,
+            resource: val.resource,
+            resource_type: val.resource_type,
+            issued_at: val.issued_at,
+            expired_at: val.expired_at,
+            status: val._status,
+            namespace: val.namespace,
         }
     }
 }
@@ -243,11 +243,10 @@ impl LeaseManager {
         }
 
         // Check max renewals
-        if let Some(max_renewals) = lease.max_renewals {
-            if lease.renew_count >= max_renewals {
+        if let Some(max_renewals) = lease.max_renewals
+            && lease.renew_count >= max_renewals {
                 return Err(LeaseError::RenewalNotAllowed);
             }
-        }
 
         // Calculate new expiration
         let new_ttl = increment.min(lease.max_ttl);

@@ -86,9 +86,10 @@ hex.workspace = true
 # Base32 encoding for TOTP
 base32.workspace = true
 
-# HMAC and SHA1 for TOTP
+# HMAC and SHA for MFA
 hmac.workspace = true
 sha1.workspace = true
+sha2.workspace = true
 
 # Policy evaluation
 pest.workspace = true

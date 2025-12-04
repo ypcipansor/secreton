@@ -226,6 +226,7 @@ pub trait ExternalSystemClient: Send + Sync {
 }
 
 /// Secrets sync manager
+#[allow(dead_code)]
 pub struct SecretsSyncManager {
     clients: RwLock<HashMap<String, Arc<dyn ExternalSystemClient>>>,
     sync_configs: RwLock<HashMap<String, SyncConfig>>,

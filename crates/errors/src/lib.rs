@@ -300,6 +300,10 @@ pub enum SecretonError {
     #[error("Invalid authentication method configuration: {message}")]
     AuthMethodConfigInvalid { message: String },
 
+    // RADIUS Authentication
+    #[error("RADIUS error: {0}")]
+    RadiusError(String),
+
     // Templating & Rendering
     #[error("Template error: {message}")]
     Template { message: String },
@@ -452,6 +456,7 @@ impl SecretonError {
             SecretonError::AuthMethodDisabled => StatusCode::FORBIDDEN,
             SecretonError::AuthMethodNotSupported => StatusCode::BAD_REQUEST,
             SecretonError::AuthMethodConfigInvalid { .. } => StatusCode::BAD_REQUEST,
+            SecretonError::RadiusError(_) => StatusCode::UNAUTHORIZED,
 
             // Templating
             SecretonError::Template { .. } => StatusCode::INTERNAL_SERVER_ERROR,
@@ -523,7 +528,8 @@ impl SecretonError {
             | SecretonError::AgentSinkWriteError { .. }
             | SecretonError::AgentRenewalError { .. }
             | SecretonError::AuthenticatedKeyAuthError { .. }
-            | SecretonError::AuthenticatedKeyPermissionError { .. } => "authentication",
+            | SecretonError::AuthenticatedKeyPermissionError { .. }
+            | SecretonError::RadiusError(_) => "authentication",
 
             SecretonError::NotFound { .. }
             | SecretonError::AlreadyExists { .. }

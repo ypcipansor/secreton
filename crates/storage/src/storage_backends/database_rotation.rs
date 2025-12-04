@@ -168,11 +168,10 @@ impl DatabaseRootRotation {
 
         // Check rotation _status
         let _status = self.rotation_status.read().await;
-        if let Some(current_status) = _status.get(_database_name) {
-            if *current_status == RotationStatus::InProgress {
+        if let Some(current_status) = _status.get(_database_name)
+            && *current_status == RotationStatus::InProgress {
                 return Err(RootRotationError::RotationInProgress);
             }
-        }
         drop(_status);
 
         // Set _status to in progress
@@ -199,7 +198,7 @@ impl DatabaseRootRotation {
             id: rotation_id.clone(),
             _database_name: _database_name.to_string(),
             old_username: old_credential._username.clone(),
-            new_username: format!("root-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            new_username: format!("root-{}", &uuid::Uuid::new_v4().to_string()[..8]),
             started_at: Utc::now(),
             completed_at: None,
             _status: RotationStatus::InProgress,
@@ -209,7 +208,7 @@ impl DatabaseRootRotation {
 
         // Generate new credential
         let new_credential = RootCredential {
-            _username: format!("root-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            _username: format!("root-{}", &uuid::Uuid::new_v4().to_string()[..8]),
             _password: self.generate_password(),
             created_at: Utc::now(),
             rotated_at: Some(Utc::now()),

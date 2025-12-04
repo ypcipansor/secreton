@@ -486,13 +486,11 @@ impl KubernetesOperator {
 
         let mut pod_names = Vec::new();
         for pod in pod_list.items {
-            if let Some(annotations) = &pod.metadata.annotations {
-                if annotations.contains_key(annotation) {
-                    if let Some(name) = pod.metadata.name {
+            if let Some(annotations) = &pod.metadata.annotations
+                && annotations.contains_key(annotation)
+                    && let Some(name) = pod.metadata.name {
                         pod_names.push(name);
                     }
-                }
-            }
         }
 
         Ok(pod_names)

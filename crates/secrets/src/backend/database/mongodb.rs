@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// MongoDB database backend
+#[allow(dead_code)]
 pub struct MongodbBackend {
     connection_string: String,
 }

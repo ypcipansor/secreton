@@ -448,7 +448,8 @@ mod tests {
 
         assert!(url.starts_with("otpauth://totp/"));
         assert!(url.contains("MyApp"));
-        assert!(url.contains("user@example.com"));
+        // URL-encoded: user%40example.com or user@example.com
+        assert!(url.contains("user%40example.com") || url.contains("user@example.com"));
         assert!(url.contains("&period=30"));
     }
 
