@@ -5,7 +5,7 @@ use crate::model::{
     CertificateRequest, CertificateResponse, PkiConfig, RevocationReason, SshKeyRequest,
     SshKeyResponse,
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, DistinguishedName, DnType, SanType};
 use ssh_key::{Algorithm, PrivateKey};

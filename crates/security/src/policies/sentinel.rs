@@ -308,6 +308,7 @@ impl SentinelEngine {
                 }
                 return Ok(false);
             }
+        }
 
         // Default: allow
         Ok(true)

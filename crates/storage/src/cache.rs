@@ -324,6 +324,7 @@ where
             ) {
                 return Ok(Some(entry));
             }
+        }
 
         // Fall back to storage
         let entry = self.storage.get_by_id(id).await?;
@@ -338,6 +339,7 @@ where
                     .set(&cache_key, serialized, Some(self.default_ttl))
                     .await;
             }
+        }
 
         Ok(entry)
     }
@@ -353,6 +355,7 @@ where
             ) {
                 return Ok(Some(entry));
             }
+        }
 
         // Fall back to storage
         let entry = self.storage.get_by_path(path).await?;
@@ -367,6 +370,7 @@ where
                     .set(&cache_key, serialized, Some(self.default_ttl))
                     .await;
             }
+        }
 
         Ok(entry)
     }

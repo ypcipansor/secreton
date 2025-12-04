@@ -31,6 +31,7 @@
 //! let auth_config = &config.auth;
 //! ```
 
+use secreton_common::password::PasswordPolicy;
 use secreton_errors::{Result as SecretonResult, SecretonError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
