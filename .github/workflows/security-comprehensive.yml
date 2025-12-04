@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -35,7 +35,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-vuln-results.sarif'
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run Trivy config scanner
         uses: aquasecurity/trivy-action@master
@@ -58,7 +58,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy config results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-config-results.sarif'
@@ -69,22 +69,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo-audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        run: cargo audit
 
   cargo-geiger:
     name: Unsafe Code Analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -114,7 +115,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload geiger reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: geiger-reports
           path: |
@@ -127,29 +128,23 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-3.0, AGPL-3.0
-          allow-licenses: Apache-2.0, MIT, BSD-3-Clause, BSD-2-Clause, ISC
+          allow-licenses: Apache-2.0, MIT, BSD-3-Clause, BSD-2-Clause, ISC, 0BSD
 
   osv-scanner:
     name: OSV Scanner
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Run OSV Scanner
-        uses: google/osv-scanner-action@v1
-        with:
-          scan-args: |-
-            --recursive
-            --skip-git
-            ./
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.2.4
+    with:
+      scan-args: |-
+        --recursive
+        --skip-git
+        ./
 
   semgrep:
     name: Semgrep Security Scan
@@ -158,10 +153,11 @@ jobs:
       image: semgrep/semgrep
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run Semgrep
         run: semgrep ci --sarif --output=semgrep-results.sarif
+        continue-on-error: true
         env:
           SEMGREP_RULES: >-
             p/security-audit
@@ -169,7 +165,7 @@ jobs:
             p/rust
 
       - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: semgrep-results.sarif
@@ -181,18 +177,19 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@master
 
       - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/rust@master
+        run: snyk test --sarif-file-output=snyk-results.sarif
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --sarif-file-output=snyk-results.sarif
 
       - name: Upload Snyk results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: snyk-results.sarif

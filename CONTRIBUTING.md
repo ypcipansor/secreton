@@ -592,9 +592,9 @@ cargo doc --workspace --all-features --no-deps 2>&1 | grep warning
    - Update README if needed
    - Add examples for new features
 
-3. **Add Changelog Entry**
-   - Document changes for users
-   - Note any breaking changes
+3. **Update Release Notes (if applicable)**
+   - If the project uses a changelog or release-notes file, document user-visible changes.
+   - Call out any breaking changes clearly.
 
 4. **Rebase on Latest**
    ```bash
@@ -720,10 +720,9 @@ Any other relevant information.
 ### Security Policy
 
 - **DO NOT** open public issues for security vulnerabilities
-- Email security issues to: **security@secreton.io**
-- We will respond within 48 hours
-- Coordinated disclosure process
-- Security advisory will be published after fix
+- Prefer opening a private security advisory in GitHub ("Security" tab → "Advisories"), or contact the maintainer via the email listed in `Cargo.toml` (currently `zynqrs@gmail.com`).
+- We will review reports and work on a fix as soon as reasonably possible.
+- Follow a coordinated disclosure process where appropriate.
 
 ### Security Testing
 
@@ -762,24 +761,21 @@ Before submitting security-related PRs:
 
 ### Getting Help
 
-- **GitHub Discussions**: For questions and discussions
+- **GitHub Discussions**: For questions and design discussions
 - **GitHub Issues**: For bugs and feature requests
-- **Discord**: Join our community chat (link in README)
-- **Email**: support@secreton.io
+- **Contact**: Use Issues/Discussions or the maintainer email from `Cargo.toml` for more detailed support.
 
 ### Resources
 
-- **Documentation**: https://secreton.io/docs
-- **API Reference**: https://secreton.io/api
-- **Examples**: https://github.com/analisaperlengkapan/secreton-examples
-- **Blog**: https://secreton.io/blog
+- **Documentation**: The `docs/` directory in this repository (work in progress)
+- **API Reference**: Generated with `cargo doc` and via the OpenAPI endpoints exposed by the API server (see README for URLs)
+- **Examples / Blog**: Planned for future releases.
 
 ### Recognition
 
-Contributors will be:
-- Listed in CONTRIBUTORS.md
-- Mentioned in release notes
-- Invited to contributor events
+Contributors are:
+- Listed in GitHub's contributors graph
+- Mentioned in release notes when appropriate
 
 ## 📋 Checklist for Contributors
 

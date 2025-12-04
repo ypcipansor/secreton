@@ -283,10 +283,11 @@ impl SentinelEngine {
 
         // Rule: "allow if path matches secret/*"
         if code.contains("path matches")
-            && let Some(pattern) = code.split("path matches").nth(1) {
-                let pattern = pattern.trim().trim_matches('"');
-                return Ok(self.path_matches(&context.path, pattern));
-            }
+            && let Some(pattern) = code.split("path matches").nth(1)
+        {
+            let pattern = pattern.trim().trim_matches('"');
+            return Ok(self.path_matches(&context.path, pattern));
+        }
 
         // Rule: "deny if not business_hours"
         if code.contains("business_hours") {
@@ -298,14 +299,14 @@ impl SentinelEngine {
 
         // Rule: "allow if identity has role:admin"
         if code.contains("identity has")
-            && let Some(attr_part) = code.split("identity has").nth(1) {
-                let attr_part = attr_part.trim().trim_matches('"');
-                if let Some((key, value)) = attr_part.split_once(':') {
-                    if let Some(actual_value) = context.identity.get(key) {
-                        return Ok(actual_value == value);
-                    }
-                    return Ok(false);
+            && let Some(attr_part) = code.split("identity has").nth(1)
+        {
+            let attr_part = attr_part.trim().trim_matches('"');
+            if let Some((key, value)) = attr_part.split_once(':') {
+                if let Some(actual_value) = context.identity.get(key) {
+                    return Ok(actual_value == value);
                 }
+                return Ok(false);
             }
 
         // Default: allow

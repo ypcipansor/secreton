@@ -117,15 +117,17 @@ impl FileBackend {
             .filter(|entry| {
                 // Filter by path prefix
                 if let Some(prefix) = &params.path_prefix
-                    && !entry.path.starts_with(prefix) {
-                        return false;
-                    }
+                    && !entry.path.starts_with(prefix)
+                {
+                    return false;
+                }
 
                 // Filter by security level
                 if let Some(min_level) = params.security_level
-                    && entry.security_level < min_level {
-                        return false;
-                    }
+                    && entry.security_level < min_level
+                {
+                    return false;
+                }
 
                 // Filter by tags
                 if !params.tags.is_empty() {
@@ -138,9 +140,10 @@ impl FileBackend {
 
                 // Filter by owner
                 if let Some(owner_id) = params.owner_id
-                    && entry.owner_id != owner_id {
-                        return false;
-                    }
+                    && entry.owner_id != owner_id
+                {
+                    return false;
+                }
 
                 // Filter by metadata
                 for (key, value) in &params.metadata_filters {

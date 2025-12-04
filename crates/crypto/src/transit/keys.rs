@@ -419,9 +419,11 @@ impl TransitKey {
 
                 // Remove context if present
                 if let Some(ctx) = context
-                    && decrypted.len() >= ctx.len() && decrypted.ends_with(ctx) {
-                        decrypted.truncate(decrypted.len() - ctx.len());
-                    }
+                    && decrypted.len() >= ctx.len()
+                    && decrypted.ends_with(ctx)
+                {
+                    decrypted.truncate(decrypted.len() - ctx.len());
+                }
 
                 decrypted
             }
@@ -457,9 +459,11 @@ impl TransitKey {
 
                 // Remove context if present
                 if let Some(ctx) = context
-                    && decrypted.len() >= ctx.len() && decrypted.ends_with(ctx) {
-                        decrypted.truncate(decrypted.len() - ctx.len());
-                    }
+                    && decrypted.len() >= ctx.len()
+                    && decrypted.ends_with(ctx)
+                {
+                    decrypted.truncate(decrypted.len() - ctx.len());
+                }
 
                 decrypted
             }
@@ -502,7 +506,7 @@ impl TransitKey {
                 // Derive AES key from shared secret
                 let mut aes_key = Key::<Aes256Gcm>::default();
                 hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret)
-                    .expand(b"secreton-x25519-aes", aes_key.as_mut_slice())
+                    .expand(b"secreton-x25519-aes", aes_key.as_mut())
                     .map_err(|_| {
                         CryptoError::KeyDerivationFailed("HKDF expansion failed".to_string())
                     })?;
@@ -516,9 +520,11 @@ impl TransitKey {
 
                 // Remove context if present
                 if let Some(ctx) = context
-                    && decrypted.len() >= ctx.len() && decrypted.ends_with(ctx) {
-                        decrypted.truncate(decrypted.len() - ctx.len());
-                    }
+                    && decrypted.len() >= ctx.len()
+                    && decrypted.ends_with(ctx)
+                {
+                    decrypted.truncate(decrypted.len() - ctx.len());
+                }
 
                 decrypted
             }
@@ -557,11 +563,12 @@ impl TransitKey {
             KeyMaterial::EcdsaP256(private_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::EcdsaP256 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::EcdsaP256
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let signing_key = P256SigningKey::from(private_key.as_ref());
                 let signature: p256::ecdsa::Signature = signing_key.sign(data);
                 BASE64.encode(signature.to_der())
@@ -570,11 +577,12 @@ impl TransitKey {
             KeyMaterial::EcdsaSecp256k1(private_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::EcdsaSecp256k1 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::EcdsaSecp256k1
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let signing_key = K256SigningKey::from(private_key.as_ref());
                 let signature: k256::ecdsa::Signature = signing_key.sign(data);
                 BASE64.encode(signature.to_der())
@@ -583,11 +591,12 @@ impl TransitKey {
             KeyMaterial::Ed25519(signing_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::Ed25519 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::Ed25519
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let signature = signing_key.sign(data);
                 BASE64.encode(signature.to_bytes())
             }
@@ -650,11 +659,12 @@ impl TransitKey {
             KeyMaterial::EcdsaP256(private_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::EcdsaP256 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::EcdsaP256
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let public_key = private_key.public_key();
                 let verifying_key = P256VerifyingKey::from(&public_key);
                 if let Ok(signature) = p256::ecdsa::Signature::from_der(&signature_bytes) {
@@ -667,11 +677,12 @@ impl TransitKey {
             KeyMaterial::EcdsaSecp256k1(private_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::EcdsaSecp256k1 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::EcdsaSecp256k1
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let public_key = private_key.public_key();
                 let verifying_key = K256VerifyingKey::from(&public_key);
                 if let Ok(signature) = k256::ecdsa::Signature::from_der(&signature_bytes) {
@@ -684,11 +695,12 @@ impl TransitKey {
             KeyMaterial::Ed25519(signing_key) => {
                 // Validate algorithm compatibility if specified
                 if let Some(alg) = algorithm
-                    && alg != SignatureAlgorithm::Ed25519 {
-                        return Err(CryptoError::InvalidUsage(
-                            "Algorithm does not match key type".to_string(),
-                        ));
-                    }
+                    && alg != SignatureAlgorithm::Ed25519
+                {
+                    return Err(CryptoError::InvalidUsage(
+                        "Algorithm does not match key type".to_string(),
+                    ));
+                }
                 let verifying_key = signing_key.verifying_key();
                 if let Ok(sig_bytes) = TryInto::<[u8; 64]>::try_into(signature_bytes) {
                     let signature = Ed25519Signature::from_bytes(&sig_bytes);

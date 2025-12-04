@@ -119,7 +119,6 @@ x509-parser.workspace = true
 pem.workspace = true
 
 # HTTP API
-axum-extra = { version = "0.9", features = ["typed-header"] }
 
 # Secret Versioning - now in enterprise crate
 # secret_versioning = { path = "./secret_versioning" }
@@ -141,10 +140,10 @@ flate2.workspace = true
 # google-cloud-secretmanager = "0.16"
 # google-cloud-bigquery = "0.16"
 # google-cloud-iam = "0.16"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Prometheus monitoring
-prometheus = "0.13"
+prometheus = { workspace = true }
 
 # LDAP Dependencies
 ldap3.workspace = true

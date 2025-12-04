@@ -257,7 +257,7 @@ impl TOTPEngine {
         use sha2::{Sha256, Sha512};
 
         // Decode base32 secret to bytes
-        let secret_bytes = decode(base32::Alphabet::RFC4648 { padding: false }, secret)
+        let secret_bytes = decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
             .ok_or_else(|| OTPError::OTPError("Invalid base32 secret".to_string()))?;
 
         // Convert counter to big-endian bytes (8 bytes)

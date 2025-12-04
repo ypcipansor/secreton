@@ -307,25 +307,25 @@ impl StorageBackend for EtcdStorage {
                 })?;
 
         if let Some(kvs) = etcd_response.kvs
-            && let Some(kv) = kvs.first() {
-                let decoded = BASE64_STANDARD.decode(&kv.value).map_err(|e| {
-                    StorageError::SerializationError {
-                        message: format!("Failed to decode base64: {}", e),
-                    }
+            && let Some(kv) = kvs.first()
+        {
+            let decoded = BASE64_STANDARD.decode(&kv.value).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to decode base64: {}", e),
+                }
+            })?;
+
+            let entry: SecretEntry =
+                serde_json::from_slice(&decoded).map_err(|e| StorageError::SerializationError {
+                    message: format!("Failed to deserialize entry: {}", e),
                 })?;
 
-                let entry: SecretEntry = serde_json::from_slice(&decoded).map_err(|e| {
-                    StorageError::SerializationError {
-                        message: format!("Failed to deserialize entry: {}", e),
-                    }
-                })?;
+            // Update cache
+            let mut cache = self.cache.write().await;
+            cache.insert(path.to_string(), entry.clone());
 
-                // Update cache
-                let mut cache = self.cache.write().await;
-                cache.insert(path.to_string(), entry.clone());
-
-                return Ok(Some(entry));
-            }
+            return Ok(Some(entry));
+        }
 
         Ok(None)
     }
@@ -439,9 +439,10 @@ impl StorageBackend for EtcdStorage {
 
                 // Apply filters
                 if let Some(owner) = params.owner_id
-                    && entry.owner_id != owner {
-                        continue;
-                    }
+                    && entry.owner_id != owner
+                {
+                    continue;
+                }
                 if !params.include_expired && entry.is_expired() {
                     continue;
                 }

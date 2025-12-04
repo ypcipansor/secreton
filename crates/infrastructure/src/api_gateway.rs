@@ -10,7 +10,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
-
 #[derive(Debug, Error)]
 pub enum GatewayError {
     #[error("Route not found: {0}")]

@@ -161,59 +161,24 @@ pub enum ActionResult {
     Pending,
 }
 
-/// Blocked IP entry for tracking blocked network addresses
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Blocked IP entry
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BlockedIp {
-    /// The blocked IP address
-    pub ip: IpAddr,
-    /// Timestamp when the IP was blocked
-    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
-    pub blocked_at: SystemTime,
-    /// Reason for blocking this IP
-    pub reason: String,
-    /// Duration of the block (None for permanent)
-    #[serde(serialize_with = "serialize_duration_opt", deserialize_with = "deserialize_duration_opt")]
-    pub duration: Option<Duration>,
+    ip: IpAddr,
+    blocked_at: SystemTime,
+    reason: String,
+    duration: Option<Duration>,
 }
 
-/// Quarantined file entry for tracking suspicious files
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Quarantined file entry
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QuarantinedFile {
-    /// Path to the quarantined file
-    pub path: PathBuf,
-    /// Timestamp when the file was quarantined
-    #[serde(serialize_with = "serialize_system_time", deserialize_with = "deserialize_system_time")]
-    pub quarantined_at: SystemTime,
-    /// Reason for quarantining
-    pub reason: String,
-    /// SHA-256 hash of the file
-    pub hash: String,
-}
-
-/// Malware file information from scan results
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MalwareFileInfo {
-    /// Path to the infected file
-    pub path: PathBuf,
-    /// Malware signature identifier
-    pub signature: String,
-    /// File size in bytes
-    pub size: u64,
-}
-
-/// Vulnerability information from package scans
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VulnerabilityInfo {
-    /// CVE identifier
-    pub cve_id: String,
-    /// Affected package name
-    pub package_name: String,
-    /// Package version
-    pub package_version: String,
-    /// Vulnerability description
-    pub description: String,
-    /// Severity level
-    pub severity: ThreatLevel,
+    path: PathBuf,
+    quarantined_at: SystemTime,
+    reason: String,
+    hash: String,
 }
 
 /// Security enforcer
@@ -585,6 +550,15 @@ impl SecurityEnforcer {
     ) -> Result<Option<Vec<MalwareFileInfo>>, SecretonError> {
         // This is a simplified implementation
         // In a real implementation, this would calculate file hashes and compare against signature database
+
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct MalwareFileInfo {
+            path: PathBuf,
+            signature: String,
+            size: u64,
+        }
+
         // Mock implementation - return empty results
         Ok(None)
     }
@@ -643,6 +617,16 @@ impl SecurityEnforcer {
     async fn scan_installed_packages(
         &self,
     ) -> Result<Option<Vec<VulnerabilityInfo>>, SecretonError> {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct VulnerabilityInfo {
+            cve_id: String,
+            package_name: String,
+            package_version: String,
+            description: String,
+            severity: ThreatLevel,
+        }
+
         // This is a simplified implementation
         // In a real implementation, this would query the package manager and cross-reference with CVE database
 
@@ -969,4 +953,22 @@ impl SecurityEnforcer {
     }
 }
 
+// Helper struct for malware file information (defined at module level)
+#[derive(Debug)]
+#[allow(dead_code)]
+struct MalwareFileInfo {
+    path: PathBuf,
+    signature: String,
+    size: u64,
+}
 
+// Helper struct for vulnerability information (defined at module level)
+#[derive(Debug)]
+#[allow(dead_code)]
+struct VulnerabilityInfo {
+    cve_id: String,
+    package_name: String,
+    package_version: String,
+    description: String,
+    severity: ThreatLevel,
+}

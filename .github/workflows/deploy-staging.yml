@@ -20,7 +20,7 @@ jobs:
     environment: staging
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -63,7 +63,7 @@ jobs:
             type=raw,value=staging
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true

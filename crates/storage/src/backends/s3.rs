@@ -383,10 +383,11 @@ impl StorageBackend for S3Storage {
                         .strip_prefix(&format!("{}/v", self.config.prefix.trim_end_matches('/')))
                         .and_then(|s| s.split('/').next())
                         && let Ok(version) = version_str.parse::<u32>()
-                            && version > latest_version {
-                                latest_version = version;
-                                latest_key = Some(key.clone());
-                            }
+                        && version > latest_version
+                    {
+                        latest_version = version;
+                        latest_key = Some(key.clone());
+                    }
                 }
             }
         }
@@ -530,9 +531,10 @@ impl StorageBackend for S3Storage {
         let mut filtered_entries = Vec::new();
         for entry in entries {
             if let Some(owner_id) = params.owner_id
-                && entry.owner_id != owner_id {
-                    continue;
-                }
+                && entry.owner_id != owner_id
+            {
+                continue;
+            }
             if !params.include_expired && entry.is_expired() {
                 continue;
             }

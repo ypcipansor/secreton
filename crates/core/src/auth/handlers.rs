@@ -1,9 +1,12 @@
 //! Authentication HTTP handlers for Secreton
 
 use crate::server::AppState;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, response::Json};
-use axum_extra::TypedHeader;
-use axum_extra::headers::{Authorization, authorization::Bearer};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    response::Json,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -41,6 +44,18 @@ pub struct UserInfoResponse {
     pub id: String,
     pub username: String,
     pub roles: Vec<String>,
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
 }
 
 /// Login handler
@@ -90,12 +105,14 @@ pub async fn refresh_token(
 }
 
 /// Logout handler
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> impl IntoResponse {
+pub async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     // Extract token from Authorization header
-    let token = bearer.token();
+    let Some(token) = extract_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        );
+    };
 
     match state.auth_service.validate_token(token).await {
         Ok(user_info) => {
@@ -126,11 +143,13 @@ pub async fn logout(
 }
 
 /// Get current user info
-pub async fn me(
-    State(state): State<Arc<AppState>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
-) -> impl IntoResponse {
-    let token = bearer.token();
+pub async fn me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
+    let Some(token) = extract_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        );
+    };
 
     match state.auth_service.validate_token(token).await {
         Ok(user_info) => (
@@ -151,10 +170,15 @@ pub async fn me(
 /// Change password handler
 pub async fn change_password(
     State(state): State<Arc<AppState>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    headers: HeaderMap,
     Json(req): Json<ChangePasswordRequest>,
 ) -> impl IntoResponse {
-    let token = bearer.token();
+    let Some(token) = extract_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        );
+    };
 
     match state.auth_service.validate_token(token).await {
         Ok(user_info) => {
@@ -248,9 +272,14 @@ pub async fn register_user(
 /// List users handler
 pub async fn list_users(
     State(state): State<Arc<AppState>>,
-    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    let token = bearer.token();
+    let Some(token) = extract_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid token"})),
+        );
+    };
 
     match state.auth_service.validate_token(token).await {
         Ok(user_info) => {
