@@ -85,9 +85,7 @@ impl RadiusAuthMethod {
         // Encode User-Password attribute (type 2) with MD5 encryption per RFC 2865
         let encrypted_password =
             Self::encode_radius_password(password, packet.authenticator(), &config.secret);
-        if let Some(attr) =
-            RadiusAttribute::create_by_id(&self.dictionary, 2, encrypted_password)
-        {
+        if let Some(attr) = RadiusAttribute::create_by_id(&self.dictionary, 2, encrypted_password) {
             attributes.push(attr);
         }
 
@@ -209,11 +207,7 @@ impl RadiusAuthMethod {
             hash_input.extend_from_slice(&prev_cipher);
             let hash = md5::compute(&hash_input);
 
-            let cipher: Vec<u8> = chunk
-                .iter()
-                .zip(hash.iter())
-                .map(|(p, h)| p ^ h)
-                .collect();
+            let cipher: Vec<u8> = chunk.iter().zip(hash.iter()).map(|(p, h)| p ^ h).collect();
 
             result.extend_from_slice(&cipher);
             prev_cipher = cipher;

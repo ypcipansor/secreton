@@ -174,11 +174,8 @@ pub trait WebAuthnService: Send + Sync {
     ) -> AuthMethodResult<bool>;
 
     /// Remove a credential
-    async fn remove_credential(
-        &self,
-        entity_id: Uuid,
-        credential_id: &str,
-    ) -> AuthMethodResult<()>;
+    async fn remove_credential(&self, entity_id: Uuid, credential_id: &str)
+    -> AuthMethodResult<()>;
 
     /// List credentials for an entity
     async fn list_credentials(&self, entity_id: Uuid) -> AuthMethodResult<Vec<WebAuthnCredential>>;
@@ -317,11 +314,12 @@ impl WebAuthnService for DefaultWebAuthnService {
     ) -> AuthMethodResult<WebAuthnCredential> {
         // Get and validate the challenge
         let mut challenges = self.registration_challenges.write().await;
-        let challenge = challenges
-            .remove(&response.challenge_id)
-            .ok_or_else(|| SecretonError::NotFound {
-                resource: format!("webauthn-challenge:{}", response.challenge_id),
-            })?;
+        let challenge =
+            challenges
+                .remove(&response.challenge_id)
+                .ok_or_else(|| SecretonError::NotFound {
+                    resource: format!("webauthn-challenge:{}", response.challenge_id),
+                })?;
         drop(challenges);
 
         // Verify the challenge hasn't expired
@@ -369,11 +367,11 @@ impl WebAuthnService for DefaultWebAuthnService {
 
         // Get the user's credentials
         let credentials = self.credentials.read().await;
-        let user_creds = credentials.get(&entity_id).ok_or_else(|| {
-            SecretonError::NotFound {
+        let user_creds = credentials
+            .get(&entity_id)
+            .ok_or_else(|| SecretonError::NotFound {
                 resource: format!("webauthn-credentials:{}", entity_id),
-            }
-        })?;
+            })?;
 
         if user_creds.is_empty() {
             return Err(SecretonError::NotFound {
@@ -409,11 +407,12 @@ impl WebAuthnService for DefaultWebAuthnService {
     ) -> AuthMethodResult<bool> {
         // Get and validate the challenge
         let mut challenges = self.authentication_challenges.write().await;
-        let challenge = challenges
-            .remove(&response.challenge_id)
-            .ok_or_else(|| SecretonError::NotFound {
-                resource: format!("webauthn-challenge:{}", response.challenge_id),
-            })?;
+        let challenge =
+            challenges
+                .remove(&response.challenge_id)
+                .ok_or_else(|| SecretonError::NotFound {
+                    resource: format!("webauthn-challenge:{}", response.challenge_id),
+                })?;
         drop(challenges);
 
         // Verify the challenge hasn't expired
@@ -425,11 +424,12 @@ impl WebAuthnService for DefaultWebAuthnService {
 
         // Find the credential
         let mut credentials = self.credentials.write().await;
-        let user_creds = credentials.get_mut(&challenge.entity_id).ok_or_else(|| {
-            SecretonError::NotFound {
-                resource: format!("webauthn-credentials:{}", challenge.entity_id),
-            }
-        })?;
+        let user_creds =
+            credentials
+                .get_mut(&challenge.entity_id)
+                .ok_or_else(|| SecretonError::NotFound {
+                    resource: format!("webauthn-credentials:{}", challenge.entity_id),
+                })?;
 
         let credential = user_creds
             .iter_mut()
@@ -528,7 +528,8 @@ mod tests {
         let response = RegistrationResponse {
             challenge_id: challenge.id,
             credential_id: "test-credential-id".to_string(),
-            attestation_object: base64::engine::general_purpose::STANDARD.encode("mock-attestation"),
+            attestation_object: base64::engine::general_purpose::STANDARD
+                .encode("mock-attestation"),
             client_data_json: base64::engine::general_purpose::STANDARD.encode("mock-client-data"),
             credential_type: CredentialType::CrossPlatform,
             name: "My YubiKey".to_string(),
