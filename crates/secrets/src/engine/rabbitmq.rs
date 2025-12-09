@@ -125,7 +125,7 @@ impl RabbitmqEngine {
         _data: &HashMap<String, Value>,
     ) -> SecretResult<HashMap<String, Value>> {
         // Generate unique username and password
-        let username = format!("vault_{}", Uuid::new_v4().simple());
+        let username = format!("secreton_{}", Uuid::new_v4().simple());
         let password = self.generate_password(16);
 
         // Default vhost

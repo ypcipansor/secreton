@@ -130,7 +130,7 @@ mod security_validation_tests {
         let guest_user = "guest_user_001";
         
         let sensitive_resources = vec![
-            "master_key_vault",
+            "master_key_secreton",
             "admin_configuration",
             "audit_logs",
             "user_database",

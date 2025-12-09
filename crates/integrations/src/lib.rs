@@ -1,7 +1,7 @@
 //! # Secreton External Integrations
 //!
 //! Third-party service integrations and connectors for the Secreton
-//! security vault, including cloud providers, CI/CD systems, and infrastructure tools.
+//! security secreton, including cloud providers, CI/CD systems, and infrastructure tools.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

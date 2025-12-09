@@ -170,7 +170,7 @@ impl AliCloudEngine {
         let credential = match role.role_type {
             RoleType::RamUser => {
                 // Create RAM user
-                let user_name = format!("vault-{}", uuid::Uuid::new_v4());
+                let user_name = format!("secreton-{}", uuid::Uuid::new_v4());
                 let access_key_id = format!("LTAI{}", self.generate_random_string(16));
                 let access_key_secret = self.generate_random_string(30);
 
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(cred.access_key_secret.len(), 30);
         assert!(cred.security_token.is_none());
         assert!(cred.user_name.is_some());
-        assert!(cred.user_name.as_ref().unwrap().starts_with("vault-"));
+        assert!(cred.user_name.as_ref().unwrap().starts_with("secreton-"));
     }
 
     #[tokio::test]

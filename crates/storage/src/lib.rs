@@ -30,7 +30,7 @@ pub use backends::{S3Storage, S3StorageConfig};
 // Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
-/// Encryption metadata for vault entries
+/// Encryption metadata for secreton entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionMetadata {
     /// Encryption algorithm used
@@ -92,7 +92,7 @@ pub struct SecretEntry {
 }
 
 impl SecretEntry {
-    /// Create a new vault entry
+    /// Create a new secreton entry
     pub fn new(
         path: String,
         encrypted_data: Vec<u8>,
@@ -160,7 +160,7 @@ impl Default for EncryptionMetadata {
     }
 }
 
-/// Query parameters for filtering vault entries
+/// Query parameters for filtering secreton entries
 #[derive(Debug, Clone, Default)]
 pub struct QueryParams {
     /// Filter by path prefix
@@ -286,28 +286,28 @@ pub type StorageResult<T> = Result<T, StorageError>;
 /// Storage backend trait for different implementations
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// Store a vault entry
+    /// Store a secreton entry
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()>;
 
-    /// Retrieve a vault entry by ID
+    /// Retrieve a secreton entry by ID
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>>;
 
-    /// Retrieve a vault entry by path
+    /// Retrieve a secreton entry by path
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>>;
 
-    /// Update an existing vault entry
+    /// Update an existing secreton entry
     async fn update(&self, entry: &SecretEntry) -> StorageResult<()>;
 
-    /// Delete a vault entry by ID
+    /// Delete a secreton entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
 
-    /// Delete a vault entry by path
+    /// Delete a secreton entry by path
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool>;
 
-    /// List vault entries with filtering
+    /// List secreton entries with filtering
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>>;
 
-    /// Count vault entries matching query
+    /// Count secreton entries matching query
     async fn count(&self, params: &QueryParams) -> StorageResult<u64>;
 
     /// Check if path exists
@@ -617,7 +617,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn test_vault_entry_initialization_defaults() {
+    fn test_secreton_entry_initialization_defaults() {
         let owner = Uuid::new_v4();
         let entry = SecretEntry::new(
             "secret/path".to_string(),
@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vault_entry_tag_and_metadata_helpers() {
+    fn test_secreton_entry_tag_and_metadata_helpers() {
         let owner = Uuid::new_v4();
         let entry = SecretEntry::new(
             "secret/path".to_string(),
@@ -696,13 +696,13 @@ mod tests {
     #[test]
     fn test_storage_error_debug_and_display() {
         let error = StorageError::NotFound {
-            resource_type: "vault_entry".to_string(),
+            resource_type: "secreton_entry".to_string(),
             id: "123".to_string(),
         };
 
         let display = format!("{}", error);
         assert!(display.contains("Not found"));
-        assert!(display.contains("vault_entry"));
+        assert!(display.contains("secreton_entry"));
         assert!(display.contains("123"));
 
         let debug = format!("{:?}", error);

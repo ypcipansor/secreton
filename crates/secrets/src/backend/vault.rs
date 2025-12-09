@@ -5,7 +5,7 @@ use crate::model::*;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-/// In-memory vault backend for secret storage
+/// In-memory secreton backend for secret storage
 pub struct SecretBackend {
     storage: RwLock<HashMap<String, Secret>>,
 }

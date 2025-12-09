@@ -1,4 +1,4 @@
-// Webhook System - Enhanced webhook notifications for vault events
+// Webhook System - Enhanced webhook notifications for secreton events
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -370,7 +370,7 @@ mod tests {
     fn create_test_webhook() -> WebhookConfig {
         WebhookConfig {
             id: "webhook-1".to_string(),
-            url: "https://hooks.example.com/vault".to_string(),
+            url: "https://hooks.example.com/secreton".to_string(),
             _secret: "test_secret_key".to_string(),
             headers: HashMap::new(),
             retry_attempts: 3,
@@ -381,7 +381,7 @@ mod tests {
 
     fn create_test_event() -> WebhookEvent {
         let mut metadata = HashMap::new();
-        metadata.insert("user_agent".to_string(), "vault-cli/1.0".to_string());
+        metadata.insert("user_agent".to_string(), "secreton-cli/1.0".to_string());
 
         WebhookEvent {
             event_id: uuid::Uuid::new_v4().to_string(),

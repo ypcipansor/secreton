@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub struct MySQLStorageConfig {
     /// MySQL connection string
     pub connection_string: String,
-    /// Table name for storing vault data
+    /// Table name for storing secreton data
     pub table_name: String,
     /// Maximum number of connections in pool
     pub max_connections: u32,
@@ -29,8 +29,8 @@ pub struct MySQLStorageConfig {
 impl Default for MySQLStorageConfig {
     fn default() -> Self {
         Self {
-            connection_string: "mysql://vault:password@localhost/vault".to_string(),
-            table_name: "vault_kv_store".to_string(),
+            connection_string: "mysql://secreton:password@localhost/secreton".to_string(),
+            table_name: "secreton_kv_store".to_string(),
             max_connections: 10,
             connection_timeout: 30,
             ssl_enabled: false,
@@ -397,7 +397,7 @@ impl StorageBackend for MySQLStorage {
                 })?;
 
         if let Some(row) = rows.first() {
-            let entry = self.row_to_vault_entry(row)?;
+            let entry = self.row_to_secreton_entry(row)?;
             let mut cache = self.cache.write().await;
             cache.insert(path.to_string(), entry.clone());
             Ok(Some(entry))
@@ -468,7 +468,7 @@ impl StorageBackend for MySQLStorage {
 
         let mut entries = Vec::new();
         for row in rows {
-            let entry = self.row_to_vault_entry(&row)?;
+            let entry = self.row_to_secreton_entry(&row)?;
             entries.push(entry);
         }
 
@@ -569,7 +569,7 @@ impl StorageBackend for MySQLStorage {
 
 impl MySQLStorage {
     /// Convert MySQL row to SecretEntry
-    fn row_to_vault_entry(&self, row: &mysql::Row) -> Result<SecretEntry, StorageError> {
+    fn row_to_secreton_entry(&self, row: &mysql::Row) -> Result<SecretEntry, StorageError> {
         let id: String = row.get(0).ok_or_else(|| StorageError::SerializationError {
             message: "Missing id field".to_string(),
         })?;
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn test_mysql_config_default() {
         let config = MySQLStorageConfig::default();
-        assert_eq!(config.table_name, "vault_kv_store");
+        assert_eq!(config.table_name, "secreton_kv_store");
         assert_eq!(config.max_connections, 10);
         assert_eq!(config.connection_timeout, 30);
         assert!(!config.ssl_enabled);
@@ -704,7 +704,7 @@ mod tests {
         );
 
         let query = storage.build_upsert_query(&entry);
-        assert!(query.contains("INSERT INTO vault_kv_store"));
+        assert!(query.contains("INSERT INTO secreton_kv_store"));
         assert!(query.contains("ON DUPLICATE KEY UPDATE"));
     }
 
@@ -719,7 +719,7 @@ mod tests {
 
         let query = storage.build_select_query("test/path");
         assert!(query.contains("SELECT"));
-        assert!(query.contains("FROM vault_kv_store"));
+        assert!(query.contains("FROM secreton_kv_store"));
         assert!(query.contains("WHERE path = ?"));
     }
 }

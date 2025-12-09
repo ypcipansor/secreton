@@ -34,7 +34,7 @@ mod secrets_engine_integration_tests {
             tenant_id: "test-tenant".to_string(),
             client_id: "test-client".to_string(),
             client_secret: "test-secret".to_string(),
-            vault_name: "test-vault".to_string(),
+            secreton_name: "test-secreton".to_string(),
             ..Default::default()
         };
         
@@ -132,7 +132,7 @@ mod secrets_engine_integration_tests {
         let engine_names = vec![
             "aws",
             "azure",
-            "azure_keyvault",
+            "azure_keysecreton",
             "gcp",
             "gcp_secretmanager",
             "kubernetes",

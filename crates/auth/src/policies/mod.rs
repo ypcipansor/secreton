@@ -1,6 +1,6 @@
 //! # Secreton Policies Engine
 //!
-//! This crate provides comprehensive policy management and evaluation for the Secreton vault system.
+//! This crate provides comprehensive policy management and evaluation for the Secreton secreton system.
 //! It implements RBAC (Role-Based Access Control) and ABAC (Attribute-Based Access Control) with
 //! a flexible policy language and evaluation engine.
 //!

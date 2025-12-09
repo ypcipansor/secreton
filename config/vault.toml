@@ -1,0 +1,9 @@
+# Secreton Adhyaksa Configuration
+
+backend = "postgres"
+database_url = "postgres://postgres:postgres@localhost:5432/secreton_adhyaksa"
+jwt_secret = "your-super-secret-jwt-key-change-this-in-production"
+encryption_key = "your-32-byte-encryption-key-here"
+server_host = "127.0.0.1"
+server_port = 8080
+log_level = "info" 

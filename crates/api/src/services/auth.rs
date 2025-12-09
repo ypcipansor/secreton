@@ -332,10 +332,10 @@ impl AuthenticationService {
 
         // Check for specific permissions based on roles
         match permission {
-            "vault:read" | "vault:list" => {
+            "secreton:read" | "secreton:list" => {
                 Ok(user.roles.contains(&"user".to_string()) || user.roles.contains(&"viewer".to_string()))
             }
-            "vault:write" => {
+            "secreton:write" => {
                 Ok(user.roles.contains(&"user".to_string()))
             }
             _ => Ok(false),

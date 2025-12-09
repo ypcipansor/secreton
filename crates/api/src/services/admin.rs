@@ -234,7 +234,7 @@ impl AdminService {
         let backup_id = uuid::Uuid::new_v4().to_string();
         let backup_path = format!("backups/{}", backup_id);
         
-        // Get all vault entries to backup
+        // Get all secreton entries to backup
         let query_params = secreton_storage::QueryParams {
             path: Some("".to_string()),
             prefix: Some("".to_string()),
@@ -1140,7 +1140,7 @@ impl AdminService {
                 title: "High volume of destructive operations".to_string(),
                 description: format!("Detected {} potentially destructive operations in the last 24 hours", suspicious_actions),
                 recommendation: "Monitor for unusual access patterns and ensure proper authorization".to_string(),
-                affected_resources: vec!["vault_operations".to_string()],
+                affected_resources: vec!["secreton_operations".to_string()],
             });
         }
 
@@ -1264,7 +1264,7 @@ impl AdminService {
 
         let mut users = Vec::new();
         for entry in entries {
-            if let Ok(user) = self.vault_entry_to_user_info(&entry) {
+            if let Ok(user) = self.secreton_entry_to_user_info(&entry) {
                 users.push(user);
             }
         }
@@ -1280,7 +1280,7 @@ impl AdminService {
             .map_err(|e| AdminError::Storage { message: e.to_string() })?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
-        self.vault_entry_to_user_info(&entry)
+        self.secreton_entry_to_user_info(&entry)
     }
 
     /// Create a new user
@@ -1304,7 +1304,7 @@ impl AdminService {
             metadata: HashMap::new(),
         };
 
-        let entry = self.user_info_to_vault_entry(&user)?;
+        let entry = self.user_info_to_secreton_entry(&user)?;
         self.storage.store(&entry)
             .await
             .map_err(|e| AdminError::Storage { message: e.to_string() })?;
@@ -1333,7 +1333,7 @@ impl AdminService {
         user.updated_at = chrono::Utc::now();
 
         // Store updated user
-        let entry = self.user_info_to_vault_entry(&user)?;
+        let entry = self.user_info_to_secreton_entry(&user)?;
         self.storage.update(&entry)
             .await
             .map_err(|e| AdminError::Storage { message: e.to_string() })?;
@@ -1361,7 +1361,7 @@ impl AdminService {
     }
 
     /// Helper method to convert UserInfo to SecretEntry for storage
-    fn user_info_to_vault_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
+    fn user_info_to_secreton_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
         use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
 
         let user_data = serde_json::to_vec(user)
@@ -1389,7 +1389,7 @@ impl AdminService {
     }
 
     /// Helper method to convert SecretEntry to UserInfo
-    fn vault_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
+    fn secreton_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
         let user: UserInfo = serde_json::from_slice(&entry.encrypted_data)
             .map_err(|e| AdminError::Storage { message: format!("Failed to deserialize user: {}", e) })?;
         Ok(user)

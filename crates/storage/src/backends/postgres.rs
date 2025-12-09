@@ -49,7 +49,7 @@ impl StorageBackend for PostgresBackend {
             })?;
 
         let query = r#"
-            INSERT INTO vault_entries 
+            INSERT INTO secreton_entries 
             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#;
@@ -87,7 +87,7 @@ impl StorageBackend for PostgresBackend {
             )
             .await
             .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to store vault entry: {}", e),
+                message: format!("Failed to store secreton entry: {}", e),
             })?;
 
         Ok(())
@@ -104,7 +104,7 @@ impl StorageBackend for PostgresBackend {
 
         let query = r#"
             SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at
-            FROM vault_entries 
+            FROM secreton_entries 
             WHERE id = $1
         "#;
 
@@ -112,7 +112,7 @@ impl StorageBackend for PostgresBackend {
             .query(query, &[&id])
             .await
             .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to query vault entry: {}", e),
+                message: format!("Failed to query secreton entry: {}", e),
             })?;
 
         if rows.is_empty() {
@@ -120,7 +120,7 @@ impl StorageBackend for PostgresBackend {
         }
 
         let row = &rows[0];
-        let entry = self.row_to_vault_entry(row)?;
+        let entry = self.row_to_secreton_entry(row)?;
         Ok(Some(entry))
     }
 
@@ -135,7 +135,7 @@ impl StorageBackend for PostgresBackend {
 
         let query = r#"
             SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at
-            FROM vault_entries 
+            FROM secreton_entries 
             WHERE path = $1
         "#;
 
@@ -143,7 +143,7 @@ impl StorageBackend for PostgresBackend {
             .query(query, &[&path])
             .await
             .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to query vault entry: {}", e),
+                message: format!("Failed to query secreton entry: {}", e),
             })?;
 
         if rows.is_empty() {
@@ -151,7 +151,7 @@ impl StorageBackend for PostgresBackend {
         }
 
         let row = &rows[0];
-        let entry = self.row_to_vault_entry(row)?;
+        let entry = self.row_to_secreton_entry(row)?;
         Ok(Some(entry))
     }
 
@@ -164,7 +164,7 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let mut query = "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM vault_entries WHERE 1=1".to_string();
+        let mut query = "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM secreton_entries WHERE 1=1".to_string();
         let mut bind_params: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
         let mut param_count = 1;
 
@@ -194,12 +194,12 @@ impl StorageBackend for PostgresBackend {
                 .query(&query, &bind_refs)
                 .await
                 .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to list vault entries: {}", e),
+                    message: format!("Failed to list secreton entries: {}", e),
                 })?;
 
         let mut entries = Vec::new();
         for row in rows {
-            entries.push(self.row_to_vault_entry(&row)?);
+            entries.push(self.row_to_secreton_entry(&row)?);
         }
 
         Ok(entries)
@@ -215,7 +215,7 @@ impl StorageBackend for PostgresBackend {
             })?;
 
         let query = r#"
-            UPDATE vault_entries 
+            UPDATE secreton_entries 
             SET path = $2, encrypted_data = $3, encryption_metadata = $4, security_level = $5, 
                 metadata = $6, tags = $7, version = $8, updated_at = $9, expires_at = $10
             WHERE id = $1
@@ -252,7 +252,7 @@ impl StorageBackend for PostgresBackend {
             )
             .await
             .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to update vault entry: {}", e),
+                message: format!("Failed to update secreton entry: {}", e),
             })?;
 
         if rows_affected == 0 {
@@ -274,14 +274,14 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = "DELETE FROM vault_entries WHERE id = $1";
+        let query = "DELETE FROM secreton_entries WHERE id = $1";
 
         let rows_affected =
             client
                 .execute(query, &[&id])
                 .await
                 .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to delete vault entry: {}", e),
+                    message: format!("Failed to delete secreton entry: {}", e),
                 })?;
 
         Ok(rows_affected > 0)
@@ -296,14 +296,14 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = "DELETE FROM vault_entries WHERE path = $1";
+        let query = "DELETE FROM secreton_entries WHERE path = $1";
 
         let rows_affected =
             client
                 .execute(query, &[&path])
                 .await
                 .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to delete vault entry: {}", e),
+                    message: format!("Failed to delete secreton entry: {}", e),
                 })?;
 
         Ok(rows_affected > 0)
@@ -318,7 +318,7 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let mut query = "SELECT COUNT(*) FROM vault_entries WHERE 1=1".to_string();
+        let mut query = "SELECT COUNT(*) FROM secreton_entries WHERE 1=1".to_string();
         let mut bind_params: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
         let mut param_count = 1;
 
@@ -343,7 +343,7 @@ impl StorageBackend for PostgresBackend {
                 .query(&query, &bind_refs)
                 .await
                 .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to count vault entries: {}", e),
+                    message: format!("Failed to count secreton entries: {}", e),
                 })?;
 
         let count: i64 = rows[0].get(0);
@@ -359,7 +359,7 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = "SELECT EXISTS(SELECT 1 FROM vault_entries WHERE path = $1)";
+        let query = "SELECT EXISTS(SELECT 1 FROM secreton_entries WHERE path = $1)";
         let rows = client
             .query(query, &[&path])
             .await
@@ -406,8 +406,8 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let count_query = "SELECT COUNT(*) FROM vault_entries";
-        let size_query = "SELECT pg_total_relation_size('vault_entries')";
+        let count_query = "SELECT COUNT(*) FROM secreton_entries";
+        let size_query = "SELECT pg_total_relation_size('secreton_entries')";
 
         let count_rows =
             client
@@ -457,7 +457,7 @@ impl StorageBackend for PostgresBackend {
             })?;
 
         let create_table_query = r#"
-            CREATE TABLE IF NOT EXISTS vault_entries (
+            CREATE TABLE IF NOT EXISTS secreton_entries (
                 id UUID PRIMARY KEY,
                 path VARCHAR NOT NULL UNIQUE,
                 encrypted_data BYTEA NOT NULL,
@@ -471,9 +471,9 @@ impl StorageBackend for PostgresBackend {
                 updated_at TIMESTAMPTZ NOT NULL,
                 expires_at TIMESTAMPTZ
             );
-            CREATE INDEX IF NOT EXISTS idx_vault_entries_path ON vault_entries(path);
-            CREATE INDEX IF NOT EXISTS idx_vault_entries_owner ON vault_entries(owner_id);
-            CREATE INDEX IF NOT EXISTS idx_vault_entries_security_level ON vault_entries(security_level);
+            CREATE INDEX IF NOT EXISTS idx_secreton_entries_path ON secreton_entries(path);
+            CREATE INDEX IF NOT EXISTS idx_secreton_entries_owner ON secreton_entries(owner_id);
+            CREATE INDEX IF NOT EXISTS idx_secreton_entries_security_level ON secreton_entries(security_level);
         "#;
 
         client
@@ -488,7 +488,7 @@ impl StorageBackend for PostgresBackend {
 }
 
 impl PostgresBackend {
-    fn row_to_vault_entry(&self, row: &Row) -> StorageResult<SecretEntry> {
+    fn row_to_secreton_entry(&self, row: &Row) -> StorageResult<SecretEntry> {
         let encryption_metadata_value: serde_json::Value = row.get("encryption_metadata");
         let encryption_metadata =
             serde_json::from_value(encryption_metadata_value).map_err(|e| {
@@ -561,7 +561,7 @@ impl PostgresTransaction {
         match op {
             PostgresOperation::Store(entry) => {
                 let query = r#"
-                    INSERT INTO vault_entries
+                    INSERT INTO secreton_entries
                     (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                     ON CONFLICT (id) DO UPDATE SET
@@ -609,7 +609,7 @@ impl PostgresTransaction {
             }
             PostgresOperation::Update(entry) => {
                 let query = r#"
-                    UPDATE vault_entries SET
+                    UPDATE secreton_entries SET
                         path = $2,
                         encrypted_data = $3,
                         encryption_metadata = $4,
@@ -653,7 +653,7 @@ impl PostgresTransaction {
                     })?;
             }
             PostgresOperation::Delete(id) => {
-                let query = "DELETE FROM vault_entries WHERE id = $1";
+                let query = "DELETE FROM secreton_entries WHERE id = $1";
                 transaction
                     .execute(query, &[id])
                     .await

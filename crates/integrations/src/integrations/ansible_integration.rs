@@ -29,7 +29,7 @@ pub enum ConnectionType {
 /// Ansible configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnsibleConfig {
-    pub vault_path: String,
+    pub secreton_path: String,
     pub inventory_path: String,
     pub connection: ConnectionType,
     pub remote_user: String,
@@ -41,7 +41,7 @@ pub struct AnsibleConfig {
 pub struct AnsibleTask {
     pub task_id: String,
     pub name: String,
-    pub module: String, // vault_read, vault_write, shell, copy, etc.
+    pub module: String, // secreton_read, secreton_write, shell, copy, etc.
     pub args: HashMap<String, String>,
     pub register: Option<String>, // Variable name to store result
 }
@@ -169,8 +169,8 @@ impl AnsibleIntegration {
 
         // Mock secret injection
         for (_key, value) in &merged_vars {
-            if value.starts_with("vault:") {
-                let secret_path = value.strip_prefix("vault:").unwrap();
+            if value.starts_with("secreton:") {
+                let secret_path = value.strip_prefix("secreton:").unwrap();
                 injected_secrets.push(secret_path.to_string());
                 // Real implementation would fetch from Secret
             }
@@ -231,7 +231,7 @@ impl AnsibleIntegration {
         for (var_name, secret_path) in secret_mappings {
             playbook
                 .variables
-                .insert(var_name, format!("vault:{}", secret_path));
+                .insert(var_name, format!("secreton:{}", secret_path));
         }
 
         Ok(())
@@ -285,7 +285,7 @@ mod tests {
                 AnsibleTask {
                     task_id: "task1".to_string(),
                     name: "Read secret from Secret".to_string(),
-                    module: "vault_read".to_string(),
+                    module: "secreton_read".to_string(),
                     args: {
                         let mut args = HashMap::new();
                         args.insert("path".to_string(), "secret/data/app".to_string());
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(playbook.variables.len(), 2);
         assert_eq!(
             playbook.variables.get("db_password"),
-            Some(&"vault:secret/data/db/password".to_string())
+            Some(&"secreton:secret/data/db/password".to_string())
         );
     }
 

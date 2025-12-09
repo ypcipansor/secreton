@@ -36,7 +36,7 @@ license = "Apache-2.0"
 repository = "https://github.com/analisaperlengkapan/secreton"
 homepage = "https://github.com/analisaperlengkapan/secreton"
 description = "Advanced Security System with Quantum-Safe Cryptography"
-keywords = ["security", "vault", "cryptography", "zero-trust", "quantum-safe"]
+keywords = ["security", "secreton", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
 rust-version = "1.90"
 

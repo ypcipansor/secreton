@@ -199,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn test_in_memory_cache_set_get_and_stats() {
         let cache = InMemoryCache::new();
-        let key = "vault:test";
+        let key = "secreton:test";
 
         // Miss before value set
         assert!(cache.get(key).await.unwrap().is_none());
@@ -222,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn test_in_memory_cache_expiration() {
         let cache = InMemoryCache::new();
-        let key = "vault:expiring";
+        let key = "secreton:expiring";
 
         cache
             .set(key, b"temp".to_vec(), Some(Duration::from_millis(50)))
@@ -243,7 +243,7 @@ mod tests {
     #[tokio::test]
     async fn test_in_memory_cache_exists_and_clear() {
         let cache = InMemoryCache::new();
-        let key = "vault:clear";
+        let key = "secreton:clear";
 
         cache.set(key, b"value".to_vec(), None).await.unwrap();
         assert!(cache.exists(key).await.unwrap());

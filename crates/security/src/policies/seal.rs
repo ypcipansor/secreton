@@ -164,7 +164,7 @@ impl SealService {
         SealStatus::new(&_config, state.clone(), progress.len())
     }
 
-    /// Seal the vault
+    /// Seal the secreton
     pub async fn seal(&self) -> Result<(), SealError> {
         let mut state = self.state.write().await;
 

@@ -290,7 +290,7 @@ mod tests {
     fn create_test_config() -> TerraformConfig {
         TerraformConfig {
             backend_type: BackendType::Consul,
-            state_path: "vault/terraform/state".to_string(),
+            state_path: "secreton/terraform/state".to_string(),
             lock_enabled: true,
             lock_timeout_seconds: 300,
         }
@@ -353,10 +353,10 @@ mod tests {
             who: "user@example.com".to_string(),
             version: "1.5.0".to_string(),
             created_at: Utc::now(),
-            path: "vault/terraform/state/default".to_string(),
+            path: "secreton/terraform/state/default".to_string(),
         };
 
-        let path = "vault/terraform/state/default";
+        let path = "secreton/terraform/state/default";
 
         // Lock state
         let lock_id = tf.lock_state(path, lock.clone()).await.unwrap();

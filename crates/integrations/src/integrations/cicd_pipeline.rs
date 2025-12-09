@@ -39,7 +39,7 @@ pub enum AuthMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
     pub platform: PipelinePlatform,
-    pub vault_url: String,
+    pub secreton_url: String,
     pub auth_method: AuthMethod,
     pub namespace: Option<String>,
 }
@@ -278,7 +278,7 @@ mod tests {
     fn create_test_config() -> PipelineConfig {
         PipelineConfig {
             platform: PipelinePlatform::GitHubActions,
-            vault_url: "https://vault.example.com".to_string(),
+            secreton_url: "https://secreton.example.com".to_string(),
             auth_method: AuthMethod::JWT,
             namespace: Some("ci-cd".to_string()),
         }

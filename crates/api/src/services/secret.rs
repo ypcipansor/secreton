@@ -702,13 +702,13 @@ mod tests {
     use secreton_core::audit::AuditLogger;
 
     #[tokio::test]
-    async fn test_vault_service_creation() {
+    async fn test_secreton_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(SecurityParams::default()).unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
 
-        let vault_service = SecretService::new(storage, crypto, audit).await;
-        assert!(vault_service.is_ok());
+        let secreton_service = SecretService::new(storage, crypto, audit).await;
+        assert!(secreton_service.is_ok());
     }
 
     #[tokio::test]

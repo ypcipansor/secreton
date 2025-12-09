@@ -45,11 +45,11 @@ mod tests {
     #[tokio::test]
     async fn test_load_from_file() {
         let tmp = tempfile::NamedTempFile::new().expect("temp file");
-        tokio::fs::write(tmp.path(), "server_url = \"https://vault.example.com\"")
+        tokio::fs::write(tmp.path(), "server_url = \"https://secreton.example.com\"")
             .await
             .expect("write config");
 
         let loaded = CliConfig::load_from_file(tmp.path()).expect("load config");
-        assert_eq!(loaded.server_url, "https://vault.example.com");
+        assert_eq!(loaded.server_url, "https://secreton.example.com");
     }
 }

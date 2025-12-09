@@ -28,8 +28,8 @@ log_retention_count = 10000
 performance_multiplier = 1
 
 [security]
-# Vault seal configuration
-seal_type = "auto"  # auto, shamir, transit, gcpkms, awskms, azurekeyvault
+# Secreton seal configuration
+seal_type = "auto"  # auto, shamir, transit, gcpkms, awskms, azurekeysecreton
 
 # Authentication
 default_auth_method = "token"

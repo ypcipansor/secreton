@@ -695,7 +695,7 @@ impl Default for MongoDBConfig {
     fn default() -> Self {
         Self {
             connection_string: "mongodb://localhost:27017".to_string(),
-            database_name: "vault_kv".to_string(),
+            database_name: "secreton_kv".to_string(),
             collection_name: "entries".to_string(),
         }
     }

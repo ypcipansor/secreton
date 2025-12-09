@@ -58,7 +58,7 @@ impl Config {
 
     pub fn default() -> Self {
         Self {
-            database_url: "sqlite:vault.db".to_string(),
+            database_url: "sqlite:secreton.db".to_string(),
             jwt_secret: "your-super-secret-jwt-key-change-this-in-production".to_string(),
             jwt_refresh_secret: "your-super-secret-refresh-key-change-this-in-production"
                 .to_string(),
@@ -114,7 +114,7 @@ impl Config {
 
         Self {
             database_url: std::env::var("VAULT_DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite:vault.db".to_string()),
+                .unwrap_or_else(|_| "sqlite:secreton.db".to_string()),
             jwt_secret: jwt_secret.clone(),
             jwt_refresh_secret: jwt_refresh_secret.clone(),
             encryption_key: std::env::var("VAULT_ENCRYPTION_KEY")

@@ -32,7 +32,7 @@ pub struct ExternalSecretsConfig {
 pub struct ExternalSecret {
     pub name: String,
     pub namespace: String,
-    pub vault_path: String,
+    pub secreton_path: String,
     pub target_secret_name: String,
     pub refresh_interval_seconds: u64,
     pub labels: HashMap<String, String>,
@@ -76,7 +76,7 @@ pub struct SecretSync {
     pub sync_id: String,
     pub external_secret_name: String,
     pub namespace: String,
-    pub vault_path: String,
+    pub secreton_path: String,
     pub target_secret_name: String,
     pub last_synced_at: DateTime<Utc>,
     pub status: SyncStatus,
@@ -158,8 +158,8 @@ impl KubernetesExternalSecrets {
         drop(external_secrets);
 
         // Mock: Fetch secret from Secret
-        let vault_data = self
-            .mock_fetch_from_vault(&external_secret.vault_path)
+        let secreton_data = self
+            .mock_fetch_from_secreton(&external_secret.secreton_path)
             .await?;
 
         // Create Kubernetes Secret with base64 encoded data
@@ -167,7 +167,7 @@ impl KubernetesExternalSecrets {
             name: external_secret.target_secret_name.clone(),
             namespace: external_secret.namespace.clone(),
             secret_type: SecretType::Opaque,
-            data: self.encode_secret_data(&vault_data, &external_secret.data_keys),
+            data: self.encode_secret_data(&secreton_data, &external_secret.data_keys),
             labels: external_secret.labels.clone(),
             annotations: external_secret.annotations.clone(),
             created_at: Utc::now(),
@@ -193,7 +193,7 @@ impl KubernetesExternalSecrets {
             sync_id: uuid::Uuid::new_v4().to_string(),
             external_secret_name: external_secret.name.clone(),
             namespace: external_secret.namespace.clone(),
-            vault_path: external_secret.vault_path.clone(),
+            secreton_path: external_secret.secreton_path.clone(),
             target_secret_name: external_secret.target_secret_name.clone(),
             last_synced_at: Utc::now(),
             status: SyncStatus::Synced,
@@ -290,7 +290,7 @@ impl KubernetesExternalSecrets {
         1
     }
 
-    async fn mock_fetch_from_vault(&self, _vault_path: &str) -> Result<HashMap<String, String>> {
+    async fn mock_fetch_from_secreton(&self, _secreton_path: &str) -> Result<HashMap<String, String>> {
         // Mock Secret fetch
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
@@ -371,7 +371,7 @@ mod tests {
         ExternalSecret {
             name: "db-credentials".to_string(),
             namespace: "production".to_string(),
-            vault_path: "secret/data/db/prod".to_string(),
+            secreton_path: "secret/data/db/prod".to_string(),
             target_secret_name: "db-secret".to_string(),
             refresh_interval_seconds: 300,
             labels: HashMap::from([("app".to_string(), "myapp".to_string())]),
@@ -496,6 +496,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(status.status, SyncStatus::Synced);
-        assert_eq!(status.vault_path, "secret/data/db/prod");
+        assert_eq!(status.secreton_path, "secret/data/db/prod");
     }
 }

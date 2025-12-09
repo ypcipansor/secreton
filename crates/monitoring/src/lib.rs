@@ -1,6 +1,6 @@
 //! # Secreton Monitoring & Alerting
 //!
-//! Unified monitoring, alerting, and health checking system for the Secreton vault.
+//! Unified monitoring, alerting, and health checking system for the Secreton secreton.
 //! Provides comprehensive system monitoring, alert management, and notification channels.
 //!
 //! ## Features

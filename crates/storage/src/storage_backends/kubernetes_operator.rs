@@ -38,8 +38,8 @@ pub struct KubernetesConfig {
 pub struct SecretOperatorConfig {
     pub enable_injection: bool,
     pub rotation_interval_hours: u64,
-    pub pod_annotation: String, // e.g., "vault.secreton.io/inject"
-    pub mount_path: String,     // e.g., "/vault/secrets"
+    pub pod_annotation: String, // e.g., "secreton.secreton.io/inject"
+    pub mount_path: String,     // e.g., "/secreton/secrets"
     pub auto_rotate: bool,
 }
 
@@ -49,7 +49,7 @@ pub struct K8sSecret {
     pub name: String,
     pub namespace: String,
     pub data: HashMap<String, String>, // Base64 encoded in real K8s
-    pub vault_path: String,
+    pub secreton_path: String,
     pub rotation_enabled: bool,
     pub last_rotation: Option<DateTime<Utc>>,
     pub version: u64,
@@ -122,20 +122,20 @@ impl KubernetesOperator {
         &self,
         name: &str,
         namespace: &str,
-        vault_path: &str,
+        secreton_path: &str,
         data: HashMap<String, String>,
     ) -> Result<K8sSecret> {
         let mut labels = HashMap::new();
         labels.insert("managed-by".to_string(), "secreton-operator".to_string());
 
         let mut annotations = HashMap::new();
-        annotations.insert("vault.secreton.io/path".to_string(), vault_path.to_string());
+        annotations.insert("secreton.secreton.io/path".to_string(), secreton_path.to_string());
 
         let secret = K8sSecret {
             name: name.to_string(),
             namespace: namespace.to_string(),
             data,
-            vault_path: vault_path.to_string(),
+            secreton_path: secreton_path.to_string(),
             rotation_enabled: false,
             last_rotation: None,
             version: 1,
@@ -234,21 +234,21 @@ impl KubernetesOperator {
     }
 
     /// Sync secret from Secret to Kubernetes
-    pub async fn sync_from_vault(
+    pub async fn sync_from_secreton(
         &self,
-        vault_path: &str,
+        secreton_path: &str,
         k8s_name: &str,
         namespace: &str,
     ) -> Result<()> {
         // Mock fetching from Secret
         // Real implementation would call Secret API
-        let vault_data = self.mock_fetch_from_vault(vault_path).await?;
+        let secreton_data = self.mock_fetch_from_secreton(secreton_path).await?;
 
         let key = format!("{}/{}", namespace, k8s_name);
         let mut secrets = self.secrets.write().await;
 
         if let Some(secret) = secrets.get_mut(&key) {
-            secret.data = vault_data;
+            secret.data = secreton_data;
             secret.version += 1;
             secret.last_rotation = Some(Utc::now());
 
@@ -474,7 +474,7 @@ impl KubernetesOperator {
         Ok(())
     }
 
-    async fn mock_fetch_from_vault(&self, _path: &str) -> Result<HashMap<String, String>> {
+    async fn mock_fetch_from_secreton(&self, _path: &str) -> Result<HashMap<String, String>> {
         // Mock fetching from Secret
         let mut data = HashMap::new();
         data.insert("username".to_string(), "updated_user".to_string());
@@ -516,8 +516,8 @@ impl Default for KubernetesOperator {
         let operator_config = SecretOperatorConfig {
             enable_injection: true,
             rotation_interval_hours: 24,
-            pod_annotation: "vault.secreton.io/inject".to_string(),
-            mount_path: "/vault/secrets".to_string(),
+            pod_annotation: "secreton.secreton.io/inject".to_string(),
+            mount_path: "/secreton/secrets".to_string(),
             auto_rotate: true,
         };
 
@@ -552,7 +552,7 @@ mod tests {
 
         assert_eq!(secret.name, "db-credentials");
         assert_eq!(secret.namespace, "default");
-        assert_eq!(secret.vault_path, "/secret/data/db");
+        assert_eq!(secret.secreton_path, "/secret/data/db");
         assert_eq!(secret.version, 1);
         assert_eq!(
             secret.labels.get("managed-by"),
@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(injection.pod_name, "my-pod");
         assert_eq!(injection.namespace, "default");
         assert_eq!(injection.secrets, vec!["api-secret"]);
-        assert_eq!(injection.mount_path, "/vault/secrets");
+        assert_eq!(injection.mount_path, "/secreton/secrets");
         assert_eq!(injection.status, InjectionStatus::Injected);
     }
 
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_from_vault() {
+    async fn test_sync_from_secreton() {
         let operator = create_test_operator();
 
         let mut data = HashMap::new();
@@ -635,7 +635,7 @@ mod tests {
 
         // Sync from Secret (mock will return updated data)
         operator
-            .sync_from_vault("/secret/data/sync", "sync-secret", "default")
+            .sync_from_secreton("/secret/data/sync", "sync-secret", "default")
             .await
             .unwrap();
 

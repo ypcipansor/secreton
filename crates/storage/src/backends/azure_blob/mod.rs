@@ -47,7 +47,7 @@ impl AzureBlobConfig {
         Self {
             account_name: "devstoreaccount1".to_string(),
             account_key: Some("Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==".to_string()),
-            container_name: "vault-dev".to_string(),
+            container_name: "secreton-dev".to_string(),
             endpoint: Some("http://127.0.0.1:10000".to_string()),
             use_emulator: true,
             sas_token: None,
@@ -129,7 +129,7 @@ impl AzureBlobConfig {
 /// let config = AzureBlobConfig {
 ///     account_name: "mystorageaccount".to_string(),
 ///     account_key: Some("your_account_key".to_string()),
-///     container_name: "vault-secrets".to_string(),
+///     container_name: "secreton-secrets".to_string(),
 ///     endpoint: None,
 ///     use_emulator: false,
 ///     sas_token: None,
@@ -268,7 +268,7 @@ impl AzureBlobStorage {
         })
     }
 
-    /// Convert a vault path to a valid Azure blob name
+    /// Convert a secreton path to a valid Azure blob name
     /// Azure blob names must be valid and cannot contain certain characters
     fn path_to_blob_name(path: &str) -> String {
         // Remove leading slash and replace path separators with underscores
@@ -294,7 +294,7 @@ impl StorageBackend for AzureBlobStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let blob_name = Self::path_to_blob_name(&entry.path);
         let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
-            message: format!("Failed to serialize vault entry: {}", e),
+            message: format!("Failed to serialize secreton entry: {}", e),
         })?;
 
         let blob_client = self.container_client.blob_client(&blob_name);
@@ -308,7 +308,7 @@ impl StorageBackend for AzureBlobStorage {
             })?;
 
         tracing::debug!(
-            "Stored vault entry: path={}, blob={}",
+            "Stored secreton entry: path={}, blob={}",
             entry.path,
             blob_name
         );
@@ -368,7 +368,7 @@ impl StorageBackend for AzureBlobStorage {
                 Ok(None)
             }
             Err(e) => Err(StorageError::SerializationError {
-                message: format!("Failed to deserialize vault entry: {}", e),
+                message: format!("Failed to deserialize secreton entry: {}", e),
             }),
         }
     }
@@ -393,7 +393,7 @@ impl StorageBackend for AzureBlobStorage {
 
         match blob_client.delete().await {
             Ok(_) => {
-                tracing::debug!("Deleted vault entry: path={}, blob={}", path, blob_name);
+                tracing::debug!("Deleted secreton entry: path={}, blob={}", path, blob_name);
                 Ok(true)
             }
             Err(e) if e.to_string().contains("404") || e.to_string().contains("NotFound") => {

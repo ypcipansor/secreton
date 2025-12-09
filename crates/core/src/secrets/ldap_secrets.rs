@@ -726,14 +726,14 @@ changetype: delete
             deletion_ldif: deletion_ldif.to_string(),
             rollback_ldif: None,
             default_ttl: Duration::hours(24),
-            username_template: "vault-{{random}}".to_string(),
+            username_template: "secreton-{{random}}".to_string(),
         };
 
         engine.create_role(role).await.unwrap();
 
         let user = engine.generate_credentials("app-user").await.unwrap();
 
-        assert!(user.username.starts_with("vault-"));
+        assert!(user.username.starts_with("secreton-"));
         assert_eq!(user.password.len(), 24);
         assert!(user.dn.contains(&user.username));
     }
@@ -749,7 +749,7 @@ changetype: delete
             deletion_ldif: "dn: {{dn}}\nchangetype: delete\n".to_string(),
             rollback_ldif: None,
             default_ttl: Duration::hours(12),
-            username_template: "vault-{{random}}".to_string(),
+            username_template: "secreton-{{random}}".to_string(),
         };
 
         engine.create_role(role).await.unwrap();
@@ -779,7 +779,7 @@ changetype: delete
             deletion_ldif: "dn: {{dn}}\nchangetype: delete\n".to_string(),
             rollback_ldif: None,
             default_ttl: Duration::hours(1),
-            username_template: "vault-{{random}}".to_string(),
+            username_template: "secreton-{{random}}".to_string(),
         };
 
         engine.create_role(role).await.unwrap();
@@ -815,7 +815,7 @@ description: Rolled back
             deletion_ldif: "dn: {{dn}}\nchangetype: delete\n".to_string(),
             rollback_ldif: Some(rollback_ldif.to_string()),
             default_ttl: Duration::hours(1),
-            username_template: "vault-{{random}}".to_string(),
+            username_template: "secreton-{{random}}".to_string(),
         };
 
         engine.create_role(role).await.unwrap();

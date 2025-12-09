@@ -205,7 +205,7 @@ GRANT ALL PRIVILEGES ON DATABASE secreton_db TO secreton_user;
 # Run database migrations
 cargo run -p secreton-api --bin migrate
 
-# Initialize the vault
+# Initialize the secreton
 cargo run -p secreton-api --bin init
 ```
 
@@ -489,7 +489,7 @@ Built with:
 - **PostgreSQL** - Primary storage backend
 
 Inspired by:
-- HashiCorp Vault
+- HashiCorp Secreton
 - AWS Secrets Manager
 - Google Secret Manager
 

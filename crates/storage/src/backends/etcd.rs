@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub struct EtcdStorageConfig {
     /// etcd server endpoints
     pub endpoints: Vec<String>,
-    /// Key prefix for all vault data
+    /// Key prefix for all secreton data
     pub prefix: String,
     /// Username for authentication
     pub username: Option<String>,
@@ -37,7 +37,7 @@ impl Default for EtcdStorageConfig {
     fn default() -> Self {
         Self {
             endpoints: vec!["http://localhost:2379".to_string()],
-            prefix: "/vault/".to_string(),
+            prefix: "/secreton/".to_string(),
             username: None,
             password: None,
             tls_enabled: false,
@@ -549,7 +549,7 @@ mod tests {
         let config = EtcdStorageConfig::default();
         assert_eq!(config.endpoints.len(), 1);
         assert_eq!(config.endpoints[0], "http://localhost:2379");
-        assert_eq!(config.prefix, "/vault/");
+        assert_eq!(config.prefix, "/secreton/");
         assert_eq!(config.timeout, 30);
     }
 
@@ -563,7 +563,7 @@ mod tests {
         };
 
         let key = storage.build_key("/test/key");
-        assert_eq!(key, "/vault/test/key");
+        assert_eq!(key, "/secreton/test/key");
     }
 
     #[tokio::test]

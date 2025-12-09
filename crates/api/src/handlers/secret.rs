@@ -440,8 +440,8 @@ pub async fn get_secret(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Get secret from vault service
-    let secret_data = state.services.vault.get_secret(&path, &user.id).await
+    // Get secret from secreton service
+    let secret_data = state.services.secreton.get_secret(&path, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -505,8 +505,8 @@ pub async fn create_secret(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Create secret via vault service
-    let secret_data = state.services.vault.put_secret(&path, request.data, &user.id).await
+    // Create secret via secreton service
+    let secret_data = state.services.secreton.put_secret(&path, request.data, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to create secret: {}", e)))?;
 
     let response = SecretResponse {
@@ -566,7 +566,7 @@ pub async fn update_secret(
     }
 
     // Get current secret to determine version
-    let current_secret = match state.services.vault.get_secret(&path, &user.id).await {
+    let current_secret = match state.services.secreton.get_secret(&path, &user.id).await {
         Ok(secret) => secret,
         Err(secret::SecretError::SecretNotFound { .. }) => {
             return Err(crate::ApiError::NotFound("Secret not found".to_string()));
@@ -574,8 +574,8 @@ pub async fn update_secret(
         Err(e) => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
     };
 
-    // Update secret via vault service
-    let secret_data = state.services.vault.put_secret(&path, request.data, &user.id).await
+    // Update secret via secreton service
+    let secret_data = state.services.secreton.put_secret(&path, request.data, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to update secret: {}", e)))?;
 
     let response = SecretResponse {
@@ -635,8 +635,8 @@ pub async fn delete_secret(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Delete secret via vault service
-    state.services.vault.delete_secret(&path, &user.id).await
+    // Delete secret via secreton service
+    state.services.secreton.delete_secret(&path, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -688,8 +688,8 @@ pub async fn list_secrets(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List secrets via vault service
-    let secret_list = state.services.vault.list_secrets(query.filter.as_deref(), &user.id).await
+    // List secrets via secreton service
+    let secret_list = state.services.secreton.list_secrets(query.filter.as_deref(), &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
 
     // Convert to response format (now with real metadata)
@@ -733,8 +733,8 @@ pub async fn create_key(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Create key via vault service
-    let key_info = state.services.vault.create_key(&request.name, &request.key_type, &user.id).await
+    // Create key via secreton service
+    let key_info = state.services.secreton.create_key(&request.name, &request.key_type, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to create key: {}", e)))?;
 
     // Get public key if available (for asymmetric keys)
@@ -799,8 +799,8 @@ pub async fn get_key(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Get key via vault service
-    let key_info = state.services.vault.get_key(&key_id, &user.id).await
+    // Get key via secreton service
+    let key_info = state.services.secreton.get_key(&key_id, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -853,8 +853,8 @@ pub async fn list_keys(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List keys via vault service
-    let key_infos = state.services.vault.list_keys(&user.id, query.filter.as_deref()).await
+    // List keys via secreton service
+    let key_infos = state.services.secreton.list_keys(&user.id, query.filter.as_deref()).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list keys: {}", e)))?;
 
     // Convert to response format
@@ -906,8 +906,8 @@ pub async fn rotate_key(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Rotate key via vault service
-    let key_info = state.services.vault.rotate_key(&key_id, &user.id).await
+    // Rotate key via secreton service
+    let key_info = state.services.secreton.rotate_key(&key_id, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -977,8 +977,8 @@ pub async fn update_key(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Update key metadata via vault service
-    let key_info = state.services.vault.update_key_metadata(&key_id, &request.metadata, &user.id).await
+    // Update key metadata via secreton service
+    let key_info = state.services.secreton.update_key_metadata(&key_id, &request.metadata, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -1031,8 +1031,8 @@ pub async fn delete_key(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Delete key via vault service
-    state.services.vault.delete_key(&key_id, &user.id).await
+    // Delete key via secreton service
+    state.services.secreton.delete_key(&key_id, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -1068,8 +1068,8 @@ pub async fn list_key_versions(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List key versions via vault service
-    let versions = state.services.vault.list_key_versions(&key_id, &user.id).await
+    // List key versions via secreton service
+    let versions = state.services.secreton.list_key_versions(&key_id, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list key versions: {}", e)))?;
 
     // Convert to response format
@@ -1108,8 +1108,8 @@ pub async fn encrypt_data(
     let plaintext = base64::decode(&request.plaintext)
         .unwrap_or_else(|_| request.plaintext.as_bytes().to_vec());
 
-    // Encrypt data via vault service
-    let (encrypted_data, key_version) = state.services.vault.encrypt(&request.key_id, &plaintext, &user.id).await
+    // Encrypt data via secreton service
+    let (encrypted_data, key_version) = state.services.secreton.encrypt(&request.key_id, &plaintext, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)))?;
 
     // Encode ciphertext as base64
@@ -1173,8 +1173,8 @@ pub async fn decrypt_data(
         key_id: format!("{}/{}", user.id, request.key_id),
     };
 
-    // Decrypt data via vault service
-    let (plaintext, key_version) = state.services.vault.decrypt(&request.key_id, &encrypted_data, &user.id).await
+    // Decrypt data via secreton service
+    let (plaintext, key_version) = state.services.secreton.decrypt(&request.key_id, &encrypted_data, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)))?;
 
     // Encode plaintext as base64
@@ -1229,8 +1229,8 @@ pub async fn sign_data(
     let data = base64::decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
 
-    // Sign data using vault service
-    let signature_result = state.services.vault.sign_data(&request.key_id, &data, &user.id).await
+    // Sign data using secreton service
+    let signature_result = state.services.secreton.sign_data(&request.key_id, &data, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to sign data: {}", e)))?;
 
     let response = SignResponse {
@@ -1270,8 +1270,8 @@ pub async fn verify_signature(
     let signature = base64::decode(&request.signature)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
 
-    // Verify signature using vault service
-    let (is_valid, key_version) = state.services.vault.verify_data(&request.key_id, &data, &signature, &user.id).await
+    // Verify signature using secreton service
+    let (is_valid, key_version) = state.services.secreton.verify_data(&request.key_id, &data, &signature, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to verify signature: {}", e)))?;
 
     let response = VerifyResponse {
@@ -1368,8 +1368,8 @@ pub async fn list_policies(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List policies via vault service
-    let policies = state.services.vault.list_policies(query.filter.as_deref()).await
+    // List policies via secreton service
+    let policies = state.services.secreton.list_policies(query.filter.as_deref()).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list policies: {}", e)))?;
 
     // Convert to response format
@@ -1409,8 +1409,8 @@ pub async fn get_policy(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Get policy via vault service
-    let policy = state.services.vault.get_policy(&name).await
+    // Get policy via secreton service
+    let policy = state.services.secreton.get_policy(&name).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e)),
@@ -1453,8 +1453,8 @@ pub async fn create_policy(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Create policy via vault service
-    let policy = state.services.vault.create_policy(&name, request.rules, request.metadata, &user.id).await
+    // Create policy via secreton service
+    let policy = state.services.secreton.create_policy(&name, request.rules, request.metadata, &user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to create policy: {}", e)))?;
 
     let response = PolicyResponse {
@@ -1494,8 +1494,8 @@ pub async fn update_policy(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Update policy via vault service
-    let policy = state.services.vault.update_policy(&name, request.rules, request.metadata, &user.id).await
+    // Update policy via secreton service
+    let policy = state.services.secreton.update_policy(&name, request.rules, request.metadata, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
@@ -1537,8 +1537,8 @@ pub async fn delete_policy(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Delete policy via vault service
-    state.services.vault.delete_policy(&name, &user.id).await
+    // Delete policy via secreton service
+    state.services.secreton.delete_policy(&name, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to delete policy: {}", e)),
@@ -1585,7 +1585,7 @@ async fn get_public_key_for_key(
     match key_info.key_type.as_str() {
         "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
             // Try to retrieve the public key from storage
-            // Public keys are typically stored alongside private keys in vault
+            // Public keys are typically stored alongside private keys in secreton
             let key_path = format!("keys/{}/{}", user.id, key_info.id);
 
             match state.services.storage.get_by_path(&key_path).await {
@@ -1667,8 +1667,8 @@ pub async fn create_backup(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Create backup via vault service
-    let backup_info = state.services.vault.create_backup(&user.id).await
+    // Create backup via secreton service
+    let backup_info = state.services.secreton.create_backup(&user.id).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to create backup: {}", e)))?;
 
     let response = BackupInfo {
@@ -1704,8 +1704,8 @@ pub async fn list_backups(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // List backups via vault service
-    let backups = state.services.vault.list_backups().await
+    // List backups via secreton service
+    let backups = state.services.secreton.list_backups().await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list backups: {}", e)))?;
 
     let backup_infos: Vec<BackupInfo> = backups.into_iter().map(|backup| BackupInfo {
@@ -1742,8 +1742,8 @@ pub async fn get_backup(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Get backup info via vault service
-    let backup_info = state.services.vault.get_backup(&backup_id).await
+    // Get backup info via secreton service
+    let backup_info = state.services.secreton.get_backup(&backup_id).await
         .map_err(|e| match e {
             secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to retrieve backup: {}", e)),
@@ -1783,8 +1783,8 @@ pub async fn restore_backup(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Restore backup via vault service
-    let result = state.services.vault.restore_backup(&backup_id, &user.id).await
+    // Restore backup via secreton service
+    let result = state.services.secreton.restore_backup(&backup_id, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to restore backup: {}", e)),
@@ -1821,8 +1821,8 @@ pub async fn delete_backup(
         return Err(crate::ApiError::Authorization("Access denied".to_string()));
     }
 
-    // Delete backup via vault service
-    state.services.vault.delete_backup(&backup_id, &user.id).await
+    // Delete backup via secreton service
+    state.services.secreton.delete_backup(&backup_id, &user.id).await
         .map_err(|e| match e {
             secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
             _ => crate::ApiError::Internal(format!("Failed to delete backup: {}", e)),

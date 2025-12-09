@@ -253,7 +253,7 @@ fn test_storage_backend_config_defaults() {
     // Test Cassandra config default
     let cassandra_config = secreton_storage::backends::CassandraConfig::default();
     assert_eq!(cassandra_config.contact_points, "127.0.0.1:9042");
-    assert_eq!(cassandra_config.keyspace, "vault_kv");
+    assert_eq!(cassandra_config.keyspace, "secreton_kv");
     assert!(cassandra_config.username.is_none());
     assert!(cassandra_config.password.is_none());
 
@@ -263,12 +263,12 @@ fn test_storage_backend_config_defaults() {
         mongodb_config.connection_string,
         "mongodb://localhost:27017"
     );
-    assert_eq!(mongodb_config.database_name, "vault_kv");
+    assert_eq!(mongodb_config.database_name, "secreton_kv");
     assert_eq!(mongodb_config.collection_name, "entries");
 }
 
 #[test]
-fn test_vault_entry_with_all_security_levels() {
+fn test_secreton_entry_with_all_security_levels() {
     let owner_id = Uuid::new_v4();
 
     // Test all security levels
@@ -302,7 +302,7 @@ fn test_vault_entry_with_all_security_levels() {
 }
 
 #[test]
-fn test_vault_entry_metadata_and_tags() {
+fn test_secreton_entry_metadata_and_tags() {
     let owner_id = Uuid::new_v4();
     let mut entry = SecretEntry::new(
         "test/metadata".to_string(),

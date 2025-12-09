@@ -145,7 +145,7 @@ impl NomadEngine {
         let token = NomadToken {
             accessor_id: accessor_id.clone(),
             secret_id,
-            name: format!("vault-{}-{}", role_name, uuid::Uuid::new_v4()),
+            name: format!("secreton-{}-{}", role_name, uuid::Uuid::new_v4()),
             token_type: role.token_type.clone(),
             policies: role.policies.clone(),
             global: role.global,

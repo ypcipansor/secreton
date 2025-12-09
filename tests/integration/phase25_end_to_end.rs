@@ -281,7 +281,7 @@ async fn test_full_observability_incident_response() {
 
     let trace_result = pipeline.trace_operation(
         "secret-access".to_string(),
-        "vault-service".to_string(),
+        "secreton-service".to_string(),
         trace_future,
     ).await;
     assert!(trace_result.is_ok());

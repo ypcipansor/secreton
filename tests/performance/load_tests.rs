@@ -1,4 +1,4 @@
-//! Performance and load testing for vault system
+//! Performance and load testing for secreton system
 //!
 //! Tests system performance under various load conditions including
 //! concurrent operations, memory usage, and response times.
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Barrier;
 use tokio::time::sleep;
 
-use crate::handlers::vault::*;
+use crate::handlers::secreton::*;
 use crate::config::ApiConfig;
 use crate::services::ServiceContainer;
 use axum_test::TestServer;

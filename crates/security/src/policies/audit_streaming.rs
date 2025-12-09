@@ -241,7 +241,7 @@ impl AuditStreamEngine {
                     event.path,
                     event.timestamp.timestamp_millis(),
                     event.principal,
-                    "vault-server",
+                    "secreton-server",
                     event.result
                 ))
             }
@@ -392,7 +392,7 @@ mod tests {
 
     fn create_test_event() -> AuditEvent {
         let mut metadata = HashMap::new();
-        metadata.insert("user_agent".to_string(), "vault-cli/1.0".to_string());
+        metadata.insert("user_agent".to_string(), "secreton-cli/1.0".to_string());
 
         AuditEvent {
             timestamp: Utc::now(),

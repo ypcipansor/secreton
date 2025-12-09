@@ -19,7 +19,7 @@ pub struct ConsulStorageConfig {
     pub datacenter: Option<String>,
     /// Consul token for authentication
     pub token: Option<String>,
-    /// Key prefix for all vault data
+    /// Key prefix for all secreton data
     pub path: String,
     /// TLS configuration
     pub tls_enabled: bool,
@@ -37,7 +37,7 @@ impl Default for ConsulStorageConfig {
             address: "http://localhost:8500".to_string(),
             datacenter: None,
             token: None,
-            path: "vault/".to_string(),
+            path: "secreton/".to_string(),
             tls_enabled: false,
             tls_ca_cert: None,
             timeout: 30,
@@ -491,7 +491,7 @@ mod tests {
     fn test_consul_config_default() {
         let config = ConsulStorageConfig::default();
         assert_eq!(config.address, "http://localhost:8500");
-        assert_eq!(config.path, "vault/");
+        assert_eq!(config.path, "secreton/");
         assert_eq!(config.timeout, 30);
         assert_eq!(config.max_retries, 3);
     }
@@ -506,7 +506,7 @@ mod tests {
         };
 
         let url = storage.build_url("test/key");
-        assert!(url.contains("/v1/kv/vault/test/key"));
+        assert!(url.contains("/v1/kv/secreton/test/key"));
     }
 
     #[test]

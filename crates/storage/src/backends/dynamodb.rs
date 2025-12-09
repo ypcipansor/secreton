@@ -39,7 +39,7 @@ impl Default for DynamoDBStorageConfig {
     fn default() -> Self {
         Self {
             region: "us-east-1".to_string(),
-            table_name: "vault_kv_store".to_string(),
+            table_name: "secreton_kv_store".to_string(),
             partition_key: "path".to_string(),
             sort_key: "version".to_string(),
             streams_enabled: false,
@@ -278,7 +278,7 @@ impl DynamoDBStorage {
     }
 
     /// Convert SecretEntry to DynamoDB item
-    fn vault_entry_to_item(&self, entry: &SecretEntry) -> HashMap<String, AttributeValue> {
+    fn secreton_entry_to_item(&self, entry: &SecretEntry) -> HashMap<String, AttributeValue> {
         let mut item = HashMap::new();
 
         item.insert(
@@ -337,7 +337,7 @@ impl DynamoDBStorage {
     }
 
     /// Convert DynamoDB item to SecretEntry
-    fn item_to_vault_entry(
+    fn item_to_secreton_entry(
         &self,
         item: &HashMap<String, AttributeValue>,
     ) -> Result<SecretEntry, StorageError> {
@@ -460,7 +460,7 @@ impl DynamoDBStorage {
 #[async_trait]
 impl StorageBackend for DynamoDBStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let item = self.vault_entry_to_item(entry);
+        let item = self.secreton_entry_to_item(entry);
 
         self.client
             .put_item()
@@ -512,7 +512,7 @@ impl StorageBackend for DynamoDBStorage {
             })?;
 
         if let Some(item) = result.item {
-            let entry = self.item_to_vault_entry(&item)?;
+            let entry = self.item_to_secreton_entry(&item)?;
             let mut cache = self.cache.write().await;
             cache.insert(path.to_string(), entry.clone());
             Ok(Some(entry))
@@ -582,7 +582,7 @@ impl StorageBackend for DynamoDBStorage {
 
             if let Some(items) = result.items {
                 for item in items {
-                    let entry = self.item_to_vault_entry(&item)?;
+                    let entry = self.item_to_secreton_entry(&item)?;
                     entries.push(entry);
                 }
             }
@@ -601,7 +601,7 @@ impl StorageBackend for DynamoDBStorage {
 
             if let Some(items) = result.items {
                 for item in items {
-                    let entry = self.item_to_vault_entry(&item)?;
+                    let entry = self.item_to_secreton_entry(&item)?;
                     entries.push(entry);
                 }
             }
@@ -715,14 +715,14 @@ mod tests {
     fn test_dynamodb_config_default() {
         let config = DynamoDBStorageConfig::default();
         assert_eq!(config.region, "us-east-1");
-        assert_eq!(config.table_name, "vault_kv_store");
+        assert_eq!(config.table_name, "secreton_kv_store");
         assert_eq!(config.partition_key, "path");
         assert_eq!(config.sort_key, "version");
         assert_eq!(config.billing_mode, "PROVISIONED");
     }
 
     #[test]
-    fn test_vault_entry_to_item() {
+    fn test_secreton_entry_to_item() {
         let config = DynamoDBStorageConfig::default();
         let storage = DynamoDBStorage {
             config,
@@ -747,7 +747,7 @@ mod tests {
             Uuid::new_v4(),
         );
 
-        let item = storage.vault_entry_to_item(&entry);
+        let item = storage.secreton_entry_to_item(&entry);
         assert!(item.contains_key("path"));
         assert!(item.contains_key("version"));
         assert!(item.contains_key("encrypted_data"));

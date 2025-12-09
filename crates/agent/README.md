@@ -1,12 +1,12 @@
-# Vault Adhyaksa Agent
+# Secreton Adhyaksa Agent
 
-**Vault Adhyaksa Agent** adalah aplikasi pendamping (helper/sidecar) untuk HashiCorp Vault-like server (`vault_adhyaksa`). Agent ini bertugas melakukan auto-auth, perpanjangan token otomatis, rendering template file dari secret Vault, serta sink token ke file, environment, atau menjalankan aplikasi lain dengan token dinamis. Agent ini sangat cocok untuk DevOps, deployment cloud-native, dan kebutuhan compliance/enterprise.
+**Secreton Adhyaksa Agent** adalah aplikasi pendamping (helper/sidecar) untuk HashiCorp Secreton-like server (`secreton_adhyaksa`). Agent ini bertugas melakukan auto-auth, perpanjangan token otomatis, rendering template file dari secret Secreton, serta sink token ke file, environment, atau menjalankan aplikasi lain dengan token dinamis. Agent ini sangat cocok untuk DevOps, deployment cloud-native, dan kebutuhan compliance/enterprise.
 
 ---
 
-## Perbedaan Vault Agent vs vault_adhyaksa (Server)
+## Perbedaan Secreton Agent vs secreton_adhyaksa (Server)
 
-| Komponen             | vault_adhyaksa (Server)         | vault_adhyaksa_agent (Agent)         |
+| Komponen             | secreton_adhyaksa (Server)         | secreton_adhyaksa_agent (Agent)         |
 |---------------------|----------------------------------|--------------------------------------|
 | **Fungsi utama**    | Server utama, API, storage, RBAC | Client/sidecar, auto-auth, template  |
 | **Proses**          | Service utama, satu per cluster  | Banyak, satu per aplikasi/VM/Pod     |
@@ -21,14 +21,14 @@
 | **Audit/Notifikasi**| Internal DB/file                 | File audit, webhook, log file        |
 
 **Singkatnya:**
-- `vault_adhyaksa` = server utama, pusat API dan storage secret
-- `vault_adhyaksa_agent` = client/sidecar untuk aplikasi, mengambil secret/token dari server, siap untuk DevOps/CI/CD
+- `secreton_adhyaksa` = server utama, pusat API dan storage secret
+- `secreton_adhyaksa_agent` = client/sidecar untuk aplikasi, mengambil secret/token dari server, siap untuk DevOps/CI/CD
 
 ---
 
-## Kegunaan Vault Agent
-- Otomatis login ke Vault dan perpanjang token
-- Render file konfigurasi dari secret Vault ke file lokal (template)
+## Kegunaan Secreton Agent
+- Otomatis login ke Secreton dan perpanjang token
+- Render file konfigurasi dari secret Secreton ke file lokal (template)
 - Sink token ke file, .env, atau jalankan aplikasi lain dengan token di environment
 - Monitoring, audit, notifikasi event penting (webhook)
 - Failover ke server backup jika server utama down
@@ -55,10 +55,10 @@
 
 ## Contoh Konfigurasi (`agent.yaml`)
 ```yaml
-server_url: "https://vault1:8200"
+server_url: "https://secreton1:8200"
 server_urls:
-  - "https://vault1:8200"
-  - "https://vault2:8200"
+  - "https://secreton1:8200"
+  - "https://secreton2:8200"
 auth_method: userpass         # atau approle, k8s
 auth_config:
   username: "myuser"
@@ -92,11 +92,11 @@ restart_delay: 5             # detik
 ## Cara Menjalankan
 1. **Build**
    ```sh
-   cargo build --release -p vault_adhyaksa_agent
+   cargo build --release -p secreton_adhyaksa_agent
    ```
 2. **Jalankan**
    ```sh
-   ./target/release/vault_adhyaksa_agent --config agent.yaml
+   ./target/release/secreton_adhyaksa_agent --config agent.yaml
    ```
 3. **Reload config/template**
    - **Linux/Unix**:  `kill -HUP <pid>`
@@ -137,4 +137,4 @@ restart_delay: 5             # detik
 
 ---
 
-**Vault Agent = Otomasi, keamanan, dan DevOps Vault Anda!** 
+**Secreton Agent = Otomasi, keamanan, dan DevOps Secreton Anda!** 

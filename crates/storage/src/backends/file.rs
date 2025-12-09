@@ -49,12 +49,12 @@ impl FileBackend {
         Ok(Self { storage_path: path })
     }
 
-    /// Generate file path for a vault entry by ID
+    /// Generate file path for a secreton entry by ID
     fn entry_path(&self, id: Uuid) -> PathBuf {
         self.storage_path.join(format!("{}.json", id))
     }
 
-    /// Read and deserialize a vault entry from file
+    /// Read and deserialize a secreton entry from file
     fn read_entry(&self, file_path: &Path) -> StorageResult<SecretEntry> {
         let content = fs::read_to_string(file_path).map_err(|e| StorageError::BackendError {
             backend: "File".to_string(),
@@ -66,7 +66,7 @@ impl FileBackend {
         })
     }
 
-    /// Serialize and write a vault entry to file
+    /// Serialize and write a secreton entry to file
     fn write_entry(&self, file_path: &Path, entry: &SecretEntry) -> StorageResult<()> {
         let content =
             serde_json::to_string_pretty(entry).map_err(|e| StorageError::SerializationError {

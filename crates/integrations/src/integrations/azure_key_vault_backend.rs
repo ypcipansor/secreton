@@ -29,7 +29,7 @@ pub enum AuthMethod {
 /// Azure Key Secret configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AzureKeySecretConfig {
-    pub vault_url: String, // https://{vault-name}.vault.azure.net
+    pub secreton_url: String, // https://{secreton-name}.secreton.azure.net
     pub tenant_id: String,
     pub auth_method: AuthMethod,
     pub subscription_id: String,
@@ -49,7 +49,7 @@ pub enum ContentType {
 pub struct AzureSecret {
     pub secret_name: String,
     pub secret_id: String,  // Azure resource ID
-    pub vault_path: String, // Secret path mapping
+    pub secreton_path: String, // Secret path mapping
     pub value: String,
     pub content_type: ContentType,
     pub enabled: bool,
@@ -127,18 +127,18 @@ impl AzureKeySecretBackend {
         &self,
         secret_name: &str,
         value: &str,
-        vault_path: &str,
+        secreton_path: &str,
         content_type: ContentType,
         tags: HashMap<String, String>,
     ) -> Result<AzureSecret> {
         let config = self.config.read().await;
-        let secret_id = format!("{}/secrets/{}", config.vault_url, secret_name);
+        let secret_id = format!("{}/secrets/{}", config.secreton_url, secret_name);
         drop(config);
 
         let azure_secret = AzureSecret {
             secret_name: secret_name.to_string(),
             secret_id,
-            vault_path: vault_path.to_string(),
+            secreton_path: secreton_path.to_string(),
             value: value.to_string(),
             content_type,
             enabled: true,
@@ -174,23 +174,23 @@ impl AzureKeySecretBackend {
 
         for (_name, azure_secret) in secrets.iter() {
             // Mock: Check if secret exists in Secret
-            let vault_exists = self
-                .mock_vault_secret_exists(&azure_secret.vault_path)
+            let secreton_exists = self
+                .mock_secreton_secret_exists(&azure_secret.secreton_path)
                 .await;
 
-            if vault_exists {
+            if secreton_exists {
                 // Handle conflict
                 match conflict_resolution {
                     ConflictResolution::PreferAzure => {
                         // Update Secret with Azure value
-                        self.mock_update_vault(&azure_secret.vault_path, &azure_secret.value)
+                        self.mock_update_secreton(&azure_secret.secreton_path, &azure_secret.value)
                             .await?;
                         synced_count += 1;
                     }
                     ConflictResolution::PreferSecret => {
                         // Update Azure with Secret value
-                        let _vault_value =
-                            self.mock_get_vault_value(&azure_secret.vault_path).await?;
+                        let _secreton_value =
+                            self.mock_get_secreton_value(&azure_secret.secreton_path).await?;
                         // Would update Azure here
                         synced_count += 1;
                     }
@@ -200,7 +200,7 @@ impl AzureKeySecretBackend {
                 }
             } else {
                 // No conflict, create in Secret
-                self.mock_create_vault(&azure_secret.vault_path, &azure_secret.value)
+                self.mock_create_secreton(&azure_secret.secreton_path, &azure_secret.value)
                     .await?;
                 synced_count += 1;
             }
@@ -223,7 +223,7 @@ impl AzureKeySecretBackend {
         key_ops: Vec<KeyOperation>,
     ) -> Result<AzureKey> {
         let config = self.config.read().await;
-        let key_id = format!("{}/keys/{}", config.vault_url, key_name);
+        let key_id = format!("{}/keys/{}", config.secreton_url, key_name);
         drop(config);
 
         let azure_key = AzureKey {
@@ -290,19 +290,19 @@ impl AzureKeySecretBackend {
 
     // Helper methods
 
-    async fn mock_vault_secret_exists(&self, _vault_path: &str) -> bool {
+    async fn mock_secreton_secret_exists(&self, _secreton_path: &str) -> bool {
         true
     }
 
-    async fn mock_update_vault(&self, _vault_path: &str, _value: &str) -> Result<()> {
+    async fn mock_update_secreton(&self, _secreton_path: &str, _value: &str) -> Result<()> {
         Ok(())
     }
 
-    async fn mock_get_vault_value(&self, _vault_path: &str) -> Result<String> {
-        Ok("vault-value".to_string())
+    async fn mock_get_secreton_value(&self, _secreton_path: &str) -> Result<String> {
+        Ok("secreton-value".to_string())
     }
 
-    async fn mock_create_vault(&self, _vault_path: &str, _value: &str) -> Result<()> {
+    async fn mock_create_secreton(&self, _secreton_path: &str, _value: &str) -> Result<()> {
         Ok(())
     }
 
@@ -348,7 +348,7 @@ mod tests {
 
     fn create_test_config() -> AzureKeySecretConfig {
         AzureKeySecretConfig {
-            vault_url: "https://my-vault.vault.azure.net".to_string(),
+            secreton_url: "https://my-secreton.secreton.azure.net".to_string(),
             tenant_id: "12345678-1234-1234-1234-123456789012".to_string(),
             auth_method: AuthMethod::ManagedIdentity,
             subscription_id: "sub-12345".to_string(),
@@ -383,7 +383,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(secret.secret_name, "db-password");
-        assert_eq!(secret.vault_path, "secret/data/db/prod");
+        assert_eq!(secret.secreton_path, "secret/data/db/prod");
         assert!(secret.enabled);
     }
 

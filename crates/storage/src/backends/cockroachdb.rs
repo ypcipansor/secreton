@@ -123,7 +123,7 @@ impl CockroachDBStorage {
             }
         });
 
-        // Create vault_entries table if it doesn't exist
+        // Create secreton_entries table if it doesn't exist
         Self::create_tables(&client).await?;
 
         Ok(Self {
@@ -133,9 +133,9 @@ impl CockroachDBStorage {
     }
 
     async fn create_tables(client: &Client) -> StorageResult<()> {
-        // Create vault_entries table with CockroachDB-specific optimizations
+        // Create secreton_entries table with CockroachDB-specific optimizations
         let create_table_query = r#"
-            CREATE TABLE IF NOT EXISTS vault_entries (
+            CREATE TABLE IF NOT EXISTS secreton_entries (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 path STRING NOT NULL UNIQUE,
                 encrypted_data BYTES NOT NULL,
@@ -163,13 +163,13 @@ impl CockroachDBStorage {
             .execute(create_table_query, &[])
             .await
             .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to create vault_entries table: {}", e),
+                message: format!("Failed to create secreton_entries table: {}", e),
             })?;
 
         Ok(())
     }
 
-    fn vault_entry_to_params<'a>(
+    fn secreton_entry_to_params<'a>(
         entry: &'a SecretEntry,
     ) -> Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync + 'a>> {
         vec![
@@ -188,7 +188,7 @@ impl CockroachDBStorage {
         ]
     }
 
-    fn row_to_vault_entry(row: &tokio_postgres::Row) -> StorageResult<SecretEntry> {
+    fn row_to_secreton_entry(row: &tokio_postgres::Row) -> StorageResult<SecretEntry> {
         let id: Uuid = row.get(0);
         let path: String = row.get(1);
         let encrypted_data: Vec<u8> = row.get(2);
@@ -241,14 +241,14 @@ impl CockroachDBStorage {
 #[async_trait]
 impl StorageBackend for CockroachDBStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let params = Self::vault_entry_to_params(entry);
+        let params = Self::secreton_entry_to_params(entry);
         let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
             .iter()
             .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
             .collect();
 
         let query = r#"
-            INSERT INTO vault_entries
+            INSERT INTO secreton_entries
             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (path) DO UPDATE SET
@@ -273,7 +273,7 @@ impl StorageBackend for CockroachDBStorage {
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
-        let query = "SELECT * FROM vault_entries WHERE id = $1";
+        let query = "SELECT * FROM secreton_entries WHERE id = $1";
         let rows =
             self.client
                 .query(query, &[&id])
@@ -283,14 +283,14 @@ impl StorageBackend for CockroachDBStorage {
                 })?;
 
         if let Some(row) = rows.first() {
-            Ok(Some(Self::row_to_vault_entry(row)?))
+            Ok(Some(Self::row_to_secreton_entry(row)?))
         } else {
             Ok(None)
         }
     }
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
-        let query = "SELECT * FROM vault_entries WHERE path = $1";
+        let query = "SELECT * FROM secreton_entries WHERE path = $1";
         let rows =
             self.client
                 .query(query, &[&path])
@@ -300,7 +300,7 @@ impl StorageBackend for CockroachDBStorage {
                 })?;
 
         if let Some(row) = rows.first() {
-            Ok(Some(Self::row_to_vault_entry(row)?))
+            Ok(Some(Self::row_to_secreton_entry(row)?))
         } else {
             Ok(None)
         }
@@ -311,7 +311,7 @@ impl StorageBackend for CockroachDBStorage {
     }
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
-        let query = "DELETE FROM vault_entries WHERE id = $1";
+        let query = "DELETE FROM secreton_entries WHERE id = $1";
         let result =
             self.client
                 .execute(query, &[&id])
@@ -324,7 +324,7 @@ impl StorageBackend for CockroachDBStorage {
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        let query = "DELETE FROM vault_entries WHERE path = $1";
+        let query = "DELETE FROM secreton_entries WHERE path = $1";
         let result =
             self.client
                 .execute(query, &[&path])
@@ -380,7 +380,7 @@ impl StorageBackend for CockroachDBStorage {
         };
 
         let query = format!(
-            "SELECT * FROM vault_entries {} {}",
+            "SELECT * FROM secreton_entries {} {}",
             where_clause, limit_clause
         );
         let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
@@ -396,7 +396,7 @@ impl StorageBackend for CockroachDBStorage {
 
         let mut entries = Vec::new();
         for row in rows {
-            entries.push(Self::row_to_vault_entry(&row)?);
+            entries.push(Self::row_to_secreton_entry(&row)?);
         }
 
         Ok(entries)
@@ -439,7 +439,7 @@ impl StorageBackend for CockroachDBStorage {
             format!("WHERE {}", conditions.join(" AND "))
         };
 
-        let query = format!("SELECT COUNT(*) FROM vault_entries {}", where_clause);
+        let query = format!("SELECT COUNT(*) FROM secreton_entries {}", where_clause);
         let params_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
             .iter()
             .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
@@ -456,7 +456,7 @@ impl StorageBackend for CockroachDBStorage {
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
-        let query = "SELECT 1 FROM vault_entries WHERE path = $1 LIMIT 1";
+        let query = "SELECT 1 FROM secreton_entries WHERE path = $1 LIMIT 1";
         let rows =
             self.client
                 .query(query, &[&path])
@@ -503,7 +503,7 @@ impl StorageBackend for CockroachDBStorage {
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        let query = "SELECT COUNT(*), SUM(octet_length(encrypted_data)) FROM vault_entries";
+        let query = "SELECT COUNT(*), SUM(octet_length(encrypted_data)) FROM secreton_entries";
         let rows = self
             .client
             .query(query, &[])

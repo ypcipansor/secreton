@@ -98,7 +98,7 @@ impl PageUtils {
     pub fn default_page_meta(title: &str, path: &str) -> PageMeta {
         PageMeta {
             title: title.to_string(),
-            description: format!("{} page for Secreton vault", title),
+            description: format!("{} page for Secreton secreton", title),
             breadcrumbs: Self::create_breadcrumbs(path),
             requires_auth: true,
             required_permissions: vec!["read".to_string()],

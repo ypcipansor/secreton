@@ -48,7 +48,7 @@ pub struct ADConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ADRole {
     pub name: String,
-    pub service_account_name_template: String, // e.g., "vault-{{random}}"
+    pub service_account_name_template: String, // e.g., "secreton-{{random}}"
     pub account_type: AccountType,
     pub distinguished_names: Vec<String>, // OUs where accounts can be created
     pub groups: Vec<String>,              // Groups to add account to
@@ -438,7 +438,7 @@ mod tests {
         ADConfig {
             domain: "example.com".to_string(),
             url: "ldap://dc.example.com:389".to_string(),
-            bind_dn: "CN=vault,CN=Users,DC=example,DC=com".to_string(),
+            bind_dn: "CN=secreton,CN=Users,DC=example,DC=com".to_string(),
             bind_password: "password123".to_string(),
             service_account_ou: "OU=ServiceAccounts,DC=example,DC=com".to_string(),
             user_ou: "OU=Users,DC=example,DC=com".to_string(),
@@ -463,7 +463,7 @@ mod tests {
 
         let role = ADRole {
             name: "app-service".to_string(),
-            service_account_name_template: "vault-{{random}}".to_string(),
+            service_account_name_template: "secreton-{{random}}".to_string(),
             account_type: AccountType::ServiceAccount,
             distinguished_names: vec!["OU=ServiceAccounts,DC=example,DC=com".to_string()],
             groups: vec!["AppUsers".to_string()],
@@ -487,7 +487,7 @@ mod tests {
 
         let role = ADRole {
             name: "webapp".to_string(),
-            service_account_name_template: "vault-{{random}}".to_string(),
+            service_account_name_template: "secreton-{{random}}".to_string(),
             account_type: AccountType::ServiceAccount,
             distinguished_names: vec!["OU=ServiceAccounts,DC=example,DC=com".to_string()],
             groups: vec!["WebAppGroup".to_string()],
@@ -500,7 +500,7 @@ mod tests {
 
         let creds = engine.generate_credentials("webapp").await.unwrap();
 
-        assert!(creds.username.starts_with("vault-"));
+        assert!(creds.username.starts_with("secreton-"));
         assert!(!creds.password.is_empty());
         assert_eq!(creds.password.len(), 24);
     }
@@ -513,7 +513,7 @@ mod tests {
 
         let role = ADRole {
             name: "db-service".to_string(),
-            service_account_name_template: "vault-{{random}}".to_string(),
+            service_account_name_template: "secreton-{{random}}".to_string(),
             account_type: AccountType::ServiceAccount,
             distinguished_names: vec!["OU=ServiceAccounts,DC=example,DC=com".to_string()],
             groups: vec![],
@@ -544,7 +544,7 @@ mod tests {
 
         let role = ADRole {
             name: "temp-service".to_string(),
-            service_account_name_template: "vault-{{random}}".to_string(),
+            service_account_name_template: "secreton-{{random}}".to_string(),
             account_type: AccountType::ServiceAccount,
             distinguished_names: vec!["OU=ServiceAccounts,DC=example,DC=com".to_string()],
             groups: vec![],
@@ -577,7 +577,7 @@ mod tests {
 
         let role = ADRole {
             name: "app-user".to_string(),
-            service_account_name_template: "vault-{{random}}".to_string(),
+            service_account_name_template: "secreton-{{random}}".to_string(),
             account_type: AccountType::User,
             distinguished_names: vec!["OU=Users,DC=example,DC=com".to_string()],
             groups: vec!["BaseGroup".to_string()],

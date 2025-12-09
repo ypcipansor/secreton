@@ -173,7 +173,7 @@ impl IBMCloudEngine {
         // Real implementation would POST to https://iam.cloud.ibm.com/v1/serviceids
         let service_id = ServiceID {
             id: format!("iam-ServiceId-{}", uuid::Uuid::new_v4()),
-            name: format!("vault-{}", name),
+            name: format!("secreton-{}", name),
             description: format!("Secret-generated service ID for {}", name),
             account_id: account_id.to_string(),
             created_at: Utc::now(),
@@ -191,7 +191,7 @@ impl IBMCloudEngine {
         // Real implementation would POST to https://iam.cloud.ibm.com/v1/apikeys
         let api_key = APIKey {
             id: uuid::Uuid::new_v4().to_string(),
-            name: format!("vault-apikey-{}", service_id),
+            name: format!("secreton-apikey-{}", service_id),
             api_key: format!("apikey-{}", uuid::Uuid::new_v4()),
             service_id: service_id.to_string(),
             created_at: Utc::now(),

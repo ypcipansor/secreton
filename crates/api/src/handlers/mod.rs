@@ -1,6 +1,6 @@
 //! HTTP request handlers for the Secreton API.
 //! 
-//! Provides comprehensive REST endpoints for vault operations,
+//! Provides comprehensive REST endpoints for secreton operations,
 //! authentication, authorization, and administrative functions.
 
 pub mod auth;

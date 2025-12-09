@@ -48,7 +48,7 @@ pub enum KmsProvider {
 
     /// Azure Key Secret
     AzureKeySecret {
-        vault_name: String,
+        secreton_name: String,
         key_name: String,
         tenant_id: String,
     },
@@ -161,11 +161,11 @@ impl AutoUnsealService {
                     .await?
             }
             KmsProvider::AzureKeySecret {
-                vault_name,
+                secreton_name,
                 key_name,
                 ..
             } => {
-                self.encrypt_with_azure_kv(master_key, vault_name, key_name)
+                self.encrypt_with_azure_kv(master_key, secreton_name, key_name)
                     .await?
             }
         };
@@ -173,7 +173,7 @@ impl AutoUnsealService {
         let encrypted_key = EncryptedMasterKey {
             ciphertext,
             key_id: _config.kek_name.clone(),
-            _context: Some("vault-master-_key".to_string()),
+            _context: Some("secreton-master-_key".to_string()),
             encrypted_at: Utc::now(),
         };
 
@@ -216,11 +216,11 @@ impl AutoUnsealService {
                 .await?
             }
             KmsProvider::AzureKeySecret {
-                vault_name,
+                secreton_name,
                 key_name,
                 ..
             } => {
-                self.decrypt_with_azure_kv(&encrypted.ciphertext, vault_name, key_name)
+                self.decrypt_with_azure_kv(&encrypted.ciphertext, secreton_name, key_name)
                     .await?
             }
         };
@@ -288,10 +288,10 @@ impl AutoUnsealService {
     async fn encrypt_with_azure_kv(
         &self,
         plaintext: &[u8],
-        _vault_name: &str,
+        _secreton_name: &str,
         _key_name: &str,
     ) -> Result<String, AutoUnsealError> {
-        // In production: azure_security_keyvault::KeyClient::encrypt()
+        // In production: azure_security_keysecreton::KeyClient::encrypt()
         let encoded = base64::encode(plaintext);
         Ok(format!("azure_kv:{}", encoded))
     }
@@ -300,7 +300,7 @@ impl AutoUnsealService {
     async fn decrypt_with_azure_kv(
         &self,
         ciphertext: &str,
-        _vault_name: &str,
+        _secreton_name: &str,
         _key_name: &str,
     ) -> Result<Vec<u8>, AutoUnsealError> {
         let encoded = ciphertext
@@ -372,7 +372,7 @@ mod tests {
                 kms_key_id: "arn:aws:kms:us-east-1:123456789:_key/abc".to_string(),
                 endpoint: None,
             },
-            "vault-master-_key".to_string(),
+            "secreton-master-_key".to_string(),
         );
 
         service.configure(_config).await.unwrap();
@@ -411,8 +411,8 @@ mod tests {
             KmsProvider::GcpKms {
                 project: "my-project".to_string(),
                 location: "us-central1".to_string(),
-                key_ring: "vault-keyring".to_string(),
-                crypto_key: "vault-_key".to_string(),
+                key_ring: "secreton-keyring".to_string(),
+                crypto_key: "secreton-_key".to_string(),
             },
             "master-_key".to_string(),
         );

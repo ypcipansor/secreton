@@ -350,7 +350,7 @@ impl DatabaseSecretsEngine {
             DatabaseType::MongoDB => {
                 format!("v_{}_{}", role_name.replace("-", "_"), short_uuid)
             }
-            _ => format!("vault_{}_{}", role_name, short_uuid),
+            _ => format!("secreton_{}_{}", role_name, short_uuid),
         }
     }
 

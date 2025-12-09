@@ -21,7 +21,7 @@ impl Default for GcsConfig {
     fn default() -> Self {
         Self {
             project_id: "test-project".to_string(),
-            bucket_name: "vault-secrets".to_string(),
+            bucket_name: "secreton-secrets".to_string(),
             credentials_path: None,
             service_account_key: None,
         }
@@ -59,7 +59,7 @@ impl Default for GcsConfig {
 ///
 /// let config = GcsConfig {
 ///     project_id: "my-project".to_string(),
-///     bucket_name: "vault-secrets".to_string(),
+///     bucket_name: "secreton-secrets".to_string(),
 ///     credentials_path: Some("/path/to/service-account.json".to_string()),
 ///     service_account_key: None,
 /// };
@@ -707,7 +707,7 @@ mod tests {
     async fn test_gcs_config_default() {
         let config = GcsConfig::default();
         assert_eq!(config.project_id, "test-project");
-        assert_eq!(config.bucket_name, "vault-secrets");
+        assert_eq!(config.bucket_name, "secreton-secrets");
     }
 
     #[tokio::test]

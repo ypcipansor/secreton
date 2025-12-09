@@ -1,8 +1,8 @@
-# Secreton Enterprise Vault - Test Configuration
+# Secreton Enterprise Secreton - Test Configuration
 # Configuration file for comprehensive test execution
 
 [workspace]
-root = "/home/clouduser/vault/secreton"
+root = "/home/clouduser/secreton/secreton"
 test_results_dir = "test_results"
 
 [test_categories]

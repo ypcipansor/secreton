@@ -67,7 +67,7 @@ impl Default for RaftConfig {
 /// Raft command types for consensus operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RaftCommand {
-    /// Store a vault entry
+    /// Store a secreton entry
     Store { entry: SecretEntry },
 
     /// Update an existing entry

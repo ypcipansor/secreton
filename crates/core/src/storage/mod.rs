@@ -251,7 +251,7 @@ impl PostgresStorage {
         client
             .execute(
                 r#"
-            CREATE TABLE IF NOT EXISTS vault_state (
+            CREATE TABLE IF NOT EXISTS secreton_state (
                 id SERIAL PRIMARY KEY,
                 sealed BOOLEAN NOT NULL DEFAULT TRUE,
                 master_key TEXT,

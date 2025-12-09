@@ -76,7 +76,7 @@ pub struct RecoveryPoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupMetadata {
     pub version: u32,
-    pub vault_version: String,
+    pub secreton_version: String,
     pub secrets_snapshot: HashMap<String, SecretData>,
     pub encryption_key_id: Option<String>,
 }
@@ -142,7 +142,7 @@ impl AdvancedBackupRecovery {
 
         let backup_metadata = BackupMetadata {
             version: 1,
-            vault_version: "1.0.0".to_string(),
+            secreton_version: "1.0.0".to_string(),
             secrets_snapshot: secrets.clone(),
             encryption_key_id: if encryption_enabled {
                 Some("key-12345".to_string())
@@ -174,7 +174,7 @@ impl AdvancedBackupRecovery {
             created_at: Utc::now(),
             metadata: HashMap::from([
                 ("secrets_count".to_string(), secrets.len().to_string()),
-                ("vault_version".to_string(), "1.0.0".to_string()),
+                ("secreton_version".to_string(), "1.0.0".to_string()),
             ]),
             checksum,
             status: BackupStatus::Completed,

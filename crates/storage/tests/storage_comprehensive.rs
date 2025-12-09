@@ -322,7 +322,7 @@ mod storage_backend_tests {
     }
 
     #[tokio::test]
-    async fn test_vault_entry_creation_and_validation() -> Result<()> {
+    async fn test_secreton_entry_creation_and_validation() -> Result<()> {
         let owner_id = Uuid::new_v4();
 
         let entry = SecretEntry::new(

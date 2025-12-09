@@ -3,9 +3,9 @@
 pub mod aws;
 pub mod database;
 pub mod oci;
-pub mod vault;
+pub mod secreton;
 
 pub use aws::*;
 pub use database::*;
 pub use oci::*;
-pub use vault::*;
+pub use secreton::*;

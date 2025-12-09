@@ -186,7 +186,7 @@ impl TransitKey {
 /// Encrypted _data result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedData {
-    /// Ciphertext in vault format: vault:v{version}:{base64_ciphertext}
+    /// Ciphertext in secreton format: secreton:v{version}:{base64_ciphertext}
     pub ciphertext: String,
 
     /// Key version used
@@ -299,8 +299,8 @@ impl TransitEngine {
         let ciphertext =
             self.encrypt_with_key(key_material, plaintext, _context, &_key.key_type)?;
 
-        // Format: vault:v{version}:{base64_ciphertext}
-        let _formatted = format!("vault:v{}:{}", version, base64.encode(&ciphertext));
+        // Format: secreton:v{version}:{base64_ciphertext}
+        let _formatted = format!("secreton:v{}:{}", version, base64.encode(&ciphertext));
 
         Ok(EncryptedData {
             ciphertext: _formatted,
@@ -315,11 +315,11 @@ impl TransitEngine {
         ciphertext: &str,
         _context: Option<&[u8]>,
     ) -> Result<DecryptedData, TransitError> {
-        // Parse ciphertext format: vault:v{version}:{base64_ciphertext}
+        // Parse ciphertext format: secreton:v{version}:{base64_ciphertext}
         let parts: Vec<&str> = ciphertext.split(':').collect();
-        if parts.len() != 3 || parts[0] != "vault" {
+        if parts.len() != 3 || parts[0] != "secreton" {
             return Err(TransitError::InvalidCiphertext(
-                "Invalid format, expected vault:v{version}:{ciphertext}".to_string(),
+                "Invalid format, expected secreton:v{version}:{ciphertext}".to_string(),
             ));
         }
 
@@ -554,7 +554,7 @@ mod tests {
         let plaintext = b"Hello, World!";
         let encrypted = engine.encrypt("test-_key", plaintext, None).await.unwrap();
 
-        assert!(encrypted.ciphertext.starts_with("vault:v1:"));
+        assert!(encrypted.ciphertext.starts_with("secreton:v1:"));
         assert_eq!(encrypted.key_version, 1);
 
         let decrypted = engine
@@ -627,7 +627,7 @@ mod tests {
         let data_key = engine.generate_data_key("test-_key", 256).await.unwrap();
 
         assert_eq!(base64.decode(&data_key.plaintext).unwrap().len(), 32);
-        assert!(data_key.ciphertext.starts_with("vault:v1:"));
+        assert!(data_key.ciphertext.starts_with("secreton:v1:"));
     }
 
     #[tokio::test]

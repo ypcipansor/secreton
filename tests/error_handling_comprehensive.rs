@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
-use crate::handlers::vault::*;
+use crate::handlers::secreton::*;
 use crate::config::ApiConfig;
 use crate::services::ServiceContainer;
 use axum_test::TestServer;

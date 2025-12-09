@@ -102,7 +102,7 @@ mod tests {
         let request = CreateRoleRequest {
             name: "auditor".to_string(),
             description: Some("Audit role".to_string()),
-            permissions: vec!["vault:read".to_string()],
+            permissions: vec!["secreton:read".to_string()],
             metadata: None,
         };
 
@@ -113,7 +113,7 @@ mod tests {
         assert!(body.success);
         let role = body.data.expect("role payload");
         assert_eq!(role.name, "auditor");
-        assert!(role.permissions.contains(&"vault:read".to_string()));
+        assert!(role.permissions.contains(&"secreton:read".to_string()));
     }
 
     #[tokio::test]
@@ -245,7 +245,7 @@ pub struct SystemMetrics {
     pub cpu_usage: CpuMetrics,
     pub disk_usage: DiskMetrics,
     pub network: NetworkMetrics,
-    pub vault: SecretMetrics,
+    pub secreton: SecretMetrics,
 }
 
 #[derive(Debug, Serialize)]
@@ -712,7 +712,7 @@ pub async fn get_system_metrics(
         cpu_usage: cpu,
         disk_usage: disk,
         network,
-        vault: SecretMetrics {
+        secreton: SecretMetrics {
             total_secrets: stats.total_secrets,
             total_keys: stats.total_keys,
             total_policies,

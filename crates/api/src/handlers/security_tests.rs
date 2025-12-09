@@ -1,4 +1,4 @@
-//! Security penetration tests for vault system
+//! Security penetration tests for secreton system
 //!
 //! Tests various attack vectors including injection attacks, authentication bypass,
 //! authorization bypass, data exfiltration, and DoS attempts.
@@ -7,7 +7,7 @@ use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode};
 use serde_json::json;
 use std::collections::HashMap;
 
-use crate::handlers::vault::*;
+use crate::handlers::secreton::*;
 use crate::config::ApiConfig;
 use crate::services::ServiceContainer;
 use axum_test::TestServer;

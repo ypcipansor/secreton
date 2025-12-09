@@ -43,7 +43,7 @@ pub struct AWSSecretsConfig {
 pub struct AWSSecret {
     pub secret_name: String,
     pub secret_arn: String,
-    pub vault_path: String,
+    pub secreton_path: String,
     pub description: String,
     pub tags: HashMap<String, String>,
     pub rotation_enabled: bool,
@@ -106,9 +106,9 @@ impl AWSSecretsManager {
     /// Sync secret to AWS
     pub async fn sync_to_aws(
         &self,
-        vault_path: &str,
+        secreton_path: &str,
         secret_name: &str,
-        vault_data: &[u8],
+        secreton_data: &[u8],
     ) -> Result<SyncOperation> {
         let config = self.config.read().await;
 
@@ -123,7 +123,7 @@ impl AWSSecretsManager {
         let operation_id = uuid::Uuid::new_v4().to_string();
 
         // Create or update secret in AWS Secrets Manager
-        let secret_value = std::str::from_utf8(vault_data)
+        let secret_value = std::str::from_utf8(secreton_data)
             .map_err(|e| AWSError::SyncError(format!("Invalid UTF-8 data: {}", e)))?;
 
         let request = self
@@ -131,7 +131,7 @@ impl AWSSecretsManager {
             .create_secret()
             .name(secret_name)
             .secret_string(secret_value)
-            .description(format!("Synced from Secreton path: {}", vault_path));
+            .description(format!("Synced from Secreton path: {}", secreton_path));
 
         match request.send().await {
             Ok(response) => {
@@ -140,7 +140,7 @@ impl AWSSecretsManager {
                 let operation = SyncOperation {
                     operation_id: operation_id.clone(),
                     direction: SyncDirection::SecretToAWS,
-                    source_path: vault_path.to_string(),
+                    source_path: secreton_path.to_string(),
                     target_path: secret_name.to_string(),
                     started_at: Utc::now(),
                     completed_at: Some(Utc::now()),
@@ -169,7 +169,7 @@ impl AWSSecretsManager {
                 let operation = SyncOperation {
                     operation_id: operation_id.clone(),
                     direction: SyncDirection::SecretToAWS,
-                    source_path: vault_path.to_string(),
+                    source_path: secreton_path.to_string(),
                     target_path: secret_name.to_string(),
                     started_at: Utc::now(),
                     completed_at: Some(Utc::now()),
@@ -236,9 +236,9 @@ impl AWSSecretsManager {
     /// Bidirectional sync
     pub async fn bidirectional_sync(
         &self,
-        vault_path: &str,
+        secreton_path: &str,
         secret_name: &str,
-        vault_data: &[u8],
+        secreton_data: &[u8],
     ) -> Result<SyncOperation> {
         let config = self.config.read().await;
 
@@ -268,19 +268,19 @@ impl AWSSecretsManager {
             Err(_) => None, // AWS secret doesn't exist
         };
 
-        // For now, assume vault data is newer if AWS secret doesn't exist
-        // In a real implementation, you'd get the vault timestamp
-        let vault_timestamp = Utc::now().timestamp_millis();
+        // For now, assume secreton data is newer if AWS secret doesn't exist
+        // In a real implementation, you'd get the secreton timestamp
+        let secreton_timestamp = Utc::now().timestamp_millis();
 
         match aws_metadata {
-            Some(aws_timestamp) if aws_timestamp > vault_timestamp => {
+            Some(aws_timestamp) if aws_timestamp > secreton_timestamp => {
                 // AWS is newer, sync from AWS
                 let (_data, operation) = self.sync_from_aws(secret_name).await?;
                 Ok(operation)
             }
             _ => {
                 // Secret is newer or AWS doesn't exist, sync to AWS
-                self.sync_to_aws(vault_path, secret_name, vault_data).await
+                self.sync_to_aws(secreton_path, secret_name, secreton_data).await
             }
         }
     }
@@ -507,10 +507,10 @@ mod tests {
         let history = manager.get_sync_history(None, None).await;
         assert_eq!(history.len(), 2);
 
-        let vault_to_aws = manager
+        let secreton_to_aws = manager
             .get_sync_history(Some(SyncDirection::SecretToAWS), None)
             .await;
-        assert_eq!(vault_to_aws.len(), 1);
+        assert_eq!(secreton_to_aws.len(), 1);
 
         let completed = manager
             .get_sync_history(None, Some(SyncStatus::Completed))

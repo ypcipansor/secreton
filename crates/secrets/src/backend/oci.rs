@@ -3,7 +3,7 @@
 
 use crate::error::*;
 // use oci_sdk::identity::{IdentityClient, InstancePrincipalProvider};
-// use oci_sdk::vault::{SecretClient, CreateSecretDetails, SecretContentDetails};
+// use oci_sdk::secreton::{SecretClient, CreateSecretDetails, SecretContentDetails};
 // use oci_sdk::Config;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ pub struct OciBackend {
     private_key: String,
     region: String,
     identity_client: Option<()>, // Placeholder for IdentityClient
-    vault_client: Option<()>,    // Placeholder for SecretClient
+    secreton_client: Option<()>,    // Placeholder for SecretClient
 }
 
 impl OciBackend {
@@ -46,7 +46,7 @@ impl OciBackend {
             private_key,
             region,
             identity_client: None,
-            vault_client: None,
+            secreton_client: None,
         }
     }
 
@@ -88,20 +88,20 @@ impl OciBackend {
         ))
     }
 
-    /// Get OCI vault secrets
-    pub async fn get_vault_secrets(
+    /// Get OCI secreton secrets
+    pub async fn get_secreton_secrets(
         &mut self,
-        _vault_id: &str,
+        _secreton_id: &str,
     ) -> Result<Vec<HashMap<String, Value>>, SecretError> {
         Err(SecretError::BackendNotSupported(
             "OCI backend requires OCI SDK which is not available".to_string(),
         ))
     }
 
-    /// Create OCI vault secret
-    pub async fn create_vault_secret(
+    /// Create OCI secreton secret
+    pub async fn create_secreton_secret(
         &mut self,
-        _vault_id: &str,
+        _secreton_id: &str,
         _secret_name: &str,
         _secret_value: &str,
         _secret_type: &str,

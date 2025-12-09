@@ -87,7 +87,7 @@ impl StorageTransaction for RedisTransaction {
         for op in self.operations {
             match op {
                 RedisTransactionOp::Store(entry) => {
-                    let key = format!("vault:entry:{}", entry.id);
+                    let key = format!("secreton:entry:{}", entry.id);
                     let value = serde_json::to_string(&entry).map_err(|e| {
                         StorageError::SerializationError {
                             message: e.to_string(),
@@ -100,7 +100,7 @@ impl StorageTransaction for RedisTransaction {
                     })?;
                 }
                 RedisTransactionOp::Update(entry) => {
-                    let key = format!("vault:entry:{}", entry.id);
+                    let key = format!("secreton:entry:{}", entry.id);
                     let value = serde_json::to_string(&entry).map_err(|e| {
                         StorageError::SerializationError {
                             message: e.to_string(),
@@ -113,7 +113,7 @@ impl StorageTransaction for RedisTransaction {
                     })?;
                 }
                 RedisTransactionOp::Delete(id) => {
-                    let key = format!("vault:entry:{}", id);
+                    let key = format!("secreton:entry:{}", id);
                     conn.del::<_, ()>(&key)
                         .await
                         .map_err(|e| StorageError::QueryFailed {
@@ -156,7 +156,7 @@ impl RedisBackend {
 #[async_trait]
 impl StorageBackend for RedisBackend {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let key = format!("vault:entry:{}", entry.id);
+        let key = format!("secreton:entry:{}", entry.id);
         let value = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
             message: e.to_string(),
         })?;
@@ -170,7 +170,7 @@ impl StorageBackend for RedisBackend {
 
         // Also store path mapping
         if !entry.path.is_empty() {
-            let path_key = format!("vault:path:{}", entry.path);
+            let path_key = format!("secreton:path:{}", entry.path);
             conn.set::<_, _, ()>(&path_key, entry.id.to_string())
                 .await
                 .map_err(|e| StorageError::QueryFailed {
@@ -182,7 +182,7 @@ impl StorageBackend for RedisBackend {
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
-        let key = format!("vault:entry:{}", id);
+        let key = format!("secreton:entry:{}", id);
         let mut conn = self.manager.lock().await;
 
         let value: Option<String> =
@@ -206,7 +206,7 @@ impl StorageBackend for RedisBackend {
     }
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
-        let key = format!("vault:path:{}", path);
+        let key = format!("secreton:path:{}", path);
         let mut conn = self.manager.lock().await;
 
         let entry_id: Option<String> =

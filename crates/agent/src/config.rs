@@ -94,15 +94,15 @@ impl AgentConfig {
         let mut config = AgentConfig::default();
 
         // Override with environment variables
-        if let Ok(agent_id) = std::env::var("BRANKAS_AGENT_ID") {
+        if let Ok(agent_id) = std::env::var("SECRETON_AGENT_ID") {
             config.agent_id = agent_id;
         }
 
-        if let Ok(name) = std::env::var("BRANKAS_AGENT_NAME") {
+        if let Ok(name) = std::env::var("SECRETON_AGENT_NAME") {
             config.name = name;
         }
 
-        if let Ok(log_level) = std::env::var("BRANKAS_LOG_LEVEL") {
+        if let Ok(log_level) = std::env::var("SECRETON_LOG_LEVEL") {
             config.logging.level = log_level;
         }
 

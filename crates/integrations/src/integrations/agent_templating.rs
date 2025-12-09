@@ -74,14 +74,14 @@ pub struct RenderedFile {
 #[derive(Debug, Clone)]
 pub struct RenderContext {
     pub variables: HashMap<String, String>,
-    pub vault_secrets: HashMap<String, serde_json::Value>,
+    pub secreton_secrets: HashMap<String, serde_json::Value>,
 }
 
 impl RenderContext {
     pub fn new() -> Self {
         Self {
             variables: HashMap::new(),
-            vault_secrets: HashMap::new(),
+            secreton_secrets: HashMap::new(),
         }
     }
 
@@ -91,7 +91,7 @@ impl RenderContext {
     }
 
     pub fn with_secret(mut self, _path: String, _data: serde_json::Value) -> Self {
-        self.vault_secrets.insert(_path, _data);
+        self.secreton_secrets.insert(_path, _data);
         self
     }
 }
@@ -106,8 +106,8 @@ impl Default for RenderContext {
 pub struct AgentTemplatingService {
     templates: Arc<RwLock<HashMap<String, Template>>>,
     rendered_files: Arc<RwLock<HashMap<String, RenderedFile>>>,
-    // Mock vault client for testing
-    vault_data: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    // Mock secreton client for testing
+    secreton_data: Arc<RwLock<HashMap<String, serde_json::Value>>>,
 }
 
 impl AgentTemplatingService {
@@ -115,7 +115,7 @@ impl AgentTemplatingService {
         Self {
             templates: Arc::new(RwLock::new(HashMap::new())),
             rendered_files: Arc::new(RwLock::new(HashMap::new())),
-            vault_data: Arc::new(RwLock::new(HashMap::new())),
+            secreton_data: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -316,14 +316,14 @@ impl AgentTemplatingService {
     /// Get _secret value from Secret
     async fn get_secret_value(&self, _path: &str, _context: &RenderContext) -> Result<String> {
         // Check _context first
-        if let Some(_data) = _context.vault_secrets.get(_path) {
+        if let Some(_data) = _context.secreton_secrets.get(_path) {
             return Ok(serde_json::to_string_pretty(_data)
                 .map_err(|_e| TemplatingError::RenderError(_e.to_string()))?);
         }
 
-        // Check mock vault _data
-        let vault_data = self.vault_data.read().await;
-        if let Some(_data) = vault_data.get(_path) {
+        // Check mock secreton _data
+        let secreton_data = self.secreton_data.read().await;
+        if let Some(_data) = secreton_data.get(_path) {
             return Ok(serde_json::to_string_pretty(_data)
                 .map_err(|_e| TemplatingError::RenderError(_e.to_string()))?);
         }
@@ -353,9 +353,9 @@ impl AgentTemplatingService {
 
     /// List secrets at _path
     async fn list_secrets(&self, _path: &str, _context: &RenderContext) -> Result<String> {
-        let vault_data = self.vault_data.read().await;
+        let secreton_data = self.secreton_data.read().await;
 
-        let secrets: Vec<String> = vault_data
+        let secrets: Vec<String> = secreton_data
             .keys()
             .filter(|k| k.starts_with(_path))
             .map(|k| k.to_string())
@@ -394,11 +394,11 @@ impl AgentTemplatingService {
         files.get(template_name).cloned()
     }
 
-    /// Add mock vault _data for testing
+    /// Add mock secreton _data for testing
     #[cfg(test)]
-    pub async fn add_vault_data(&self, _path: String, _data: serde_json::Value) {
-        let mut vault_data = self.vault_data.write().await;
-        vault_data.insert(_path, _data);
+    pub async fn add_secreton_data(&self, _path: String, _data: serde_json::Value) {
+        let mut secreton_data = self.secreton_data.write().await;
+        secreton_data.insert(_path, _data);
     }
 }
 
@@ -462,7 +462,7 @@ mod tests {
 
         // Add mock _data
         service
-            .add_vault_data(
+            .add_secreton_data(
                 "_secret/_data/app".to_string(),
                 json!({
                     "_username": "admin",

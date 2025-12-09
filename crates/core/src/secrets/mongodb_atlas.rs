@@ -152,7 +152,7 @@ impl MongoDBAtlasEngine {
             .ok_or_else(|| MongoDBAtlasError::RoleNotFound(role_name.to_string()))?;
 
         // Generate username
-        let username = format!("vault-{}", self.generate_random_string(8));
+        let username = format!("secreton-{}", self.generate_random_string(8));
 
         // Generate password
         let password = self.generate_password(32);
@@ -418,7 +418,7 @@ mod tests {
 
         let user = engine.generate_credentials("app-role").await.unwrap();
 
-        assert!(user.username.starts_with("vault-"));
+        assert!(user.username.starts_with("secreton-"));
         assert_eq!(user.password.len(), 32);
         assert_eq!(user.database_name, "myapp");
         assert_eq!(user.roles.len(), 1);

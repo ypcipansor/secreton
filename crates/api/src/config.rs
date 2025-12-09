@@ -650,7 +650,7 @@ mod tests {
                     refresh_expiration: Duration::from_secs(86400),
                     algorithm: "HS256".to_string(),
                     issuer: "secreton".to_string(),
-                    audience: "vault-users".to_string(),
+                    audience: "secreton-users".to_string(),
                 },
                 oauth2: None,
                 mtls: Some(MtlsConfig {
@@ -684,8 +684,8 @@ mod tests {
                     email: None,
                     webauthn: Some(WebAuthnConfig {
                         rp_name: "Secreton Secret".to_string(),
-                        rp_id: "vault.example.com".to_string(),
-                        origin: "https://vault.example.com".to_string(),
+                        rp_id: "secreton.example.com".to_string(),
+                        origin: "https://secreton.example.com".to_string(),
                     }),
                 },
             },
@@ -732,7 +732,7 @@ mod tests {
             },
             cors: CorsConfig {
                 enabled: true,
-                allowed_origins: vec!["https://vault.example.com".to_string()],
+                allowed_origins: vec!["https://secreton.example.com".to_string()],
                 allowed_methods: vec!["GET".to_string(), "POST".to_string()],
                 allowed_headers: vec!["Authorization".to_string()],
                 exposed_headers: vec![],

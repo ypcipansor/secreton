@@ -18,7 +18,7 @@ pub struct S3StorageConfig {
     pub region: String,
     /// S3 bucket name
     pub bucket_name: String,
-    /// Key prefix for all vault data
+    /// Key prefix for all secreton data
     pub prefix: String,
     /// Enable server-side encryption
     pub server_side_encryption: bool,
@@ -36,8 +36,8 @@ impl Default for S3StorageConfig {
     fn default() -> Self {
         Self {
             region: "us-east-1".to_string(),
-            bucket_name: "vault-secrets-bucket".to_string(),
-            prefix: "vault/".to_string(),
+            bucket_name: "secreton-secrets-bucket".to_string(),
+            prefix: "secreton/".to_string(),
             server_side_encryption: true,
             kms_key_id: None,
             versioning_enabled: true,
@@ -236,7 +236,7 @@ impl S3Storage {
             );
 
             let lifecycle_rule = aws_sdk_s3::types::LifecycleRule::builder()
-                .id("vault-secrets-lifecycle")
+                .id("secreton-secrets-lifecycle")
                 .status(aws_sdk_s3::types::ExpirationStatus::Enabled)
                 .filter(
                     aws_sdk_s3::types::LifecycleRuleFilter::builder()
@@ -287,14 +287,14 @@ impl S3Storage {
     }
 
     /// Convert SecretEntry to S3 object data
-    fn vault_entry_to_bytes(&self, entry: &SecretEntry) -> Result<Vec<u8>, StorageError> {
+    fn secreton_entry_to_bytes(&self, entry: &SecretEntry) -> Result<Vec<u8>, StorageError> {
         serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to serialize entry: {}", e),
         })
     }
 
     /// Convert S3 object data to SecretEntry
-    fn bytes_to_vault_entry(&self, data: &[u8]) -> Result<SecretEntry, StorageError> {
+    fn bytes_to_secreton_entry(&self, data: &[u8]) -> Result<SecretEntry, StorageError> {
         serde_json::from_slice(data).map_err(|e| StorageError::SerializationError {
             message: format!("Failed to deserialize entry: {}", e),
         })
@@ -305,7 +305,7 @@ impl S3Storage {
 impl StorageBackend for S3Storage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let key = self.build_versioned_key(&entry.path, entry.version);
-        let data = self.vault_entry_to_bytes(entry)?;
+        let data = self.secreton_entry_to_bytes(entry)?;
 
         let mut put_request = self
             .client
@@ -378,7 +378,7 @@ impl StorageBackend for S3Storage {
         if let Some(objects) = result.contents {
             for object in objects {
                 if let Some(key) = &object.key {
-                    // Extract version from key (format: vault/v{version}/path)
+                    // Extract version from key (format: secreton/v{version}/path)
                     if let Some(version_str) = key
                         .strip_prefix(&format!("{}/v", self.config.prefix.trim_end_matches('/')))
                         .and_then(|s| s.split('/').next())
@@ -413,7 +413,7 @@ impl StorageBackend for S3Storage {
                     message: format!("Failed to collect body: {}", e),
                 })?;
 
-            let entry = self.bytes_to_vault_entry(&data.into_bytes())?;
+            let entry = self.bytes_to_secreton_entry(&data.into_bytes())?;
             let mut cache = self.cache.write().await;
             cache.insert(path.to_string(), entry.clone());
             Ok(Some(entry))
@@ -520,7 +520,7 @@ impl StorageBackend for S3Storage {
                             }
                         })?;
 
-                        let entry = self.bytes_to_vault_entry(&data.into_bytes())?;
+                        let entry = self.bytes_to_secreton_entry(&data.into_bytes())?;
                         entries.push(entry);
                     }
                 }
@@ -635,8 +635,8 @@ mod tests {
     fn test_s3_config_default() {
         let config = S3StorageConfig::default();
         assert_eq!(config.region, "us-east-1");
-        assert_eq!(config.bucket_name, "vault-secrets-bucket");
-        assert_eq!(config.prefix, "vault/");
+        assert_eq!(config.bucket_name, "secreton-secrets-bucket");
+        assert_eq!(config.prefix, "secreton/");
         assert!(config.server_side_encryption);
         assert!(config.versioning_enabled);
         assert_eq!(config.retention_days, 30);
@@ -651,7 +651,7 @@ mod tests {
         // Test the key building logic directly
         assert_eq!(
             format!("{}{}", config.prefix.trim_end_matches('/'), "/test/path"),
-            "vault/test/path"
+            "secreton/test/path"
         );
     }
 
@@ -667,12 +667,12 @@ mod tests {
                 2,
                 "test/path"
             ),
-            "vault/v2/test/path"
+            "secreton/v2/test/path"
         );
     }
 
     #[test]
-    fn test_vault_entry_to_bytes() {
+    fn test_secreton_entry_to_bytes() {
         let _config = S3StorageConfig::default();
 
         let entry = SecretEntry::new(

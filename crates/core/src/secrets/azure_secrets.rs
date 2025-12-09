@@ -233,7 +233,7 @@ impl AzureSecretsEngine {
 
         let app_id = uuid::Uuid::new_v4().to_string();
         let object_id = uuid::Uuid::new_v4().to_string();
-        let display_name = format!("vault-{}-{}", role.name, Utc::now().timestamp());
+        let display_name = format!("secreton-{}-{}", role.name, Utc::now().timestamp());
 
         let client_secret = self.generate_client_secret();
 

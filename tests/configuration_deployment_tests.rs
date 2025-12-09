@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::handlers::vault::*;
+use crate::handlers::secreton::*;
 use crate::config::ApiConfig;
 use crate::services::ServiceContainer;
 use axum_test::TestServer;
@@ -860,7 +860,7 @@ mod configuration_tests {
         let k8s_payload = json!({
             "data": {
                 "orchestrator": "kubernetes",
-                "namespace": "secreton-vault",
+                "namespace": "secreton-secreton",
                 "replicas": 3,
                 "resources": {
                     "cpu": "500m",
@@ -883,7 +883,7 @@ mod configuration_tests {
         let swarm_payload = json!({
             "data": {
                 "orchestrator": "docker_swarm",
-                "services": ["vault", "backup", "monitoring"],
+                "services": ["secreton", "backup", "monitoring"],
                 "networks": ["secreton_network"]
             },
             "metadata": {
@@ -933,7 +933,7 @@ mod configuration_tests {
                 "cloud_provider": "aws",
                 "region": "us-east-1",
                 "services": ["ec2", "rds", "s3", "kms"],
-                "iam_roles": ["vault-role", "backup-role"]
+                "iam_roles": ["secreton-role", "backup-role"]
             },
             "metadata": {
                 "description": "AWS cloud configuration",
@@ -953,7 +953,7 @@ mod configuration_tests {
                 "cloud_provider": "azure",
                 "region": "eastus",
                 "resource_group": "secreton-rg",
-                "services": ["vm", "database", "storage", "keyvault"]
+                "services": ["vm", "database", "storage", "keysecreton"]
             },
             "metadata": {
                 "description": "Azure cloud configuration",
@@ -999,7 +999,7 @@ mod configuration_tests {
         // 1. Legacy system data
         let legacy_payload = json!({
             "data": {
-                "legacy_system": "old_vault_v1",
+                "legacy_system": "old_secreton_v1",
                 "migration_status": "pending",
                 "data_volume": "10GB"
             },
@@ -1018,7 +1018,7 @@ mod configuration_tests {
         // 2. Migration configuration
         let migration_config_payload = json!({
             "data": {
-                "source_system": "old_vault_v1",
+                "source_system": "old_secreton_v1",
                 "target_system": "secreton_v2",
                 "migration_strategy": "incremental",
                 "validation_required": true

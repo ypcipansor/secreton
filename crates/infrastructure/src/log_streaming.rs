@@ -222,11 +222,11 @@ impl LogStreaming {
     /// Enrich log with additional _context
     async fn enrich_log(&self, event: &mut LogEvent, enrichment: &LogEnrichment) {
         if enrichment.add_hostname && event.hostname.is_none() {
-            event.hostname = Some("vault-server-1".to_string());
+            event.hostname = Some("secreton-server-1".to_string());
         }
 
         if enrichment.add_pod_info && event.pod_name.is_none() {
-            event.pod_name = Some("vault-0".to_string());
+            event.pod_name = Some("secreton-0".to_string());
             event.namespace = Some("default".to_string());
         }
 
@@ -438,7 +438,7 @@ mod tests {
             _context,
             trace_id: None,
             span_id: None,
-            service: "vault".to_string(),
+            service: "secreton".to_string(),
             hostname: None,
             pod_name: None,
             namespace: None,
@@ -472,7 +472,7 @@ mod tests {
             id: "fluentd-1".to_string(),
             destination_type: DestinationType::Fluentd,
             endpoint: "tcp://localhost:24224".to_string(),
-            tag: "vault.logs".to_string(),
+            tag: "secreton.logs".to_string(),
             index: None,
             enabled: true,
         };
@@ -482,7 +482,7 @@ mod tests {
             .format_for_fluentd(&event, &destination.tag)
             .unwrap();
 
-        assert!(_formatted.starts_with("[vault.logs,"));
+        assert!(_formatted.starts_with("[secreton.logs,"));
         assert!(_formatted.contains("Test log message"));
     }
 
@@ -500,7 +500,7 @@ mod tests {
             destination_type: DestinationType::Logstash,
             endpoint: "tcp://localhost:5044".to_string(),
             tag: "".to_string(),
-            index: Some("vault-logs".to_string()),
+            index: Some("secreton-logs".to_string()),
             enabled: true,
         };
 
@@ -510,7 +510,7 @@ mod tests {
         assert!(_formatted.contains("@timestamp"));
         assert!(_formatted.contains("@version"));
         assert!(_formatted.contains("Test log message"));
-        assert!(_formatted.contains("vault-logs"));
+        assert!(_formatted.contains("secreton-logs"));
     }
 
     #[tokio::test]

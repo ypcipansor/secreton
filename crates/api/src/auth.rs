@@ -49,7 +49,7 @@ impl Default for AuthConfig {
             issuer: "secreton".to_string(),
             audience: "secreton-api".to_string(),
             require_auth: true,
-            admin_roles: vec!["admin".to_string(), "vault-admin".to_string()],
+            admin_roles: vec!["admin".to_string(), "secreton-admin".to_string()],
         }
     }
 }
@@ -68,7 +68,7 @@ impl UserRole {
     pub fn as_string(&self) -> String {
         match self {
             UserRole::Admin => "admin".to_string(),
-            UserRole::SecretAdmin => "vault-admin".to_string(),
+            UserRole::SecretAdmin => "secreton-admin".to_string(),
             UserRole::KeyManager => "key-manager".to_string(),
             UserRole::CryptoUser => "crypto-user".to_string(),
             UserRole::ReadOnly => "read-only".to_string(),
@@ -78,7 +78,7 @@ impl UserRole {
     pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(UserRole::Admin),
-            "vault-admin" => Some(UserRole::SecretAdmin),
+            "secreton-admin" => Some(UserRole::SecretAdmin),
             "key-manager" => Some(UserRole::KeyManager),
             "crypto-user" => Some(UserRole::CryptoUser),
             "read-only" => Some(UserRole::ReadOnly),
@@ -435,7 +435,7 @@ mod tests {
             ],
             exp: (Utc::now() + Duration::hours(24)).timestamp() as u64,
             iat: Utc::now().timestamp() as u64,
-            iss: "secreton-vault".to_string(),
+            iss: "secreton-secreton".to_string(),
             aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
         };
@@ -458,7 +458,7 @@ mod tests {
             permissions: vec![],
             exp: (Utc::now() + Duration::hours(24)).timestamp() as u64,
             iat: Utc::now().timestamp() as u64,
-            iss: "secreton-vault".to_string(),
+            iss: "secreton-secreton".to_string(),
             aud: "secreton-api".to_string(),
             jti: Uuid::new_v4().to_string(),
         };
@@ -474,10 +474,10 @@ mod tests {
 
         let token = auth_service
             .generate_token(
-                "vault-admin",
+                "secreton-admin",
                 "Secret Admin",
-                "vault.admin@example.com",
-                vec!["vault-admin".to_string()],
+                "secreton.admin@example.com",
+                vec!["secreton-admin".to_string()],
             )
             .expect("token generation");
 

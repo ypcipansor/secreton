@@ -293,7 +293,7 @@ impl GCPSecretsEngine {
 
         // Generate random token payload
         let token_payload = format!(
-            "{{\"iss\":\"vault@{}.iam.gserviceaccount.com\",\"scope\":\"{}\",\"aud\":\"https://oauth2.googleapis.com/token\",\"exp\":{},\"iat\":{}}}",
+            "{{\"iss\":\"secreton@{}.iam.gserviceaccount.com\",\"scope\":\"{}\",\"aud\":\"https://oauth2.googleapis.com/token\",\"exp\":{},\"iat\":{}}}",
             roleset.project,
             roleset.token_scopes.join(" "),
             (Utc::now() + roleset.ttl).timestamp(),
@@ -330,7 +330,7 @@ impl GCPSecretsEngine {
 
         let unique_id = uuid::Uuid::new_v4().to_string();
         let email = format!(
-            "vault-{}-{}@{}.iam.gserviceaccount.com",
+            "secreton-{}-{}@{}.iam.gserviceaccount.com",
             roleset.name,
             unique_id.chars().take(8).collect::<String>(),
             roleset.project
@@ -552,7 +552,7 @@ mod tests {
         assert!(creds.service_account_key.is_some());
 
         let sa = creds.service_account_key.unwrap();
-        assert!(sa.email.contains("vault-app-sa"));
+        assert!(sa.email.contains("secreton-app-sa"));
         assert!(sa.email.ends_with(".iam.gserviceaccount.com"));
         assert!(sa.private_key.contains("BEGIN PRIVATE KEY"));
     }

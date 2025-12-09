@@ -98,30 +98,30 @@ impl OciEngine {
         self.backend.list_compartments().await
     }
 
-    /// Get vault secrets
-    pub async fn get_vault_secrets(
+    /// Get secreton secrets
+    pub async fn get_secreton_secrets(
         &mut self,
-        vault_id: &str,
+        secreton_id: &str,
     ) -> Result<Vec<HashMap<String, Value>>, SecretError> {
-        tracing::info!("Getting OCI vault secrets for vault: {}", vault_id);
-        self.backend.get_vault_secrets(vault_id).await
+        tracing::info!("Getting OCI secreton secrets for secreton: {}", secreton_id);
+        self.backend.get_secreton_secrets(secreton_id).await
     }
 
-    /// Create vault secret
-    pub async fn create_vault_secret(
+    /// Create secreton secret
+    pub async fn create_secreton_secret(
         &mut self,
-        vault_id: &str,
+        secreton_id: &str,
         secret_name: &str,
         secret_value: &str,
         secret_type: &str,
     ) -> Result<HashMap<String, Value>, SecretError> {
         tracing::info!(
-            "Creating OCI vault secret: {} in vault: {}",
+            "Creating OCI secreton secret: {} in secreton: {}",
             secret_name,
-            vault_id
+            secreton_id
         );
         self.backend
-            .create_vault_secret(vault_id, secret_name, secret_value, secret_type)
+            .create_secreton_secret(secreton_id, secret_name, secret_value, secret_type)
             .await
     }
 

@@ -247,7 +247,7 @@ impl Default for CassandraConfig {
     fn default() -> Self {
         Self {
             contact_points: "127.0.0.1:9042".to_string(),
-            keyspace: "vault_kv".to_string(),
+            keyspace: "secreton_kv".to_string(),
             username: None,
             password: None,
             connection_timeout_secs: 30,
