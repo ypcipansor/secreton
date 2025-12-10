@@ -243,10 +243,7 @@ impl PkiEngine {
     }
 
     /// Get certificate revocation information
-    pub async fn get_revocation_info(
-        &self,
-        serial_number: &str,
-    ) -> Option<RevokedCertificate> {
+    pub async fn get_revocation_info(&self, serial_number: &str) -> Option<RevokedCertificate> {
         self.revoked_certificates
             .read()
             .await
@@ -265,8 +262,11 @@ impl PkiEngine {
         crl_data.push_str("-----BEGIN X509 CRL-----\n");
         crl_data.push_str(&format!("# CRL Generated: {}\n", now.to_rfc3339()));
         crl_data.push_str(&format!("# Next Update: {}\n", next_update.to_rfc3339()));
-        crl_data.push_str(&format!("# Total Revoked Certificates: {}\n", revoked.len()));
-        
+        crl_data.push_str(&format!(
+            "# Total Revoked Certificates: {}\n",
+            revoked.len()
+        ));
+
         for (serial, info) in revoked.iter() {
             crl_data.push_str(&format!(
                 "# Serial: {} | Revoked: {} | Reason: {:?}\n",
@@ -275,7 +275,7 @@ impl PkiEngine {
                 info.reason
             ));
         }
-        
+
         crl_data.push_str("-----END X509 CRL-----\n");
 
         Ok(crate::model::CrlResponse {
@@ -380,7 +380,7 @@ fn extract_key_info(key_pair: &rcgen::KeyPair) -> KeyInfo {
     KeyInfo {
         public_key_pem: key_pair.public_key_pem(),
         key_type: "ECDSA".to_string(), // rcgen uses ECDSA by default
-        key_bits: 256, // P-256 curve
+        key_bits: 256,                 // P-256 curve
     }
 }
 

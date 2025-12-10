@@ -93,8 +93,10 @@ pub trait RecoveryCodeService: Send + Sync {
     async fn validate(&self, request: RecoveryCodeValidationRequest) -> AuthMethodResult<bool>;
 
     /// Get the enrollment status for an entity
-    async fn get_enrollment(&self, entity_id: Uuid)
-        -> AuthMethodResult<Option<RecoveryCodeEnrollment>>;
+    async fn get_enrollment(
+        &self,
+        entity_id: Uuid,
+    ) -> AuthMethodResult<Option<RecoveryCodeEnrollment>>;
 
     /// Revoke all recovery codes for an entity
     async fn revoke_codes(&self, entity_id: Uuid) -> AuthMethodResult<()>;
@@ -209,11 +211,12 @@ impl RecoveryCodeService for DefaultRecoveryCodeService {
 
     async fn validate(&self, request: RecoveryCodeValidationRequest) -> AuthMethodResult<bool> {
         let mut enrollments = self.enrollments.write().await;
-        let enrollment = enrollments
-            .get_mut(&request.entity_id)
-            .ok_or_else(|| SecretonError::NotFound {
-                resource: format!("recovery-codes:{}", request.entity_id),
-            })?;
+        let enrollment =
+            enrollments
+                .get_mut(&request.entity_id)
+                .ok_or_else(|| SecretonError::NotFound {
+                    resource: format!("recovery-codes:{}", request.entity_id),
+                })?;
 
         // Normalize the code (remove dashes, uppercase)
         let normalized_code: String = request

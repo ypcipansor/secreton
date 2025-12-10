@@ -311,11 +311,12 @@ impl PushService for DefaultPushService {
         // First, get and update the notification, extracting needed data
         let (is_approved, device_id) = {
             let mut notifications = self.notifications.write().await;
-            let notification = notifications
-                .get_mut(&request.notification_id)
-                .ok_or_else(|| SecretonError::NotFound {
-                    resource: format!("push-notification:{}", request.notification_id),
-                })?;
+            let notification =
+                notifications
+                    .get_mut(&request.notification_id)
+                    .ok_or_else(|| SecretonError::NotFound {
+                        resource: format!("push-notification:{}", request.notification_id),
+                    })?;
 
             // Verify entity_id matches
             if notification.entity_id != request.entity_id {
