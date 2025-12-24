@@ -47,3 +47,5 @@ ssh-key = "0.6"
 rand.workspace = true
 base64.workspace = true
 hex.workspace = true
+spki.workspace = true
+der.workspace = true

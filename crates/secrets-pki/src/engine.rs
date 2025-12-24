@@ -1,5 +1,8 @@
 //! PKI engine implementation
 
+use der::Decode;
+use der::EncodePem;
+use x509_cert::Certificate;
 use crate::error::PkiError;
 use crate::model::{
     CertificateRequest, CertificateResponse, PkiConfig, RevocationReason, SshKeyRequest,
@@ -83,11 +86,11 @@ impl PkiEngine {
         let not_after_chrono = not_before_chrono + Duration::seconds(ttl);
 
         // rcgen uses time crate internally, convert from chrono
-        params.not_before = time::OffsetDateTime::from_unix_timestamp(
+        params.not_before = ::time::OffsetDateTime::from_unix_timestamp(
             not_before_chrono.timestamp(),
         )
         .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
-        params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after_chrono.timestamp())
+        params.not_after = ::time::OffsetDateTime::from_unix_timestamp(not_after_chrono.timestamp())
             .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
 
         // Add subject alternative names
@@ -307,9 +310,105 @@ impl PkiEngine {
 
     /// Get CA information
     pub async fn get_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
+        if let Some(ca_cert_pem) = &self.config.ca_cert {
+            return self.parse_ca_cert(ca_cert_pem);
+        }
+
         // For now, generate a default self-signed CA
-        // TODO: Implement proper CA certificate parsing when PEM crate API is available
         self.generate_default_ca_info().await
+    }
+
+    /// Parse CA certificate from PEM
+    fn parse_ca_cert(&self, pem: &str) -> Result<crate::model::CaInfo, PkiError> {
+        use crate::model::CaInfo;
+
+        // Parse PEM to Certificate
+        let (label, cert_bytes) = der::pem::decode_vec(pem.as_bytes())
+            .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse PEM: {}", e)))?;
+
+        if label != "CERTIFICATE" {
+             return Err(PkiError::CertificateParsing(format!("Invalid PEM label: {}", label)));
+        }
+
+        let cert = Certificate::from_der(&cert_bytes)
+            .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse X509: {}", e)))?;
+
+        // Extract public key info
+        let spki = &cert.tbs_certificate.subject_public_key_info;
+        let algorithm_oid = spki.algorithm.oid.to_string();
+
+        let key_type = match algorithm_oid.as_str() {
+            "1.2.840.113549.1.1.1" => "RSA".to_string(),
+            oid if oid.starts_with("1.2.840.10045") => "ECDSA".to_string(),
+            oid if oid.starts_with("1.3.101") => "EdDSA".to_string(),
+            _ => format!("Unknown ({})", algorithm_oid),
+        };
+
+        // Key bits calculation is complex without full parsing of the key data.
+        // For now, we default to 0 to avoid returning misleading values (like DER encoded size).
+        let key_bits = 0;
+
+        // Extract validity
+        let valid_from = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
+        let valid_until = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+
+        // Extract Subject and Issuer
+        let mut subject = HashMap::new();
+        for rdn in cert.tbs_certificate.subject.0.iter() {
+            for attr in rdn.0.iter() {
+                let oid_string = attr.oid.to_string();
+                let key = match oid_string.as_str() {
+                    "2.5.4.3" => "common_name",
+                    "2.5.4.10" => "organization",
+                    "2.5.4.11" => "organizational_unit",
+                    "2.5.4.6" => "country",
+                    "2.5.4.8" => "state",
+                    "2.5.4.7" => "locality",
+                    _ => &oid_string,
+                };
+                // Handle AnyString/Utf8String/PrintableString etc
+                if let Ok(s) = attr.value.decode_as::<String>() {
+                     subject.insert(key.to_string(), s);
+                }
+            }
+        }
+
+        let mut issuer = HashMap::new();
+        for rdn in cert.tbs_certificate.issuer.0.iter() {
+            for attr in rdn.0.iter() {
+                let oid_string = attr.oid.to_string();
+                let key = match oid_string.as_str() {
+                    "2.5.4.3" => "common_name",
+                    "2.5.4.10" => "organization",
+                    "2.5.4.11" => "organizational_unit",
+                    "2.5.4.6" => "country",
+                    "2.5.4.8" => "state",
+                    "2.5.4.7" => "locality",
+                    _ => &oid_string,
+                };
+                if let Ok(s) = attr.value.decode_as::<String>() {
+                     issuer.insert(key.to_string(), s);
+                }
+            }
+        }
+
+        // Extract public key PEM
+        let public_key_pem = spki.to_pem(der::pem::LineEnding::LF)
+             .map_err(|e| PkiError::CertificateParsing(format!("Failed to encode public key: {}", e)))?;
+
+        Ok(CaInfo {
+            certificate: pem.to_string(),
+            public_key: public_key_pem,
+            key_type,
+            key_bits,
+            signature_algorithm: cert.signature_algorithm.oid.to_string(),
+            subject,
+            issuer,
+            valid_from: chrono::DateTime::from_timestamp(valid_from, 0)
+                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_from timestamp".to_string()))?,
+            valid_until: chrono::DateTime::from_timestamp(valid_until, 0)
+                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_until timestamp".to_string()))?,
+        })
     }
 
     /// Generate default CA info for development/testing
@@ -333,8 +432,8 @@ impl PkiEngine {
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
 
         // Set validity (10 years)
-        let not_before = time::OffsetDateTime::now_utc();
-        let not_after = not_before + time::Duration::days(3650);
+        let not_before = ::time::OffsetDateTime::now_utc();
+        let not_after = not_before + ::time::Duration::days(3650);
         params.not_before = not_before;
         params.not_after = not_after;
 
