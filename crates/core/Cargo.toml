@@ -144,6 +144,7 @@ reqwest = { version = "0.12", features = ["json"] }
 
 # Prometheus monitoring
 prometheus = { workspace = true }
+sysinfo = { workspace = true }
 
 # LDAP Dependencies
 ldap3.workspace = true

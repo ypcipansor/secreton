@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+use sysinfo::{Disks, Networks, System};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -56,6 +57,18 @@ impl Default for TelemetryConfig {
     }
 }
 
+struct SysInfoMonitor {
+    system: System,
+    networks: Networks,
+    disks: Disks,
+}
+
+impl std::fmt::Debug for SysInfoMonitor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SysInfoMonitor").finish()
+    }
+}
+
 /// System metrics collector
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -66,15 +79,27 @@ pub struct TelemetryCollector {
     start_time: Instant,
     /// Metrics storage
     metrics: Arc<RwLock<SystemMetrics>>,
+    /// System monitor
+    sys_monitor: Arc<tokio::sync::Mutex<SysInfoMonitor>>,
 }
 
 impl TelemetryCollector {
     /// Create a new telemetry collector
     pub fn new(config: TelemetryConfig) -> Self {
+        let mut system = System::new_all();
+        system.refresh_all();
+        let networks = Networks::new_with_refreshed_list();
+        let disks = Disks::new_with_refreshed_list();
+
         Self {
             config,
             start_time: Instant::now(),
             metrics: Arc::new(RwLock::new(SystemMetrics::default())),
+            sys_monitor: Arc::new(tokio::sync::Mutex::new(SysInfoMonitor {
+                system,
+                networks,
+                disks,
+            })),
         }
     }
 
@@ -94,8 +119,70 @@ impl TelemetryCollector {
         }
 
         // Start background metrics collection
-        // TODO: Implement background collection if needed
-        // self.start_collection().await;
+        let sys_monitor = self.sys_monitor.clone();
+        let metrics = self.metrics.clone();
+        let interval_secs = self.config.collection_interval_seconds;
+        let start_time = self.start_time;
+
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+
+            loop {
+                interval.tick().await;
+
+                // Lock the system monitor to update system stats
+                let mut monitor = sys_monitor.lock().await;
+
+                // Refresh system stats
+                monitor.system.refresh_all();
+                monitor.networks.refresh(true);
+                monitor.disks.refresh(true);
+
+                // CPU Usage
+                let cpu_usage_percent = monitor.system.global_cpu_usage();
+
+                // Memory Usage
+                let memory_usage_bytes = monitor.system.used_memory();
+
+                // Disk Usage
+                let mut disk_usage_bytes = 0;
+                for disk in &monitor.disks {
+                    // This is total space, usually we want used space?
+                    // sysinfo Disk has available_space() and total_space().
+                    // used = total - available
+                    disk_usage_bytes += disk.total_space().saturating_sub(disk.available_space());
+                }
+
+                // Network IO
+                let mut network_io_bytes = 0;
+                for (_interface_name, network) in &monitor.networks {
+                    network_io_bytes += network.received() + network.transmitted();
+                }
+
+                // Load Average
+                let load_avg = System::load_average();
+
+                // Uptime
+                let uptime_seconds = start_time.elapsed().as_secs();
+
+                // Update metrics
+                let mut metrics_guard = metrics.write().await;
+
+                metrics_guard.performance.cpu_usage_percent = cpu_usage_percent;
+                metrics_guard.performance.memory_usage_bytes = memory_usage_bytes;
+                metrics_guard.performance.disk_usage_bytes = disk_usage_bytes;
+                metrics_guard.performance.network_io_bytes = network_io_bytes;
+
+                metrics_guard.system.load_average_1m = load_avg.one as f32;
+                metrics_guard.system.load_average_5m = load_avg.five as f32;
+                metrics_guard.system.load_average_15m = load_avg.fifteen as f32;
+                metrics_guard.system.uptime_seconds = uptime_seconds;
+
+                // We can't easily get active connections or database connections here without access to those pools
+                // So we leave them as is (updated by other parts of the system potentially)
+            }
+        });
 
         Ok(())
     }
