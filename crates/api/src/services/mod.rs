@@ -10,6 +10,7 @@ pub mod admin;
 use std::sync::Arc;
 use anyhow::Result;
 use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
+use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use crate::config::ApiConfig;
 
 /// Service container holding all application services
@@ -80,6 +81,15 @@ impl ApiServiceContainer {
         // Initialize MFA service
         let mfa = Arc::new(secreton_auth::mfa::MfaService::new());
         self.registry.register("mfa".to_string(), mfa);
+
+        // Initialize Telemetry service
+        // Use default config for now, ideally mapped from ApiConfig or CoreConfig
+        let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
+        // Start collection immediately (background task)
+        if let Err(e) = telemetry.start_collection().await {
+            tracing::warn!("Failed to start telemetry collection: {}", e);
+        }
+        self.registry.register("telemetry".to_string(), telemetry);
 
         Ok(())
     }

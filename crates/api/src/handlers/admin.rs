@@ -20,6 +20,7 @@ use crate::{
     ApiResponse, ApiResult,
 };
 use secreton_errors::SecretonError;
+use secreton_core::telemetry::TelemetryCollector;
 
 /// Create administrative routes
 pub fn create_routes() -> Router<AppState> {
@@ -505,195 +506,64 @@ pub async fn get_config(
     Ok(Json(ApiResponse::success(config)))
 }
 
-use std::process::Command;
 use tokio::time::{timeout, Duration};
 
-/// Helper functions for system metrics collection
-async fn get_memory_metrics() -> MemoryMetrics {
-    // Try to get memory info from /proc/meminfo (Linux)
-    if let Ok(output) = Command::new("cat").arg("/proc/meminfo").output().await {
-        if let Ok(meminfo) = String::from_utf8(output.stdout) {
-            return parse_memory_info(&meminfo);
-        }
-    }
-
-    // Fallback to basic memory info
-    MemoryMetrics {
-        total: 16 * 1024 * 1024 * 1024, // 16GB
-        used: 8 * 1024 * 1024 * 1024,   // 8GB
-        free: 8 * 1024 * 1024 * 1024,   // 8GB
-        cached: 2 * 1024 * 1024 * 1024, // 2GB
-    }
-}
-
-fn parse_memory_info(meminfo: &str) -> MemoryMetrics {
-    let mut total = 0u64;
-    let mut free = 0u64;
-    let mut cached = 0u64;
-
-    for line in meminfo.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let value = parts[1].parse::<u64>().unwrap_or(0) * 1024; // Convert KB to bytes
-            match parts[0] {
-                "MemTotal:" => total = value,
-                "MemFree:" => free = value,
-                "Cached:" => cached = value,
-                _ => {}
-            }
-        }
-    }
-
-    let used = total.saturating_sub(free);
-    
-    MemoryMetrics {
-        total,
-        used,
-        free,
-        cached,
-    }
-}
-
-async fn get_cpu_metrics() -> CpuMetrics {
-    // Try to get CPU info from /proc/cpuinfo and /proc/loadavg
-    let cores = if let Ok(output) = Command::new("nproc").output().await {
-        String::from_utf8(output.stdout)
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .unwrap_or(1)
-    } else {
-        1
-    };
-
-    let load_average = if let Ok(output) = Command::new("cat").arg("/proc/loadavg").output().await {
-        if let Ok(loadavg) = String::from_utf8(output.stdout) {
-            parse_load_average(&loadavg)
-        } else {
-            [0.0, 0.0, 0.0]
-        }
-    } else {
-        [0.0, 0.0, 0.0]
-    };
-
-    // For CPU usage percentage, we'd need more complex monitoring
-    // For now, return basic info
-    CpuMetrics {
-        cores,
-        usage_percent: 0.0, // Would need system monitoring library
-        load_average,
-    }
-}
-
-fn parse_load_average(loadavg: &str) -> [f64; 3] {
-    let parts: Vec<&str> = loadavg.split_whitespace().collect();
-    if parts.len() >= 3 {
-        [
-            parts[0].parse().unwrap_or(0.0),
-            parts[1].parse().unwrap_or(0.0),
-            parts[2].parse().unwrap_or(0.0),
-        ]
-    } else {
-        [0.0, 0.0, 0.0]
-    }
-}
-
-async fn get_disk_metrics() -> DiskMetrics {
-    // Try to get disk usage with df command
-    if let Ok(output) = Command::new("df").arg("/").output().await {
-        if let Ok(df_output) = String::from_utf8(output.stdout) {
-            return parse_disk_usage(&df_output);
-        }
-    }
-
-    // Fallback
-    DiskMetrics {
-        total: 1024 * 1024 * 1024 * 1024, // 1TB
-        used: 256 * 1024 * 1024 * 1024,   // 256GB
-        free: 768 * 1024 * 1024 * 1024,   // 768GB
-        usage_percent: 25.0,
-    }
-}
-
-fn parse_disk_usage(df_output: &str) -> DiskMetrics {
-    for line in df_output.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 && parts[5] == "/" {
-            let total = parts[1].parse::<u64>().unwrap_or(0) * 1024; // Convert 1K blocks to bytes
-            let used = parts[2].parse::<u64>().unwrap_or(0) * 1024;
-            let free = parts[3].parse::<u64>().unwrap_or(0) * 1024;
-            let usage_percent = parts[4].trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
-            
-            return DiskMetrics {
-                total,
-                used,
-                free,
-                usage_percent,
-            };
-        }
-    }
-
-    DiskMetrics {
-        total: 0,
-        used: 0,
-        free: 0,
-        usage_percent: 0.0,
-    }
-}
-
-async fn get_network_metrics() -> NetworkMetrics {
-    // Try to get network stats from /proc/net/dev
-    if let Ok(output) = Command::new("cat").arg("/proc/net/dev").output().await {
-        if let Ok(netdev) = String::from_utf8(output.stdout) {
-            return parse_network_stats(&netdev);
-        }
-    }
-
-    // Fallback
-    NetworkMetrics {
-        bytes_sent: 0,
-        bytes_received: 0,
-        packets_sent: 0,
-        packets_received: 0,
-    }
-}
-
-fn parse_network_stats(netdev: &str) -> NetworkMetrics {
-    for line in netdev.lines().skip(2) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 17 && parts[0].trim_end_matches(':') != "lo" {
-            // Skip loopback, use first non-lo interface
-            let bytes_received = parts[1].parse::<u64>().unwrap_or(0);
-            let packets_received = parts[2].parse::<u64>().unwrap_or(0);
-            let bytes_sent = parts[9].parse::<u64>().unwrap_or(0);
-            let packets_sent = parts[10].parse::<u64>().unwrap_or(0);
-            
-            return NetworkMetrics {
-                bytes_sent,
-                bytes_received,
-                packets_sent,
-                packets_received,
-            };
-        }
-    }
-
-    NetworkMetrics {
-        bytes_sent: 0,
-        bytes_received: 0,
-        packets_sent: 0,
-        packets_received: 0,
-    }
-}
 pub async fn get_system_metrics(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<SystemMetrics>>> {
     let stats = state.admin.get_system_stats().await
         .map_err(|e| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
 
-    // Get additional system metrics
-    let memory = get_memory_metrics().await;
-    let cpu = get_cpu_metrics().await;
-    let disk = get_disk_metrics().await;
-    let network = get_network_metrics().await;
+    // Use shared telemetry collector if available
+    let (memory, cpu, disk, network, uptime) = if let Some(telemetry) = state.get_service::<TelemetryCollector>("telemetry") {
+        let m = telemetry.get_metrics().await;
+
+        let mem = MemoryMetrics {
+            total: m.performance.total_memory_bytes,
+            used: m.performance.memory_usage_bytes,
+            free: m.performance.total_memory_bytes.saturating_sub(m.performance.memory_usage_bytes),
+            cached: 0, // Not currently tracked in core metrics
+        };
+
+        let cpu = CpuMetrics {
+            cores: num_cpus::get() as u32,
+            usage_percent: m.performance.cpu_usage_percent as f64,
+            load_average: [
+                m.system.load_average_1m as f64,
+                m.system.load_average_5m as f64,
+                m.system.load_average_15m as f64
+            ],
+        };
+
+        let disk = DiskMetrics {
+            total: m.performance.total_disk_bytes,
+            used: m.performance.disk_usage_bytes,
+            free: m.performance.total_disk_bytes.saturating_sub(m.performance.disk_usage_bytes),
+            usage_percent: if m.performance.total_disk_bytes > 0 {
+                (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64) * 100.0
+            } else {
+                0.0
+            },
+        };
+
+        let net = NetworkMetrics {
+            bytes_sent: m.performance.network_tx_bytes,
+            bytes_received: m.performance.network_rx_bytes,
+            packets_sent: 0, // Not tracked
+            packets_received: 0, // Not tracked
+        };
+
+        (mem, cpu, disk, net, m.system.uptime_seconds)
+    } else {
+        // Fallback for when telemetry service is missing
+        (
+             MemoryMetrics { total: 0, used: 0, free: 0, cached: 0 },
+             CpuMetrics { cores: 1, usage_percent: 0.0, load_average: [0.0; 3] },
+             DiskMetrics { total: 0, used: 0, free: 0, usage_percent: 0.0 },
+             NetworkMetrics { bytes_sent: 0, bytes_received: 0, packets_sent: 0, packets_received: 0 },
+             stats.uptime_seconds
+        )
+    };
 
     // Count total policies from storage
     let total_policies = state.storage.list(&secreton_storage::QueryParams {
@@ -707,7 +577,7 @@ pub async fn get_system_metrics(
     .unwrap_or(0);
 
     let metrics = SystemMetrics {
-        uptime: stats.uptime_seconds,
+        uptime,
         memory_usage: memory,
         cpu_usage: cpu,
         disk_usage: disk,

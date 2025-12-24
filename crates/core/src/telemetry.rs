@@ -135,7 +135,9 @@ impl TelemetryCollector {
                 let mut monitor = sys_monitor.lock().await;
 
                 // Refresh system stats
-                monitor.system.refresh_all();
+                // Optimized: Only refresh what we need
+                monitor.system.refresh_cpu_all();
+                monitor.system.refresh_memory();
                 monitor.networks.refresh(true);
                 monitor.disks.refresh(true);
 
@@ -144,21 +146,29 @@ impl TelemetryCollector {
 
                 // Memory Usage
                 let memory_usage_bytes = monitor.system.used_memory();
+                let total_memory_bytes = monitor.system.total_memory();
 
                 // Disk Usage
                 let mut disk_usage_bytes = 0;
+                let mut total_disk_bytes = 0;
                 for disk in &monitor.disks {
                     // This is total space, usually we want used space?
                     // sysinfo Disk has available_space() and total_space().
                     // used = total - available
-                    disk_usage_bytes += disk.total_space().saturating_sub(disk.available_space());
+                    let total = disk.total_space();
+                    let available = disk.available_space();
+                    disk_usage_bytes += total.saturating_sub(available);
+                    total_disk_bytes += total;
                 }
 
                 // Network IO
-                let mut network_io_bytes = 0;
+                let mut network_rx_bytes = 0;
+                let mut network_tx_bytes = 0;
                 for (_interface_name, network) in &monitor.networks {
-                    network_io_bytes += network.received() + network.transmitted();
+                    network_rx_bytes += network.received();
+                    network_tx_bytes += network.transmitted();
                 }
+                let network_io_bytes = network_rx_bytes + network_tx_bytes;
 
                 // Load Average
                 let load_avg = System::load_average();
@@ -171,8 +181,12 @@ impl TelemetryCollector {
 
                 metrics_guard.performance.cpu_usage_percent = cpu_usage_percent;
                 metrics_guard.performance.memory_usage_bytes = memory_usage_bytes;
+                metrics_guard.performance.total_memory_bytes = total_memory_bytes;
                 metrics_guard.performance.disk_usage_bytes = disk_usage_bytes;
+                metrics_guard.performance.total_disk_bytes = total_disk_bytes;
                 metrics_guard.performance.network_io_bytes = network_io_bytes;
+                metrics_guard.performance.network_rx_bytes = network_rx_bytes;
+                metrics_guard.performance.network_tx_bytes = network_tx_bytes;
 
                 metrics_guard.system.load_average_1m = load_avg.one as f32;
                 metrics_guard.system.load_average_5m = load_avg.five as f32;
@@ -282,10 +296,18 @@ pub struct PerformanceMetrics {
     pub cpu_usage_percent: f32,
     /// Memory usage in bytes
     pub memory_usage_bytes: u64,
+    /// Total memory in bytes
+    pub total_memory_bytes: u64,
     /// Disk usage in bytes
     pub disk_usage_bytes: u64,
-    /// Network I/O in bytes
+    /// Total disk space in bytes
+    pub total_disk_bytes: u64,
+    /// Network I/O in bytes (deprecated, use rx/tx)
     pub network_io_bytes: u64,
+    /// Network received bytes
+    pub network_rx_bytes: u64,
+    /// Network transmitted bytes
+    pub network_tx_bytes: u64,
     /// Database connections
     pub database_connections: u32,
     /// Cache hit rate percentage
