@@ -115,9 +115,9 @@ impl InMemoryTotpService {
         // Dynamic truncation
         let offset = (result[19] & 0xf) as usize;
         let code = ((result[offset] & 0x7f) as u32) << 24
-            | ((result[offset + 1] & 0xff) as u32) << 16
-            | ((result[offset + 2] & 0xff) as u32) << 8
-            | ((result[offset + 3] & 0xff) as u32);
+            | (u32::from(result[offset + 1])) << 16
+            | (u32::from(result[offset + 2])) << 8
+            | u32::from(result[offset + 3]);
 
         let modulus = 10u32.pow(digits);
         let totp = code % modulus;

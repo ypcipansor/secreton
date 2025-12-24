@@ -237,7 +237,7 @@ impl DefaultWebAuthnService {
         use rand::RngCore;
         let mut challenge = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut challenge);
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&challenge)
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(challenge)
     }
 
     /// Clean up expired challenges

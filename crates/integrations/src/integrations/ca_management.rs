@@ -109,6 +109,12 @@ pub struct CAManagement {
     revocation_list: Arc<RwLock<Vec<RevocationEntry>>>,
 }
 
+impl Default for CAManagement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CAManagement {
     pub fn new() -> Self {
         Self {
@@ -424,12 +430,6 @@ impl CAManagement {
 
         let key_pair = KeyPair::generate().unwrap();
         key_pair.serialize_pem()
-    }
-}
-
-impl Default for CAManagement {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

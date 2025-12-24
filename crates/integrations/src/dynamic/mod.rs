@@ -148,7 +148,7 @@ pub async fn generate_mysql_credential(
 
     let mut conn = pool.get_conn().await?;
     conn.query_drop(&create_user_query).await?;
-    conn.query_drop(&format!("GRANT SELECT ON *.* TO '{}'@'%'", username))
+    conn.query_drop(format!("GRANT SELECT ON *.* TO '{}'@'%'", username))
         .await?;
 
     Ok(DynamicMysqlCredential {
@@ -255,7 +255,7 @@ pub async fn generate_gcp_credential(
         });
 
         let create_response = client
-            .post(&format!(
+            .post(format!(
                 "https://iam.googleapis.com/v1/projects/{}/serviceAccounts",
                 project_id
             ))
@@ -289,7 +289,7 @@ pub async fn generate_gcp_credential(
     });
 
     let key_response = client
-        .post(&format!(
+        .post(format!(
             "https://iam.googleapis.com/v1/projects/{}/serviceAccounts/{}/keys",
             project_id, sa_email
         ))
@@ -346,7 +346,7 @@ pub async fn generate_azure_credential(
     });
 
     let sp_response = client
-        .post(&format!(
+        .post(format!(
             "https://management.azure.com/subscriptions/{}/providers/Microsoft.Authorization/servicePrincipals?api-version=2022-04-01",
             subscription_id
         ))

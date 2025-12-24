@@ -227,13 +227,12 @@ impl S3Storage {
 
         // Configure lifecycle rules
         if config.lifecycle_enabled {
-            let mut transitions = Vec::new();
-            transitions.push(
+            let transitions = vec![
                 aws_sdk_s3::types::Transition::builder()
                     .days(config.retention_days)
                     .storage_class(aws_sdk_s3::types::TransitionStorageClass::Glacier)
                     .build(),
-            );
+            ];
 
             let lifecycle_rule = aws_sdk_s3::types::LifecycleRule::builder()
                 .id("secreton-secrets-lifecycle")

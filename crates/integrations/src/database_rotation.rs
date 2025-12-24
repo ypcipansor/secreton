@@ -198,7 +198,7 @@ impl DatabaseRootRotation {
             id: rotation_id.clone(),
             database_name: database_name.to_string(),
             old_username: old_credential.username.clone(),
-            new_username: format!("root-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            new_username: format!("root-{}", &uuid::Uuid::new_v4().to_string()[..8]),
             started_at: Utc::now(),
             completed_at: None,
             status: RotationStatus::InProgress,
@@ -208,7 +208,7 @@ impl DatabaseRootRotation {
 
         // Generate new credential
         let new_credential = RootCredential {
-            username: format!("root-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            username: format!("root-{}", &uuid::Uuid::new_v4().to_string()[..8]),
             password: self.generate_password(),
             created_at: Utc::now(),
             rotated_at: Some(Utc::now()),

@@ -111,6 +111,12 @@ pub struct AnsibleIntegration {
     executions: Arc<RwLock<HashMap<String, ExecutionResult>>>,
 }
 
+impl Default for AnsibleIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnsibleIntegration {
     pub fn new() -> Self {
         Self {
@@ -168,7 +174,7 @@ impl AnsibleIntegration {
         merged_vars.extend(extra_vars);
 
         // Mock secret injection
-        for (_key, value) in &merged_vars {
+        for value in merged_vars.values() {
             if value.starts_with("secreton:") {
                 let secret_path = value.strip_prefix("secreton:").unwrap();
                 injected_secrets.push(secret_path.to_string());

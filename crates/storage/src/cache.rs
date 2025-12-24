@@ -96,11 +96,11 @@ impl CacheBackend for InMemoryCache {
 
         match data.get(key) {
             Some(entry) => {
-                if let Some(expires_at) = entry.expires_at
-                    && std::time::Instant::now() > expires_at
-                {
-                    stats.miss_count += 1;
-                    return Ok(None);
+                if let Some(expires_at) = entry.expires_at {
+                    if std::time::Instant::now() > expires_at {
+                        stats.miss_count += 1;
+                        return Ok(None);
+                    }
                 }
 
                 stats.hit_count += 1;

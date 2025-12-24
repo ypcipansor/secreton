@@ -16,6 +16,12 @@ pub struct SamlAuthMethod {
     _http_client: Client,
 }
 
+impl Default for SamlAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SamlAuthMethod {
     pub fn new() -> Self {
         Self {

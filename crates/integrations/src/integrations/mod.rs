@@ -3,7 +3,7 @@ pub mod advanced_backup_recovery;
 pub mod agent_templating;
 pub mod ansible_integration;
 pub mod aws_secrets_manager;
-pub mod azure_key_secreton_backend;
+pub mod azure_key_vault_backend;
 pub mod ca_management;
 pub mod certificate_revocation;
 pub mod cicd_pipeline;
