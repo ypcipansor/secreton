@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::token::*;
+use super::core::*;
 use secreton_errors::SecretonError;
 
 /// Token renewal service trait
@@ -93,11 +93,9 @@ impl TokenRenewalService for InMemoryTokenRenewalService {
                 reason: token_id.to_string(),
             })?;
 
-        let time_remaining = if let Some(expiry) = token.expiry_time {
-            Some(expiry.signed_duration_since(Utc::now()))
-        } else {
-            None
-        };
+        let time_remaining = token
+            .expiry_time
+            .map(|expiry| expiry.signed_duration_since(Utc::now()));
 
         Ok(TokenRenewalInfo {
             token_id,

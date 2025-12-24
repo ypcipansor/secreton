@@ -101,7 +101,7 @@ pub struct AuditEntry {
 }
 
 /// Restore options
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RestoreOptions {
     /// Skip secrets restoration
     pub skip_secrets: bool,
@@ -117,18 +117,6 @@ pub struct RestoreOptions {
 
     /// Force restore (overwrite existing data)
     pub force: bool,
-}
-
-impl Default for RestoreOptions {
-    fn default() -> Self {
-        Self {
-            skip_secrets: false,
-            skip_auth: false,
-            skip_policies: false,
-            skip_config: false,
-            force: false,
-        }
-    }
 }
 
 /// Restore result

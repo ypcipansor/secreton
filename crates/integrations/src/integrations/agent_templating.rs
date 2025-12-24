@@ -317,15 +317,15 @@ impl AgentTemplatingService {
     async fn get_secret_value(&self, _path: &str, _context: &RenderContext) -> Result<String> {
         // Check _context first
         if let Some(_data) = _context.secreton_secrets.get(_path) {
-            return Ok(serde_json::to_string_pretty(_data)
-                .map_err(|_e| TemplatingError::RenderError(_e.to_string()))?);
+            return serde_json::to_string_pretty(_data)
+                .map_err(|_e| TemplatingError::RenderError(_e.to_string()));
         }
 
         // Check mock secreton _data
         let secreton_data = self.secreton_data.read().await;
         if let Some(_data) = secreton_data.get(_path) {
-            return Ok(serde_json::to_string_pretty(_data)
-                .map_err(|_e| TemplatingError::RenderError(_e.to_string()))?);
+            return serde_json::to_string_pretty(_data)
+                .map_err(|_e| TemplatingError::RenderError(_e.to_string()));
         }
 
         Err(TemplatingError::SecretNotFound(_path.to_string()))

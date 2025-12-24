@@ -197,7 +197,7 @@ impl CredentialGenerator for AwsCredentialGenerator {
         let assume_role = client
             .assume_role()
             .role_arn(&role_arn)
-            .role_session_name(&format!("{}-session-{}", self.role_prefix, role))
+            .role_session_name(format!("{}-session-{}", self.role_prefix, role))
             .set_duration_seconds(Some(expires_in as i32 * 60)) // Convert to seconds
             .send()
             .await
@@ -246,6 +246,12 @@ impl CredentialGenerator for AwsCredentialGenerator {
 /// Unified credential manager
 pub struct CredentialManager {
     generators: std::collections::HashMap<String, Box<dyn CredentialGenerator + Send + Sync>>,
+}
+
+impl Default for CredentialManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CredentialManager {

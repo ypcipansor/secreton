@@ -61,6 +61,7 @@ impl SecurityLevel {
     }
 
     /// Get security level from string
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().replace("-", "_").as_str() {
             "public" => Some(SecurityLevel::Public),
@@ -479,11 +480,14 @@ pub mod utils {
 }
 
 /// Password generation utilities
-
-/// Generate a secure random password (legacy function - use utils::password::generate_password instead)
-pub fn generate_password() -> Result<String> {
-    Ok(utils::password::generate_password(32))
+pub mod password_legacy {
+    use super::*;
+    /// Generate a secure random password (legacy function - use utils::password::generate_password instead)
+    pub fn generate_password() -> Result<String> {
+        Ok(utils::password::generate_password(32))
+    }
 }
+pub use password_legacy::generate_password;
 
 /// Service health status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -63,7 +63,7 @@ pub async fn generate_aws_credential(
     let assume_role = client
         .assume_role()
         .role_arn(&role_arn)
-        .role_session_name(&format!("{}-session-{}", config.role_prefix, role))
+        .role_session_name(format!("{}-session-{}", config.role_prefix, role))
         .set_duration_seconds(Some(config.default_duration_seconds))
         .send()
         .await

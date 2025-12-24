@@ -55,7 +55,7 @@ impl PolicyEngine {
     pub fn add_role_relationship(&mut self, child_role: Uuid, parent_role: Uuid) {
         self.role_hierarchy
             .entry(child_role)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(parent_role);
     }
 
@@ -94,17 +94,7 @@ impl PolicyEngine {
 
     /// Compile a policy condition
     fn compile_condition(&self, condition: &PolicyCondition) -> PolicyResult<CompiledCondition> {
-        let operator = match condition.operator {
-            ConditionOperator::Equals => ConditionOperator::Equals,
-            ConditionOperator::NotEquals => ConditionOperator::NotEquals,
-            ConditionOperator::Contains => ConditionOperator::Contains,
-            ConditionOperator::NotContains => ConditionOperator::NotContains,
-            ConditionOperator::In => ConditionOperator::In,
-            ConditionOperator::NotIn => ConditionOperator::NotIn,
-            ConditionOperator::GreaterThan => ConditionOperator::GreaterThan,
-            ConditionOperator::LessThan => ConditionOperator::LessThan,
-            ConditionOperator::Regex => ConditionOperator::Regex,
-        };
+        let operator = condition.operator;
 
         Ok(CompiledCondition {
             attribute: condition.attribute.clone(),
@@ -206,10 +196,10 @@ impl PolicyEngine {
                 Rule::identifier => {
                     // Parse actions/resources
                     let value = inner_pair.as_str().to_string();
-                    if value.starts_with("action:") {
-                        rule.actions.push(value[7..].to_string());
-                    } else if value.starts_with("resource:") {
-                        rule.resources.push(value[9..].to_string());
+                    if let Some(stripped) = value.strip_prefix("action:") {
+                        rule.actions.push(stripped.to_string());
+                    } else if let Some(stripped) = value.strip_prefix("resource:") {
+                        rule.resources.push(stripped.to_string());
                     }
                 }
                 _ => {}
@@ -324,4 +314,10 @@ pub struct CompiledCondition {
     pub attribute: String,
     pub operator: ConditionOperator,
     pub values: Vec<String>,
+}
+
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }

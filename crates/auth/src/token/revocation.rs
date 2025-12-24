@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::token::*;
+use super::core::*;
 use secreton_errors::SecretonError;
 
 /// Token revocation service trait
