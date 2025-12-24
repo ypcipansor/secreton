@@ -344,9 +344,6 @@ impl PkiEngine {
             _ => format!("Unknown ({})", algorithm_oid),
         };
 
-        // Key bits calculation is complex without full parsing of the key data.
-        // For now, we default to 0 to avoid returning misleading values (like DER encoded size).
-        let key_bits = 0;
 
         // Extract validity
         let valid_from = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
@@ -395,6 +392,40 @@ impl PkiEngine {
         // Extract public key PEM
         let public_key_pem = spki.to_pem(der::pem::LineEnding::LF)
              .map_err(|e| PkiError::CertificateParsing(format!("Failed to encode public key: {}", e)))?;
+
+        // Calculate key bits based on algorithm
+        let key_bits = match key_type.as_str() {
+            "RSA" => {
+                use pkcs1::DecodeRsaPublicKey;
+                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_pkcs1_der(spki.subject_public_key.raw_bytes()) {
+                    rsa_pub.modulus.as_bytes().len() * 8
+                } else {
+                    // Try parsing as SPKI if raw bytes fails or if it's SPKI inside?
+                    // Actually subject_public_key in SPKI is usually the raw key data.
+                    // For RSA, it is RSAPublicKey (PKCS#1).
+                    0
+                }
+            },
+            "ECDSA" => {
+                // Check curve from parameters
+                // For now, simple mapping if possible, else 0
+                if let Some(params) = &spki.algorithm.parameters {
+                    if let Ok(oid) = params.decode_as::<der::asn1::ObjectIdentifier>() {
+                        match oid.to_string().as_str() {
+                            "1.2.840.10045.3.1.7" => 256, // P-256
+                            "1.3.132.0.34" => 384,        // P-384
+                            "1.3.132.0.35" => 521,        // P-521
+                            _ => 0
+                        }
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            },
+            _ => 0,
+        };
 
         Ok(CaInfo {
             certificate: pem.to_string(),
