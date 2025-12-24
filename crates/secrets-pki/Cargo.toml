@@ -49,3 +49,4 @@ base64.workspace = true
 hex.workspace = true
 spki.workspace = true
 der.workspace = true
+pkcs1 = "0.7.5"

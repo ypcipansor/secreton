@@ -350,44 +350,8 @@ impl PkiEngine {
         let valid_until = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
 
         // Extract Subject and Issuer
-        let mut subject = HashMap::new();
-        for rdn in cert.tbs_certificate.subject.0.iter() {
-            for attr in rdn.0.iter() {
-                let oid_string = attr.oid.to_string();
-                let key = match oid_string.as_str() {
-                    "2.5.4.3" => "common_name",
-                    "2.5.4.10" => "organization",
-                    "2.5.4.11" => "organizational_unit",
-                    "2.5.4.6" => "country",
-                    "2.5.4.8" => "state",
-                    "2.5.4.7" => "locality",
-                    _ => &oid_string,
-                };
-                // Handle AnyString/Utf8String/PrintableString etc
-                if let Ok(s) = attr.value.decode_as::<String>() {
-                     subject.insert(key.to_string(), s);
-                }
-            }
-        }
-
-        let mut issuer = HashMap::new();
-        for rdn in cert.tbs_certificate.issuer.0.iter() {
-            for attr in rdn.0.iter() {
-                let oid_string = attr.oid.to_string();
-                let key = match oid_string.as_str() {
-                    "2.5.4.3" => "common_name",
-                    "2.5.4.10" => "organization",
-                    "2.5.4.11" => "organizational_unit",
-                    "2.5.4.6" => "country",
-                    "2.5.4.8" => "state",
-                    "2.5.4.7" => "locality",
-                    _ => &oid_string,
-                };
-                if let Ok(s) = attr.value.decode_as::<String>() {
-                     issuer.insert(key.to_string(), s);
-                }
-            }
-        }
+        let subject = Self::extract_dn(&cert.tbs_certificate.subject);
+        let issuer = Self::extract_dn(&cert.tbs_certificate.issuer);
 
         // Extract public key PEM
         let public_key_pem = spki.to_pem(der::pem::LineEnding::LF)
@@ -396,8 +360,7 @@ impl PkiEngine {
         // Calculate key bits based on algorithm
         let key_bits = match key_type.as_str() {
             "RSA" => {
-                use pkcs1::DecodeRsaPublicKey;
-                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_pkcs1_der(spki.subject_public_key.raw_bytes()) {
+                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes()) {
                     rsa_pub.modulus.as_bytes().len() * 8
                 } else {
                     // Try parsing as SPKI if raw bytes fails or if it's SPKI inside?
@@ -444,8 +407,6 @@ impl PkiEngine {
 
     /// Generate default CA info for development/testing
     async fn generate_default_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
-        use crate::model::CaInfo;
-
         // Create default CA parameters
         let mut params = CertificateParams::new(vec!["Secreton CA".to_string()])
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
@@ -477,63 +438,31 @@ impl PkiEngine {
             .self_signed(&key_pair)
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
-        // Extract information
-        let subject = extract_dn_info(&cert);
-        let issuer = extract_dn_info(&cert);
-
-        // Get key info - pass key_pair not certificate
-        let key_info = extract_key_info(&key_pair);
-
-        Ok(CaInfo {
-            certificate: cert.pem(),
-            public_key: key_info.public_key_pem,
-            key_type: key_info.key_type,
-            key_bits: key_info.key_bits,
-            signature_algorithm: "SHA256withRSA".to_string(), // default
-            subject,
-            issuer,
-            valid_from: chrono::DateTime::from_timestamp(not_before.unix_timestamp(), 0)
-                .ok_or_else(|| {
-                    PkiError::InvalidCaConfiguration("Invalid validity start".to_string())
-                })?,
-            valid_until: chrono::DateTime::from_timestamp(not_after.unix_timestamp(), 0)
-                .ok_or_else(|| {
-                    PkiError::InvalidCaConfiguration("Invalid validity end".to_string())
-                })?,
-        })
+        // Parse the generated certificate
+        // This implicitly tests our parsing logic
+        self.parse_ca_cert(&cert.pem())
     }
-}
 
-/// Extract key information from certificate and key pair
-fn extract_key_info(key_pair: &rcgen::KeyPair) -> KeyInfo {
-    // Get the public key PEM from the key pair
-    KeyInfo {
-        public_key_pem: key_pair.public_key_pem(),
-        key_type: "ECDSA".to_string(), // rcgen uses ECDSA by default
-        key_bits: 256,                 // P-256 curve
+    /// Extract DN from Name (RdnSequence)
+    fn extract_dn(name: &x509_cert::name::RdnSequence) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for rdn in name.0.iter() {
+            for attr in rdn.0.iter() {
+                let oid_string = attr.oid.to_string();
+                let key = match oid_string.as_str() {
+                    "2.5.4.3" => "common_name",
+                    "2.5.4.10" => "organization",
+                    "2.5.4.11" => "organizational_unit",
+                    "2.5.4.6" => "country",
+                    "2.5.4.8" => "state",
+                    "2.5.4.7" => "locality",
+                    _ => &oid_string,
+                };
+                if let Ok(s) = attr.value.decode_as::<String>() {
+                    map.insert(key.to_string(), s);
+                }
+            }
+        }
+        map
     }
-}
-
-/// Extract distinguished name info from rcgen certificate
-fn extract_dn_info(_cert: &rcgen::Certificate) -> HashMap<String, String> {
-    // For rcgen certificates, we can't easily extract DN info from the built certificate
-    // This is a simplified implementation - return default values
-    let mut info = HashMap::new();
-    info.insert("common_name".to_string(), "Secreton CA".to_string());
-    info.insert("organization".to_string(), "Secreton Security".to_string());
-    info.insert(
-        "organizational_unit".to_string(),
-        "Certificate Authority".to_string(),
-    );
-    info.insert("country".to_string(), "US".to_string());
-    info.insert("state".to_string(), "CA".to_string());
-    info.insert("locality".to_string(), "San Francisco".to_string());
-    info
-}
-
-/// Key information structure
-struct KeyInfo {
-    public_key_pem: String,
-    key_type: String,
-    key_bits: usize,
 }
