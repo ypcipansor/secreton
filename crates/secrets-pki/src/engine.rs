@@ -396,8 +396,7 @@ impl PkiEngine {
         // Calculate key bits based on algorithm
         let key_bits = match key_type.as_str() {
             "RSA" => {
-                use pkcs1::DecodeRsaPublicKey;
-                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_pkcs1_der(spki.subject_public_key.raw_bytes()) {
+                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes()) {
                     rsa_pub.modulus.as_bytes().len() * 8
                 } else {
                     // Try parsing as SPKI if raw bytes fails or if it's SPKI inside?
