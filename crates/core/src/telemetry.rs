@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+use sysinfo::{Disks, Networks, System};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -56,6 +57,18 @@ impl Default for TelemetryConfig {
     }
 }
 
+struct SysInfoMonitor {
+    system: System,
+    networks: Networks,
+    disks: Disks,
+}
+
+impl std::fmt::Debug for SysInfoMonitor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SysInfoMonitor").finish()
+    }
+}
+
 /// System metrics collector
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -66,15 +79,27 @@ pub struct TelemetryCollector {
     start_time: Instant,
     /// Metrics storage
     metrics: Arc<RwLock<SystemMetrics>>,
+    /// System monitor
+    sys_monitor: Arc<tokio::sync::Mutex<SysInfoMonitor>>,
 }
 
 impl TelemetryCollector {
     /// Create a new telemetry collector
     pub fn new(config: TelemetryConfig) -> Self {
+        let mut system = System::new_all();
+        system.refresh_all();
+        let networks = Networks::new_with_refreshed_list();
+        let disks = Disks::new_with_refreshed_list();
+
         Self {
             config,
             start_time: Instant::now(),
             metrics: Arc::new(RwLock::new(SystemMetrics::default())),
+            sys_monitor: Arc::new(tokio::sync::Mutex::new(SysInfoMonitor {
+                system,
+                networks,
+                disks,
+            })),
         }
     }
 
@@ -94,8 +119,84 @@ impl TelemetryCollector {
         }
 
         // Start background metrics collection
-        // TODO: Implement background collection if needed
-        // self.start_collection().await;
+        let sys_monitor = self.sys_monitor.clone();
+        let metrics = self.metrics.clone();
+        let interval_secs = self.config.collection_interval_seconds;
+        let start_time = self.start_time;
+
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+
+            loop {
+                interval.tick().await;
+
+                // Lock the system monitor to update system stats
+                let mut monitor = sys_monitor.lock().await;
+
+                // Refresh system stats
+                // Optimized: Only refresh what we need
+                monitor.system.refresh_cpu_all();
+                monitor.system.refresh_memory();
+                monitor.networks.refresh(true);
+                monitor.disks.refresh(true);
+
+                // CPU Usage
+                let cpu_usage_percent = monitor.system.global_cpu_usage();
+
+                // Memory Usage
+                let memory_usage_bytes = monitor.system.used_memory();
+                let total_memory_bytes = monitor.system.total_memory();
+
+                // Disk Usage
+                let mut disk_usage_bytes = 0;
+                let mut total_disk_bytes = 0;
+                for disk in &monitor.disks {
+                    // This is total space, usually we want used space?
+                    // sysinfo Disk has available_space() and total_space().
+                    // used = total - available
+                    let total = disk.total_space();
+                    let available = disk.available_space();
+                    disk_usage_bytes += total.saturating_sub(available);
+                    total_disk_bytes += total;
+                }
+
+                // Network IO
+                let mut network_rx_bytes = 0;
+                let mut network_tx_bytes = 0;
+                for (_interface_name, network) in &monitor.networks {
+                    network_rx_bytes += network.received();
+                    network_tx_bytes += network.transmitted();
+                }
+                let network_io_bytes = network_rx_bytes + network_tx_bytes;
+
+                // Load Average
+                let load_avg = System::load_average();
+
+                // Uptime
+                let uptime_seconds = start_time.elapsed().as_secs();
+
+                // Update metrics
+                let mut metrics_guard = metrics.write().await;
+
+                metrics_guard.performance.cpu_usage_percent = cpu_usage_percent;
+                metrics_guard.performance.memory_usage_bytes = memory_usage_bytes;
+                metrics_guard.performance.total_memory_bytes = total_memory_bytes;
+                metrics_guard.performance.disk_usage_bytes = disk_usage_bytes;
+                metrics_guard.performance.total_disk_bytes = total_disk_bytes;
+                metrics_guard.performance.network_io_bytes = network_io_bytes;
+                metrics_guard.performance.network_rx_bytes = network_rx_bytes;
+                metrics_guard.performance.network_tx_bytes = network_tx_bytes;
+
+                metrics_guard.system.load_average_1m = load_avg.one as f32;
+                metrics_guard.system.load_average_5m = load_avg.five as f32;
+                metrics_guard.system.load_average_15m = load_avg.fifteen as f32;
+                metrics_guard.system.uptime_seconds = uptime_seconds;
+
+                // We can't easily get active connections or database connections here without access to those pools
+                // So we leave them as is (updated by other parts of the system potentially)
+            }
+        });
 
         Ok(())
     }
@@ -195,10 +296,18 @@ pub struct PerformanceMetrics {
     pub cpu_usage_percent: f32,
     /// Memory usage in bytes
     pub memory_usage_bytes: u64,
+    /// Total memory in bytes
+    pub total_memory_bytes: u64,
     /// Disk usage in bytes
     pub disk_usage_bytes: u64,
-    /// Network I/O in bytes
+    /// Total disk space in bytes
+    pub total_disk_bytes: u64,
+    /// Network I/O in bytes (deprecated, use rx/tx)
     pub network_io_bytes: u64,
+    /// Network received bytes
+    pub network_rx_bytes: u64,
+    /// Network transmitted bytes
+    pub network_tx_bytes: u64,
     /// Database connections
     pub database_connections: u32,
     /// Cache hit rate percentage
