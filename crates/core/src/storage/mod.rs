@@ -17,10 +17,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+pub mod legacy_storage;
 pub mod mfa;
 pub mod secret;
 pub mod secure;
-pub mod storage;
 pub mod traits;
 pub mod types;
 
@@ -32,6 +32,7 @@ pub use traits::*;
 pub use types::*;
 
 // Type alias for backward compatibility
+pub use legacy_storage::Storage;
 pub type MemoryStorage = Storage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +130,7 @@ pub trait StorageBackend: Send + Sync {
 }
 
 pub enum StorageType {
-    Sqlite(Storage),
+    Sqlite(legacy_storage::Storage),
     // Postgres(PostgresStorage),
 }
 
@@ -606,7 +607,7 @@ impl PostgresStorage {
         client
             .execute(
                 "INSERT INTO secrets (path, version, data) VALUES ($1, $2, $3)",
-                &[&path, &(version as i64), &data],
+                &[&path, &(version as i32), &data],
             )
             .await
             .map_err(|e| CoreError::Database {
@@ -709,7 +710,7 @@ impl PostgresStorage {
         client.execute(r#"
             INSERT INTO sentinel_policies (namespace, name, version, policy_type, source_code, egp, rgp, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#, &[&p.namespace, &p.name, &p.version, &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at]).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
+        "#, &[&p.namespace, &p.name, &(p.version as i32), &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at]).await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
 
@@ -754,7 +755,7 @@ impl PostgresStorage {
         client
             .execute(
                 "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
-                &[&namespace, &name, &version],
+                &[&namespace, &name, &(version as i32)],
             )
             .await
             .map_err(|e| CoreError::Database {
@@ -1186,7 +1187,7 @@ impl StorageBackend for PostgresStorage {
         let client = self.pool.get().await.map_err(|e| CoreError::Database {
             message: e.to_string(),
         })?;
-        let hash = Storage::hash_password(password)?;
+        let hash = legacy_storage::Storage::hash_password(password)?;
         client
             .execute(
                 "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
@@ -1214,7 +1215,7 @@ impl StorageBackend for PostgresStorage {
 
         if let Some(row) = rows.first() {
             let hash: String = row.get("password_hash");
-            Ok(Storage::verify_password(&hash, password)?)
+            Ok(legacy_storage::Storage::verify_password(&hash, password)?)
         } else {
             Ok(false)
         }
@@ -1487,7 +1488,7 @@ impl StorageBackend for PostgresStorage {
             let effect: PolicyEffect = serde_json::from_str(&format!("\"{}\"", effect_str))?;
             let rules: Vec<PolicyRule> = serde_json::from_value(rules_json)?;
             let metadata: HashMap<String, String> = metadata_json
-                .map(|v| serde_json::from_value(v))
+                .map(serde_json::from_value)
                 .transpose()?
                 .unwrap_or_default();
 
@@ -1517,7 +1518,7 @@ impl StorageBackend for PostgresStorage {
         client.execute(r#"
             INSERT INTO sentinel_policies (namespace, name, version, policy_type, source_code, egp, rgp, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#, &[&p.namespace, &p.name, &p.version, &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at])
+        "#, &[&p.namespace, &p.name, &(p.version as i32), &p.policy_type, &p.source_code, &p.egp, &p.rgp, &p.created_at])
         .await.map_err(|e| CoreError::Database { message: e.to_string() })?;
         Ok(())
     }
@@ -1563,7 +1564,7 @@ impl StorageBackend for PostgresStorage {
         client
             .execute(
                 "DELETE FROM sentinel_policies WHERE namespace = $1 AND name = $2 AND version = $3",
-                &[&namespace, &name, &version],
+                &[&namespace, &name, &(version as i32)],
             )
             .await
             .map_err(|e| CoreError::Database {
@@ -1590,4 +1591,3 @@ impl StorageBackend for PostgresStorage {
 }
 
 // Re-export for backward compatibility
-pub use storage::Storage;

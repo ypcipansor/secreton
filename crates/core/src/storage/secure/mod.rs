@@ -251,6 +251,12 @@ pub struct MemoryKeyStore {
     current_key_id: RwLock<Option<String>>,
 }
 
+impl Default for MemoryKeyStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryKeyStore {
     /// Creates a new, empty in-memory key store
     pub fn new() -> Self {

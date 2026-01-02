@@ -291,7 +291,7 @@ impl LDAPSecretsEngine {
     /// Generate password according to policy
     fn generate_password(&self, policy: &PasswordPolicy) -> String {
         use rand::Rng;
-        let length = policy.min_length.max(8) as usize;
+        let length = policy.min_length.max(8);
         let mut rng = rand::thread_rng();
 
         // Build charset based on policy
@@ -357,8 +357,8 @@ impl LDAPSecretsEngine {
             }
 
             // Parse DN
-            if line.starts_with("dn:") {
-                let dn = line[3..].trim().to_string();
+            if let Some(stripped) = line.strip_prefix("dn:") {
+                let dn = stripped.trim().to_string();
 
                 // Check next line for changetype
                 i += 1;
@@ -433,7 +433,7 @@ impl LDAPSecretsEngine {
                         // Base64 encoded value
                         base64::Engine::decode(
                             &base64::engine::general_purpose::STANDARD,
-                            &line[colon_pos + 2..].trim(),
+                            line[colon_pos + 2..].trim(),
                         )
                         .map_err(|e| LDAPSecretsError::LDIFError(format!("Invalid base64: {}", e)))?
                         .iter()
@@ -445,7 +445,7 @@ impl LDAPSecretsEngine {
 
                 attributes
                     .entry(attr_name)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(attr_value);
             }
 

@@ -104,7 +104,7 @@ impl SecretEngine for LdapEngine {
                 Ok(Secret {
                     id: Uuid::new_v4(),
                     path: path.to_string(),
-                    data: data,
+                    data,
                     metadata: SecretMetadata {
                         version: 1,
                         created_by: "ldap-engine".to_string(),

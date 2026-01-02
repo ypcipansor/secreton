@@ -24,6 +24,12 @@ pub struct InMemorySecretStorage {
     secrets: Arc<RwLock<HashMap<String, (Value, u32)>>>,
 }
 
+impl Default for InMemorySecretStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemorySecretStorage {
     pub fn new() -> Self {
         Self {
