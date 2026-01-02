@@ -81,6 +81,18 @@ pub struct PolicyContext {
     // Placeholder for future policy evaluation context
 }
 
+#[derive(Debug)]
+pub struct PolicyCheckConfig<'a> {
+    pub sentinel_policies: &'a [SentinelPolicy],
+    pub user: &'a str,
+    pub path: &'a str,
+    pub action: &'a str,
+    pub _context: Option<&'a serde_json::Value>,
+    pub rbac_roles: &'a [String],
+    pub rbac_policies: &'a [Policy],
+    pub policyset_json: Option<&'a str>,
+}
+
 pub async fn evaluate_with_sentinel(
     policies: &[SentinelPolicy],
     user: &str,
@@ -136,23 +148,28 @@ pub async fn evaluate_with_sentinel(
 }
 
 // Integrasi ke policy engine utama
-pub async fn check_policy_with_sentinel(
-    sentinel_policies: &[SentinelPolicy],
-    user: &str,
-    path: &str,
-    action: &str,
-    _context: Option<&serde_json::Value>,
-    rbac_roles: &[String],
-    rbac_policies: &[Policy],
-    policyset_json: Option<&str>,
-) -> bool {
+pub async fn check_policy_with_sentinel(config: PolicyCheckConfig<'_>) -> bool {
     // Implement sentinel policy evaluation
-    if !evaluate_with_sentinel(sentinel_policies, user, path, action, &PolicyContext {}).await {
+    if !evaluate_with_sentinel(
+        config.sentinel_policies,
+        config.user,
+        config.path,
+        config.action,
+        &PolicyContext {},
+    )
+    .await
+    {
         return false;
     }
 
     // Lanjut evaluasi RBAC/ACL biasa
-    crate::policies::rbac::check_policy(rbac_roles, rbac_policies, path, action, policyset_json)
+    crate::policies::rbac::check_policy(
+        config.rbac_roles,
+        config.rbac_policies,
+        config.path,
+        config.action,
+        config.policyset_json,
+    )
 }
 
 #[cfg(test)]

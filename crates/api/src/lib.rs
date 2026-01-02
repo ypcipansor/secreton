@@ -106,9 +106,9 @@ fn generate_hotp_simple(key: &[u8], counter: u64) -> u32 {
     // Dynamic truncation (simplified)
     let offset = (result[31] & 0xf) as usize;
     let code = ((result[offset] & 0x7f) as u32) << 24
-        | ((result[offset + 1] & 0xff) as u32) << 16
-        | ((result[offset + 2] & 0xff) as u32) << 8
-        | (result[offset + 3] & 0xff) as u32;
+        | (result[offset + 1] as u32) << 16
+        | (result[offset + 2] as u32) << 8
+        | (result[offset + 3] as u32);
 
     code % 1_000_000
 }

@@ -3,22 +3,17 @@
 use serde::{Deserialize, Serialize};
 
 /// Security vs Performance optimization levels
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OptimizationLevel {
     /// Maximum security, minimum performance (Production-Critical)
     MaximumSecurity,
     /// High security with good performance (Production-Standard)
+    #[default]
     HighSecurity,
     /// Balanced security and performance (Development/Staging)
     Balanced,
     /// Maximum performance, reduced security (Testing Only)
     MaximumPerformance,
-}
-
-impl Default for OptimizationLevel {
-    fn default() -> Self {
-        OptimizationLevel::HighSecurity
-    }
 }
 
 impl OptimizationLevel {

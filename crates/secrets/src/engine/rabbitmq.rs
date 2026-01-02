@@ -194,7 +194,7 @@ impl RabbitmqEngine {
         });
 
         let response = client
-            .put(&format!("{}/api/users/{}", management_url, username))
+            .put(format!("{}/api/users/{}", management_url, username))
             .basic_auth(&self.config.username, Some(&self.config.password))
             .json(&user_payload)
             .send()
@@ -235,7 +235,7 @@ impl RabbitmqEngine {
         });
 
         let response = client
-            .put(&format!(
+            .put(format!(
                 "{}/api/permissions/{}/{}",
                 management_url,
                 urlencoding::encode(vhost),

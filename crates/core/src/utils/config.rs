@@ -49,6 +49,12 @@ pub struct Config {
     pub server: ServerConfig,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}
+
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)?;
@@ -56,48 +62,7 @@ impl Config {
         Ok(config)
     }
 
-    pub fn default() -> Self {
-        Self {
-            database_url: "sqlite:secreton.db".to_string(),
-            jwt_secret: "your-super-secret-jwt-key-change-this-in-production".to_string(),
-            jwt_refresh_secret: "your-super-secret-refresh-key-change-this-in-production"
-                .to_string(),
-            encryption_key: "your-32-byte-encryption-key-here".to_string(),
-            server_host: "127.0.0.1".to_string(),
-            server_port: 8080,
-            log_level: "info".to_string(),
-            backend: None,
-            is_leader: false,
-            dynamic_db_url: None,
-            aws_access_key: None,
-            aws_secret_key: None,
-            aws_region: None,
-            ldap_url: None,
-            ldap_base_dn: None,
-            oidc_client_id: None,
-            oidc_client_secret: None,
-            oidc_issuer: None,
-            oidc_redirect_url: None,
-            node_id: None,
-            peers: None,
-            replication_mode: None,
-            replication_peers: None,
-            auto_unseal_enabled: None,
-            auto_unseal_provider: None,
-            auto_unseal_key_id: None,
-            audit_devices: None,
-            auth: AuthConfig {
-                jwt_secret: "your-super-secret-jwt-key-change-this-in-production".to_string(),
-                refresh_secret: "your-super-secret-refresh-key-change-this-in-production"
-                    .to_string(),
-            },
-            server: ServerConfig {
-                host: "127.0.0.1".to_string(),
-                port: 8080,
-                log_level: "info".to_string(),
-            },
-        }
-    }
+    // Removed default method to avoid conflict with Default trait
 
     pub fn from_env() -> Self {
         let jwt_secret = std::env::var("VAULT_JWT_SECRET")

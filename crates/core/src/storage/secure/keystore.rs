@@ -51,6 +51,12 @@ pub struct MemoryKeyStoreImpl {
     keys: Arc<RwLock<HashMap<String, KeyEntry>>>,
 }
 
+impl Default for MemoryKeyStoreImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryKeyStoreImpl {
     /// Create a new empty memory key store
     pub fn new() -> Self {

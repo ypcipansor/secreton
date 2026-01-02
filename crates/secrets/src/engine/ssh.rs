@@ -152,8 +152,8 @@ impl SshEngine {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(b"ssh-ed25519");
-        hasher.update(&[0u8; 4]); // length prefix for algorithm name
-        hasher.update(&public_key_bytes);
+        hasher.update([0u8; 4]); // length prefix for algorithm name
+        hasher.update(public_key_bytes);
         let fingerprint = format!(
             "SHA256:{}",
             general_purpose::STANDARD.encode(hasher.finalize())

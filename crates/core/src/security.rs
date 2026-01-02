@@ -306,6 +306,12 @@ pub struct SecurityAssessment {
     pub overall_score: f64,
 }
 
+impl Default for SecurityAssessment {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SecurityAssessment {
     /// Create a new security assessment
     pub fn new() -> Self {
@@ -397,8 +403,7 @@ impl SecurityAssessment {
         let vuln_penalty = self.vulnerabilities.len() as f64 * 0.1;
 
         (compliance_score * 0.6 + self.crypto_strength_score * 0.4 - vuln_penalty)
-            .max(0.0)
-            .min(1.0)
+            .clamp(0.0, 1.0)
     }
 }
 

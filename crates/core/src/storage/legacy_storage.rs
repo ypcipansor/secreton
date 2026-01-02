@@ -18,7 +18,7 @@ impl Storage {
     /// Create a new storage instance
     /// Note: Actual storage backends are managed by the storage crate
     pub async fn new(_database_url: &str) -> Result<Self> {
-        // Storage backends are now created via storage crate factory
+        // Storage backends are now created via storage factory
         Ok(Self {})
     }
 

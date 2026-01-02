@@ -145,8 +145,8 @@ impl SecretEngine for TransitEngine {
         }
 
         // Handle decryption requests
-        if path.starts_with("decrypt/") {
-            let _key_name = &path[8..]; // Remove "decrypt/" prefix
+        if let Some(_key_name) = path.strip_prefix("decrypt/") {
+            // Remove "decrypt/" prefix
 
             // For decryption, we need the ciphertext from query parameters or body
             // This is a simplified implementation - in practice, this would come from request body
@@ -166,8 +166,8 @@ impl SecretEngine for TransitEngine {
         }
 
         // Handle key generation
-        if path.starts_with("keys/") {
-            let key_name = &path[5..]; // Remove "keys/" prefix
+        if let Some(key_name) = path.strip_prefix("keys/") {
+            // Remove "keys/" prefix
 
             let key_type = data
                 .get("type")
@@ -201,8 +201,8 @@ impl SecretEngine for TransitEngine {
             Ok(secret)
         }
         // Handle encryption requests
-        else if path.starts_with("encrypt/") {
-            let key_name = &path[8..]; // Remove "encrypt/" prefix
+        else if let Some(key_name) = path.strip_prefix("encrypt/") {
+            // Remove "encrypt/" prefix
 
             let plaintext = data
                 .get("plaintext")
@@ -239,8 +239,8 @@ impl SecretEngine for TransitEngine {
             Ok(secret)
         }
         // Handle decryption requests
-        else if path.starts_with("decrypt/") {
-            let key_name = &path[8..]; // Remove "decrypt/" prefix
+        else if let Some(key_name) = path.strip_prefix("decrypt/") {
+            // Remove "decrypt/" prefix
 
             let ciphertext = data
                 .get("ciphertext")
@@ -286,8 +286,8 @@ impl SecretEngine for TransitEngine {
             return Err(SecretError::EngineNotFound("transit".to_string()));
         }
 
-        if path.starts_with("keys/") {
-            let key_name = &path[5..]; // Remove "keys/" prefix
+        if let Some(key_name) = path.strip_prefix("keys/") {
+            // Remove "keys/" prefix
             self.keys.remove(key_name);
             Ok(())
         } else {
