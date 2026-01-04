@@ -18,6 +18,7 @@ use crate::services::audit::AuditLogger;
 use crate::config::ApiConfig;  // Use local ApiConfig with auth field
 use crate::services::crypto::CryptoService;
 use crate::services::auth::AuthenticationService;
+use secreton_auth::policies::service::PolicyService;
 
 /// Service container holding all application services
 pub struct ApiServiceContainer {
@@ -62,11 +63,15 @@ impl ApiServiceContainer {
             &config.auth,
         ).await?);
 
+        // Initialize policy service
+        let policy_service = Arc::new(PolicyService::new());
+
         // Initialize secret service
         let secreton = Arc::new(secret::SecretService::new(
             storage.clone(),
             crypto.clone(),
             audit.clone(),
+            policy_service.clone(),
         ).await?);
 
         // Initialize admin service
@@ -88,6 +93,7 @@ impl ApiServiceContainer {
         registry.register_service("crypto".to_string(), crypto.clone());
         registry.register_service("audit".to_string(), audit.clone());
         registry.register_service("auth".to_string(), auth.clone());
+        registry.register_service("policy".to_string(), policy_service.clone());
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
         registry.register_service("telemetry".to_string(), telemetry);

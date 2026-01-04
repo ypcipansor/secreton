@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
+use secreton_auth::policies::service::PolicyService;
+use secreton_auth::policies::model::EvaluationContext;
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
 
@@ -74,6 +76,7 @@ pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     audit: Arc<AuditLogger>,
+    policy_service: Arc<PolicyService>,
 }
 
 impl SecretService {
@@ -82,12 +85,37 @@ impl SecretService {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         crypto: Arc<CryptoService>,
         audit: Arc<AuditLogger>,
+        policy_service: Arc<PolicyService>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             crypto,
             audit,
+            policy_service,
         })
+    }
+
+    /// Check permission for an action on a resource
+    async fn check_permission(&self, user_id: &str, action: &str, path: &str) -> Result<bool, SecretError> {
+        let mut subject = HashMap::new();
+        subject.insert("id".to_string(), user_id.to_string());
+
+        let mut resource = HashMap::new();
+        resource.insert("path".to_string(), path.to_string());
+
+        let context = EvaluationContext {
+            subject,
+            resource,
+            action: action.to_string(),
+            environment: HashMap::new(),
+        };
+
+        // TODO: Pass actual user roles once IdentityService is integrated
+        let result = self.policy_service.evaluate_access(&context, &[])
+            .await
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Policy evaluation error: {}", e)))?;
+
+        Ok(result.allowed)
     }
 
     /// Get secret by path
@@ -192,11 +220,8 @@ impl SecretService {
 
     /// Delete secret
     pub async fn delete_secret(&self, path: &str, user_id: &str) -> Result<(), SecretError> {
-        // Check permissions - temporarily allow all deletes for development
-        // TODO: Implement proper RBAC policy check
-        let has_permission = true;
-
-        if !has_permission {
+        // Check permissions
+        if !self.check_permission(user_id, "delete", path).await? {
             return Err(SecretError::PermissionDenied(format!("No delete permission for path: {}", path)));
         }
 
@@ -912,8 +937,9 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let policy_service = Arc::new(PolicyService::new());
 
-        let secreton_service = SecretService::new(storage, crypto, audit).await;
+        let secreton_service = SecretService::new(storage, crypto, audit, policy_service).await;
         assert!(secreton_service.is_ok());
     }
 
@@ -935,7 +961,8 @@ mod tests {
 
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = SecretService::new(storage, crypto, audit).await.unwrap();
+        let policy_service = Arc::new(PolicyService::new());
+        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         let secret = service.get_secret("app/config", "user1").await.unwrap();
         assert_eq!(secret.path, "app/config");
@@ -947,7 +974,8 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = SecretService::new(storage, crypto, audit).await.unwrap();
+        let policy_service = Arc::new(PolicyService::new());
+        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
@@ -1000,7 +1028,8 @@ mod tests {
         let _ = storage.store(&key_storage_entry).await;
 
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = SecretService::new(storage, crypto, audit).await.unwrap();
+        let policy_service = Arc::new(PolicyService::new());
+        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), "user1").await.unwrap();
         assert!(!result.ciphertext.is_empty());
