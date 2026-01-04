@@ -109,15 +109,37 @@ impl SecretService {
         path: &str,
         action: &str,
     ) -> Result<(), SecretError> {
-        // Admin/Superuser bypass for consistency with other services
+        // Admin/Superuser bypass
         if user.roles.iter().any(|r| r == "admin" || r == "superuser") || user.is_superuser {
             return Ok(());
         }
 
-        // Retrieve policies for the user
-        // For now, we fetch all policies and filter (simplified) or just use all.
-        // In a real system, we'd fetch only applicable policies.
-        // Since list_policies is a placeholder, this will return empty.
+        // RBAC Check
+        // Resolve role IDs
+        let mut role_ids = Vec::new();
+        for role_name in &user.roles {
+             if let Some(role_id) = self.policy_service.get_role_id_by_name(role_name).await {
+                 role_ids.push(role_id);
+             }
+        }
+
+        let context = EvaluationContext {
+            subject: HashMap::from([("id".to_string(), user.id.clone())]),
+            resource: HashMap::from([("path".to_string(), path.to_string())]),
+            action: action.to_string(),
+            environment: HashMap::new(),
+        };
+
+        match self.policy_service.evaluate_access(&context, &role_ids).await {
+            Ok(result) if result.allowed => Ok(()),
+            _ => Err(SecretError::PermissionDenied(format!("Action '{}' denied on '{}'", action, path))),
+        }
+    }
+
+    /// Get secret by path
+    pub async fn get_secret(&self, path: &str, user: &secreton_auth::User) -> Result<SecretData, SecretError> {
+        // Check permissions
+        self.check_permission(user, path, "read").await?;
         let policies = self.list_policies(None).await.unwrap_or_default();
 
         let mut sentinel_policies = Vec::new();
@@ -1068,6 +1090,115 @@ mod tests {
         let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), &user).await.unwrap();
         assert!(!result.ciphertext.is_empty());
         assert_eq!(key_version, 1);
+    }
+
+    #[tokio::test]
+    async fn test_create_key_permission_denied() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let policy_service = Arc::new(PolicyService::new());
+
+        // Create service
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit, policy_service).await.unwrap();
+
+        // Create user without roles
+        let user_id = "user_no_role";
+        let user_data = serde_json::json!({
+            "id": user_id,
+            "username": "user_no_role",
+            "roles": []
+        });
+
+        let user_bytes = serde_json::to_vec(&user_data).unwrap();
+        let encrypted_user = crypto.encrypt_data(&user_bytes).unwrap();
+
+        let user_entry = SecretEntry::new(
+            format!("users/{}", user_id),
+            encrypted_user,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        storage.store(&user_entry).await.unwrap();
+
+        // Try to create key
+        let result = service.create_key("test_key", "aes256-gcm", user_id).await;
+
+        assert!(matches!(result, Err(SecretError::PermissionDenied(_))));
+    }
+
+    #[tokio::test]
+    async fn test_create_key_permission_allowed() {
+        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let policy_service = Arc::new(PolicyService::new());
+
+        // Setup Policy
+        let policy = Policy {
+            id: Uuid::new_v4(),
+            name: "allow_create_key".to_string(),
+            policy_type: PolicyType::RBAC,
+            effect: PolicyEffect::Allow,
+            rules: vec![PolicyRule {
+                id: Uuid::new_v4(),
+                name: "allow_keys".to_string(),
+                conditions: vec![],
+                actions: vec!["create_key".to_string()],
+                resources: vec!["keys/".to_string()],
+            }],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+
+        let created_policy = policy_service.create_policy(policy).await.unwrap();
+
+        // Setup Role
+        let role = Role {
+            id: Uuid::new_v4(),
+            name: "key_creator".to_string(),
+            description: None,
+            parent_role: None,
+            policies: vec![created_policy.id],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        policy_service.create_role(role.clone()).await.unwrap();
+
+        // Create service
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit, policy_service).await.unwrap();
+
+        // Create user with role
+        let user_id = "user_with_role";
+        let user_data = serde_json::json!({
+            "id": user_id,
+            "username": "user_with_role",
+            "roles": ["key_creator"]
+        });
+
+        let user_bytes = serde_json::to_vec(&user_data).unwrap();
+        let encrypted_user = crypto.encrypt_data(&user_bytes).unwrap();
+
+        let user_entry = SecretEntry::new(
+            format!("users/{}", user_id),
+            encrypted_user,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        storage.store(&user_entry).await.unwrap();
+
+        // Try to create key
+        let result = service.create_key("test_key_allowed", "aes256-gcm", user_id).await;
+
+        assert!(result.is_ok());
     }
 }
 

@@ -12,12 +12,13 @@ use super::model::{ConditionOperator, EvaluationContext, EvaluationResult, Polic
 /// Policy evaluator for access control decisions
 pub struct PolicyEvaluator {
     engine: PolicyEngine,
+    role_policies: HashMap<Uuid, Vec<Uuid>>,
 }
 
 impl PolicyEvaluator {
     /// Create a new policy evaluator
-    pub fn new(engine: PolicyEngine) -> Self {
-        Self { engine }
+    pub fn new(engine: PolicyEngine, role_policies: HashMap<Uuid, Vec<Uuid>>) -> Self {
+        Self { engine, role_policies }
     }
 
     /// Evaluate access request against all applicable policies
@@ -328,10 +329,8 @@ impl PolicyEvaluator {
     }
 
     /// Get policies for a role
-    fn get_policies_for_role(&self, _role_id: &Uuid) -> Option<Vec<Uuid>> {
-        // This would typically query a database or cache
-        // For now, return None - policies are evaluated directly
-        None
+    fn get_policies_for_role(&self, role_id: &Uuid) -> Option<Vec<Uuid>> {
+        self.role_policies.get(role_id).cloned()
     }
 }
 
@@ -358,7 +357,7 @@ mod tests {
     #[test]
     fn test_basic_evaluation() {
         let engine = PolicyEngine::new();
-        let evaluator = PolicyEvaluator::new(engine);
+        let evaluator = PolicyEvaluator::new(engine, HashMap::new());
 
         let context = EvaluationContext {
             subject: {

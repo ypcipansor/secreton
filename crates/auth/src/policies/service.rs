@@ -138,6 +138,14 @@ impl PolicyService {
         policies.values().cloned().collect()
     }
 
+    /// Get role ID by name
+    pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
+        let roles = self.roles.read().await;
+        roles.values()
+            .find(|r| r.name == name)
+            .map(|r| r.id)
+    }
+
     /// Create a new role
     pub async fn create_role(&self, mut role: Role) -> PolicyResult<Role> {
         // Validate role
@@ -299,7 +307,13 @@ impl PolicyService {
         subject_policies: &[Uuid],
     ) -> PolicyResult<EvaluationResult> {
         let engine_guard = self.engine.read().await;
-        let evaluator = PolicyEvaluator::new((*engine_guard).clone());
+        let roles_guard = self.roles.read().await;
+        let mut role_policies = HashMap::new();
+        for (id, role) in roles_guard.iter() {
+            role_policies.insert(*id, role.policies.clone());
+        }
+
+        let evaluator = PolicyEvaluator::new((*engine_guard).clone(), role_policies);
         evaluator.evaluate(context, subject_roles, subject_policies)
     }
 
