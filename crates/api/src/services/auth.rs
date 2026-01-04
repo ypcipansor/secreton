@@ -380,10 +380,18 @@ impl AuthenticationService {
     }
 
     /// Verify password for a user
-    pub async fn verify_password(&self, _username: &str, _password: &str) -> Result<bool, AuthError> {
-        // Placeholder verification
-        // TODO: Implement actual password verification against storage/auth service
-        Ok(true)
+    pub async fn verify_password(&self, username: &str, password: &str) -> Result<bool, AuthError> {
+        let request = LoginRequest {
+            username: username.to_string(),
+            password: password.to_string(),
+            mfa_code: None,
+            remember_me: None,
+        };
+
+        match self.auth_service.login(&request).await {
+            Ok(response) => Ok(response.success),
+            Err(_) => Ok(false),
+        }
     }
 
     /// Generate access token for user
