@@ -50,6 +50,7 @@ pub struct ApiServiceContainer {
     pub crypto: Arc<CryptoService>,
     pub audit: Arc<AuditLogger>,
     pub auth: Arc<AuthenticationService>,
+    pub auth: Arc<AuthenticationService>,
     pub policy: Arc<PolicyService>,
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
@@ -84,6 +85,49 @@ impl ApiServiceContainer {
         let policy_service = Arc::new(PolicyService::new());
         // Initialize identity service
         let identity: Arc<dyn IdentityService + Send + Sync> = Arc::new(InMemoryIdentityService::new());
+
+        // Initialize MFA services
+        let totp_service = Arc::new(secreton_auth::InMemoryTotpService::new("Secreton".to_string()));
+
+        // Use default/mock config for SMS and Email for now since we don't have real config
+        let sms_config = secreton_auth::mfa::sms::SmsConfig {
+            provider: secreton_auth::mfa::sms::SmsProvider::Custom { url: "http://localhost/mock-sms".to_string() },
+            api_key: "mock-key".to_string(),
+            api_secret: None,
+            from_number: "0000".to_string(),
+            message_template: "Your code is {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        };
+        let sms_service = Arc::new(secreton_auth::InMemorySmsService::new(sms_config));
+
+        let email_config = secreton_auth::mfa::email::EmailConfig {
+            smtp_server: "localhost".to_string(),
+            smtp_port: 25,
+            smtp_username: "user".to_string(),
+            smtp_password: "password".to_string(),
+            from_email: "noreply@secreton.local".to_string(),
+            subject_template: "Secreton MFA Code".to_string(),
+            body_template: "Your code is {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        };
+        let email_service = Arc::new(secreton_auth::InMemoryEmailService::new(email_config));
+
+        let hardware_service = Arc::new(secreton_auth::InMemoryHardwareService::new());
+        let push_service = Arc::new(secreton_auth::mfa::push::DefaultPushService::new_mock());
+        let webauthn_service = Arc::new(secreton_auth::mfa::webauthn::DefaultWebAuthnService::new_default());
+        let recovery_service = Arc::new(secreton_auth::mfa::recovery::DefaultRecoveryCodeService::new());
+
+        let mfa = Arc::new(secreton_auth::CombinedMfaService::new(
+            totp_service,
+            sms_service,
+            email_service,
+            hardware_service,
+            push_service,
+            webauthn_service,
+            recovery_service,
+        ));
 
         // Initialize secret service
         let secreton = Arc::new(secret::SecretService::new(
@@ -192,7 +236,9 @@ impl ApiServiceContainer {
         registry.register_service("crypto".to_string(), crypto.clone());
         registry.register_service("audit".to_string(), audit.clone());
         registry.register_service("auth".to_string(), auth.clone());
+        registry.register_service("auth".to_string(), auth.clone());
         registry.register_service("policy".to_string(), policy_service.clone());
+        registry.register_service("mfa".to_string(), mfa.clone());
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
         registry.register_service("telemetry".to_string(), telemetry);
@@ -210,7 +256,10 @@ impl ApiServiceContainer {
             crypto,
             audit,
             auth,
+            audit,
+            auth,
             policy: policy_service,
+            mfa,
             secreton,
             admin,
             mfa,
