@@ -134,6 +134,7 @@ impl LdapAuthMethod {
                     .and_then(|v| v.first())
                     .cloned(),
                 roles,
+                permissions: vec![],
                 metadata,
                 last_login: Some(Utc::now()),
             })

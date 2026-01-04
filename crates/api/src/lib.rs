@@ -11,11 +11,17 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warp::{Filter, Rejection, Reply, reject};
+use axum::Json;
 
 use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
 
+pub mod services;
+pub mod middleware;
+pub mod config;
+pub type ApiResult<T> = Result<T, ApiError>;
+
 /// API Response wrapper
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub data: Option<T>,
@@ -57,12 +63,27 @@ pub struct MfaResponse {
     pub response: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ClientInfo {
     pub ip_address: String,
     pub user_agent: Option<String>,
     pub geo_location: Option<String>,
     pub device_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HealthCheckResponse {
+    pub status: String,
+    pub version: String,
+    pub uptime: u64,
+    pub dependencies: HealthCheckDependencies,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HealthCheckDependencies {
+    pub database: String,
+    pub cache: String,
+    pub crypto: String,
 }
 
 /// Simple TOTP validation (same logic as in handlers)
@@ -685,6 +706,55 @@ impl From<SecretonError> for ApiError {
     }
 }
 
+impl ApiError {
+    #[allow(non_snake_case)]
+    pub fn Authentication(message: String) -> Self {
+        Self(SecretonError::Authentication { message })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn Authorization(message: String) -> Self {
+        Self(SecretonError::Authorization { message })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn NotFound(resource: String) -> Self {
+        Self(SecretonError::NotFound { resource })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn Internal(message: String) -> Self {
+        Self(SecretonError::Internal { message })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn BadRequest(message: String) -> Self {
+        Self(SecretonError::Validation { message })
+    }
+}
+
+impl axum::response::IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match &self.0 {
+            SecretonError::Authentication { message } => (axum::http::StatusCode::UNAUTHORIZED, message.clone()),
+            SecretonError::Authorization { message } => (axum::http::StatusCode::FORBIDDEN, message.clone()),
+            SecretonError::NotFound { resource } => (axum::http::StatusCode::NOT_FOUND, format!("Resource not found: {}", resource)),
+            SecretonError::Validation { message } => (axum::http::StatusCode::BAD_REQUEST, message.clone()),
+            SecretonError::Internal { message } => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message.clone()),
+            SecretonError::Configuration { message } => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Configuration error: {}", message)),
+            SecretonError::Network { message } => (axum::http::StatusCode::BAD_GATEWAY, message.clone()),
+            SecretonError::Parse { message } => (axum::http::StatusCode::BAD_REQUEST, message.clone()),
+            SecretonError::MfaRequired => (axum::http::StatusCode::UNAUTHORIZED, "MFA required".to_string()),
+            SecretonError::AccountLocked { username } => (axum::http::StatusCode::FORBIDDEN, format!("Account locked: {}", username)),
+            SecretonError::PasswordExpired { username } => (axum::http::StatusCode::FORBIDDEN, format!("Password expired: {}", username)),
+            _ => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Unknown error".to_string()),
+        };
+
+        let body = Json(ApiResponse::<()>::error(message));
+        (status, body).into_response()
+    }
+}
+
 impl reject::Reject for ApiError {}
 
 /// Global error handler for API rejections
@@ -746,6 +816,9 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
 // Re-export KV and Transit modules for axum-based API
 pub mod kv;
 pub mod transit;
+pub mod extractors;
+pub mod handlers;
+pub mod auth;
 
 // Re-export types needed by tests
 pub use kv::KVApiState;
@@ -757,17 +830,29 @@ pub use transit::TransitApiState;
 pub struct ApiState {
     pub kv: KVApiState,
     pub transit: TransitApiState,
+    pub config: std::sync::Arc<crate::config::ApiConfig>,
+    pub secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
+    pub auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
+    pub audit: std::sync::Arc<crate::services::admin::AdminService>,
 }
 
 impl ApiState {
     pub async fn new(
         transit_state: TransitApiState,
         kv_state: KVApiState,
+        config: std::sync::Arc<crate::config::ApiConfig>,
+        secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
+        auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
+        audit: std::sync::Arc<crate::services::admin::AdminService>,
         _optimization_level: OptimizationLevel,
     ) -> Result<Self, SecretonError> {
         Ok(Self {
             kv: kv_state,
             transit: transit_state,
+            config,
+            secreton,
+            auth,
+            audit,
         })
     }
 }

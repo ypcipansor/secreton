@@ -288,7 +288,8 @@ impl AuthMethodImpl for GithubAuthMethod {
                     username: user_info.login.clone(),
                     email: user_info.email.clone(),
                     display_name: user_info.name.clone(),
-                    roles: Vec::new(),
+                    roles: vec![], // GitHub roles need mapping
+                    permissions: vec![],
                     metadata: user_metadata,
                     last_login: Some(Utc::now()),
                 };

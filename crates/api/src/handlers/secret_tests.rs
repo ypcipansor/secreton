@@ -10,14 +10,14 @@ use tokio::time::{sleep, Duration};
 
 use crate::handlers::secret::*;
 use crate::config::ApiConfig;
-use crate::services::ServiceContainer;
+use crate::services::ApiServiceContainer;
 use axum_test::TestServer;
 use std::sync::Arc;
 
 async fn create_test_server() -> TestServer {
     let config = ApiConfig::default();
     let services = Arc::new(
-        ServiceContainer::new(&config)
+        ApiServiceContainer::new(&config)
             .await
             .expect("Failed to create services"),
     );

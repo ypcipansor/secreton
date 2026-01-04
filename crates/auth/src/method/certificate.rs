@@ -310,6 +310,7 @@ impl CertAuth {
             email: cert.email.clone(),
             display_name: Some(cert.common_name),
             roles,
+            permissions: vec![],
             metadata,
             last_login: Some(Utc::now()),
         })

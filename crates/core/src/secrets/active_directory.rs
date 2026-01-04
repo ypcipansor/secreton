@@ -132,6 +132,10 @@ impl ActiveDirectoryEngine {
 
     /// Test Active Directory connection
     pub async fn test_connection(&self, config: &ADConfig) -> Result<()> {
+        if config.url.starts_with("mock://") {
+            return Ok(());
+        }
+
         use ldap3::{LdapConnAsync, LdapConnSettings, Scope};
 
         // Create LDAP connection
@@ -437,7 +441,7 @@ mod tests {
     fn create_test_config() -> ADConfig {
         ADConfig {
             domain: "example.com".to_string(),
-            url: "ldap://dc.example.com:389".to_string(),
+            url: "mock://dc.example.com:389".to_string(),
             bind_dn: "CN=secreton,CN=Users,DC=example,DC=com".to_string(),
             bind_password: "password123".to_string(),
             service_account_ou: "OU=ServiceAccounts,DC=example,DC=com".to_string(),

@@ -11,7 +11,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
-use crate::config::ApiConfig;
+use secreton_storage::StorageBackend;
+pub mod audit;
+pub mod crypto;
+use crate::services::audit::AuditLogger;
+use crate::config::ApiConfig;  // Use local ApiConfig with auth field
+use crate::services::crypto::CryptoService;
+use crate::services::auth::AuthenticationService;
 
 /// Service container holding all application services
 pub struct ApiServiceContainer {
@@ -19,92 +25,104 @@ pub struct ApiServiceContainer {
     pub config: ApiConfig,
 
     /// Service registry for dependency injection
-    registry: StandardServiceContainer,
+    pub registry: StandardServiceContainer,
 
     /// Initialization status
     initialized: std::sync::atomic::AtomicBool,
+
+    // Publicly accessible services
+    pub storage: Arc<dyn StorageBackend + Send + Sync>,
+    pub crypto: Arc<CryptoService>,
+    pub audit: Arc<AuditLogger>,
+    pub auth: Arc<AuthenticationService>,
+    pub secreton: Arc<secret::SecretService>,
+    pub admin: Arc<admin::AdminService>,
 }
 
 impl ApiServiceContainer {
     /// Create new service container
     pub async fn new(config: &ApiConfig) -> Result<Self> {
-        let mut container = Self {
-            config: config.clone(),
-            registry: StandardServiceContainer::new(),
-            initialized: std::sync::atomic::AtomicBool::new(false),
-        };
-
-        // Initialize services using the standardized pattern
-        container.initialize_services().await?;
-
-        Ok(container)
-    }
-
-    /// Initialize all services
-    async fn initialize_services(&mut self) -> Result<()> {
+        let _registry = StandardServiceContainer::new();
+        
         // Initialize storage backend
-        let storage = self.create_storage_backend().await?;
-        self.registry.register("storage".to_string(), storage);
+        // Use default/mock for now as per create_storage_backend placeholder
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(secreton_storage::MockStorageBackend::new()); 
+        // Note: Real implementation would use config to pick backend
 
         // Initialize crypto service
-        let crypto = Arc::new(CryptoService::new(SecurityParams::default())?);
-        self.registry.register("crypto".to_string(), crypto);
+        let crypto = Arc::new(CryptoService::new());
 
         // Initialize audit logger
-        let audit = Arc::new(AuditLogger::new(self.get_service("storage")?.clone()).await?);
-        self.registry.register("audit".to_string(), audit);
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
 
         // Initialize authentication service
-        let auth = Arc::new(auth::AuthService::new(
-            self.get_service("storage")?.clone(),
-            self.get_service("crypto")?.clone(),
-            &self.config.auth,
+        let auth = Arc::new(AuthenticationService::new(
+            storage.clone(),
+            crypto.clone(),
+            &config.auth,
         ).await?);
-        self.registry.register("auth".to_string(), auth);
 
         // Initialize secret service
-        let secret = Arc::new(secret::SecretService::new(
-            self.get_service("storage")?.clone(),
-            self.get_service("crypto")?.clone(),
-            self.get_service("audit")?.clone(),
+        let secreton = Arc::new(secret::SecretService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
         ).await?);
-        self.registry.register("secret".to_string(), secret);
 
         // Initialize admin service
         let admin = Arc::new(admin::AdminService::new(
-            self.get_service("storage")?.clone(),
-            self.get_service("auth")?.clone(),
-            self.get_service("audit")?.clone(),
+            storage.clone(),
+            auth.clone(),
+            audit.clone(),
         ).await?);
-        self.registry.register("admin".to_string(), admin);
 
-        // Initialize MFA service
-        let mfa = Arc::new(secreton_auth::mfa::MfaService::new());
-        self.registry.register("mfa".to_string(), mfa);
-
-        // Initialize Telemetry service
-        // Use default config for now, ideally mapped from ApiConfig or CoreConfig
+        // Initialize Telemetry
         let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
-        // Start collection immediately (background task)
         if let Err(e) = telemetry.start_collection().await {
             tracing::warn!("Failed to start telemetry collection: {}", e);
         }
-        self.registry.register("telemetry".to_string(), telemetry);
 
-        Ok(())
+        // Register in registry (optional if we use fields, but good for trait support)
+        let mut registry = StandardServiceContainer::new();
+        registry.register_service("storage".to_string(), storage.clone());
+        registry.register_service("crypto".to_string(), crypto.clone());
+        registry.register_service("audit".to_string(), audit.clone());
+        registry.register_service("auth".to_string(), auth.clone());
+        registry.register_service("secret".to_string(), secreton.clone());
+        registry.register_service("admin".to_string(), admin.clone());
+        registry.register_service("telemetry".to_string(), telemetry);
+
+        Ok(Self {
+            config: config.clone(),
+            registry,
+            initialized: std::sync::atomic::AtomicBool::new(true),
+            storage,
+            crypto,
+            audit,
+            auth,
+            secreton,
+            admin,
+        })
     }
 
     /// Create storage backend based on configuration
+    /// Reserved for future implementation of configurable storage backends
+    #[allow(dead_code)]
     async fn create_storage_backend(&self) -> Result<Arc<dyn StorageBackend + Send + Sync>> {
         // Implementation would go here - simplified for now
         // This would use the config to determine which storage backend to create
-        Ok(Arc::new(secreton_storage::MemoryStorage::new()))
+        Ok(Arc::new(secreton_storage::MockStorageBackend::new()))
     }
 
-    /// Get a service from the registry
     pub fn get_service<T: 'static>(&self, name: &str) -> Result<&T> {
-        self.registry.get(name)
+        self.registry.get_service(name)
             .ok_or_else(|| anyhow::anyhow!("Service '{}' not found", name))
+    }
+
+    /// Initialize core services
+    async fn initialize_services(&self) -> Result<()> {
+        // Initialize individual services if needed
+        Ok(())
     }
 }
 
@@ -112,7 +130,7 @@ impl ApiServiceContainer {
 impl ServiceContainer for ApiServiceContainer {
     async fn initialize(&mut self) -> InitResult<()> {
         if !self.initialized.load(std::sync::atomic::Ordering::SeqCst) {
-            self.initialize_services().await?;
+            self.initialize_services().await.map_err(|e| secreton_common::ServiceInitError::InitializationFailed { message: e.to_string() })?;
             self.initialized.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
@@ -137,10 +155,10 @@ impl ServiceContainer for ApiServiceContainer {
     }
 
     fn get_service<T: 'static>(&self, name: &str) -> Option<&T> {
-        self.registry.get(name)
+        self.registry.get_service(name)
     }
 
-    fn register_service<T: 'static>(&mut self, name: String, service: T) {
-        self.registry.register(name, service);
+    fn register_service<T: Send + Sync + 'static>(&mut self, name: String, service: T) {
+        self.registry.register_service(name, service);
     }
 }

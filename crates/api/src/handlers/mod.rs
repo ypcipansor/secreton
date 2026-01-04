@@ -9,10 +9,10 @@ pub mod admin;
 pub mod health;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::State,
     http::StatusCode,
     response::Json,
-    routing::{delete, get, post, put},
+    routing::get,
     Router,
 };
 
@@ -20,23 +20,21 @@ use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{
     compression::CompressionLayer,
-    cors::CorsLayer,
-    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 
-use crate::{
-    config::ApiConfig,
-    middleware::{auth::AuthMiddleware, rate_limit::RateLimitMiddleware},
-    services::ServiceContainer,
-    ApiResponse, ApiResult,
-};
+
+use crate::middleware::{auth::AuthMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
+use crate::{ApiResponse, ApiResult};
+use axum::middleware::{self};
+use secreton_config::ApiConfig;
+use crate::services::ApiServiceContainer;
 
 /// Application state shared across handlers
-pub type AppState = Arc<ServiceContainer>;
+pub type AppState = Arc<ApiServiceContainer>;
 
 /// Create the main application router
-pub fn create_router(config: &ApiConfig, services: Arc<ServiceContainer>) -> Router {
+pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
     let app_state = services.clone();
 
     // Create API v1 routes
@@ -56,16 +54,11 @@ pub fn create_router(config: &ApiConfig, services: Arc<ServiceContainer>) -> Rou
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
-                .layer(TimeoutLayer::new(config.http.timeout))
-                .layer(CorsLayer::new()
-                    .allow_origin(tower_http::cors::Any) // For now, allow any origin - configure based on config.cors.allowed_origins
-                    .allow_methods(config.cors.allowed_methods.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
-                    .allow_headers(config.cors.allowed_headers.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
-                    .expose_headers(config.cors.exposed_headers.iter().map(|s| s.parse().unwrap()).collect::<Vec<_>>())
-                    .allow_credentials(config.cors.allow_credentials)
-                    .max_age(config.cors.max_age.map(|d| tower_http::cors::MaxAge::exact(d))))
-                .layer(RateLimitMiddleware::new(&config.rate_limit))
-                .layer(AuthMiddleware::new(&config.auth)),
+                // Use defaults for missing config fields
+                .layer(tower_http::timeout::TimeoutLayer::new(std::time::Duration::from_secs(30)))
+                .layer(create_cors_layer())
+                .layer(middleware::from_fn(RateLimitMiddleware::limit))
+                .layer(middleware::from_fn_with_state(app_state.clone(), AuthMiddleware::authenticate)),
         )
         .with_state(app_state)
 }
@@ -86,9 +79,9 @@ async fn root_handler() -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
 async fn get_version() -> ApiResult<Json<ApiResponse<VersionInfo>>> {
     let version_info = VersionInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        build_date: env!("BUILD_DATE").to_string(),
-        git_commit: env!("GIT_COMMIT").to_string(),
-        rust_version: env!("RUST_VERSION").to_string(),
+        build_date: option_env!("BUILD_DATE").unwrap_or("unknown").to_string(),
+        git_commit: option_env!("GIT_COMMIT").unwrap_or("unknown").to_string(),
+        rust_version: option_env!("RUST_VERSION").unwrap_or("unknown").to_string(),
     };
 
     Ok(Json(ApiResponse::success(version_info)))
@@ -109,7 +102,7 @@ async fn get_metrics(State(_state): State<AppState>) -> Result<String, StatusCod
 }
 
 /// Version information
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct VersionInfo {
     pub version: String,
     pub build_date: String,
@@ -125,15 +118,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_root_endpoint() {
+        use secreton_config::ApiConfig as SharedApiConfig;
+        
         let config = ApiConfig::default();
+        let shared_config = SharedApiConfig::default();
+        
         let services = Arc::new(
-            ServiceContainer::new(&config)
+            ApiServiceContainer::new(&config)
                 .await
                 .expect("Failed to create services")
         );
         
-        let app = create_router(&config, services);
-        let server = TestServer::new(app).unwrap();
+        let app = create_router(&shared_config, services);
+        let server = TestServer::new(app.into_make_service()).unwrap();
         
         let response = server.get("/").await;
         response.assert_status_ok();
@@ -145,15 +142,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_endpoint() {
+        use secreton_config::ApiConfig as SharedApiConfig;
+
         let config = ApiConfig::default();
+        let shared_config = SharedApiConfig::default();
+
         let services = Arc::new(
-            ServiceContainer::new(&config)
+            ApiServiceContainer::new(&config)
                 .await
                 .expect("Failed to create services")
         );
         
-        let app = create_router(&config, services);
-        let server = TestServer::new(app).unwrap();
+        let app = create_router(&shared_config, services);
+        let server = TestServer::new(app.into_make_service()).unwrap();
         
         let response = server.get("/api/v1/version").await;
         response.assert_status_ok();

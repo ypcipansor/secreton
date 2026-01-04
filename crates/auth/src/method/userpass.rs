@@ -41,6 +41,8 @@ impl UserPassAuthMethod {
             id,
             groups,
             policies,
+            roles: vec![], // Added roles
+            permissions: vec![], // Added permissions
             metadata: HashMap::new(),
         };
 
@@ -91,7 +93,8 @@ impl AuthMethodImpl for UserPassAuthMethod {
                             username: user_entry.username.to_string(),
                             email: None,
                             display_name: None,
-                            roles: user_entry.groups.clone(),
+                            roles: user_entry.groups.clone(), // Map groups to roles
+                            permissions: user_entry.permissions.clone(),
                             metadata: user_entry.metadata.clone(),
                             last_login: Some(Utc::now()),
                         };
@@ -146,5 +149,7 @@ pub struct UserEntry {
     pub id: String,
     pub groups: Vec<String>,
     pub policies: Vec<String>,
+    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
     pub metadata: HashMap<String, String>,
 }

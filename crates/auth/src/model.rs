@@ -11,6 +11,7 @@ pub struct UserInfo {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub roles: Vec<String>,
+    pub permissions: Vec<String>,
     pub metadata: HashMap<String, String>,
     pub last_login: Option<DateTime<Utc>>,
 }
@@ -288,4 +289,12 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub disabled: bool,
+    pub password_hash: String,
+    pub full_name: Option<String>,
+    pub is_active: bool,
+    pub is_superuser: bool,
+    pub enabled: bool,
+    pub mfa_enabled: bool,
+    pub mfa_secret: Option<String>,
+    pub last_login: Option<DateTime<Utc>>,
 }

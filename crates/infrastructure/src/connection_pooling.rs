@@ -497,7 +497,7 @@ mod tests {
         assert!(metrics_before.total_connections >= 2);
 
         // Evict idle (but will keep minimum)
-        let evicted = service.evict_idle("temp-db").await.unwrap();
+        let _evicted = service.evict_idle("temp-db").await.unwrap();
 
         let metrics_after = service.get_metrics("temp-db").await.unwrap();
         assert_eq!(metrics_after.total_connections, 2); // Kept minimum

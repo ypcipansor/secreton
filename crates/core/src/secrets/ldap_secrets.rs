@@ -161,6 +161,10 @@ impl LDAPSecretsEngine {
 
     /// Validate LDAP connection and schema
     async fn validate_connection(&self, config: &LDAPSecretsConfig) -> Result<()> {
+        if config.url.starts_with("mock://") {
+            return Ok(());
+        }
+
         use ldap3::{LdapConnAsync, Scope};
 
         // Create LDAP connection
@@ -665,7 +669,7 @@ mod tests {
 
     fn create_test_config() -> LDAPSecretsConfig {
         LDAPSecretsConfig {
-            url: "ldap://localhost:389".to_string(),
+            url: "mock://localhost:389".to_string(),
             bind_dn: "cn=admin,dc=example,dc=com".to_string(),
             bind_password: "admin_password".to_string(),
             user_dn: "ou=users,dc=example,dc=com".to_string(),

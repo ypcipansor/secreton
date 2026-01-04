@@ -453,7 +453,13 @@ mod tests {
     fn create_test_config() -> GCPConfig {
         GCPConfig {
             project_id: "my-test-project".to_string(),
-            credentials: r#"{"type":"service_account","project_id":"my-test-project"}"#.to_string(),
+            credentials: r#"{
+                "type": "service_account",
+                "project_id": "my-test-project",
+                "private_key_id": "mock_key_id",
+                "private_key": "-----BEGIN PRIVATE KEY-----\nMOCK_KEY\n-----END PRIVATE KEY-----",
+                "client_email": "secreton@my-test-project.iam.gserviceaccount.com"
+            }"#.to_string(),
             scopes: vec!["https://www.googleapis.com/auth/cloud-platform".to_string()],
             ttl: Duration::hours(1),
             max_ttl: Duration::hours(24),

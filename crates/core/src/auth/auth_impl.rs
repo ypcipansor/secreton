@@ -187,6 +187,7 @@ impl AuthService {
             email: claims.claims.email,
             display_name: None,
             roles: claims.claims.roles,
+            permissions: vec![],
             metadata: HashMap::new(),
             last_login: None,
         })
@@ -239,6 +240,7 @@ impl AuthService {
             email: email.map(|s| s.to_string()),
             display_name: None,
             roles: roles.to_vec(),
+            permissions: vec![],
             metadata: HashMap::new(),
             last_login: None,
         })
@@ -255,6 +257,7 @@ impl AuthService {
                 email: None,
                 display_name: Some("Administrator".to_string()),
                 roles: vec!["admin".to_string(), "user".to_string()],
+                permissions: vec![],
                 metadata: HashMap::new(),
                 last_login: None,
             },
@@ -264,6 +267,7 @@ impl AuthService {
                 email: None,
                 display_name: Some("Regular User".to_string()),
                 roles: vec!["user".to_string()],
+                permissions: vec![],
                 metadata: HashMap::new(),
                 last_login: None,
             },

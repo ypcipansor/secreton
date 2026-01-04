@@ -69,9 +69,9 @@ pub struct DecryptResponse {
 pub fn create_transit_router() -> Router<()> {
     Router::new()
         .route("/keys", get(list_keys))
-        .route("/keys/:key_name", post(create_key))
-        .route("/encrypt/:key_name", post(encrypt_data))
-        .route("/decrypt/:key_name", post(decrypt_data))
+        .route("/keys/{key_name}", post(create_key))
+        .route("/encrypt/{key_name}", post(encrypt_data))
+        .route("/decrypt/{key_name}", post(decrypt_data))
 }
 
 pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ListKeysResponse> {

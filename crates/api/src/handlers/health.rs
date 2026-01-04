@@ -8,7 +8,7 @@ use axum::{
     response::Json,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 use crate::{
@@ -224,7 +224,7 @@ async fn check_cache_health(state: &AppState) -> HealthCheck {
         details: cache_info,
     }
 }
-async fn check_crypto_health(state: &AppState) -> HealthCheck {
+async fn check_crypto_health(_state: &AppState) -> HealthCheck {
     let start_time = std::time::Instant::now();
 
     // Check if crypto service is accessible
@@ -255,7 +255,7 @@ async fn check_storage_health(state: &AppState) -> HealthCheck {
 
             HealthCheck {
                 status: status.to_string(),
-                message: health_status.last_error.or_else(|| Some("Storage backend healthy".to_string())),
+                message: health_status.last_error.clone().or_else(|| Some("Storage backend healthy".to_string())),
                 response_time_ms: response_time,
                 last_check: chrono::Utc::now(),
                 details: Some({
@@ -286,7 +286,11 @@ async fn check_storage_health(state: &AppState) -> HealthCheck {
 /// Check database readiness
 async fn check_database_readiness(_state: &AppState) -> HealthCheck {
     // Similar to health check but focused on readiness
-    check_database_health(_state).await
+    let mut check = check_database_health(_state).await;
+    if check.status == "healthy" {
+        check.status = "ready".to_string();
+    }
+    check
 }
 
 /// Check cache readiness
@@ -318,21 +322,17 @@ fn get_uptime_seconds() -> u64 {
 mod tests {
     use super::*;
     use crate::config::ApiConfig;
-    use crate::services::ServiceContainer;
+    use crate::services::ApiServiceContainer;
     use std::sync::Arc;
 
-    fn create_state() -> Arc<ServiceContainer> {
+    async fn create_state() -> Arc<ApiServiceContainer> {
         let config = ApiConfig::default();
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(ServiceContainer::new(&config))
-            .expect("Failed to create services")
-            .into()
+        ApiServiceContainer::new(&config).await.expect("Failed to create services").into()
     }
 
     #[tokio::test]
     async fn test_simple_health_check() {
-        let services = create_state();
+        let services = create_state().await;
 
         let result = simple_health_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
@@ -343,7 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_liveness_check() {
-        let services = create_state();
+        let services = create_state().await;
 
         let result = liveness_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
@@ -354,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_response() {
-        let services = create_state();
+        let services = create_state().await;
         let result = health_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
 
@@ -367,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_readiness_check_marks_ready() {
-        let services = create_state();
+        let services = create_state().await;
         let result = readiness_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
 
@@ -381,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detailed_health_overall_status() {
-        let services = create_state();
+        let services = create_state().await;
         let result = detailed_health_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
 

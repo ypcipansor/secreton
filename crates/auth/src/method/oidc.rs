@@ -137,6 +137,7 @@ impl OidcAuthMethod {
             },
             last_login: Some(Utc::now()),
             roles: vec![],
+            permissions: vec![],
         };
 
         Ok(AuthResult {

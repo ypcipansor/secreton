@@ -257,6 +257,7 @@ impl AuthMethodImpl for OktaAuthMethod {
                         }
                     },
                     roles,
+                    permissions: vec![],
                     metadata: {
                         let mut meta = HashMap::new();
                         meta.insert("okta_user_id".to_string(), user_info.id.clone());

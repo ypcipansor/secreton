@@ -267,7 +267,8 @@ impl JwtTokenService {
 
     /// Validate access token and return claims
     pub fn validate_access_token(&self, token: &str) -> Result<AccessTokenClaims, JwtError> {
-        let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.set_audience(&[&self.config.audience]);
         let decoding_key =
             jsonwebtoken::DecodingKey::from_secret(self.config.jwt_secret.as_bytes());
 

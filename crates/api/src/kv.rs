@@ -147,11 +147,11 @@ pub struct DeleteResponse {
 pub fn create_kv_router() -> Router<()> {
     Router::new()
         .route("/secrets", get(list_secrets))
-        .route("/secret/data/:path", post(put_secret))
-        .route("/secret/data/:path", get(get_secret))
-        .route("/secret/data/:path", delete(delete_secret))
-        .route("/secret/metadata/:path", get(get_metadata))
-        .route("/secret/destroy/:path/:version", delete(destroy_secret))
+        .route("/secret/data/{path}", post(put_secret))
+        .route("/secret/data/{path}", get(get_secret))
+        .route("/secret/data/{path}", delete(delete_secret))
+        .route("/secret/metadata/{path}", get(get_metadata))
+        .route("/secret/destroy/{path}/{version}", delete(destroy_secret))
 }
 
 /// List all secret paths

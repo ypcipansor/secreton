@@ -9,40 +9,6 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-// Serialization helpers for SystemTime and Duration
-fn serialize_system_time<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    serializer.serialize_u64(duration.as_secs())
-}
-
-fn deserialize_system_time<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let secs: u64 = serde::Deserialize::deserialize(deserializer)?;
-    Ok(UNIX_EPOCH + Duration::from_secs(secs))
-}
-
-fn serialize_duration_opt<S>(duration: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match duration {
-        Some(d) => serializer.serialize_some(&d.as_secs()),
-        None => serializer.serialize_none(),
-    }
-}
-
-fn deserialize_duration_opt<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let opt: Option<u64> = serde::Deserialize::deserialize(deserializer)?;
-    Ok(opt.map(Duration::from_secs))
-}
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::sync::mpsc;

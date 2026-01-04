@@ -39,6 +39,7 @@ impl AppRoleAuthMethod {
             role_id,
             secret_id,
             policies,
+            permissions: vec![],
             metadata,
             bound_cidr_list: vec![],
             secret_id_ttl: None,
@@ -106,6 +107,7 @@ impl AuthMethodImpl for AppRoleAuthMethod {
                     email: None,
                     display_name: Some(format!("AppRole {}", role.role_name)),
                     roles: role.policies.clone(),
+                    permissions: role.permissions.clone(),
                     metadata: role.metadata.clone(),
                     last_login: Some(Utc::now()),
                 };
@@ -151,6 +153,7 @@ pub struct AppRole {
     pub role_id: String,
     pub secret_id: String,
     pub policies: Vec<String>,
+    pub permissions: Vec<String>,
     pub metadata: HashMap<String, String>,
     pub bound_cidr_list: Vec<String>,
     pub secret_id_ttl: Option<u64>,

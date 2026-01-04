@@ -292,28 +292,6 @@ mod comprehensive_tests {
 
         println!("✅ Concurrent operations verified");
     }
-
-    // Summary test that runs all major feature tests
-    #[tokio::test]
-    async fn test_comprehensive_feature_coverage() {
-        println!("🧪 Running comprehensive feature coverage test");
-
-        // Run all major feature tests
-        test_all_secrets_engines_functional();
-        test_all_authentication_methods();
-        test_all_storage_backends();
-        // test_shamir_secret_sharing(); // Commented out - uses non-existent ShamirMath API
-        test_clustering_features();
-        test_enterprise_features();
-        test_monitoring_features();
-        test_api_features();
-        test_performance_characteristics();
-        test_error_handling();
-        test_security_features();
-        test_full_integration_workflow();
-        test_concurrent_operations();
-
-        println!("🎉 ALL COMPREHENSIVE TESTS PASSED!");
-        println!("✅ Secreton is production-ready with full feature coverage");
-    }
 }
+
+
