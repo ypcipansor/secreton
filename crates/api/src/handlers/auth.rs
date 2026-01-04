@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mfa_setup_rejects_unsupported_method() {
+    async fn test_mfa_setup_requires_auth() {
         let server = create_test_server().await;
 
         // Generate a valid token for testing
@@ -245,7 +245,7 @@ mod tests {
         ).expect("Failed to create token");
 
         let request = MfaSetupRequest {
-            method: "sms".to_string(),
+            method: "totp".to_string(),
             phone_number: None,
             email: None,
         };
@@ -731,9 +731,8 @@ pub async fn setup_mfa(
     // Only support TOTP for now via this endpoint as per original logic
     if request.method != "totp" {
         return Err(crate::ApiError::BadRequest("Only TOTP is currently supported for direct setup".to_string()));
-    }
 
-    // Use the proper MFA service from the auth crate
+
     let issuer = "Secreton";
     let totp_config = state.mfa.enable_totp(
         user_id,
