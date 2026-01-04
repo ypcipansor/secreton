@@ -70,7 +70,7 @@ pub struct SessionInfo {
 }
 
 // Use types from secreton_auth
-use secreton_auth::{LoginRequest, RefreshTokenRequest, UserInfo};
+use secreton_auth::{LoginRequest, RefreshTokenRequest, UserInfo, MfaService};
 
 use crate::{
     handlers::AppState,
@@ -785,13 +785,16 @@ pub async fn disable_mfa(
         return Err(crate::ApiError::Authentication("Invalid password".to_string()));
     }
 
-    // TODO: MFA service not in ApiServiceContainer - skipping disable for now
-    // Original code:
-    // state.mfa.disable_totp(&user.id).await.map_err(|e| {
-    //     crate::ApiError::Internal(format!("Failed to disable MFA: {}", e))
-    // })?;
+    // Parse UUID
+    let user_uuid = Uuid::parse_str(&user.id)
+        .map_err(|_| crate::ApiError::Internal("Invalid user ID format".to_string()))?;
 
-    let method = "totp"; // Assume TOTP for now
+    // Remove MFA enrollment (disables all methods)
+    state.mfa.remove_enrollment(user_uuid).await.map_err(|e| {
+        crate::ApiError::Internal(format!("Failed to disable MFA: {}", e))
+    })?;
+
+    let method = "all"; // All MFA methods disabled
 
     let data = serde_json::json!({
         "message": "MFA successfully disabled",

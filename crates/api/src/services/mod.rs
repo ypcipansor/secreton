@@ -19,6 +19,19 @@ use crate::config::ApiConfig;  // Use local ApiConfig with auth field
 use crate::services::crypto::CryptoService;
 use crate::services::auth::AuthenticationService;
 
+// MFA Services
+use secreton_auth::mfa::{
+    CombinedMfaService,
+    InMemoryTotpService,
+    InMemorySmsService,
+    InMemoryEmailService,
+    InMemoryHardwareService,
+    DefaultPushService,
+    DefaultWebAuthnService,
+    DefaultRecoveryCodeService,
+    SmsConfig, SmsProvider, EmailConfig,
+};
+
 /// Service container holding all application services
 pub struct ApiServiceContainer {
     /// Configuration
@@ -37,6 +50,7 @@ pub struct ApiServiceContainer {
     pub auth: Arc<AuthenticationService>,
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
+    pub mfa: Arc<CombinedMfaService>,
 }
 
 impl ApiServiceContainer {
@@ -76,6 +90,51 @@ impl ApiServiceContainer {
             audit.clone(),
         ).await?);
 
+        // Initialize MFA Services
+        // For now, we use InMemory/Default implementations. In production, these might be configured via `config`.
+        let totp_service = Arc::new(InMemoryTotpService::new("Secreton".to_string()));
+
+        // Configure SMS Config (Default placeholder)
+        let sms_config = SmsConfig {
+            provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+            api_key: "dummy-key".to_string(),
+            api_secret: None,
+            from_number: "000000".to_string(),
+            message_template: "Your Secreton code is {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        };
+        let sms_service = Arc::new(InMemorySmsService::new(sms_config));
+
+        // Configure Email Config (Default placeholder)
+        let email_config = EmailConfig {
+            smtp_server: "localhost".to_string(),
+            smtp_port: 1025,
+            smtp_username: "user".to_string(),
+            smtp_password: "password".to_string(),
+            from_email: "noreply@secreton.io".to_string(),
+            subject_template: "Secreton Verification Code".to_string(),
+            body_template: "Your verification code is: {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        };
+        let email_service = Arc::new(InMemoryEmailService::new(email_config));
+
+        let hardware_service = Arc::new(InMemoryHardwareService::new());
+        let push_service = Arc::new(DefaultPushService::new_mock()); // Using mock for now
+        let webauthn_service = Arc::new(DefaultWebAuthnService::new_default());
+        let recovery_service = Arc::new(DefaultRecoveryCodeService::new());
+
+        let mfa = Arc::new(CombinedMfaService::new(
+            totp_service,
+            sms_service,
+            email_service,
+            hardware_service,
+            push_service,
+            webauthn_service,
+            recovery_service,
+        ));
+
         // Initialize Telemetry
         let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
         if let Err(e) = telemetry.start_collection().await {
@@ -91,6 +150,9 @@ impl ApiServiceContainer {
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
         registry.register_service("telemetry".to_string(), telemetry);
+        // mfa service is specific type, registering as part of container struct mostly.
+        // If we want to register it in StandardServiceContainer, we'd need to wrap it or impl Service trait if it doesn't.
+        // For now, it's available via the struct field.
 
         Ok(Self {
             config: config.clone(),
@@ -102,6 +164,7 @@ impl ApiServiceContainer {
             auth,
             secreton,
             admin,
+            mfa,
         })
     }
 
