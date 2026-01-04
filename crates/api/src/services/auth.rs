@@ -12,13 +12,14 @@ use uuid::Uuid;
 
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
-use secreton_storage::{StorageBackend, QueryParams};
+use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel, QueryParams};
 use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod};
 use secreton_core::User;
 use thiserror::Error;
 use crate::ApiResult;
 
 pub const USER_STORAGE_PREFIX: &str = "users/";
+const SESSION_STORAGE_PREFIX: &str = "sys/auth/sessions/";
 
 #[derive(Debug, Deserialize)]
 pub struct ApiLoginRequest {
@@ -139,7 +140,8 @@ pub struct AuthenticationService {
     /// Token service for JWT operations
     token_service: JwtTokenService,
 
-    /// Storage backend for sessions (reserved for future session persistence)
+    /// Storage backend for sessions
+
     storage: Arc<dyn StorageBackend + Send + Sync>,
 
     /// Configuration
@@ -230,6 +232,44 @@ impl AuthenticationService {
             &user.policies, // Use user.policies which we just created
             false, // MFA status from auth result
         ).map_err(|e| secreton_errors::SecretonError::Authentication { message: e.to_string() })?;
+
+        // Create and store session
+        let now = chrono::Utc::now();
+        let expires_at = now + chrono::Duration::from_std(self.config.jwt.expiration)
+            .unwrap_or(chrono::Duration::hours(1));
+
+        // Use JTI if available from tokens, otherwise generate UUID
+        // The TokenPair from secreton_auth doesn't expose JTI directly, so we generate a session ID
+        let session_id = Uuid::new_v4().to_string();
+
+        let session = Session {
+            id: session_id.clone(),
+            user_id: user.id.clone(),
+            token: token_pair.access_token.clone(),
+            refresh_token: Some(token_pair.refresh_token.clone()),
+            ip_address: "unknown".to_string(), // Request context not available here
+            user_agent: "unknown".to_string(),
+            created_at: now,
+            expires_at,
+            last_accessed: now,
+        };
+
+        // Serialize session
+        let session_data = serde_json::to_vec(&session)
+            .map_err(|e| secreton_errors::SecretonError::Internal { message: format!("Failed to serialize session: {}", e) })?;
+
+        // Create storage entry
+        let entry = SecretEntry::new(
+            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
+            session_data,
+            EncryptionMetadata::default(), // No actual encryption for now as we don't have CryptoService active
+            SecurityLevel::Secret,
+            Uuid::parse_str(&user.id).unwrap_or_default(),
+        ).with_expiration(expires_at);
+
+        // Store session
+        self.storage.store(&entry).await
+            .map_err(|e| secreton_errors::SecretonError::Authentication { message: format!("Failed to store session: {}", e) })?;
 
         Ok(ApiLoginResponse {
             token: AuthToken {
@@ -373,37 +413,46 @@ impl AuthenticationService {
 
     /// Get active session count
     pub async fn get_active_session_count(&self) -> Result<u64, AuthError> {
-        // TODO: Implement actual session tracking
-        // For now, return a reasonable default
-        Ok(5)
-    }
+        let params = QueryParams {
+            path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
+            ..Default::default()
+        };
 
-    /// Cleanup expired sessions
-    pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
-        let params = secreton_storage::QueryParams {
+        let count = self.storage.count(&params).await
+            .map_err(|e| AuthError::Storage(e))?;
+
             path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
             include_expired: true,
             ..Default::default()
         };
 
-        let sessions = self.storage.list(&params).await?;
-        let mut cleaned_count = 0;
+        let entries = self.storage.list(&params).await
+            .map_err(|e| AuthError::Storage(e))?;
 
-        for session in sessions {
-            if session.is_expired() {
-                if let Err(e) = self.storage.delete_by_path(&session.path).await {
-                    tracing::warn!("Failed to delete expired session {}: {}", session.path, e);
+        let mut deleted_count = 0;
+        let now = chrono::Utc::now();
+
+        for entry in entries {
+            let is_expired = if let Some(expires_at) = entry.expires_at {
+                expires_at < now
+            } else {
+                false
+            };
+
+            if is_expired {
+                if let Err(e) = self.storage.delete_by_path(&entry.path).await {
+                    tracing::warn!("Failed to delete expired session {}: {}", entry.path, e);
                     continue;
                 }
-                cleaned_count += 1;
+                deleted_count += 1;
             }
         }
 
-        if cleaned_count > 0 {
-            tracing::info!("Cleaned up {} expired sessions", cleaned_count);
+        if deleted_count > 0 {
+            tracing::info!("Cleaned up {} expired sessions", deleted_count);
         }
 
-        Ok(cleaned_count)
+        Ok(deleted_count)
     }
 
     /// Verify password for a user
