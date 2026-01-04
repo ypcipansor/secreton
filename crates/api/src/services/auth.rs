@@ -136,7 +136,6 @@ pub struct AuthenticationService {
     token_service: JwtTokenService,
 
     /// Storage backend for sessions (reserved for future session persistence)
-    #[allow(dead_code)]
     storage: Arc<dyn StorageBackend + Send + Sync>,
 
     /// Configuration
@@ -374,9 +373,23 @@ impl AuthenticationService {
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
-        // TODO: Implement actual session cleanup
-        // For now, return 0 (no sessions cleaned)
-        Ok(0)
+        let params = secreton_storage::QueryParams {
+            path_prefix: Some("sys/sessions/".to_string()),
+            include_expired: true,
+            ..Default::default()
+        };
+
+        let sessions = self.storage.list(&params).await?;
+        let mut cleaned_count = 0;
+
+        for session in sessions {
+            if session.is_expired() {
+                self.storage.delete_by_path(&session.path).await?;
+                cleaned_count += 1;
+            }
+        }
+
+        Ok(cleaned_count)
     }
 
     /// Verify password for a user
@@ -517,5 +530,58 @@ mod tests {
 
         let auth_service = AuthenticationService::new(storage, crypto, &config).await;
         assert!(auth_service.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired_sessions() {
+        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+        use uuid::Uuid;
+
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new());
+        let config = AuthConfig::default();
+
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap();
+
+        // Add expired session
+        let expired_session = SecretEntry::new(
+            "sys/sessions/expired1".to_string(),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::new_v4(),
+        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+        storage.store(&expired_session).await.unwrap();
+
+        // Add active session
+        let active_session = SecretEntry::new(
+            "sys/sessions/active1".to_string(),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::new_v4(),
+        ).with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
+        storage.store(&active_session).await.unwrap();
+
+        // Add unrelated expired entry
+        let unrelated_expired = SecretEntry::new(
+            "other/path/expired2".to_string(),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::new_v4(),
+        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+        storage.store(&unrelated_expired).await.unwrap();
+
+        // Run cleanup
+        let cleaned_count = auth_service.cleanup_expired_sessions().await.unwrap();
+
+        // Verify results
+        assert_eq!(cleaned_count, 1, "Should cleanup exactly 1 session");
+
+        // Check storage state
+        assert!(!storage.exists("sys/sessions/expired1").await.unwrap(), "Expired session should be removed");
+        assert!(storage.exists("sys/sessions/active1").await.unwrap(), "Active session should remain");
+        assert!(storage.exists("other/path/expired2").await.unwrap(), "Unrelated expired entry should remain");
     }
 }
