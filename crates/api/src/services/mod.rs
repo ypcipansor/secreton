@@ -197,10 +197,6 @@ impl ApiServiceContainer {
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
         registry.register_service("telemetry".to_string(), telemetry);
-        // mfa service is specific type, registering as part of container struct mostly.
-        // If we want to register it in StandardServiceContainer, we'd need to wrap it or impl Service trait if it doesn't.
-        // For now, it's available via the struct field.
-        registry.register_service("policy".to_string(), policy_service.clone());
         registry.register_service("identity".to_string(), identity.clone());
 
         Ok(Self {

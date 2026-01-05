@@ -128,6 +128,80 @@ impl CombinedMfaService {
         }
     }
 
+    /// Enable TOTP for an entity
+    pub async fn enable_totp(
+        &self,
+        entity_id: Uuid,
+        account_name: String,
+    ) -> AuthMethodResult<TotpEnrollment> {
+        // Enroll in TOTP service
+        let enrollment = self.totp_service.enroll(entity_id, account_name).await
+            .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
+
+        // Update central enrollment
+        let mut enrollments = self.enrollments.write().await;
+        let user_enrollment = enrollments.entry(entity_id).or_insert_with(|| MfaEnrollment {
+            entity_id,
+            methods: Vec::new(),
+            required_methods: Vec::new(),
+            enrolled_at: Utc::now(),
+        });
+
+        if !user_enrollment.methods.contains(&MfaMethod::Totp) {
+            user_enrollment.methods.push(MfaMethod::Totp);
+        }
+
+        Ok(enrollment)
+    }
+
+    /// Regenerate recovery codes
+    pub async fn regenerate_recovery_codes(&self, entity_id: Uuid) -> AuthMethodResult<Vec<String>> {
+        let response = self.recovery_service.generate_codes(entity_id).await?;
+
+        // Update central enrollment
+        let mut enrollments = self.enrollments.write().await;
+        let user_enrollment = enrollments.entry(entity_id).or_insert_with(|| MfaEnrollment {
+            entity_id,
+            methods: Vec::new(),
+            required_methods: Vec::new(),
+            enrolled_at: Utc::now(),
+        });
+
+        if !user_enrollment.methods.contains(&MfaMethod::Recovery) {
+            user_enrollment.methods.push(MfaMethod::Recovery);
+        }
+
+        Ok(response.codes)
+    }
+
+    /// Verify TOTP code
+    pub async fn verify_totp(&self, entity_id: Uuid, code: &str) -> AuthMethodResult<bool> {
+        let request = MfaValidationRequest {
+            entity_id,
+            method: MfaMethod::Totp,
+            code: Some(code.to_string()),
+            hardware_request: None,
+            push_notification_id: None,
+            push_response: None,
+            webauthn_response: None,
+        };
+        self.validate(request).await
+    }
+
+    /// Disable TOTP for an entity
+    pub async fn disable_totp(&self, entity_id: Uuid) -> AuthMethodResult<()> {
+        let mut enrollments = self.enrollments.write().await;
+        if let Some(enrollment) = enrollments.get_mut(&entity_id) {
+            enrollment.methods.retain(|m| *m != MfaMethod::Totp);
+            enrollment.required_methods.retain(|m| *m != MfaMethod::Totp);
+        }
+        drop(enrollments);
+
+        self.totp_service.remove_enrollment(entity_id).await
+            .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
+        Ok(())
+    }
+
     /// Validate based on MFA method
     async fn validate_method(&self, request: &MfaValidationRequest) -> AuthMethodResult<bool> {
         match &request.method {
