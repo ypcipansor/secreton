@@ -827,17 +827,55 @@ impl SecretService {
     pub async fn sign_data(
         &self,
         key_name: &str,
-        _data: &[u8],
+        data: &[u8],
         user: &secreton_auth::User,
     ) -> Result<SignResult, SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "sign").await?;
         
         let key_info = self.get_key(key_name, user).await?;
-        
-        // In real implementation: get key -> decrypt -> sign
-        // Placeholder:
+
+        // Map key type to algorithm
+        let algorithm = match key_info.key_type.as_str() {
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type for signing: {}", key_info.key_type))),
+        };
+
+        // Retrieve key from storage
+        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
+        let key_entry = self.storage.get_by_path(&key_data_path).await
+            .map_err(|e| SecretError::Storage(e))?
+            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
+
+        // Decrypt the stored key data
+        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+
+        // Sign data using crypto engine
+        let signature = self.crypto.sign_data(&key_data, data, algorithm)
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+
+        // Return base64 encoded signature
+        use base64::Engine;
+        let signature_str = base64::engine::general_purpose::STANDARD.encode(signature);
+
+        // Log audit trail
+        let key_id = format!("{}/{}", user.id, key_name);
+        let _ = self.audit.log_event(
+            SecurityEventType::SigningOperation {
+                key_id: key_id.clone(),
+                data_size: data.len().try_into().unwrap_or(0),
+                user: user.id.to_string(),
+            },
+        ).await;
+
         Ok(SignResult {
-            signature: "placeholder_signature".to_string(),
+            signature: signature_str,
             key_version: key_info.version,
         })
     }
@@ -847,13 +885,30 @@ impl SecretService {
         &self,
         key_name: &str,
         data: &[u8],
-        signature: &[u8],
+        signature_b64: &[u8],
         user: &secreton_auth::User,
     ) -> Result<(bool, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "verify").await?;
 
-        // Get key info to retrieve version
+        // Get key info to retrieve version and algorithm
         let key_info = self.get_key(key_name, user).await?;
+
+         // Map key type to algorithm
+        let algorithm = match key_info.key_type.as_str() {
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type for verification: {}", key_info.key_type))),
+        };
+
+        // Decode base64 signature
+        use base64::Engine;
+        let signature = base64::engine::general_purpose::STANDARD.decode(signature_b64)
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e)))?;
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
@@ -866,8 +921,19 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Verify signature
-        let is_valid = self.crypto.verify_signature(&key_data, data, signature)
+        let is_valid = self.crypto.verify_signature(&key_data, data, &signature, algorithm)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+
+        // Log audit trail
+        let key_id = format!("{}/{}", user.id, key_name);
+        let _ = self.audit.log_event(
+            SecurityEventType::VerificationOperation {
+                key_id: key_id.clone(),
+                data_size: data.len().try_into().unwrap_or(0),
+                user: user.id.to_string(),
+                valid: is_valid,
+            },
+        ).await;
 
         Ok((is_valid, key_info.version))
     }

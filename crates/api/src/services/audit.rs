@@ -64,6 +64,12 @@ impl AuditLogger {
             SecurityEventType::Logout { user, session_id, ip_address, user_agent } =>
                 (CoreAuditEventType::AuthLogout, AuditStatus::Success, user, "session".to_string(), "logout".to_string(),
                  Some(vec![("session_id".to_string(), session_id), ("ip_address".to_string(), ip_address.unwrap_or_default()), ("user_agent".to_string(), user_agent.unwrap_or_default())].into_iter().collect())),
+            SecurityEventType::SigningOperation { key_id, user, data_size } =>
+                (CoreAuditEventType::Custom("crypto.sign".to_string()), AuditStatus::Success, user, key_id, "sign".to_string(),
+                 Some(vec![("data_size".to_string(), data_size.to_string())].into_iter().collect())),
+            SecurityEventType::VerificationOperation { key_id, user, data_size, valid } =>
+                (CoreAuditEventType::Custom("crypto.verify".to_string()), if valid { AuditStatus::Success } else { AuditStatus::Failure }, user, key_id, "verify".to_string(),
+                 Some(vec![("data_size".to_string(), data_size.to_string()), ("valid".to_string(), valid.to_string())].into_iter().collect())),
         };
 
         let mut audit_event = AuditEvent::new(core_type, status, user, resource, op);
@@ -83,6 +89,8 @@ pub enum SecurityEventType {
     KeyRotation { old_key_id: String, new_key_id: String, algorithm: String, user: String },
     EncryptionOperation { key_id: String, user: String, data_size: u64 },
     DecryptionOperation { key_id: String, user: String, data_size: u64 },
+    SigningOperation { key_id: String, user: String, data_size: u64 },
+    VerificationOperation { key_id: String, user: String, data_size: u64, valid: bool },
     AuthenticationSuccess { user: String, method: String },
     AuthenticationFailure { user: String, method: String, reason: String },
     SessionTerminated { user: String, session_id: String, reason: String },
