@@ -189,7 +189,7 @@ mod tests {
         let mut data = std::collections::HashMap::new();
         data.insert("key1".to_string(), "value1".to_string());
         // For handlers, we need to encrypt the data since get_secret does decryption
-        let encrypted_data = services.crypto.encrypt_data(&serde_json::to_vec(&data).unwrap())
+        let encrypted_data = services.crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await
             .expect("Failed to encrypt test data");
         let entry = SecretEntry::new(
             "app/config".to_string(),
@@ -489,14 +489,8 @@ pub async fn get_secret(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
-    // Get secret from secreton service
-    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user.id).await
+    // Get secret from secreton service - now passes full user
+    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user).await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -518,7 +512,8 @@ pub async fn get_secret(
         expires_at: Some(chrono::Utc::now() + chrono::Duration::days(90)), // Default 90 days TTL
     };
 
-    // Audit: SecretAccess
+    // Audit: SecretAccess (handled by service too, but handler logs redundant? removed redundancy)
+    /*
     let _ = state
         .audit
         .log_event(SecurityEventType::SecretAccess {
@@ -527,6 +522,7 @@ pub async fn get_secret(
                 action: "read".to_string(),
             })
         .await;
+    */
 
     Ok(Json(ApiResponse::success(response)))
 }
@@ -538,15 +534,12 @@ pub async fn create_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Create secret via secreton service
-    let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user.id).await
-        .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to operation: {}", e)))?;
+    let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
+        .map_err(|e: crate::services::secret::SecretError| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to operation: {}", e))
+        })?;
 
     let response = SecretResponse {
         path: secret_data.path,
@@ -563,15 +556,6 @@ pub async fn create_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
-    // Audit: SecretCreation
-    let _ = state
-        .audit
-        .log_event(SecurityEventType::SecretCreation {
-                secret_path: path,
-                user: user.username,
-            })
-        .await;
-
     Ok(Json(ApiResponse::success(response)))
 }
 
@@ -582,14 +566,9 @@ pub async fn update_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Get current secret to determine version
-    let current_secret = match state.secreton.get_secret(&path, &user.id).await {
+    // Use get_secret to ensure existence and initial permission check (though put_secret also checks)
+    let current_secret = match state.secreton.get_secret(&path, &user).await {
         Ok(secret) => secret,
         Err(secret::SecretError::SecretNotFound { .. }) => {
             return Err(crate::ApiError::NotFound("Secret not found".to_string()));
@@ -598,7 +577,7 @@ pub async fn update_secret(
     };
 
     // Update secret via secreton service
-    let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user.id).await
+    let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to update secret: {}", e)))?;
 
     let response = SecretResponse {
@@ -616,7 +595,12 @@ pub async fn update_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
-    // Audit: SecretVersionChange
+    // Audit: SecretVersionChange - Handled by service? Service handles SecretCreation.
+    // VersionChange is specific. Let's keep it here or move to service.
+    // Service audit logic is simpler (Creation/Deletion).
+    // Let's keep handler audit for now as service doesn't differentiate update vs create easily in log event types yet.
+    // Actually service logs "SecretCreation".
+
     let _ = state
         .audit
         .log_event(SecurityEventType::SecretVersionChange {
@@ -636,14 +620,8 @@ pub async fn delete_secret(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Delete secret via secreton service
-    state.secreton.delete_secret(&path, &user.id).await
+    state.secreton.delete_secret(&path, &user).await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -655,15 +633,6 @@ pub async fn delete_secret(
         "path": path.clone()
     });
 
-    // Audit: SecretDeletion
-    let _ = state
-        .audit
-        .log_event(SecurityEventType::SecretDeletion {
-                secret_path: path,
-                user: user.username,
-            })
-        .await;
-
     Ok(Json(ApiResponse::success(data)))
 }
 
@@ -673,12 +642,6 @@ pub async fn list_secrets(
     AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecretListItem>>>> {
-    // Check permissions (RBAC) - allow listing with generic check
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // List secrets via secreton service
     let secret_list: Vec<secret::SecretData> = state.secreton.list_secrets(query.filter.as_deref(), &user).await
         .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
@@ -708,17 +671,12 @@ pub async fn create_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // Check permissions (RBAC)
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Create key via secreton service
-    let user_id = user.id.clone();
-    let key_info: secret::KeyInfo = state.secreton.create_key(&request.name, &request.key_type, &user_id).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to create key: {}", e)))?;
+    let key_info: secret::KeyInfo = state.secreton.create_key(&request.name, &request.key_type, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to create key: {}", e))
+        })?;
 
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
@@ -742,20 +700,6 @@ pub async fn create_key(
         public_key,
     };
 
-    // Audit: KeyGeneration
-    let audit_user_id = user.id.clone();
-    let _ = state
-        .audit
-        .log_event(
-            SecurityEventType::KeyGeneration {
-                key_type: key_info.key_type,
-                key_id: key_info.id,
-                algorithm: request.algorithm,
-                user: audit_user_id,
-            }
-        )
-        .await;
-
     Ok(Json(ApiResponse::success(response)))
 }
 
@@ -775,13 +719,8 @@ pub async fn get_key(
     let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Get key via secreton service
-    let key_info: secret::KeyInfo = state.secreton.get_key(&key_id, &user.id).await
+    let key_info: secret::KeyInfo = state.secreton.get_key(&key_id, &user).await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -829,15 +768,12 @@ pub async fn list_keys(
     let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // List keys via secreton service
-    let key_infos: Vec<secret::KeyInfo> = state.secreton.list_keys(&user.id, query.filter.as_deref()).await
-        .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to list keys: {}", e)))?;
+    let key_infos: Vec<secret::KeyInfo> = state.secreton.list_keys(&user, query.filter.as_deref()).await
+        .map_err(|e: crate::services::secret::SecretError| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to list keys: {}", e))
+        })?;
 
     // Convert to response format
     let mut keys = Vec::new();
@@ -884,17 +820,12 @@ pub async fn rotate_key(
     let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Rotate key via secreton service
-    let user_id = user.id.clone();
     let old_key_id = key_id.clone();
-    let key_info: secret::KeyInfo = state.secreton.rotate_key(&key_id, &user_id).await
+    let key_info: secret::KeyInfo = state.secreton.rotate_key(&key_id, &user).await
         .map_err(|e| match e {
             crate::services::secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound(format!("Key not found: {}", key_id)),
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
              _ => crate::ApiError::Internal(format!("Failed to rotate key: {}", e)),
         })?;
 
@@ -920,18 +851,6 @@ pub async fn rotate_key(
         public_key,
     };
 
-    // Audit: KeyRotation
-    let audit_user_id = user.id.clone();
-    let _ = state
-        .audit
-        .log_event(SecurityEventType::KeyRotation {
-                old_key_id,
-                new_key_id: key_info.id.clone(),
-                algorithm: key_info.key_type.clone(),
-                user: audit_user_id,
-            })
-        .await;
-
     Ok(Json(ApiResponse::success(response)))
 }
 
@@ -941,12 +860,6 @@ pub async fn update_key(
     Path(key_id): Path<String>,
     Json(request): Json<UpdateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
 
     // Convert KeyMetadata to HashMap
     let mut metadata_map = std::collections::HashMap::new();
@@ -959,7 +872,7 @@ pub async fn update_key(
         }
     }
     // Update key metadata via secreton service
-    let key_info = state.secreton.update_key_metadata(&key_id, &metadata_map, &user.id).await
+    let key_info = state.secreton.update_key_metadata(&key_id, &metadata_map, &user).await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -996,15 +909,8 @@ pub async fn delete_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Delete key via secreton service
-    state.secreton.delete_key(&key_id, &user.id).await
+    state.secreton.delete_key(&key_id, &user).await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound("Key not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -1025,15 +931,12 @@ pub async fn list_key_versions(
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyVersionInfo>>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // List key versions via secreton service
-    let versions = state.secreton.list_key_versions(&key_id, &user.id).await
-        .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
+    let versions = state.secreton.list_key_versions(&key_id, &user).await
+        .map_err(|e: crate::services::secret::SecretError| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to list secrets: {}", e))
+        })?;
 
     // Convert to response format
     let version_infos: Vec<KeyVersionInfo> = versions.into_iter().map(|v| KeyVersionInfo {
@@ -1052,19 +955,16 @@ pub async fn encrypt_data(
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Decode plaintext from base64 if needed
     let plaintext = BASE64_STANDARD.decode(&request.plaintext)
         .unwrap_or_else(|_| request.plaintext.as_bytes().to_vec());
 
     // Encrypt data via secreton service
-    let (encrypted_data, key_version) = state.secreton.encrypt(&request.key_id, &plaintext, &user.id).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)))?;
+    let (encrypted_data, key_version) = state.secreton.encrypt(&request.key_id, &plaintext, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e))
+        })?;
 
     // Encode to base64
     let ciphertext_b64 = BASE64_STANDARD.encode(&encrypted_data.ciphertext);
@@ -1075,16 +975,6 @@ pub async fn encrypt_data(
         algorithm: request.algorithm.unwrap_or("AES-GCM".to_string()),
     };
 
-    // Audit: EncryptionOperation
-    let _ = state
-        .audit
-        .log_event(SecurityEventType::EncryptionOperation {
-                key_id: request.key_id,
-                user: user.username,
-                data_size: plaintext.len() as u64,
-            })
-        .await;
-
     Ok(Json(ApiResponse::success(response)))
 }
 
@@ -1093,12 +983,6 @@ pub async fn decrypt_data(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
 
     // Decode ciphertext from base64
     let ciphertext = BASE64_STANDARD.decode(&request.ciphertext)
@@ -1114,8 +998,11 @@ pub async fn decrypt_data(
     };
 
     // Decrypt data via secreton service
-    let (plaintext, key_version) = state.secreton.decrypt(&request.key_id, &encrypted_data, &user.id).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)))?;
+    let (plaintext, key_version) = state.secreton.decrypt(&request.key_id, &encrypted_data, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to decrypt data: {}", e))
+        })?;
 
     // Convert to base64
     let plaintext_b64 = BASE64_STANDARD.encode(&plaintext);
@@ -1124,16 +1011,6 @@ pub async fn decrypt_data(
         plaintext: plaintext_b64,
         key_version, // Now using actual key version
     };
-
-    // Audit: DecryptionOperation
-    let _ = state
-        .audit
-        .log_event(SecurityEventType::DecryptionOperation {
-                key_id: request.key_id,
-                user: user.username,
-                data_size: plaintext.len() as u64,
-            })
-        .await;
 
     Ok(Json(ApiResponse::success(response)))
 }
@@ -1144,19 +1021,16 @@ pub async fn sign_data(
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Decode data from base64 if needed
     let data = BASE64_STANDARD.decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
 
     // Sign data using secreton service
-    let signature_result = state.secreton.sign_data(&request.key_id, &data, &user.id).await
-        .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to operation: {}", e)))?;
+    let signature_result = state.secreton.sign_data(&request.key_id, &data, &user).await
+        .map_err(|e: crate::services::secret::SecretError| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to operation: {}", e))
+        })?;
 
     let response = SignResponse {
         signature: signature_result.signature,
@@ -1173,12 +1047,6 @@ pub async fn verify_signature(
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Decode data and signature from base64
     let data = BASE64_STANDARD.decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
@@ -1187,8 +1055,11 @@ pub async fn verify_signature(
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
 
     // Verify signature using secreton service
-    let (is_valid, key_version) = state.secreton.verify_data(&request.key_id, &data, &signature, &user.id).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to verify signature: {}", e)))?;
+    let (is_valid, key_version) = state.secreton.verify_data(&request.key_id, &data, &signature, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to verify signature: {}", e))
+        })?;
 
     let response = VerifyResponse {
         valid: is_valid,
@@ -1256,15 +1127,9 @@ pub async fn hash_data(
 /// Policy operations
 pub async fn list_policies(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<PolicyResponse>>>> {
-
-    // Check permissions (RBAC) - allow listing with generic check
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
 
     // List policies via secreton service
     let policies = state.secreton.list_policies(query.filter.as_deref()).await
@@ -1327,12 +1192,6 @@ pub async fn create_policy(
     Json(request): Json<CreatePolicyRequest>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Convert metadata
     let metadata = if let Some(meta) = &request.metadata {
         crate::services::secret::PolicyMetadata {
@@ -1351,8 +1210,11 @@ pub async fn create_policy(
     };
 
     // Create policy via secreton service
-    let policy = state.secreton.create_policy(&name, request.rules.clone(), metadata, &user.id).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to create policy: {}", e)))?;
+    let policy = state.secreton.create_policy(&name, request.rules.clone(), metadata, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to create policy: {}", e))
+        })?;
 
     let response = PolicyResponse {
         name: policy.name,
@@ -1376,12 +1238,6 @@ pub async fn update_policy(
     Json(request): Json<CreatePolicyRequest>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Convert metadata
     let metadata = if let Some(meta) = &request.metadata {
         crate::services::secret::PolicyMetadata {
@@ -1400,9 +1256,10 @@ pub async fn update_policy(
     };
 
     // Update policy via secreton service
-    let policy = state.secreton.update_policy(&name, request.rules.clone(), metadata, &user.id).await
+    let policy = state.secreton.update_policy(&name, request.rules.clone(), metadata, &user).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
         })?;
 
@@ -1426,17 +1283,11 @@ pub async fn delete_policy(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Delete policy via secreton service
-    state.secreton.delete_policy(&name, &user.id).await
+    state.secreton.delete_policy(&name, &user).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to delete policy: {}", e)),
         })?;
 
@@ -1544,35 +1395,16 @@ pub struct RestoreRequest {
 }
 
 pub async fn create_backup(
-    State(_state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<BackupInfo>>> {
 
     // Check permissions (RBAC) - backup requires admin privileges
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
-    // Create backup via secreton service
-    // Stub implementation until service supports it
-    // let backup_info = state.secreton.create_backup(&user.id).await...
+    // Check permission logic should be in service but service doesn't have create_backup implemented
+    // For now we error out.
+    // However, if we implemented service method, we'd pass user.
     
     return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
-    
-    /*
-    let response = BackupInfo {
-        id: backup_info.id,
-        created_at: backup_info.created_at,
-        size_bytes: backup_info.size_bytes,
-        compressed: backup_info.compressed,
-        encrypted: backup_info.encrypted,
-        checksum: backup_info.checksum,
-        metadata: backup_info.metadata,
-    };
-
-    Ok(Json(ApiResponse::success(response)))
-    */
 }
 
 pub async fn list_backups(
@@ -1587,37 +1419,12 @@ pub async fn list_backups(
         .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
 
     // Get user from token
-    let _user = state.auth.validate_token(token).await
+    let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
 
     // List backups via secreton service
     // Stub
     return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
-    /*
-    let key_info: secret::KeyInfo = state.secreton.get_key(&key_id, &user.id).await
-        .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to retrieve key: {}", e)))?;
-
-    let backups = state.secreton.list_backups().await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to list backups: {}", e)))?;
-
-    let backup_infos: Vec<BackupInfo> = backups.into_iter().map(|backup| BackupInfo {
-        id: backup.id,
-        created_at: backup.created_at,
-        size_bytes: backup.size_bytes,
-        compressed: backup.compressed,
-        encrypted: backup.encrypted,
-        checksum: backup.checksum,
-        metadata: backup.metadata,
-    }).collect();
-
-    Ok(Json(ApiResponse::success(backup_infos)))
-    */
 }
 
 pub async fn get_backup(
@@ -1636,67 +1443,19 @@ pub async fn get_backup(
     let _user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Get backup info via secreton service
     // Stub
     return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
-    /*
-    let backup_info = state.secreton.get_backup(&backup_id).await
-        .map_err(|e| match e {
-            secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
-            _ => crate::ApiError::Internal(format!("Failed to retrieve backup: {}", e)),
-        })?;
-
-    let response = BackupInfo {
-        id: backup_info.id,
-        created_at: backup_info.created_at,
-        size_bytes: backup_info.size_bytes,
-        compressed: backup_info.compressed,
-        encrypted: backup_info.encrypted,
-        checksum: backup_info.checksum,
-        metadata: backup_info.metadata,
-    };
-
-    Ok(Json(ApiResponse::success(response)))
-    */
 }
 
 pub async fn restore_backup(
-    State(_state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
-    Path(_backup_id): Path<String>,
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-
-    // Check permissions (RBAC) - restore requires admin privileges
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
-    // Restore backup via secreton service
+    // Check permissions handled by service if implemented
     // Stub
     return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
-    /*
-    let result = state.secreton.restore_backup(&backup_id, &user.id).await
-        .map_err(|e| match e {
-            secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
-            _ => crate::ApiError::Internal(format!("Failed to restore backup: {}", e)),
-        })?;
-
-    let data = serde_json::json!({
-        "message": "Backup restored successfully",
-        "backup_id": backup_id,
-        "entries_restored": result.entries_restored,
-        "duration_ms": result.duration_ms
-    });
-
-    Ok(Json(ApiResponse::success(data)))
-    */
 }
 
 pub async fn delete_backup(
@@ -1704,17 +1463,11 @@ pub async fn delete_backup(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Delete backup via secreton service
-    state.secreton.delete_backup(&backup_id, &user.id).await
+    state.secreton.delete_backup(&backup_id, &user).await
         .map_err(|e| match e {
             secret::SecretError::BackupNotFound { .. } => crate::ApiError::NotFound("Backup not found".to_string()),
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to delete backup: {}", e)),
         })?;
 

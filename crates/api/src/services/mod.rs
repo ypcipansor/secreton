@@ -68,7 +68,7 @@ impl ApiServiceContainer {
         // Note: Real implementation would use config to pick backend
 
         // Initialize crypto service
-        let crypto = Arc::new(CryptoService::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
 
         // Initialize audit logger
         let audit = Arc::new(AuditLogger::new(storage.clone()).await?);

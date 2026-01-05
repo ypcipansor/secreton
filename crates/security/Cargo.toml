@@ -52,7 +52,8 @@ prometheus = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 
 # WASM support
-wasmi.workspace = true
+wasmi = { workspace = true, optional = true }
+base64.workspace = true
 
 # Additional dependencies for security policies
 glob.workspace = true
@@ -66,4 +67,4 @@ postgres = ["tokio-postgres", "deadpool-postgres"]
 redis = ["dep:redis"]
 monitoring = ["sentry", "opentelemetry"]
 prometheus-metrics = ["prometheus", "metrics-exporter-prometheus"]
-# wasm = ["wasmtime"]
+wasmi = ["dep:wasmi"]
