@@ -193,6 +193,7 @@ impl ApiServiceContainer {
         registry.register_service("audit".to_string(), audit.clone());
         registry.register_service("auth".to_string(), auth.clone());
         registry.register_service("policy".to_string(), policy_service.clone());
+        registry.register_service("mfa".to_string(), mfa.clone());
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
         registry.register_service("telemetry".to_string(), telemetry);

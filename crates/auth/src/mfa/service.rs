@@ -78,6 +78,20 @@ pub trait MfaService: Send + Sync {
 
     /// Check if MFA is required for an entity
     async fn is_mfa_required(&self, entity_id: Uuid) -> AuthMethodResult<bool>;
+
+    /// Enable TOTP for an entity
+    async fn enable_totp(
+        &self,
+        entity_id: Uuid,
+        issuer: String,
+        account_name: String,
+    ) -> AuthMethodResult<crate::mfa::totp::TotpEnrollment>;
+
+    /// Disable TOTP for an entity
+    async fn disable_totp(&self, entity_id: Uuid) -> AuthMethodResult<()>;
+
+    /// Regenerate recovery codes for an entity
+    async fn regenerate_recovery_codes(&self, entity_id: Uuid) -> AuthMethodResult<Vec<String>>;
 }
 
 /// Combined MFA service implementation
@@ -308,5 +322,65 @@ impl MfaService for CombinedMfaService {
     async fn is_mfa_required(&self, entity_id: Uuid) -> AuthMethodResult<bool> {
         let enrollments = self.enrollments.read().await;
         Ok(enrollments.contains_key(&entity_id))
+    }
+
+    async fn enable_totp(
+        &self,
+        entity_id: Uuid,
+        issuer: String,
+        account_name: String,
+    ) -> AuthMethodResult<crate::mfa::totp::TotpEnrollment> {
+        let enrollment = self.totp_service.enroll(entity_id, account_name).await?;
+
+        // Update enrollment methods
+        let mut enrollments = self.enrollments.write().await;
+        let entry = enrollments.entry(entity_id).or_insert(MfaEnrollment {
+            entity_id,
+            methods: Vec::new(),
+            required_methods: Vec::new(),
+            enrolled_at: Utc::now(),
+        });
+
+        if !entry.methods.contains(&MfaMethod::Totp) {
+            entry.methods.push(MfaMethod::Totp);
+        }
+
+        Ok(enrollment)
+    }
+
+    async fn disable_totp(&self, entity_id: Uuid) -> AuthMethodResult<()> {
+        self.totp_service.remove_enrollment(entity_id).await?;
+
+        // Update enrollment methods
+        let mut enrollments = self.enrollments.write().await;
+        if let Some(entry) = enrollments.get_mut(&entity_id) {
+            entry.methods.retain(|m| *m != MfaMethod::Totp);
+
+            // If no methods left, remove enrollment
+            if entry.methods.is_empty() {
+                enrollments.remove(&entity_id);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn regenerate_recovery_codes(&self, entity_id: Uuid) -> AuthMethodResult<Vec<String>> {
+        let response = self.recovery_service.generate_codes(entity_id).await?;
+
+        // Ensure Recovery method is added to enrollment
+        let mut enrollments = self.enrollments.write().await;
+        let entry = enrollments.entry(entity_id).or_insert(MfaEnrollment {
+            entity_id,
+            methods: Vec::new(),
+            required_methods: Vec::new(),
+            enrolled_at: Utc::now(),
+        });
+
+        if !entry.methods.contains(&MfaMethod::Recovery) {
+            entry.methods.push(MfaMethod::Recovery);
+        }
+
+        Ok(response.codes)
     }
 }
