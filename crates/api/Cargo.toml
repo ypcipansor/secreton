@@ -64,7 +64,7 @@ secreton-core = { path = "../core" }
 secreton-storage = { path = "../storage" }
 secreton-crypto = { path = "../crypto" }
 secreton-errors = { path = "../errors" }
-secreton-security = { path = "../security" }
+secreton-security = { path = "../security", features = ["wasmi"] }
 secreton-common = { path = "../common" }
 # secreton-token = { path = "../token" }  # JWT functionality moved to auth crate
 secreton-auth = { path = "../auth" }

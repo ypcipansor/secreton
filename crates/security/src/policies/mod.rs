@@ -15,6 +15,9 @@ pub mod secret_scanning;
 pub mod sentinel;
 pub mod sentinel_policy;
 pub mod wrapping;
-mod wasm;
-#[cfg(test)]
+
+#[cfg(feature = "wasmi")]
+pub mod wasm;
+
+#[cfg(all(test, feature = "wasmi"))]
 mod tests_wasm;
