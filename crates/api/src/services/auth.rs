@@ -127,6 +127,8 @@ pub struct ApiLoginResponse {
     pub token: AuthToken,
 }
 
+const SESSION_STORAGE_PREFIX: &str = "sys/sessions/";
+
 /// Authentication service facade
 pub struct AuthenticationService {
     /// Unified authentication service
@@ -374,7 +376,7 @@ impl AuthenticationService {
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
         let params = secreton_storage::QueryParams {
-            path_prefix: Some("sys/sessions/".to_string()),
+            path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
             include_expired: true,
             ..Default::default()
         };
@@ -384,9 +386,16 @@ impl AuthenticationService {
 
         for session in sessions {
             if session.is_expired() {
-                self.storage.delete_by_path(&session.path).await?;
+                if let Err(e) = self.storage.delete_by_path(&session.path).await {
+                    tracing::warn!("Failed to delete expired session {}: {}", session.path, e);
+                    continue;
+                }
                 cleaned_count += 1;
             }
+        }
+
+        if cleaned_count > 0 {
+            tracing::info!("Cleaned up {} expired sessions", cleaned_count);
         }
 
         Ok(cleaned_count)
