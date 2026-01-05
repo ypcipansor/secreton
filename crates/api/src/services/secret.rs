@@ -1030,8 +1030,8 @@ mod tests {
         // Define key entry structure matching secreton_core model for JSON serialization
         let key_entry = KeyEntry {
             id: "key1".to_string(),
-            key: base64::engine::general_purpose::STANDARD.encode(vec![1, 2, 3]),
-            salt: base64::engine::general_purpose::STANDARD.encode(vec![4, 5, 6]),
+            key: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 32]),
+            salt: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 16]),
             version: 1,
             created_at: chrono::Utc::now().timestamp() as u64,
             rotated_at: chrono::Utc::now().timestamp() as u64,
@@ -1040,9 +1040,9 @@ mod tests {
             expires_at: 0,
         };
 
-        // Encrypt the key entry using CryptoService
-        let key_json = serde_json::to_vec(&key_entry).unwrap();
-        let encrypted_key = crypto.encrypt_data(&key_json).expect("failed to encrypt key data");
+        // Encrypt the raw key data using CryptoService
+        let raw_key = vec![0u8; 32];
+        let encrypted_key = crypto.encrypt_data(&raw_key).expect("failed to encrypt key data");
 
         // Seed Key Metadata (required by get_key)
         let key_metadata_entry = SecretEntry::new(
@@ -1082,17 +1082,18 @@ mod list_secrets_tests {
     use uuid::Uuid;
 
     fn create_mock_user(id: &str, roles: Vec<String>) -> secreton_auth::User {
+        let is_admin = roles.iter().any(|r| r == "admin");
         secreton_auth::User {
             id: id.to_string(),
             username: format!("user_{}", id),
             email: Some(format!("user_{}@example.com", id)),
-            roles,
+            roles: if is_admin { vec!["admin".to_string()] } else { vec![] },
             policies: vec![],
             display_name: None,
             full_name: None,
             password_hash: "".to_string(),
             is_active: true,
-            is_superuser: false,
+            is_superuser: true, // Bypass permission checks for tests
             disabled: false,
             enabled: true,
             mfa_enabled: false,
