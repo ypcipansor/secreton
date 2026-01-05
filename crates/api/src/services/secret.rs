@@ -273,7 +273,8 @@ impl SecretService {
     }
 
     /// Get policy by name
-    pub async fn get_policy(&self, name: &str) -> Result<Policy, SecretError> {
+    pub async fn get_policy(&self, name: &str, user: &secreton_auth::User) -> Result<Policy, SecretError> {
+        self.check_permission(user, &format!("sys/policies/{}", name), "read").await?;
         // Placeholder
         Ok(Policy {
             name: name.to_string(),
