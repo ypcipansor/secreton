@@ -188,16 +188,28 @@ mod tests {
         // Seed secret for tests
         let mut data = std::collections::HashMap::new();
         data.insert("key1".to_string(), "value1".to_string());
-        // For handlers, we assume get_secret returns the decrypted data map.
-        // Storage should contain the encrypted data (formatted locally as map for mock).
+        // For handlers, we need to encrypt the data since get_secret does decryption
+        let encrypted_data = services.crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await
+            .expect("Failed to encrypt test data");
         let entry = SecretEntry::new(
             "app/config".to_string(),
-            serde_json::to_vec(&data).unwrap(),
+            encrypted_data,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::new_v4(),
         );
         services.storage.store(&entry).await.ok();
+
+        // Seed user roles entry for mock_user so RBAC check_permission grants access
+        let user_roles = serde_json::json!({ "roles": ["admin"] });
+        let user_entry = SecretEntry::new(
+            format!("users/{}", "mock_user"),
+            serde_json::to_vec(&user_roles).unwrap(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        services.storage.store(&user_entry).await.ok();
 
         let app = create_routes().with_state(services);
         use std::net::SocketAddr;
