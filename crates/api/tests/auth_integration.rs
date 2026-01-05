@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_verify_password_integration() {
     let storage = Arc::new(MockStorageBackend::new());
-    let crypto = Arc::new(CryptoService::new());
+    let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
     let config = AuthConfig::default();
 
     let auth_service = AuthenticationService::new(storage, crypto, &config)
