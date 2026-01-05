@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use uuid::Uuid;
+use tokio::sync::RwLock;
 
 /// Wrapper for encrypted data including key version/ID
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,6 +111,9 @@ impl KeyStorage for SystemKeyStorage {
 pub struct CryptoService {
     key_manager: Arc<KeyManager>,
     crypto_engine: Arc<CryptoEngine>,
+    // Cache: (key_id, key_bytes, timestamp)
+    active_key_cache: Arc<RwLock<Option<(String, Vec<u8>, std::time::Instant)>>>,
+    cache_ttl: std::time::Duration,
 }
 
 impl CryptoService {
@@ -152,6 +156,8 @@ impl CryptoService {
         Ok(Self {
             key_manager,
             crypto_engine: Arc::new(CryptoEngine::new()),
+            active_key_cache: Arc::new(RwLock::new(None)),
+            cache_ttl: std::time::Duration::from_secs(300), // 5 minutes cache
         })
     }
 
@@ -175,12 +181,32 @@ impl CryptoService {
     /// Encrypt data with the active system key.
     /// Returns a serialized CryptoPacket containing key_id and encrypted data.
     pub async fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        // Get active key
-        let key = self.key_manager.get_active_key().await
-            .map_err(|e| anyhow::anyhow!("Failed to get active key: {}", e))?;
+        let mut key_info = None;
 
-        let key_id = self.key_manager.get_active_key_id().await
-            .map_err(|e| anyhow::anyhow!("Failed to get active key ID: {}", e))?;
+        // Try reading from cache
+        {
+            let cache = self.active_key_cache.read().await;
+            if let Some((id, key, ts)) = &*cache {
+                if ts.elapsed() < self.cache_ttl {
+                    key_info = Some((id.clone(), key.clone()));
+                }
+            }
+        }
+
+        // If not in cache, fetch and update cache
+        if key_info.is_none() {
+            let key = self.key_manager.get_active_key().await
+                .map_err(|e| anyhow::anyhow!("Failed to get active key: {}", e))?;
+            let key_id = self.key_manager.get_active_key_id().await
+                .map_err(|e| anyhow::anyhow!("Failed to get active key ID: {}", e))?;
+
+            // Update cache
+            let mut cache = self.active_key_cache.write().await;
+            *cache = Some((key_id.clone(), key.clone(), std::time::Instant::now()));
+            key_info = Some((key_id, key));
+        }
+
+        let (key_id, key) = key_info.unwrap();
 
         let encrypted_data = self.crypto_engine.encrypt(AlgorithmId::Aes256Gcm, plaintext, &key)
             .map_err(|e| anyhow::anyhow!("Encryption error: {}", e))?;
@@ -201,6 +227,7 @@ impl CryptoService {
             .map_err(|e| anyhow::anyhow!("Invalid encrypted data format: {}", e))?;
 
         // Get the specific key version
+        // We could cache old keys too if needed, but for now just active key
         let key = self.key_manager.get_key_by_id(&packet.key_id).await
             .map_err(|e| anyhow::anyhow!("Key not found ({}): {}", packet.key_id, e))?;
 
