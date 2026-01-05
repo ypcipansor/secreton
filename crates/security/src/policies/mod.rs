@@ -15,3 +15,6 @@ pub mod secret_scanning;
 pub mod sentinel;
 pub mod sentinel_policy;
 pub mod wrapping;
+mod wasm;
+#[cfg(test)]
+mod tests_wasm;
