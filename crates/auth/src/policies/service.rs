@@ -138,6 +138,22 @@ impl PolicyService {
         policies.values().cloned().collect()
     }
 
+    /// Get role ID by name
+    pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
+        let roles = self.roles.read().await;
+        roles.values()
+            .find(|r| r.name == name)
+            .map(|r| r.id)
+    }
+
+    /// Get policy ID by name
+    pub async fn get_policy_id_by_name(&self, name: &str) -> Option<Uuid> {
+        let policies = self.policies.read().await;
+        policies.values()
+            .find(|p| p.name == name)
+            .map(|p| p.id)
+    }
+
     /// Create a new role
     pub async fn create_role(&self, mut role: Role) -> PolicyResult<Role> {
         // Validate role
@@ -178,11 +194,6 @@ impl PolicyService {
             })
     }
 
-    /// Get role ID by name
-    pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
-        let roles = self.roles.read().await;
-        roles.values().find(|r| r.name == name).map(|r| r.id)
-    }
 
     /// Update role
     pub async fn update_role(&self, role_id: &Uuid, mut updates: Role) -> PolicyResult<Role> {
@@ -299,7 +310,9 @@ impl PolicyService {
         subject_policies: &[Uuid],
     ) -> PolicyResult<EvaluationResult> {
         let engine_guard = self.engine.read().await;
-        let evaluator = PolicyEvaluator::new((*engine_guard).clone());
+        let roles_guard = self.roles.read().await;
+
+        let evaluator = PolicyEvaluator::new(&engine_guard, &roles_guard);
         evaluator.evaluate(context, subject_roles, subject_policies)
     }
 

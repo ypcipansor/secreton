@@ -109,59 +109,41 @@ impl SecretService {
         path: &str,
         action: &str,
     ) -> Result<(), SecretError> {
-        // Admin/Superuser bypass for consistency with other services
+        // Admin/Superuser bypass
         if user.roles.iter().any(|r| r == "admin" || r == "superuser") || user.is_superuser {
             return Ok(());
         }
 
-        // Retrieve policies for the user
-        // For now, we fetch all policies and filter (simplified) or just use all.
-        // In a real system, we'd fetch only applicable policies.
-        // Since list_policies is a placeholder, this will return empty.
-        let policies = self.list_policies(None).await.unwrap_or_default();
-
-        let mut sentinel_policies = Vec::new();
-        let mut rbac_policies = Vec::new();
-
-        for policy in policies {
-            for rule in policy.rules {
-                if rule.starts_with("wasm:") || rule == "wasm" {
-                    // Treat as Sentinel/WASM policy
-                    sentinel_policies.push(SentinelPolicy {
-                        name: policy.name.clone(),
-                        enforcement_level: EnforcementLevel::HardMandatory,
-                        policy_code: rule,
-                        description: policy.metadata.description.clone(),
-                        created_at: policy.created_at,
-                        modified_at: policy.updated_at,
-                    });
-                } else {
-                    // Treat as RBAC rule (placeholder parsing)
-                    // TODO: Parse RBAC rule string into RbacPolicy struct
-                }
-            }
+        // RBAC Check
+        // Resolve role IDs
+        let mut role_ids = Vec::new();
+        for role_name in &user.roles {
+             if let Some(role_id) = self.policy_service.get_role_id_by_name(role_name).await {
+                 role_ids.push(role_id);
+             }
         }
 
-        let config = PolicyCheckConfig {
-            sentinel_policies: &sentinel_policies,
-            user: &user.username,
-            path,
-            action,
-            _context: None,
-            rbac_roles: &user.roles,
-            rbac_policies: &rbac_policies,
-            policyset_json: None,
+        // Resolve policy IDs
+        let mut policy_ids = Vec::new();
+        for policy_name in &user.policies {
+             if let Some(policy_id) = self.policy_service.get_policy_id_by_name(policy_name).await {
+                 policy_ids.push(policy_id);
+             }
+        }
+
+        let context = EvaluationContext {
+            subject: HashMap::from([("id".to_string(), user.id.clone())]),
+            resource: HashMap::from([("path".to_string(), path.to_string())]),
+            action: action.to_string(),
+            environment: HashMap::new(),
         };
 
-        if !check_policy_with_sentinel(config).await {
-            return Err(SecretError::PermissionDenied(format!(
-                "Permission denied for action '{}' on path '{}'",
-                action, path
-            )));
+        match self.policy_service.evaluate_access(&context, &role_ids, &policy_ids).await {
+            Ok(result) if result.allowed => Ok(()),
+            _ => Err(SecretError::PermissionDenied(format!("Action '{}' denied on '{}'", action, path))),
         }
-
-        Ok(())
     }
+
 
     /// Get secret by path
     pub async fn get_secret(&self, path: &str, user: &secreton_auth::User) -> Result<SecretData, SecretError> {
@@ -1069,7 +1051,115 @@ mod tests {
         assert!(!result.ciphertext.is_empty());
         assert_eq!(key_version, 1);
     }
+
+    #[tokio::test]
+    async fn test_create_key_permission_denied() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service).await.unwrap();
+
+        let user = secreton_auth::User {
+            id: "user_no_role".to_string(),
+            username: "user_no_role".to_string(),
+            email: None,
+            roles: vec![],
+            policies: vec![],
+            display_name: None,
+            full_name: None,
+            password_hash: "".to_string(),
+            is_active: true,
+            is_superuser: false,
+            disabled: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        let result = service.create_key("test_key", "aes256-gcm", &user).await;
+
+        assert!(matches!(result, Err(SecretError::PermissionDenied(_))));
+    }
+
+    #[tokio::test]
+    async fn test_create_key_permission_allowed() {
+        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service.clone()).await.unwrap();
+
+        let policy = Policy {
+            id: Uuid::new_v4(),
+            name: "allow_create_key".to_string(),
+            policy_type: PolicyType::RBAC,
+            effect: PolicyEffect::Allow,
+            rules: vec![PolicyRule {
+                id: Uuid::new_v4(),
+                name: "rule_allow_create".to_string(),
+                conditions: vec![],
+                actions: vec!["create".to_string()],
+                resources: vec!["keys/".to_string()],
+            }],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+
+        let created_policy = policy_service.create_policy(policy).await.unwrap();
+
+        let role = Role {
+            id: Uuid::new_v4(),
+            name: "key_creator".to_string(),
+            description: None,
+            parent_role: None,
+            policies: vec![created_policy.id],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        policy_service.create_role(role.clone()).await.unwrap();
+
+        let user = secreton_auth::User {
+            id: "user_with_role".to_string(),
+            username: "user_with_role".to_string(),
+            email: None,
+            roles: vec!["key_creator".to_string()],
+            policies: vec![],
+            display_name: None,
+            full_name: None,
+            password_hash: "".to_string(),
+            is_active: true,
+            is_superuser: false,
+            disabled: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        let result = service.create_key("test_key_allowed", "aes256-gcm", &user).await;
+
+        assert!(result.is_ok());
+    }
 }
+
 
 #[cfg(test)]
 mod list_secrets_tests {
