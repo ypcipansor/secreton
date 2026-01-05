@@ -171,14 +171,6 @@ impl KeyManager {
         }
     }
 
-    pub async fn get_active_key_id(&self) -> Result<String, CryptoError> {
-        match self.storage.get_key("active_key_ref").await {
-            Ok(key_id_bytes) => String::from_utf8(key_id_bytes)
-                .map_err(|_| CryptoError::Internal("Invalid key ID format".to_string())),
-            Err(_) => Ok("active_key".to_string()),
-        }
-    }
-
     pub async fn get_key_by_id(&self, key_id: &str) -> Result<Vec<u8>, CryptoError> {
         self.storage.get_key(key_id).await
     }

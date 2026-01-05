@@ -173,7 +173,7 @@ impl SecretService {
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
 
         // Decrypt the secret data
-        let decrypted_data = self.crypto.decrypt(&encrypted_entry.encrypted_data).await
+        let decrypted_data = self.crypto.decrypt(&encrypted_entry.encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse the decrypted data as JSON
@@ -212,7 +212,7 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to serialize secret data: {}", e)))?;
 
         // Encrypt the data
-        let encrypted_data = self.crypto.encrypt_data(&json_data).await
+        let encrypted_data = self.crypto.encrypt_data(&json_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
@@ -345,7 +345,7 @@ impl SecretService {
         for entry in entries {
             if self.check_permission(user, &entry.path, "read").await.is_ok() {
                 // Decrypt the secret data
-                match self.crypto.decrypt(&entry.encrypted_data).await {
+                match self.crypto.decrypt(&entry.encrypted_data) {
                     Ok(decrypted_data) => {
                         // Parse the decrypted data as JSON
                         match serde_json::from_slice::<HashMap<String, String>>(&decrypted_data) {
@@ -431,7 +431,7 @@ impl SecretService {
             .map_err(|e| SecretError::Storage(e))?;
 
         // Encrypt the key data before storing
-        let encrypted_key_data = self.crypto.encrypt_data(&key_data).await
+        let encrypted_key_data = self.crypto.encrypt_data(&key_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
         
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
@@ -769,7 +769,7 @@ impl SecretService {
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self.crypto.decrypt(&key_entry.encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Generate nonce/IV
@@ -821,7 +821,7 @@ impl SecretService {
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self.crypto.decrypt(&key_entry.encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Decrypt the user data using the key
@@ -880,7 +880,7 @@ impl SecretService {
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self.crypto.decrypt(&key_entry.encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Verify signature
@@ -965,7 +965,7 @@ mod tests {
     #[tokio::test]
     async fn test_secreton_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
@@ -977,7 +977,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_secret_with_permission() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
@@ -988,7 +988,7 @@ mod tests {
         
         let secret_entry = SecretEntry::new(
             "app/config".to_string(),
-            crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await.unwrap(),
+            crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).unwrap(), // Use crypto to encrypt
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::new_v4(),
@@ -1005,7 +1005,7 @@ mod tests {
     #[tokio::test]
     async fn test_put_secret_placeholder() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
@@ -1022,7 +1022,7 @@ mod tests {
     #[tokio::test]
     async fn test_encrypt_placeholder_response() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
@@ -1030,8 +1030,8 @@ mod tests {
         // Define key entry structure matching secreton_core model for JSON serialization
         let key_entry = KeyEntry {
             id: "key1".to_string(),
-            key: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 32]),
-            salt: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 16]),
+            key: base64::engine::general_purpose::STANDARD.encode(vec![1, 2, 3]),
+            salt: base64::engine::general_purpose::STANDARD.encode(vec![4, 5, 6]),
             version: 1,
             created_at: chrono::Utc::now().timestamp() as u64,
             rotated_at: chrono::Utc::now().timestamp() as u64,
@@ -1040,13 +1040,13 @@ mod tests {
             expires_at: 0,
         };
 
-        // Encrypt the raw key data using CryptoService
-        let raw_key = vec![0u8; 32];
-        let encrypted_key = crypto.encrypt_data(&raw_key).await.expect("failed to encrypt key data");
+        // Encrypt the key entry using CryptoService
+        let key_json = serde_json::to_vec(&key_entry).unwrap();
+        let encrypted_key = crypto.encrypt_data(&key_json).expect("failed to encrypt key data");
 
         // Seed Key Metadata (required by get_key)
         let key_metadata_entry = SecretEntry::new(
-            "keys/user1/key1".to_string(),
+            "keys/user1/key1".to_string(), // Assumed path for get_key
             serde_json::to_vec(&key_entry).unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
@@ -1054,6 +1054,8 @@ mod tests {
         );
         let _ = storage.store(&key_metadata_entry).await;
 
+        // keys also stored as SecretEntry in backend
+        // So keys must be stored as SecretEntry with path "keys/..."
         let key_storage_entry = SecretEntry::new(
             "key_data/user1/key1".to_string(),
             encrypted_key,
@@ -1080,18 +1082,17 @@ mod list_secrets_tests {
     use uuid::Uuid;
 
     fn create_mock_user(id: &str, roles: Vec<String>) -> secreton_auth::User {
-        let is_admin = roles.iter().any(|r| r == "admin");
         secreton_auth::User {
             id: id.to_string(),
             username: format!("user_{}", id),
             email: Some(format!("user_{}@example.com", id)),
-            roles: if is_admin { vec!["admin".to_string()] } else { vec![] },
+            roles,
             policies: vec![],
             display_name: None,
             full_name: None,
             password_hash: "".to_string(),
             is_active: true,
-            is_superuser: true, // Always bypass permission check for tests
+            is_superuser: false,
             disabled: false,
             enabled: true,
             mfa_enabled: false,
@@ -1106,7 +1107,7 @@ mod list_secrets_tests {
     #[tokio::test]
     async fn test_list_secrets_permissions() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
@@ -1118,7 +1119,7 @@ mod list_secrets_tests {
         // Create secrets for user1
         let entry1 = SecretEntry::new(
             "app/user1/secret1".to_string(),
-            crypto.encrypt_data(br#"{"key": "value"}"#).await.unwrap(),
+            crypto.encrypt_data(br#"{"key": "value"}"#).unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             user1_uuid,
@@ -1128,7 +1129,7 @@ mod list_secrets_tests {
         // Create secrets for user2
         let entry2 = SecretEntry::new(
             "app/user2/secret1".to_string(),
-            crypto.encrypt_data(br#"{"key": "value"}"#).await.unwrap(),
+            crypto.encrypt_data(br#"{"key": "value"}"#).unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             user2_uuid,

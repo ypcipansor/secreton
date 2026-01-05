@@ -1559,7 +1559,7 @@ mod tests {
     #[tokio::test]
     async fn test_admin_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1571,7 +1571,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_system_stats() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1587,7 +1587,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_backup_returns_metadata() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1601,7 +1601,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_garbage_collection_returns_details() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new());
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());

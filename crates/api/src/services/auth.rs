@@ -545,7 +545,7 @@ mod tests {
     #[tokio::test]
     async fn test_auth_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let config = AuthConfig::default();
 
         let auth_service = AuthenticationService::new(storage, crypto, &config).await;
@@ -558,7 +558,7 @@ mod tests {
         use uuid::Uuid;
 
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(CryptoService::new());
         let config = AuthConfig::default();
 
         let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap();
