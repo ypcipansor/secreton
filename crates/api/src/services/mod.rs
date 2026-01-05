@@ -49,6 +49,7 @@ pub struct ApiServiceContainer {
     pub crypto: Arc<CryptoService>,
     pub audit: Arc<AuditLogger>,
     pub auth: Arc<AuthenticationService>,
+    pub policy: Arc<PolicyService>,
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
     pub mfa: Arc<CombinedMfaService>,
@@ -78,6 +79,7 @@ impl ApiServiceContainer {
         ).await?);
 
         // Initialize policy service
+    // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());
 
         // Initialize secret service
@@ -202,6 +204,7 @@ impl ApiServiceContainer {
             crypto,
             audit,
             auth,
+            policy: policy_service,
             secreton,
             admin,
             mfa,

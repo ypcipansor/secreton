@@ -178,6 +178,12 @@ impl PolicyService {
             })
     }
 
+    /// Get role ID by name
+    pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
+        let roles = self.roles.read().await;
+        roles.values().find(|r| r.name == name).map(|r| r.id)
+    }
+
     /// Update role
     pub async fn update_role(&self, role_id: &Uuid, mut updates: Role) -> PolicyResult<Role> {
         let mut roles = self.roles.write().await;
