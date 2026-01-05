@@ -1033,12 +1033,7 @@ mod tests {
         );
         let _ = storage.store(&secret_entry).await;
 
-<<<<<<< HEAD
-        let crypto = Arc::new(CryptoService::new());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let policy_service = Arc::new(PolicyService::new());
-=======
->>>>>>> 0d6cde0 (feat: implement proper RBAC policy checks in SecretService)
+
         let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         // Note: With empty policies in role, evaluate_access defaults to deny unless configured otherwise.
@@ -1047,7 +1042,11 @@ mod tests {
         // However, for this unit test, let's just check that it runs without panic.
         // Actually, without policy it will fail with PermissionDenied, which is correct behavior for RBAC.
 
-<<<<<<< HEAD
+        let result = service.get_secret("app/config", "user1").await;
+        // It should be PermissionDenied because we didn't add allow policy
+        assert!(matches!(result, Err(SecretError::PermissionDenied(_))));
+    }
+
     #[tokio::test]
     async fn test_put_secret_placeholder() {
         let storage = Arc::new(MockStorageBackend::new());
@@ -1061,11 +1060,6 @@ mod tests {
         let secret = service.put_secret("app/admin", data, "user1").await.unwrap();
         assert_eq!(secret.path, "app/admin");
         assert!(secret.data.contains_key("username"));
-=======
-        let result = service.get_secret("app/config", "user1").await;
-        // It should be PermissionDenied because we didn't add allow policy
-        assert!(matches!(result, Err(SecretError::PermissionDenied(_))));
->>>>>>> 0d6cde0 (feat: implement proper RBAC policy checks in SecretService)
     }
 
     #[tokio::test]
@@ -1113,10 +1107,7 @@ mod tests {
         let _ = storage.store(&key_storage_entry).await;
 
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-<<<<<<< HEAD
-        let policy_service = Arc::new(PolicyService::new());
-=======
->>>>>>> 0d6cde0 (feat: implement proper RBAC policy checks in SecretService)
+
         let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         // Setup user for permission check (encrypt uses get_key which calls check_permission)
