@@ -68,6 +68,13 @@ pub enum AlgorithmId {
     Aes256Gcm,
     ChaCha20Poly1305,
 
+    // Asymmetric encryption / signing
+    Rsa2048,
+    Rsa4096,
+    EcdsaP256,
+    EcdsaP384,
+    Ed25519,
+
     // Hash functions
     Sha256,
     Sha3_256,
@@ -83,6 +90,11 @@ impl fmt::Display for AlgorithmId {
         let name = match self {
             AlgorithmId::Aes256Gcm => "AES-256-GCM",
             AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305",
+            AlgorithmId::Rsa2048 => "RSA-2048",
+            AlgorithmId::Rsa4096 => "RSA-4096",
+            AlgorithmId::EcdsaP256 => "ECDSA-P256",
+            AlgorithmId::EcdsaP384 => "ECDSA-P384",
+            AlgorithmId::Ed25519 => "Ed25519",
             AlgorithmId::Sha256 => "SHA-256",
             AlgorithmId::Sha3_256 => "SHA3-256",
             AlgorithmId::Blake3 => "BLAKE3",
@@ -108,6 +120,11 @@ impl SecurityParams {
         let (key_size, iterations, salt_size) = match algorithm {
             AlgorithmId::Aes256Gcm => (32, None, Some(12)),
             AlgorithmId::ChaCha20Poly1305 => (32, None, Some(12)),
+            AlgorithmId::Rsa2048 => (256, None, None),
+            AlgorithmId::Rsa4096 => (512, None, None),
+            AlgorithmId::EcdsaP256 => (32, None, None),
+            AlgorithmId::EcdsaP384 => (48, None, None),
+            AlgorithmId::Ed25519 => (32, None, None),
             AlgorithmId::Sha256 => (32, None, None),
             AlgorithmId::Sha3_256 => (32, None, None),
             AlgorithmId::Blake3 => (32, None, None),
@@ -127,6 +144,11 @@ impl SecurityParams {
     pub fn is_secure(&self) -> bool {
         match self.algorithm {
             AlgorithmId::Aes256Gcm | AlgorithmId::ChaCha20Poly1305 => self.key_size >= 32,
+            AlgorithmId::Rsa2048 => self.key_size >= 256,
+            AlgorithmId::Rsa4096 => self.key_size >= 512,
+            AlgorithmId::EcdsaP256 => self.key_size >= 32,
+            AlgorithmId::EcdsaP384 => self.key_size >= 48,
+            AlgorithmId::Ed25519 => self.key_size >= 32,
             AlgorithmId::Pbkdf2 => self.iterations.unwrap_or(0) >= 100_000 && self.key_size >= 32,
             AlgorithmId::Argon2id => self.iterations.unwrap_or(0) >= 3 && self.key_size >= 32,
             _ => true,

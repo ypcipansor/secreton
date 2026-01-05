@@ -326,11 +326,11 @@ impl SecretService {
         let algorithm = match key_type {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
-            "rsa-2048" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: RSA not in AlgorithmId
-            "rsa-4096" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: RSA not in AlgorithmId
-            "ecdsa-p256" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: ECDSA not in AlgorithmId
-            "ecdsa-p384" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: ECDSA not in AlgorithmId
-            "ed25519" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: Ed25519 not in AlgorithmId
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
             _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type: {}", key_type))),
         };
 
@@ -551,11 +551,11 @@ impl SecretService {
         let algorithm = match current_key.key_type.as_str() {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
-            "rsa-2048" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: RSA not in AlgorithmId
-            "rsa-4096" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: RSA not in AlgorithmId
-            "ecdsa-p256" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: ECDSA not in AlgorithmId
-            "ecdsa-p384" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: ECDSA not in AlgorithmId
-            "ed25519" => secreton_crypto::AlgorithmId::Aes256Gcm, // TODO: Ed25519 not in AlgorithmId
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
             _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type: {}", current_key.key_type))),
         };
 
