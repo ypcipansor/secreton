@@ -12,11 +12,13 @@ use uuid::Uuid;
 
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
-use secreton_storage::StorageBackend;
+use secreton_storage::{StorageBackend, QueryParams};
 use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod};
 use secreton_core::User;
 use thiserror::Error;
 use crate::ApiResult;
+
+pub const USER_STORAGE_PREFIX: &str = "users/";
 
 #[derive(Debug, Deserialize)]
 pub struct ApiLoginRequest {
@@ -364,9 +366,9 @@ impl AuthenticationService {
 
     /// Get total user count
     pub async fn get_user_count(&self) -> Result<u64, AuthError> {
-        // TODO: Implement actual user count from storage
-        // For now, return a reasonable default
-        Ok(10)
+        let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
+        let count = self.storage.count(&params).await?;
+        Ok(count)
     }
 
     /// Get active session count
@@ -603,5 +605,46 @@ mod tests {
         assert!(!storage.exists("sys/sessions/expired1").await.unwrap(), "Expired session should be removed");
         assert!(storage.exists("sys/sessions/active1").await.unwrap(), "Active session should remain");
         assert!(storage.exists("other/path/expired2").await.unwrap(), "Unrelated expired entry should remain");
+    }
+
+    #[tokio::test]
+    async fn test_get_user_count() {
+        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+
+        let storage = Arc::new(MockStorageBackend::new());
+
+        // Add some dummy users
+        let user1 = SecretEntry::new(
+            format!("{}user1", USER_STORAGE_PREFIX),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        let user2 = SecretEntry::new(
+            format!("{}user2", USER_STORAGE_PREFIX),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        let other = SecretEntry::new(
+            "secrets/something".to_string(),
+            vec![],
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+
+        storage.store(&user1).await.unwrap();
+        storage.store(&user2).await.unwrap();
+        storage.store(&other).await.unwrap();
+
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let config = AuthConfig::default();
+        let auth_service = AuthenticationService::new(storage, crypto, &config).await.unwrap();
+
+        let count = auth_service.get_user_count().await.unwrap();
+        assert_eq!(count, 2);
     }
 }

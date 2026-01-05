@@ -11,7 +11,7 @@ use uuid;
 
 use crate::services::audit::AuditLogger;
 use secreton_storage::{StorageBackend, QueryParams};
-use crate::services::auth::AuthenticationService;
+use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
 
 /// Admin service errors
 #[derive(Error, Debug)]
@@ -1279,7 +1279,7 @@ impl AdminService {
         use secreton_storage::QueryParams;
 
         let query_params = QueryParams {
-            path_prefix: Some("users/".to_string()),
+            path_prefix: Some(USER_STORAGE_PREFIX.to_string()),
             limit: Some(1000),
             offset: Some(0),
             ..Default::default()
@@ -1301,7 +1301,7 @@ impl AdminService {
 
     /// Get user by ID
     pub async fn get_user(&self, user_id: &str) -> Result<UserInfo, AdminError> {
-        let path = format!("users/{}", user_id);
+        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let entry = self.storage.get_by_path(&path)
             .await
             .map_err(|e| AdminError::Storage(e))?
@@ -1313,7 +1313,7 @@ impl AdminService {
     /// Create a new user
     pub async fn create_user(&self, request: CreateUserRequest) -> Result<UserInfo, AdminError> {
         // Check if user already exists
-        let _existing_path = format!("users/{}", uuid::Uuid::new_v4());
+        let _existing_path = format!("{}{}", USER_STORAGE_PREFIX, uuid::Uuid::new_v4());
         // Actually check by username - this is a simplified check
         // In production, you'd want a unique constraint on username
 
@@ -1375,7 +1375,7 @@ impl AdminService {
             return Err(AdminError::NotPermitted("Cannot delete admin user".to_string()));
         }
 
-        let path = format!("users/{}", user_id);
+        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let deleted = self.storage.delete_by_path(&path)
             .await
             .map_err(|e| AdminError::Storage(e))?;
@@ -1408,7 +1408,7 @@ impl AdminService {
             .map_err(|e| AdminError::Internal(anyhow::anyhow!("Invalid user ID: {}", e)))?;
 
         Ok(SecretEntry::new(
-            format!("users/{}", user.id),
+            format!("{}{}", USER_STORAGE_PREFIX, user.id),
             user_data,
             encryption_metadata,
             SecurityLevel::Secret,
