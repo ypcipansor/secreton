@@ -132,7 +132,6 @@ impl CombinedMfaService {
     pub async fn enable_totp(
         &self,
         entity_id: Uuid,
-        issuer: String,
         account_name: String,
     ) -> AuthMethodResult<TotpEnrollment> {
         // Enroll in TOTP service

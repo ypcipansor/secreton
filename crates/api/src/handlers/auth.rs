@@ -731,12 +731,10 @@ pub async fn setup_mfa(
     // Only support TOTP for now via this endpoint as per original logic
     if request.method != "totp" {
         return Err(crate::ApiError::BadRequest("Only TOTP is currently supported for direct setup".to_string()));
+    }
 
-
-    let issuer = "Secreton";
     let totp_config = state.mfa.enable_totp(
         user_id,
-        issuer.to_string(),
         user.username.clone(),
     ).await.map_err(|e| {
         crate::ApiError::Internal(format!("Failed to setup MFA: {}", e))

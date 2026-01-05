@@ -9,6 +9,7 @@ Cargo.lock
 
 # Logs
 *.log
+*.txt
 
 # Environment variables
 .env
