@@ -12,6 +12,7 @@ use uuid;
 use crate::services::audit::AuditLogger;
 use secreton_storage::{StorageBackend, QueryParams};
 use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
+use secreton_performance::SecretPerformanceOptimizer;
 
 /// Admin service errors
 #[derive(Error, Debug)]
@@ -115,6 +116,7 @@ pub struct AdminService {
     auth: Arc<AuthenticationService>,
     #[allow(dead_code)] // Reserved for future audit integration
     _audit: Arc<AuditLogger>,
+    performance: Arc<SecretPerformanceOptimizer>,
     #[allow(dead_code)] // Reserved for request metrics  
     _request_count: Arc<std::sync::Mutex<u64>>,
     #[allow(dead_code)] // Reserved for rate calculation
@@ -127,11 +129,13 @@ impl AdminService {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         auth: Arc<AuthenticationService>,
         audit: Arc<AuditLogger>,
+        performance: Arc<SecretPerformanceOptimizer>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             auth,
             _audit: audit,
+            performance,
             _request_count: Arc::new(std::sync::Mutex::new(0)),
             _last_request_time: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
         })
@@ -214,9 +218,10 @@ impl AdminService {
 
     /// Get cache hit rate (0.0 to 1.0)
     async fn get_cache_hit_rate(&self) -> f64 {
-        // TODO: Implement actual cache hit rate tracking
-        // For now, return a reasonable default
-        0.85
+        match self.performance.analyze_performance().await {
+            Ok(metrics) => metrics.cache_hit_rate,
+            Err(_) => 0.0,
+        }
     }
 
     /// Get requests per minute (actual implementation based on audit logs)
@@ -1563,8 +1568,9 @@ mod tests {
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let admin_service = AdminService::new(storage, auth, audit).await;
+        let admin_service = AdminService::new(storage, auth, audit, performance).await;
         assert!(admin_service.is_ok());
     }
 
@@ -1575,7 +1581,8 @@ mod tests {
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = AdminService::new(storage, auth, audit).await.unwrap();
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
 
         let stats = service.get_system_stats().await.expect("stats should be retrieved");
         assert!(stats.uptime_seconds >= 0);
@@ -1591,7 +1598,8 @@ mod tests {
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = AdminService::new(storage, auth, audit).await.unwrap();
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
 
         let backup = service.create_backup().await.expect("backup");
         assert!(backup.encrypted);
@@ -1605,7 +1613,8 @@ mod tests {
         let config = AuthConfig::default();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = AdminService::new(storage, auth, audit).await.unwrap();
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");
