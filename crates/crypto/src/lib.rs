@@ -7,6 +7,7 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use pkcs8::EncodePrivateKey;
 
 pub mod advanced_key_manager;
 pub mod authenticated_key_operations;
@@ -68,6 +69,13 @@ pub enum AlgorithmId {
     Aes256Gcm,
     ChaCha20Poly1305,
 
+    // Asymmetric encryption / signing
+    Rsa2048,
+    Rsa4096,
+    EcdsaP256,
+    EcdsaP384,
+    Ed25519,
+
     // Hash functions
     Sha256,
     Sha3_256,
@@ -83,6 +91,11 @@ impl fmt::Display for AlgorithmId {
         let name = match self {
             AlgorithmId::Aes256Gcm => "AES-256-GCM",
             AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305",
+            AlgorithmId::Rsa2048 => "RSA-2048",
+            AlgorithmId::Rsa4096 => "RSA-4096",
+            AlgorithmId::EcdsaP256 => "ECDSA-P256",
+            AlgorithmId::EcdsaP384 => "ECDSA-P384",
+            AlgorithmId::Ed25519 => "Ed25519",
             AlgorithmId::Sha256 => "SHA-256",
             AlgorithmId::Sha3_256 => "SHA3-256",
             AlgorithmId::Blake3 => "BLAKE3",
@@ -108,6 +121,11 @@ impl SecurityParams {
         let (key_size, iterations, salt_size) = match algorithm {
             AlgorithmId::Aes256Gcm => (32, None, Some(12)),
             AlgorithmId::ChaCha20Poly1305 => (32, None, Some(12)),
+            AlgorithmId::Rsa2048 => (256, None, None),
+            AlgorithmId::Rsa4096 => (512, None, None),
+            AlgorithmId::EcdsaP256 => (32, None, None),
+            AlgorithmId::EcdsaP384 => (48, None, None),
+            AlgorithmId::Ed25519 => (32, None, None),
             AlgorithmId::Sha256 => (32, None, None),
             AlgorithmId::Sha3_256 => (32, None, None),
             AlgorithmId::Blake3 => (32, None, None),
@@ -127,6 +145,11 @@ impl SecurityParams {
     pub fn is_secure(&self) -> bool {
         match self.algorithm {
             AlgorithmId::Aes256Gcm | AlgorithmId::ChaCha20Poly1305 => self.key_size >= 32,
+            AlgorithmId::Rsa2048 => self.key_size >= 256,
+            AlgorithmId::Rsa4096 => self.key_size >= 512,
+            AlgorithmId::EcdsaP256 => self.key_size >= 32,
+            AlgorithmId::EcdsaP384 => self.key_size >= 48,
+            AlgorithmId::Ed25519 => self.key_size >= 32,
             AlgorithmId::Pbkdf2 => self.iterations.unwrap_or(0) >= 100_000 && self.key_size >= 32,
             AlgorithmId::Argon2id => self.iterations.unwrap_or(0) >= 3 && self.key_size >= 32,
             _ => true,
@@ -146,7 +169,42 @@ pub fn generate_random_bytes(len: usize) -> CryptoResult<Vec<u8>> {
 /// Generate a random key for the specified algorithm
 pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
     let params = SecurityParams::new(algorithm);
-    generate_random_bytes(params.key_size)
+
+    match algorithm {
+        AlgorithmId::Rsa2048 | AlgorithmId::Rsa4096 => {
+            let bit_size = params.key_size * 8;
+            let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bit_size)
+                .map_err(|e| CryptoError::KeyGenerationFailed(format!("RSA generation failed: {}", e)))?;
+
+            let doc = private_key.to_pkcs8_der()
+                .map_err(|e| CryptoError::KeyGenerationFailed(format!("RSA PKCS8 encoding failed: {}", e)))?;
+
+            Ok(doc.as_bytes().to_vec())
+        },
+        AlgorithmId::EcdsaP256 => {
+            let secret_key = p256::SecretKey::random(&mut OsRng);
+            let doc = secret_key.to_pkcs8_der()
+                .map_err(|e| CryptoError::KeyGenerationFailed(format!("ECDSA P-256 PKCS8 encoding failed: {}", e)))?;
+            Ok(doc.as_bytes().to_vec())
+        },
+        AlgorithmId::EcdsaP384 => {
+            let secret_key = p384::SecretKey::random(&mut OsRng);
+            let doc = secret_key.to_pkcs8_der()
+                .map_err(|e| CryptoError::KeyGenerationFailed(format!("ECDSA P-384 PKCS8 encoding failed: {}", e)))?;
+            Ok(doc.as_bytes().to_vec())
+        },
+        AlgorithmId::Ed25519 => {
+            // ed25519-dalek might not have 'rand' or 'pkcs8' feature enabled in workspace
+            // Use explicit random generation and from_bytes
+            let mut seed = [0u8; 32];
+            OsRng.fill_bytes(&mut seed);
+
+            // We return the raw 32-byte seed as the private key for Ed25519.
+            // This avoids dependency on the 'pkcs8' feature of ed25519-dalek which might be missing.
+            Ok(seed.to_vec())
+        },
+        _ => generate_random_bytes(params.key_size),
+    }
 }
 
 /// Generate a random nonce/IV for the specified algorithm
