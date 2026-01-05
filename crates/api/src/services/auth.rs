@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use serde_json;
 
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
@@ -130,7 +131,6 @@ pub struct ApiLoginResponse {
     pub token: AuthToken,
 }
 
-const SESSION_STORAGE_PREFIX: &str = "sys/sessions/";
 
 /// Authentication service facade
 pub struct AuthenticationService {
@@ -421,6 +421,15 @@ impl AuthenticationService {
         let count = self.storage.count(&params).await
             .map_err(|e| AuthError::Storage(e))?;
 
+        Ok(count)
+    }
+
+    /// Cleanup expired sessions
+    pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
+        // TODO: Optimize this for large datasets. Currently it fetches all sessions and filters in memory.
+        // A better approach would be to have the storage backend support filtering by expiration or
+        // a dedicated expiration index.
+        let params = QueryParams {
             path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
             include_expired: true,
             ..Default::default()
@@ -616,7 +625,7 @@ mod tests {
 
         // Add expired session
         let expired_session = SecretEntry::new(
-            "sys/sessions/expired1".to_string(),
+            "sys/auth/sessions/expired1".to_string(),
             vec![],
             EncryptionMetadata::default(),
             SecurityLevel::Internal,
@@ -626,7 +635,7 @@ mod tests {
 
         // Add active session
         let active_session = SecretEntry::new(
-            "sys/sessions/active1".to_string(),
+            "sys/auth/sessions/active1".to_string(),
             vec![],
             EncryptionMetadata::default(),
             SecurityLevel::Internal,
@@ -651,8 +660,8 @@ mod tests {
         assert_eq!(cleaned_count, 1, "Should cleanup exactly 1 session");
 
         // Check storage state
-        assert!(!storage.exists("sys/sessions/expired1").await.unwrap(), "Expired session should be removed");
-        assert!(storage.exists("sys/sessions/active1").await.unwrap(), "Active session should remain");
+        assert!(!storage.exists("sys/auth/sessions/expired1").await.unwrap(), "Expired session should be removed");
+        assert!(storage.exists("sys/auth/sessions/active1").await.unwrap(), "Active session should remain");
         assert!(storage.exists("other/path/expired2").await.unwrap(), "Unrelated expired entry should remain");
     }
 
