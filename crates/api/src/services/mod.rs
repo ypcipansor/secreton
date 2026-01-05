@@ -90,38 +90,72 @@ impl ApiServiceContainer {
             audit.clone(),
         ).await?);
 
-        // Initialize MFA Services
-        // For now, we use InMemory/Default implementations. In production, these might be configured via `config`.
-        let totp_service = Arc::new(InMemoryTotpService::new("Secreton".to_string()));
+        // Initialize MFA Services using configuration
+        let mfa_config = &config.auth.mfa;
 
-        // Configure SMS Config (Default placeholder)
-        let sms_config = SmsConfig {
-            provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
-            api_key: "dummy-key".to_string(),
-            api_secret: None,
-            from_number: "000000".to_string(),
-            message_template: "Your Secreton code is {code}".to_string(),
-            code_length: 6,
-            code_expiry_seconds: 300,
+        let totp_service = Arc::new(InMemoryTotpService::new(mfa_config.totp.issuer.clone()));
+
+        // Configure SMS Config
+        // Map from ApiConfig::SmsConfig to Auth::SmsConfig
+        let sms_config = if let Some(sms) = &mfa_config.sms {
+            SmsConfig {
+                provider: match sms.provider.to_lowercase().as_str() {
+                    "twilio" => SmsProvider::Twilio,
+                    "awssns" | "aws_sns" => SmsProvider::AwsSns,
+                    "nexmo" => SmsProvider::Nexmo,
+                    _ => SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+                },
+                api_key: sms.api_key.clone(),
+                api_secret: None, // Config doesn't have secret yet
+                from_number: sms.from_number.clone(),
+                message_template: "Your Secreton code is {code}".to_string(),
+                code_length: 6,
+                code_expiry_seconds: 300,
+            }
+        } else {
+            // Default config if not provided
+            SmsConfig {
+                provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+                api_key: "dummy-key".to_string(),
+                api_secret: None,
+                from_number: "000000".to_string(),
+                message_template: "Your Secreton code is {code}".to_string(),
+                code_length: 6,
+                code_expiry_seconds: 300,
+            }
         };
         let sms_service = Arc::new(InMemorySmsService::new(sms_config));
 
-        // Configure Email Config (Default placeholder)
-        let email_config = EmailConfig {
-            smtp_server: "localhost".to_string(),
-            smtp_port: 1025,
-            smtp_username: "user".to_string(),
-            smtp_password: "password".to_string(),
-            from_email: "noreply@secreton.io".to_string(),
-            subject_template: "Secreton Verification Code".to_string(),
-            body_template: "Your verification code is: {code}".to_string(),
-            code_length: 6,
-            code_expiry_seconds: 300,
+        // Configure Email Config
+        let email_config = if let Some(email) = &mfa_config.email {
+            EmailConfig {
+                smtp_server: email.smtp_server.clone(),
+                smtp_port: email.smtp_port,
+                smtp_username: email.username.clone(),
+                smtp_password: email.password.clone(),
+                from_email: email.from_address.clone(),
+                subject_template: "Secreton Verification Code".to_string(),
+                body_template: "Your verification code is: {code}".to_string(),
+                code_length: 6,
+                code_expiry_seconds: 300,
+            }
+        } else {
+            EmailConfig {
+                smtp_server: "localhost".to_string(),
+                smtp_port: 1025,
+                smtp_username: "user".to_string(),
+                smtp_password: "password".to_string(),
+                from_email: "noreply@secreton.io".to_string(),
+                subject_template: "Secreton Verification Code".to_string(),
+                body_template: "Your verification code is: {code}".to_string(),
+                code_length: 6,
+                code_expiry_seconds: 300,
+            }
         };
         let email_service = Arc::new(InMemoryEmailService::new(email_config));
 
         let hardware_service = Arc::new(InMemoryHardwareService::new());
-        let push_service = Arc::new(DefaultPushService::new_mock()); // Using mock for now
+        let push_service = Arc::new(DefaultPushService::new_mock());
         let webauthn_service = Arc::new(DefaultWebAuthnService::new_default());
         let recovery_service = Arc::new(DefaultRecoveryCodeService::new());
 
