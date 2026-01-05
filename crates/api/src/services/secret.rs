@@ -10,10 +10,11 @@ use thiserror::Error;
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
 use secreton_auth::policies::service::PolicyService;
-use secreton_auth::policies::model::EvaluationContext;
+use secreton_auth::{IdentityService, policies::model::EvaluationContext};
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
 use secreton_core::User;
+use uuid::Uuid;
 
 /// Policy metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -77,6 +78,7 @@ pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     audit: Arc<AuditLogger>,
+    identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
 }
 
@@ -86,12 +88,14 @@ impl SecretService {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         crypto: Arc<CryptoService>,
         audit: Arc<AuditLogger>,
+        identity: Arc<dyn IdentityService + Send + Sync>,
         policy_service: Arc<PolicyService>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             crypto,
             audit,
+            identity,
             policy_service,
         })
     }
@@ -100,37 +104,34 @@ impl SecretService {
     async fn check_permission(&self, user_id: &str, action: &str, resource: &str) -> Result<bool, SecretError> {
         // Fetch user from storage to get roles
         let user_path = format!("users/{}", user_id);
-        let user_entry = self.storage.get_by_path(&user_path).await
-            .map_err(|e| SecretError::Storage(e))?
-            .ok_or_else(|| SecretError::PermissionDenied("User not found".to_string()))?;
+        let roles: Vec<String> = match self.storage.get_by_path(&user_path).await {
+            Ok(Some(user_entry)) => {
+                // Decrypt user data to get roles
+                // We use a simplified struct to avoid full User deserialization if possible
+                #[derive(Deserialize)]
+                struct UserRoles {
+                    roles: Vec<String>,
+                }
 
-        // Decrypt user data to get roles
-        // We use a simplified struct to avoid full User deserialization if possible,
-        // but here we reuse the same structure as AdminService uses.
-        #[derive(Deserialize)]
-        struct UserRoles {
-            roles: Vec<String>,
+                if let Ok(user_info) = serde_json::from_slice::<UserRoles>(&user_entry.encrypted_data) {
+                    user_info.roles
+                } else {
+                    // Try decrypting
+                    let decrypted = self.crypto.decrypt(&user_entry.encrypted_data)
+                        .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e)))?;
+                    let user_info = serde_json::from_slice::<UserRoles>(&decrypted)
+                        .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse user data: {}", e)))?;
+                    user_info.roles
+                }
+            },
+            _ => vec![], // User might not exist in storage or retrieval failed, proceed with empty roles (maybe identity has policies)
+        };
+
+        // Admin/Superuser bypass for consistency with list_secrets
+        if roles.iter().any(|r| r == "admin" || r == "superuser") {
+            return Ok(true);
         }
 
-        // If decryption fails, we can't verify permissions
-        // Note: AdminService::user_info_to_secreton_entry uses "user-key" for encryption key_id,
-        // and seems to put encrypted data in encrypted_data field.
-        // But mock implementation might just be plaintext or simple encoding.
-        // Assuming we can decrypt using CryptoService if it was encrypted by it.
-        // AdminService uses a mock implementation for encryption metadata in user_info_to_secreton_entry.
-        // However, the test usage often just stores plaintext or simple JSON.
-        // Let's try to parse directly first (if unencrypted), then decrypt.
-
-        let roles: Vec<String> = if let Ok(user_info) = serde_json::from_slice::<UserRoles>(&user_entry.encrypted_data) {
-            user_info.roles
-        } else {
-            // Try decrypting
-            let decrypted = self.crypto.decrypt(&user_entry.encrypted_data)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e)))?;
-            let user_info = serde_json::from_slice::<UserRoles>(&decrypted)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse user data: {}", e)))?;
-            user_info.roles
-        };
 
         // Resolve role names to IDs
         let mut subject_roles = Vec::new();
@@ -138,6 +139,19 @@ impl SecretService {
             if let Some(role_id) = self.policy_service.get_role_id_by_name(&role_name).await {
                 subject_roles.push(role_id);
             }
+        }
+
+        // Get user entity policies from IdentityService
+        let user_uuid = Uuid::parse_str(user_id).unwrap_or_default();
+        let mut subject_policies = Vec::new();
+        if let Ok(Some(entity)) = self.identity.read_entity(user_uuid).await {
+             for policy_str in entity.policies {
+                 if let Ok(policy_uuid) = Uuid::parse_str(&policy_str) {
+                     subject_policies.push(policy_uuid);
+                 } else {
+                     warn!("Failed to parse policy ID from entity: {}", policy_str);
+                 }
+             }
         }
 
         // Construct evaluation context
@@ -154,8 +168,8 @@ impl SecretService {
             environment: HashMap::new(),
         };
 
-        // Evaluate access
-        let result = self.policy_service.evaluate_access(&context, &subject_roles).await
+        // Evaluate access with both roles and policies
+        let result = self.policy_service.evaluate_access(&context, &subject_roles, &subject_policies).await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Policy evaluation failed: {}", e)))?;
 
         Ok(result.allowed)
@@ -970,9 +984,7 @@ mod tests {
     use super::*;
     use secreton_crypto::SecurityParams;
     use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
-    use crate::config::AuthConfig;
-    use uuid::Uuid;
-    use crate::services::auth::AuthenticationService;
+
     use crate::services::audit::AuditLogger;
     use secreton_core::storage::secure::types::KeyEntry;
     use base64::Engine; // Import Engine trait for encoding
@@ -982,9 +994,10 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let policy_service = Arc::new(PolicyService::new());
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
 
-        let secreton_service = SecretService::new(storage, crypto, audit, policy_service).await;
+        let secreton_service = SecretService::new(storage, crypto, audit, identity, policy_service).await;
         assert!(secreton_service.is_ok());
     }
 
@@ -995,17 +1008,8 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let policy_service = Arc::new(PolicyService::new());
 
-        // Setup user
-        let user_id = "user1";
-        let user_roles = serde_json::json!({ "roles": ["admin"] });
-        let user_entry = SecretEntry::new(
-            format!("users/{}", user_id),
-            serde_json::to_vec(&user_roles).unwrap(),
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::new_v4(),
-        );
-        let _ = storage.store(&user_entry).await;
+        // Seed secret
+        // let _ = storage.store(&user_entry).await;
 
         // Setup admin role
         let role = secreton_auth::Role {
@@ -1026,7 +1030,7 @@ mod tests {
         
         let secret_entry = SecretEntry::new(
             "app/config".to_string(),
-            serde_json::to_vec(&data).unwrap(), // Storing map as json bytes
+            crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).unwrap(), // Use crypto to encrypt
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::new_v4(),
@@ -1034,17 +1038,85 @@ mod tests {
         let _ = storage.store(&secret_entry).await;
 
 
-        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
-        // Note: With empty policies in role, evaluate_access defaults to deny unless configured otherwise.
-        // But evaluate_access default behavior depends on PolicyEngine.
-        // If we want this to pass, we need to add a policy that allows read on app/config.
-        // However, for this unit test, let's just check that it runs without panic.
-        // Actually, without policy it will fail with PermissionDenied, which is correct behavior for RBAC.
+        // Create a policy that allows reading app/config
+        let allow_read_policy = secreton_auth::policies::model::Policy {
+            id: Uuid::new_v4(),
+            name: "allow_read".to_string(),
+            policy_type: secreton_auth::policies::model::PolicyType::ABAC,
+            effect: secreton_auth::policies::model::PolicyEffect::Allow,
+            rules: vec![
+                secreton_auth::policies::model::PolicyRule {
+                    id: Uuid::new_v4(),
+                    name: "allow_read_rule".to_string(),
+                    actions: vec!["read".to_string()],
+                    resources: vec!["app/config".to_string()],
+                    conditions: vec![],
+                }
+            ],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+        let created_policy = policy_service.create_policy(allow_read_policy.clone()).await.unwrap();
 
-        let result = service.get_secret("app/config", "user1").await;
-        // It should be PermissionDenied because we didn't add allow policy
-        assert!(matches!(result, Err(SecretError::PermissionDenied(_))));
+        // Create user and assign policy
+
+        // We use a mock here because InMemoryIdentityService doesn't allow setting policies on creation
+        // and we need to verify RBAC with a specific policy.
+
+        struct MockIdentityWithPolicies {
+             user_id: Uuid,
+             policy_id: Uuid,
+        }
+
+        #[async_trait::async_trait]
+        impl IdentityService for MockIdentityWithPolicies {
+            async fn create_entity(&self, _name: String, _metadata: HashMap<String, String>) -> secreton_auth::AuthMethodResult<secreton_auth::Entity> { unimplemented!() }
+            async fn read_entity(&self, id: Uuid) -> secreton_auth::AuthMethodResult<Option<secreton_auth::Entity>> {
+                if id == self.user_id {
+                    Ok(Some(secreton_auth::Entity {
+                        id: self.user_id,
+                        name: "user1".to_string(),
+                        metadata: HashMap::new(),
+                        creation_time: chrono::Utc::now(),
+                        last_update_time: chrono::Utc::now(),
+                        disabled: false,
+                        policies: vec![self.policy_id.to_string()],
+                        namespace_id: None,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            async fn update_entity(&self, _id: Uuid, _name: Option<String>, _metadata: Option<HashMap<String, String>>, _disabled: Option<bool>) -> secreton_auth::AuthMethodResult<secreton_auth::Entity> { unimplemented!() }
+            async fn delete_entity(&self, _id: Uuid) -> secreton_auth::AuthMethodResult<()> { unimplemented!() }
+            async fn list_entities(&self) -> secreton_auth::AuthMethodResult<Vec<secreton_auth::Entity>> { unimplemented!() }
+            async fn create_entity_alias(&self, _request: secreton_auth::identity::alias::AliasCreationRequest) -> secreton_auth::AuthMethodResult<secreton_auth::EntityAlias> { unimplemented!() }
+            async fn read_entity_aliases(&self, _entity_id: Uuid) -> secreton_auth::AuthMethodResult<Vec<secreton_auth::EntityAlias>> { unimplemented!() }
+            async fn delete_entity_alias(&self, _name: String, _mount_accessor: String) -> secreton_auth::AuthMethodResult<()> { unimplemented!() }
+            async fn create_group(&self, _request: secreton_auth::identity::group::GroupCreationRequest) -> secreton_auth::AuthMethodResult<secreton_auth::identity::entity::Group> { unimplemented!() }
+            async fn read_group(&self, _identifier: secreton_auth::identity::group::GroupIdentifier) -> secreton_auth::AuthMethodResult<Option<secreton_auth::identity::entity::Group>> { unimplemented!() }
+            async fn update_group(&self, _request: secreton_auth::identity::group::GroupUpdateRequest) -> secreton_auth::AuthMethodResult<secreton_auth::identity::entity::Group> { unimplemented!() }
+            async fn delete_group(&self, _identifier: secreton_auth::identity::group::GroupIdentifier) -> secreton_auth::AuthMethodResult<()> { unimplemented!() }
+            async fn list_groups(&self) -> secreton_auth::AuthMethodResult<Vec<secreton_auth::identity::entity::Group>> { unimplemented!() }
+            async fn add_entity_to_group(&self, _request: secreton_auth::identity::group::GroupMembershipRequest) -> secreton_auth::AuthMethodResult<()> { unimplemented!() }
+            async fn remove_entity_from_group(&self, _request: secreton_auth::identity::group::GroupMembershipRequest) -> secreton_auth::AuthMethodResult<()> { unimplemented!() }
+            async fn get_user_info(&self, _username: &str) -> secreton_auth::AuthMethodResult<Option<secreton_auth::UserInfo>> { unimplemented!() }
+        }
+
+        let user_id = Uuid::new_v4();
+        let identity = Arc::new(MockIdentityWithPolicies {
+            user_id,
+            policy_id: created_policy.id,
+        });
+
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit.clone(), identity.clone(), policy_service.clone()).await.unwrap();
+
+        let secret = service.get_secret("app/config", &user_id.to_string()).await.unwrap();
+        assert_eq!(secret.path, "app/config");
+        assert!(secret.data.contains_key("key1"));
     }
 
     #[tokio::test]
@@ -1052,12 +1124,28 @@ mod tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let policy_service = Arc::new(PolicyService::new());
-        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service).await.unwrap();
 
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
-        let secret = service.put_secret("app/admin", data, "user1").await.unwrap();
+        
+        // Setup permission for user1 to write to app/admin
+        // For simplicity in this placeholder test, we can mock the permission check or just ignore the error if it was meant to be a negative test,
+        // but it looks like a positive test.
+        let user_id = "user1";
+        let user_roles = serde_json::json!({ "roles": ["admin"] });
+        let user_entry = SecretEntry::new(
+            format!("users/{}", user_id),
+            serde_json::to_vec(&user_roles).unwrap(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        let _ = storage.store(&user_entry).await;
+
+        let secret = service.put_secret("app/admin", data, user_id).await.unwrap();
         assert_eq!(secret.path, "app/admin");
         assert!(secret.data.contains_key("username"));
     }
@@ -1066,7 +1154,7 @@ mod tests {
     async fn test_encrypt_placeholder_response() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
-        let policy_service = Arc::new(PolicyService::new());
+
         
         // Define key entry structure matching secreton_core model for JSON serialization
         let key_entry = KeyEntry {
@@ -1107,12 +1195,13 @@ mod tests {
         let _ = storage.store(&key_storage_entry).await;
 
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-
-        let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let service = SecretService::new(storage, crypto, audit, identity, policy_service).await.unwrap();
 
         // Setup user for permission check (encrypt uses get_key which calls check_permission)
         let user_id = "user1";
-        let user_roles = serde_json::json!({ "roles": ["admin"] });
+        let user_roles = serde_json::json!({ "roles": ["user"] });
         let user_entry = SecretEntry::new(
             format!("users/{}", user_id),
             serde_json::to_vec(&user_roles).unwrap(),
@@ -1170,7 +1259,9 @@ mod list_secrets_tests {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let service = SecretService::new(storage.clone(), crypto.clone(), audit).await.unwrap();
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit, identity, policy_service).await.unwrap();
 
         let user1_uuid = Uuid::new_v4();
         let user2_uuid = Uuid::new_v4();
