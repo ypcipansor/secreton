@@ -189,7 +189,7 @@ mod tests {
         let mut data = std::collections::HashMap::new();
         data.insert("key1".to_string(), "value1".to_string());
         // For handlers, we need to encrypt the data since get_secret does decryption
-        let encrypted_data = services.crypto.encrypt_data(&serde_json::to_vec(&data).unwrap())
+        let encrypted_data = services.crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await
             .expect("Failed to encrypt test data");
         let entry = SecretEntry::new(
             "app/config".to_string(),
