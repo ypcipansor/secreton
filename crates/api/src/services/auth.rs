@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
 use secreton_storage::StorageBackend;
-use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService};
+use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod};
 use secreton_core::User;
 use thiserror::Error;
 use crate::ApiResult;
@@ -163,6 +163,9 @@ impl AuthenticationService {
 
         // Create unified auth service
         let auth_service = Arc::new(UnifiedAuthService::new());
+
+        // Register default authentication methods
+        auth_service.register_method("userpass".to_string(), Arc::new(UserPassAuthMethod::new())).await;
 
         Ok(Self {
             auth_service,
