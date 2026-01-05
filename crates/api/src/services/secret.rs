@@ -973,11 +973,8 @@ pub struct DecryptResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secreton_crypto::SecurityParams;
     use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
-    use crate::config::AuthConfig;
     use uuid::Uuid;
-    use crate::services::auth::AuthenticationService;
     use crate::services::audit::AuditLogger;
     use secreton_core::storage::secure::types::KeyEntry;
     use base64::Engine; // Import Engine trait for encoding
@@ -1038,9 +1035,6 @@ mod tests {
         );
         let _ = storage.store(&secret_entry).await;
 
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
-        let policy_service = Arc::new(PolicyService::new());
         let service = SecretService::new(storage, crypto, audit, policy_service).await.unwrap();
 
         // Note: With empty policies in role, evaluate_access defaults to deny unless configured otherwise.
@@ -1061,17 +1055,6 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let policy_service = Arc::new(PolicyService::new());
         let service = SecretService::new(storage.clone(), crypto, audit, policy_service).await.unwrap();
-
-        // Seed user1 with admin role so it can put secret
-        let user_roles = serde_json::json!({ "roles": ["admin"] });
-        let user_entry = SecretEntry::new(
-            format!("users/{}", "user1"),
-            serde_json::to_vec(&user_roles).unwrap(),
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::new_v4(),
-        );
-        storage.store(&user_entry).await.ok();
 
         // Seed user1 with admin role so it can put secret
         let user_roles = serde_json::json!({ "roles": ["admin"] });
