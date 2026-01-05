@@ -265,30 +265,30 @@ impl SecretService {
         prefix: Option<&str>,
         user: &User,
     ) -> Result<Vec<SecretData>, SecretError> {
-        // Build query params
-        let mut query = secreton_storage::QueryParams::new();
-        if let Some(p) = prefix {
-            query = query.with_path_prefix(p.to_string());
-        }
-
-        // Get all secrets from storage
-        let entries = self.storage.list(&query).await
-            .map_err(|e| SecretError::Storage(e))?;
-
         // Parse user_id as UUID for ownership check
         let user_uuid = uuid::Uuid::parse_str(&user.id).unwrap_or_default();
         let is_admin = user.roles.iter().any(|r| r == "admin" || r == "superuser");
 
+        // Build query params
+        // Optimize: Use storage-level filtering for owner_id if not admin
+        let mut query = secreton_storage::QueryParams::new();
+
+        if let Some(p) = prefix {
+            query = query.with_path_prefix(p.to_string());
+        }
+
+        if !is_admin {
+            query = query.with_owner(user_uuid);
+        }
+
+        // Get secrets from storage
+        // The storage backend handles filtering by owner_id if set in query
+        let entries = self.storage.list(&query).await
+            .map_err(|e| SecretError::Storage(e))?;
+
         // Convert entries to SecretData
         let mut accessible_secrets = Vec::new();
         for entry in entries {
-            // Check permissions:
-            // 1. Admin/Superuser can see all
-            // 2. Owner can see their secrets
-            if !is_admin && entry.owner_id != user_uuid {
-                continue;
-            }
-            
             // Decrypt the secret data
             match self.crypto.decrypt(&entry.encrypted_data) {
                 Ok(decrypted_data) => {
