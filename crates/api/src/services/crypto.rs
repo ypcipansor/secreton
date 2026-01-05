@@ -46,9 +46,11 @@ impl CryptoService {
     }
 
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        // Deserialize the ciphertext back into EncryptedData
-        let encrypted_data: EncryptedData = serde_json::from_slice(ciphertext)
-            .map_err(|e| anyhow::anyhow!("Failed to deserialize encrypted data: {}", e))?;
+        // Deserialize the ciphertext back into EncryptedData using bincode (more compact than JSON)
+        let (encrypted_data, _): (EncryptedData, usize) = bincode::serde::decode_from_slice(
+            ciphertext,
+            bincode::config::standard()
+        ).map_err(|e| anyhow::anyhow!("Failed to deserialize encrypted data: {}", e))?;
 
         self.decrypt_data(&encrypted_data)
     }
@@ -78,8 +80,8 @@ impl CryptoService {
         // Encrypt using master key
         let encrypted_data = self.engine.encrypt(AlgorithmId::Aes256Gcm, plaintext, &self.master_key)?;
 
-        // Serialize EncryptedData to Vec<u8>
-        let serialized = serde_json::to_vec(&encrypted_data)
+        // Serialize EncryptedData to Vec<u8> using bincode
+        let serialized = bincode::serde::encode_to_vec(&encrypted_data, bincode::config::standard())
             .map_err(|e| anyhow::anyhow!("Failed to serialize encrypted data: {}", e))?;
 
         Ok(serialized)
@@ -109,6 +111,9 @@ mod tests {
         // Test encryption
         let encrypted = service.encrypt_data(plaintext).expect("Encryption failed");
         assert_ne!(plaintext, encrypted.as_slice());
+
+        // Verify it is not JSON (simple heuristic: doesn't start with curly brace)
+        assert_ne!(encrypted[0], b'{');
 
         // Test decryption
         let decrypted = service.decrypt(&encrypted).expect("Decryption failed");
