@@ -7,18 +7,18 @@ use uuid::Uuid;
 
 use super::engine::{CompiledCondition, CompiledPolicy, CompiledRule, PolicyEngine};
 use super::error::PolicyResult;
-use super::model::{ConditionOperator, EvaluationContext, EvaluationResult, PolicyEffect};
+use super::model::{ConditionOperator, EvaluationContext, EvaluationResult, PolicyEffect, Role};
 
 /// Policy evaluator for access control decisions
-pub struct PolicyEvaluator {
-    engine: PolicyEngine,
-    role_policies: HashMap<Uuid, Vec<Uuid>>,
+pub struct PolicyEvaluator<'a> {
+    engine: &'a PolicyEngine,
+    roles: &'a HashMap<Uuid, Role>,
 }
 
-impl PolicyEvaluator {
+impl<'a> PolicyEvaluator<'a> {
     /// Create a new policy evaluator
-    pub fn new(engine: PolicyEngine, role_policies: HashMap<Uuid, Vec<Uuid>>) -> Self {
-        Self { engine, role_policies }
+    pub fn new(engine: &'a PolicyEngine, roles: &'a HashMap<Uuid, Role>) -> Self {
+        Self { engine, roles }
     }
 
     /// Evaluate access request against all applicable policies
@@ -330,7 +330,7 @@ impl PolicyEvaluator {
 
     /// Get policies for a role
     fn get_policies_for_role(&self, role_id: &Uuid) -> Option<Vec<Uuid>> {
-        self.role_policies.get(role_id).cloned()
+        self.roles.get(role_id).map(|r| r.policies.clone())
     }
 }
 
@@ -357,7 +357,8 @@ mod tests {
     #[test]
     fn test_basic_evaluation() {
         let engine = PolicyEngine::new();
-        let evaluator = PolicyEvaluator::new(engine, HashMap::new());
+        let roles = HashMap::new();
+        let evaluator = PolicyEvaluator::new(&engine, &roles);
 
         let context = EvaluationContext {
             subject: {

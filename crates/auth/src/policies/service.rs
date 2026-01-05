@@ -308,12 +308,8 @@ impl PolicyService {
     ) -> PolicyResult<EvaluationResult> {
         let engine_guard = self.engine.read().await;
         let roles_guard = self.roles.read().await;
-        let mut role_policies = HashMap::new();
-        for (id, role) in roles_guard.iter() {
-            role_policies.insert(*id, role.policies.clone());
-        }
 
-        let evaluator = PolicyEvaluator::new((*engine_guard).clone(), role_policies);
+        let evaluator = PolicyEvaluator::new(&engine_guard, &roles_guard);
         evaluator.evaluate(context, subject_roles, subject_policies)
     }
 
