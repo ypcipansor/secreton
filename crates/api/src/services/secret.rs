@@ -13,6 +13,7 @@ use secreton_auth::policies::service::PolicyService;
 use secreton_auth::policies::model::EvaluationContext;
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
+use secreton_core::User;
 
 /// Policy metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -287,23 +288,32 @@ impl SecretService {
     pub async fn list_secrets(
         &self,
         prefix: Option<&str>,
-        _user_id: &str,
+        user: &User,
     ) -> Result<Vec<SecretData>, SecretError> {
+        // Parse user_id as UUID for ownership check
+        let user_uuid = uuid::Uuid::parse_str(&user.id).unwrap_or_default();
+        let is_admin = user.roles.iter().any(|r| r == "admin" || r == "superuser");
+
         // Build query params
+        // Optimize: Use storage-level filtering for owner_id if not admin
         let mut query = secreton_storage::QueryParams::new();
+
         if let Some(p) = prefix {
             query = query.with_path_prefix(p.to_string());
         }
 
-        // Get all secrets from storage
+        if !is_admin {
+            query = query.with_owner(user_uuid);
+        }
+
+        // Get secrets from storage
+        // The storage backend handles filtering by owner_id if set in query
         let entries = self.storage.list(&query).await
             .map_err(|e| SecretError::Storage(e))?;
 
         // Convert entries to SecretData
         let mut accessible_secrets = Vec::new();
         for entry in entries {
-            // TODO: Add permission check here
-            
             // Decrypt the secret data
             match self.crypto.decrypt(&entry.encrypted_data) {
                 Ok(decrypted_data) => {
@@ -1034,5 +1044,92 @@ mod tests {
         let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), "user1").await.unwrap();
         assert!(!result.ciphertext.is_empty());
         assert_eq!(key_version, 1);
+    }
+}
+
+#[cfg(test)]
+mod list_secrets_tests {
+    use super::*;
+    use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
+    use crate::services::audit::AuditLogger;
+    use secreton_core::User;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    fn create_mock_user(id: &str, roles: Vec<String>) -> User {
+        User {
+            id: id.to_string(),
+            username: format!("user_{}", id),
+            email: Some(format!("user_{}@example.com", id)),
+            roles,
+            policies: vec![],
+            display_name: None,
+            full_name: None,
+            password_hash: "".to_string(),
+            is_active: true,
+            is_superuser: false,
+            disabled: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_secrets_permissions() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit).await.unwrap();
+
+        let user1_uuid = Uuid::new_v4();
+        let user2_uuid = Uuid::new_v4();
+
+        // Create secrets for user1
+        let entry1 = SecretEntry::new(
+            "app/user1/secret1".to_string(),
+            crypto.encrypt_data(br#"{"key": "value"}"#).unwrap(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            user1_uuid,
+        );
+        storage.store(&entry1).await.unwrap();
+
+        // Create secrets for user2
+        let entry2 = SecretEntry::new(
+            "app/user2/secret1".to_string(),
+            crypto.encrypt_data(br#"{"key": "value"}"#).unwrap(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            user2_uuid,
+        );
+        storage.store(&entry2).await.unwrap();
+
+        // Test user1 accessing list (should only see their own)
+        let user1 = create_mock_user(&user1_uuid.to_string(), vec!["user".to_string()]);
+        let secrets_user1 = service.list_secrets(None, &user1).await.unwrap();
+        assert_eq!(secrets_user1.len(), 1);
+        assert_eq!(secrets_user1[0].path, "app/user1/secret1");
+
+        // Test user2 accessing list
+        let user2 = create_mock_user(&user2_uuid.to_string(), vec!["user".to_string()]);
+        let secrets_user2 = service.list_secrets(None, &user2).await.unwrap();
+        assert_eq!(secrets_user2.len(), 1);
+        assert_eq!(secrets_user2[0].path, "app/user2/secret1");
+
+        // Test admin accessing list (should see all)
+        let admin_uuid = Uuid::new_v4();
+        let admin = create_mock_user(&admin_uuid.to_string(), vec!["admin".to_string()]);
+        let secrets_admin = service.list_secrets(None, &admin).await.unwrap();
+
+        // Note: MockStorageBackend might not support filtering or order strictly,
+        // but if we list all, we should get 2.
+        // Wait, other tests might have added entries to the static mock if it's shared?
+        // No, MockStorageBackend::new() creates a new instance.
+        assert_eq!(secrets_admin.len(), 2);
     }
 }

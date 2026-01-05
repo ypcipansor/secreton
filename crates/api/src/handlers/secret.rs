@@ -668,7 +668,7 @@ pub async fn list_secrets(
     }
 
     // List secrets via secreton service
-    let secret_list: Vec<secret::SecretData> = state.secreton.list_secrets(query.filter.as_deref(), &user.id).await
+    let secret_list: Vec<secret::SecretData> = state.secreton.list_secrets(query.filter.as_deref(), &user).await
         .map_err(|e: crate::services::secret::SecretError| crate::ApiError::Internal(format!("Failed to list secrets: {}", e)))?;
 
     // Convert to response format (now with real metadata)
