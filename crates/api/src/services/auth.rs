@@ -18,6 +18,8 @@ use secreton_core::User;
 use thiserror::Error;
 use crate::ApiResult;
 
+pub const USER_STORAGE_PREFIX: &str = "users/";
+
 #[derive(Debug, Deserialize)]
 pub struct ApiLoginRequest {
     pub username: String,
@@ -364,7 +366,7 @@ impl AuthenticationService {
 
     /// Get total user count
     pub async fn get_user_count(&self) -> Result<u64, AuthError> {
-        let params = QueryParams::new().with_path_prefix("users/".to_string());
+        let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
         let count = self.storage.count(&params).await?;
         Ok(count)
     }
@@ -613,14 +615,14 @@ mod tests {
 
         // Add some dummy users
         let user1 = SecretEntry::new(
-            "users/user1".to_string(),
+            format!("{}user1", USER_STORAGE_PREFIX),
             vec![],
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::new_v4(),
         );
         let user2 = SecretEntry::new(
-            "users/user2".to_string(),
+            format!("{}user2", USER_STORAGE_PREFIX),
             vec![],
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
@@ -638,7 +640,7 @@ mod tests {
         storage.store(&user2).await.unwrap();
         storage.store(&other).await.unwrap();
 
-        let crypto = Arc::new(CryptoService::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let config = AuthConfig::default();
         let auth_service = AuthenticationService::new(storage, crypto, &config).await.unwrap();
 
