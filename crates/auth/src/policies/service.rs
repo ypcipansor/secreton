@@ -146,6 +146,14 @@ impl PolicyService {
             .map(|r| r.id)
     }
 
+    /// Get policy ID by name
+    pub async fn get_policy_id_by_name(&self, name: &str) -> Option<Uuid> {
+        let policies = self.policies.read().await;
+        policies.values()
+            .find(|p| p.name == name)
+            .map(|p| p.id)
+    }
+
     /// Create a new role
     pub async fn create_role(&self, mut role: Role) -> PolicyResult<Role> {
         // Validate role
@@ -186,11 +194,6 @@ impl PolicyService {
             })
     }
 
-    /// Get role ID by name
-    pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
-        let roles = self.roles.read().await;
-        roles.values().find(|r| r.name == name).map(|r| r.id)
-    }
 
     /// Update role
     pub async fn update_role(&self, role_id: &Uuid, mut updates: Role) -> PolicyResult<Role> {
