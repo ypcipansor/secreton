@@ -19,6 +19,7 @@ use crate::config::ApiConfig;  // Use local ApiConfig with auth field
 use crate::services::crypto::CryptoService;
 use crate::services::auth::AuthenticationService;
 use secreton_auth::policies::service::PolicyService;
+use secreton_auth::{InMemoryIdentityService, IdentityService};
 
 // MFA Services
 use secreton_auth::mfa::{
@@ -53,6 +54,7 @@ pub struct ApiServiceContainer {
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
     pub mfa: Arc<CombinedMfaService>,
+    pub identity: Arc<dyn IdentityService + Send + Sync>,
 }
 
 impl ApiServiceContainer {
@@ -79,14 +81,16 @@ impl ApiServiceContainer {
         ).await?);
 
         // Initialize policy service
-    // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());
+        // Initialize identity service
+        let identity: Arc<dyn IdentityService + Send + Sync> = Arc::new(InMemoryIdentityService::new());
 
         // Initialize secret service
         let secreton = Arc::new(secret::SecretService::new(
             storage.clone(),
             crypto.clone(),
             audit.clone(),
+            identity.clone(),
             policy_service.clone(),
         ).await?);
 
@@ -195,6 +199,8 @@ impl ApiServiceContainer {
         // mfa service is specific type, registering as part of container struct mostly.
         // If we want to register it in StandardServiceContainer, we'd need to wrap it or impl Service trait if it doesn't.
         // For now, it's available via the struct field.
+        registry.register_service("policy".to_string(), policy_service.clone());
+        registry.register_service("identity".to_string(), identity.clone());
 
         Ok(Self {
             config: config.clone(),
@@ -208,6 +214,7 @@ impl ApiServiceContainer {
             secreton,
             admin,
             mfa,
+            identity,
         })
     }
 

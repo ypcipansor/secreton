@@ -25,6 +25,7 @@ impl PolicyEvaluator {
         &self,
         context: &EvaluationContext,
         subject_roles: &[Uuid],
+        subject_policies: &[Uuid],
     ) -> PolicyResult<EvaluationResult> {
         let mut evaluated_policies = Vec::new();
         let _evaluated_roles = subject_roles.to_vec();
@@ -35,27 +36,33 @@ impl PolicyEvaluator {
         // Get all roles in hierarchy
         let all_roles = self.get_role_hierarchy(subject_roles);
 
-        // Evaluate policies for each role
+        // Collect all policy IDs to evaluate
+        let mut all_policy_ids = subject_policies.to_vec();
+
+        // Add policies from roles
         for role_id in &all_roles {
             if let Some(policies) = self.get_policies_for_role(role_id) {
-                for policy_id in policies {
-                    if let Some(policy) = self.engine.policies.get(&policy_id) {
-                        let result = self.evaluate_policy(policy, context)?;
-                        evaluated_policies.push(policy_id);
+                all_policy_ids.extend(policies);
+            }
+        }
 
-                        match result {
-                            PolicyEvaluation::Allow => {
-                                allow_count += 1;
-                                reasons.push(format!("Policy {} allows access", policy_id));
-                            }
-                            PolicyEvaluation::Deny => {
-                                deny_count += 1;
-                                reasons.push(format!("Policy {} denies access", policy_id));
-                            }
-                            PolicyEvaluation::NotApplicable => {
-                                // Policy doesn't apply to this request
-                            }
-                        }
+        // Evaluate all policies
+        for policy_id in all_policy_ids {
+            if let Some(policy) = self.engine.policies.get(&policy_id) {
+                let result = self.evaluate_policy(policy, context)?;
+                evaluated_policies.push(policy_id);
+
+                match result {
+                    PolicyEvaluation::Allow => {
+                        allow_count += 1;
+                        reasons.push(format!("Policy {} allows access", policy_id));
+                    }
+                    PolicyEvaluation::Deny => {
+                        deny_count += 1;
+                        reasons.push(format!("Policy {} denies access", policy_id));
+                    }
+                    PolicyEvaluation::NotApplicable => {
+                        // Policy doesn't apply to this request
                     }
                 }
             }
@@ -369,7 +376,7 @@ mod tests {
         };
 
         // Test with no policies - should deny
-        let result = evaluator.evaluate(&context, &[]).unwrap();
+        let result = evaluator.evaluate(&context, &[], &[]).unwrap();
         assert!(!result.allowed);
         assert_eq!(result.reason, "No applicable policies found");
     }

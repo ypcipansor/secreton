@@ -296,10 +296,11 @@ impl PolicyService {
         &self,
         context: &EvaluationContext,
         subject_roles: &[Uuid],
+        subject_policies: &[Uuid],
     ) -> PolicyResult<EvaluationResult> {
         let engine_guard = self.engine.read().await;
         let evaluator = PolicyEvaluator::new((*engine_guard).clone());
-        evaluator.evaluate(context, subject_roles)
+        evaluator.evaluate(context, subject_roles, subject_policies)
     }
 
     /// Parse policy from string
