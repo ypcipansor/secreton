@@ -35,11 +35,6 @@ struct OAuthState {
     expires_at: chrono::DateTime<chrono::Utc>,
 }
 
-// Simple in-memory token blacklist for invalidation
-lazy_static::lazy_static! {
-    static ref TOKEN_BLACKLIST: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>> = Arc::new(RwLock::new(HashMap::new()));
-}
-
 // Session storage
 pub type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
 
@@ -610,10 +605,7 @@ pub async fn logout(
 
     // Invalidate the token by adding to blacklist
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(24); // Blacklist for 24 hours
-    {
-        let mut blacklist = TOKEN_BLACKLIST.write().await;
-        blacklist.insert(token.to_string(), expires_at);
-    }
+    state.auth.revoke_token(token.to_string(), expires_at).await;
 
     // Remove all sessions for this user (or find session by token)
     // For now, we remove all sessions as logout typically invalidates all
@@ -1188,10 +1180,7 @@ pub async fn revoke_session(
 
     // Invalidate associated tokens by adding to blacklist
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
-    {
-        let mut blacklist = TOKEN_BLACKLIST.write().await;
-        blacklist.insert(token.to_string(), expires_at);
-    }
+    state.auth.revoke_token(token.to_string(), expires_at).await;
 
     let data = serde_json::json!({
         "message": "Session successfully revoked",

@@ -17,6 +17,7 @@ use secreton_auth::{IdentityService, policies::model::EvaluationContext};
 use secreton_performance::{SecretPerformanceOptimizer, AccessType};
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
+use uuid::Uuid;
 
 /// Policy metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -242,8 +243,8 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
-        let owner_id = uuid::Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| uuid::Uuid::new_v4());
+        let owner_id = Uuid::parse_str(&user.id)
+            .unwrap_or_else(|_| Uuid::new_v4());
 
         // Create SecretEntry
         let entry = secreton_storage::SecretEntry::new(
@@ -368,7 +369,7 @@ impl SecretService {
         user: &secreton_auth::User,
     ) -> Result<Vec<SecretData>, SecretError> {
         // Parse user_id as UUID for ownership check
-        let user_uuid = uuid::Uuid::parse_str(&user.id).unwrap_or_default();
+        let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
         let is_admin = user.roles.iter().any(|r| r == "admin" || r == "superuser");
 
         // Build query params
@@ -448,11 +449,11 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Generate unique key ID
-        let key_id = format!("key_{}", uuid::Uuid::new_v4().simple());
+        let key_id = format!("key_{}", Uuid::new_v4().simple());
 
         // Parse user_id as UUID
-        let owner_id = uuid::Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| uuid::Uuid::new_v4());
+        let owner_id = Uuid::parse_str(&user.id)
+            .unwrap_or_else(|_| Uuid::new_v4());
 
         // Store key metadata as SecretEntry
         let key_metadata = serde_json::json!({
@@ -655,8 +656,8 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
-        let owner_id = uuid::Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| uuid::Uuid::new_v4());
+        let owner_id = Uuid::parse_str(&user.id)
+            .unwrap_or_else(|_| Uuid::new_v4());
 
         // Update metadata with new version
         let new_version = current_key.version + 1;
@@ -1079,7 +1080,6 @@ pub struct DecryptResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secreton_crypto::SecurityParams;
     use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
 
     use crate::services::audit::AuditLogger;

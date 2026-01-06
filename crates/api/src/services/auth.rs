@@ -146,6 +146,9 @@ pub struct AuthenticationService {
 
     /// Configuration
     config: AuthConfig,
+
+    /// Token blacklist
+    token_blacklist: Arc<tokio::sync::RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
 }
 
 impl AuthenticationService {
@@ -177,6 +180,7 @@ impl AuthenticationService {
             token_service,
             storage,
             config: config.clone(),
+            token_blacklist: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         })
     }
 
@@ -284,6 +288,11 @@ impl AuthenticationService {
 
     /// Validate access token
     pub async fn validate_token(&self, token: &str) -> Result<User, AuthError> {
+        // Check blacklist
+        if self.is_token_revoked(token).await {
+            return Err(AuthError::InvalidToken);
+        }
+
         let claims = self.token_service.validate_access_token(token)
             .map_err(|_| AuthError::InvalidToken)?;
 
@@ -308,6 +317,24 @@ impl AuthenticationService {
             updated_at: chrono::Utc::now(),
             metadata: HashMap::new(),
         })
+    }
+
+    /// Revoke a token
+    pub async fn revoke_token(&self, token: String, expires_at: chrono::DateTime<chrono::Utc>) {
+        let mut blacklist = self.token_blacklist.write().await;
+        // Clean up expired entries while we're at it
+        blacklist.retain(|_, &mut exp| exp > chrono::Utc::now());
+        blacklist.insert(token, expires_at);
+    }
+
+    /// Check if a token is revoked
+    pub async fn is_token_revoked(&self, token: &str) -> bool {
+        let blacklist = self.token_blacklist.read().await;
+        if let Some(expires_at) = blacklist.get(token) {
+            *expires_at > chrono::Utc::now()
+        } else {
+            false
+        }
     }
 
     /// Refresh access token
