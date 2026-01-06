@@ -11,6 +11,7 @@ use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_auth::{IdentityService, policies::model::EvaluationContext};
+use secreton_performance::{SecretPerformanceOptimizer, AccessType};
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
 use secreton_core::User;
@@ -82,6 +83,7 @@ pub struct SecretService {
     audit: Arc<AuditLogger>,
     identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
+    performance: Arc<SecretPerformanceOptimizer>,
 }
 
 impl SecretService {
@@ -92,6 +94,7 @@ impl SecretService {
         audit: Arc<AuditLogger>,
         identity: Arc<dyn IdentityService + Send + Sync>,
         policy_service: Arc<PolicyService>,
+        performance: Arc<SecretPerformanceOptimizer>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
@@ -99,6 +102,7 @@ impl SecretService {
             audit,
             identity,
             policy_service,
+            performance,
         })
     }
 
@@ -147,7 +151,36 @@ impl SecretService {
 
     /// Get secret by path
     pub async fn get_secret(&self, path: &str, user: &secreton_auth::User) -> Result<SecretData, SecretError> {
+        let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
+
+        // Try to get from cache first
+        if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
+            // Decrypt the cached data
+            match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
+                Ok(secret_map) => {
+                    // Log access in performance optimizer (cache hit)
+                    self.performance.record_access(
+                        path,
+                        AccessType::Read,
+                        start_time.elapsed(),
+                        true
+                    ).await;
+
+                    return Ok(SecretData {
+                        path: path.to_string(),
+                        data: secret_map,
+                        version: 0, // Cache might not store version or we'd need to extend it
+                        created_at: chrono::Utc::now(), // Approximate
+                        updated_at: chrono::Utc::now(), // Approximate
+                    });
+                }
+                Err(_) => {
+                    // If cached data is invalid, remove it
+                    let _ = self.performance.invalidate_cached(path).await;
+                }
+            }
+        }
 
         // Get encrypted secret from storage
         let encrypted_entry = self.storage.get_by_path(path).await
@@ -161,6 +194,17 @@ impl SecretService {
         // Parse the decrypted data as JSON
         let secret_map: HashMap<String, String> = serde_json::from_slice(&decrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
+
+        // Cache the decrypted data
+        let _ = self.performance.put_cached(path.to_string(), decrypted_data.clone()).await;
+
+        // Log access in performance optimizer (cache miss)
+        self.performance.record_access(
+            path,
+            AccessType::Read,
+            start_time.elapsed(),
+            true
+        ).await;
 
         // Log audit trail
         let _ = self.audit.log_event(
@@ -187,6 +231,7 @@ impl SecretService {
         data: HashMap<String, String>,
         user: &secreton_auth::User,
     ) -> Result<SecretData, SecretError> {
+        let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
 
         // Serialize data to JSON for storage
@@ -214,6 +259,16 @@ impl SecretService {
         self.storage.store(&entry).await
             .map_err(|e| SecretError::Storage(e))?;
 
+        // Update cache with plaintext data
+        let _ = self.performance.put_cached(path.to_string(), json_data).await;
+
+        self.performance.record_access(
+            path,
+            AccessType::Write,
+            start_time.elapsed(),
+            true
+        ).await;
+
         // Log audit trail
         let _ = self.audit.log_event(
             SecurityEventType::SecretCreation {
@@ -233,6 +288,7 @@ impl SecretService {
 
     /// Delete secret
     pub async fn delete_secret(&self, path: &str, user: &secreton_auth::User) -> Result<(), SecretError> {
+        let start_time = std::time::Instant::now();
         self.check_permission(user, path, "delete").await?;
 
         // Check if secret exists before deletion
@@ -247,6 +303,16 @@ impl SecretService {
         // Delete from storage using delete_by_path
         self.storage.delete_by_path(path).await
             .map_err(|e| SecretError::Storage(e))?;
+
+        // Invalidate cache
+        let _ = self.performance.invalidate_cached(path).await;
+
+        self.performance.record_access(
+            path,
+            AccessType::Delete,
+            start_time.elapsed(),
+            true
+        ).await;
 
         // Log audit trail
         let _ = self.audit.log_event(
@@ -951,8 +1017,9 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let secreton_service = SecretService::new(storage, crypto, audit, identity, policy_service).await;
+        let secreton_service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await;
         assert!(secreton_service.is_ok());
     }
 
@@ -963,6 +1030,7 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
         // Seed secret
         let mut data = HashMap::new();
@@ -977,7 +1045,7 @@ mod tests {
         );
         let _ = storage.store(&secret_entry).await;
 
-        let service = SecretService::new(storage, crypto, audit, identity, policy_service).await.unwrap();
+        let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
         let user = mock_user();
         let secret = service.get_secret("app/config", &user).await.unwrap();
         assert_eq!(secret.path, "app/config");
@@ -991,7 +1059,8 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service).await.unwrap();
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
 
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
@@ -1008,6 +1077,7 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
         // Define key entry structure matching secreton_core model for JSON serialization
         let key_entry = KeyEntry {
@@ -1045,7 +1115,7 @@ mod tests {
         );
         let _ = storage.store(&key_storage_entry).await;
 
-        let service = SecretService::new(storage, crypto, audit, identity, policy_service).await.unwrap();
+        let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
         let user = mock_user();
         let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), &user).await.unwrap();
         assert!(!result.ciphertext.is_empty());
@@ -1059,8 +1129,9 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service).await.unwrap();
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
 
         let user = secreton_auth::User {
             id: "user_no_role".to_string(),
@@ -1097,8 +1168,9 @@ mod tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service.clone()).await.unwrap();
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service.clone(), performance).await.unwrap();
 
         let policy = Policy {
             id: Uuid::new_v4(),
@@ -1200,7 +1272,8 @@ mod list_secrets_tests {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
-        let service = SecretService::new(storage.clone(), crypto.clone(), audit, identity, policy_service).await.unwrap();
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = SecretService::new(storage.clone(), crypto.clone(), audit, identity, policy_service, performance).await.unwrap();
 
         let user1_uuid = Uuid::new_v4();
         let user2_uuid = Uuid::new_v4();

@@ -392,6 +392,13 @@ impl SecretPerformanceOptimizer {
         Ok(())
     }
 
+    /// Invalidate a specific cache entry
+    pub async fn invalidate_cached(&self, key: &str) -> Result<()> {
+        let mut cache = self.cache.write().await;
+        cache.remove(key);
+        Ok(())
+    }
+
     /// Get cache statistics
     pub async fn get_cache_stats(&self) -> HashMap<String, usize> {
         let cache = self.cache.read().await;

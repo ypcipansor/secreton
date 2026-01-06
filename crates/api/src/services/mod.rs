@@ -20,6 +20,7 @@ use crate::services::crypto::CryptoService;
 use crate::services::auth::AuthenticationService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_auth::{InMemoryIdentityService, IdentityService};
+use secreton_performance::{SecretPerformanceOptimizer, SecretPerformanceConfig};
 
 // MFA Services
 use secreton_auth::mfa::{
@@ -53,6 +54,7 @@ pub struct ApiServiceContainer {
     pub policy: Arc<PolicyService>,
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
+    pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
     pub identity: Arc<dyn IdentityService + Send + Sync>,
 }
@@ -85,6 +87,9 @@ impl ApiServiceContainer {
         // Initialize identity service
         let identity: Arc<dyn IdentityService + Send + Sync> = Arc::new(InMemoryIdentityService::new());
 
+        // Initialize secret performance optimizer
+        let performance = Arc::new(SecretPerformanceOptimizer::new(SecretPerformanceConfig::default()));
+
         // Initialize secret service
         let secreton = Arc::new(secret::SecretService::new(
             storage.clone(),
@@ -92,6 +97,7 @@ impl ApiServiceContainer {
             audit.clone(),
             identity.clone(),
             policy_service.clone(),
+            performance.clone(),
         ).await?);
 
         // Initialize admin service
@@ -99,6 +105,7 @@ impl ApiServiceContainer {
             storage.clone(),
             auth.clone(),
             audit.clone(),
+            performance.clone(),
         ).await?);
 
         // Initialize MFA Services using configuration
@@ -210,6 +217,7 @@ impl ApiServiceContainer {
             policy: policy_service,
             secreton,
             admin,
+            performance,
             mfa,
             identity,
         })
