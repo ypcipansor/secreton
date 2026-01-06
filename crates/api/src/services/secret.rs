@@ -885,29 +885,28 @@ impl SecretService {
         self.check_permission(user, "sys/crypto", "hash").await?;
 
         // Compute hash based on algorithm
-        let hash = match algorithm {
+        let hash_hex = match algorithm {
             "SHA-256" | "sha256" => {
                 let mut hasher = Sha256::new();
                 hasher.update(data);
-                hasher.finalize().to_vec()
+                hex::encode(hasher.finalize())
             }
             "SHA-512" | "sha512" => {
                 let mut hasher = Sha512::new();
                 hasher.update(data);
-                hasher.finalize().to_vec()
+                hex::encode(hasher.finalize())
             }
             "SHA3-256" | "sha3-256" => {
                 let mut hasher = Sha3_256::new();
                 hasher.update(data);
-                hasher.finalize().to_vec()
+                hex::encode(hasher.finalize())
             }
             _ => {
                 return Err(SecretError::InvalidOperation(format!("Unsupported hash algorithm: {}", algorithm)));
             }
         };
 
-        // Encode hash as hex
-        Ok(hex::encode(hash))
+        Ok(hash_hex)
     }
 }
 

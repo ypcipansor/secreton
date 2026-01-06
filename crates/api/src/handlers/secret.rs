@@ -14,7 +14,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use base64::prelude::*;
-use hex;
 
 use crate::handlers::{AppState};
 use crate::services::secret;
