@@ -161,8 +161,14 @@ pub struct TokenPair {
 impl Default for TokenConfig {
     fn default() -> Self {
         Self {
-            jwt_secret: "default-secret-change-in-production".to_string(),
-            jwt_refresh_secret: "default-refresh-secret-change-in-production".to_string(),
+            jwt_secret: std::env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| {
+                eprintln!("WARNING: Using default insecure JWT secret! Set SECRETON_JWT_SECRET in production.");
+                "default-secret-change-in-production".to_string()
+            }),
+            jwt_refresh_secret: std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
+                eprintln!("WARNING: Using default insecure JWT refresh secret! Set SECRETON_JWT_REFRESH_SECRET in production.");
+                "default-refresh-secret-change-in-production".to_string()
+            }),
             access_token_duration: Duration::hours(1),
             refresh_token_duration: Duration::days(7),
             issuer: "secreton".to_string(),
@@ -269,6 +275,7 @@ impl JwtTokenService {
     pub fn validate_access_token(&self, token: &str) -> Result<AccessTokenClaims, JwtError> {
         let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.set_audience(&[&self.config.audience]);
+        validation.set_issuer(&[&self.config.issuer]);
         let decoding_key =
             jsonwebtoken::DecodingKey::from_secret(self.config.jwt_secret.as_bytes());
 
@@ -288,6 +295,14 @@ impl JwtTokenService {
     /// Validate refresh token and return claims
     pub fn validate_refresh_token(&self, token: &str) -> Result<RefreshTokenClaims, JwtError> {
         let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        // Refresh tokens don't always carry audience claims in standard implementations unless configured,
+        // but it's good practice. Assuming standard claims.
+        // If refresh token doesn't have aud/iss, this might fail.
+        // However, create_refresh_token doesn't seem to add iss/aud in current impl.
+        // Let's check create_refresh_token.
+        // It creates RefreshTokenClaims which has sub, username, iat, exp, jti. NO iss/aud.
+        // So we cannot validate iss/aud here unless we add them to creation.
+
         let decoding_key =
             jsonwebtoken::DecodingKey::from_secret(self.config.jwt_refresh_secret.as_bytes());
 

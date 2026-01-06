@@ -467,7 +467,7 @@ pub struct HashRequest {
     pub algorithm: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HashResponse {
     pub hash: String,
     pub algorithm: String,
