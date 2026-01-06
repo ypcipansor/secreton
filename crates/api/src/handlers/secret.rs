@@ -1147,20 +1147,15 @@ pub async fn list_policies(
 
 pub async fn get_policy(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
 
-    // Check permissions (RBAC)
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
-
     // Get policy via secreton service
-    let policy = state.secreton.get_policy(&name).await
+    let policy = state.secreton.get_policy(&name, &user).await
         .map_err(|e| match e {
             secret::SecretError::PolicyNotFound { .. } => crate::ApiError::NotFound("Policy not found".to_string()),
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e)),
         })?;
 
