@@ -376,7 +376,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.findings.len() > 0);
+        assert!(!result.findings.is_empty());
         assert!(result.scanned_files > 0);
     }
 
@@ -395,7 +395,7 @@ mod tests {
             .filter(|f| f.secret_type == SecretType::APIKey)
             .collect();
 
-        assert!(api_key_findings.len() > 0);
+        assert!(!api_key_findings.is_empty());
     }
 
     #[tokio::test]
@@ -413,7 +413,7 @@ mod tests {
             .filter(|f| f.secret_type == SecretType::Password)
             .collect();
 
-        assert!(password_findings.len() > 0);
+        assert!(!password_findings.is_empty());
         assert!(password_findings[0].severity == Severity::Critical);
     }
 

@@ -1,5 +1,7 @@
 //! KV Secrets Engine API endpoints
 
+#![allow(clippy::collapsible_if)]
+
 use anyhow::Result;
 use axum::{
     Router,

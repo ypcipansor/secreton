@@ -248,7 +248,7 @@ mod tests {
                 assert_eq!(expected, 32);
                 assert_eq!(actual, 16);
             }
-            _ => assert!(false, "Expected InvalidKeyLength error"),
+            _ => panic!("Expected InvalidKeyLength error"),
         }
     }
 }

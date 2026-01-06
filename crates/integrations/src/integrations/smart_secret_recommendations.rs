@@ -571,7 +571,7 @@ mod tests {
 
         let recommendations = recommender.generate_recommendations().await.unwrap();
 
-        assert!(recommendations.len() > 0);
+        assert!(!recommendations.is_empty());
         assert!(recommendations.iter().any(|r| r.priority == Priority::High));
     }
 

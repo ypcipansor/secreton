@@ -1,15 +1,13 @@
 //! Digital signature implementations
 
 use crate::{AlgorithmId, CryptoError, CryptoResult};
-use ed25519_dalek::{Signer as _, Verifier as _, SigningKey, VerifyingKey, Signature};
+use ed25519_dalek::{SigningKey, VerifyingKey, Signature};
 use p256::ecdsa::{
     SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey,
-    signature::{Signer as _, Verifier as _},
     Signature as P256Signature
 };
 use p384::ecdsa::{
     SigningKey as P384SigningKey, VerifyingKey as P384VerifyingKey,
-    signature::{Signer as _, Verifier as _},
     Signature as P384Signature
 };
 use rsa::{
@@ -17,6 +15,7 @@ use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey},
 };
 use sha2::Sha256;
+use signature::{Signer, Verifier};
 
 /// Signing engine for digital signatures
 pub struct SigningEngine;

@@ -138,10 +138,9 @@ impl SamlAuthMethod {
                 Ok(XmlEvent::Characters(text)) => {
                     if in_assertion && in_subject && current_element == "NameID" {
                         assertion.name_id = text;
-                    } else if in_attribute_statement && current_element == "AttributeValue" {
-                        if let Some(ref mut attr) = current_attribute {
-                            attr.values.push(text);
-                        }
+                    } else if in_attribute_statement && current_element == "AttributeValue"
+                        && let Some(ref mut attr) = current_attribute {
+                        attr.values.push(text);
                     }
                 }
                 Ok(XmlEvent::EndElement { name }) => {

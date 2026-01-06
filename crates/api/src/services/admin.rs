@@ -1,5 +1,7 @@
 //! Admin service for system management operations.
 
+#![allow(clippy::collapsible_if)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
@@ -148,11 +150,11 @@ impl AdminService {
 
         // Get user count from auth service
         let total_users = self.auth.get_user_count().await
-            .map_err(|e| AdminError::Auth(e))?;
+            .map_err(AdminError::Auth)?;
 
         // Get active sessions
         let active_sessions = self.auth.get_active_session_count().await
-            .map_err(|e| AdminError::Auth(e))?;
+            .map_err(AdminError::Auth)?;
 
         // Get secret/key counts from storage
         let (total_secrets, total_keys) = self.get_storage_counts().await?;
@@ -199,7 +201,7 @@ impl AdminService {
     /// Get storage counts (secrets and keys)
     async fn get_storage_counts(&self) -> Result<(u64, u64), AdminError> {
         let stats = self.storage.get_stats().await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         // For now, consider all entries as secrets, and keys as a subset
         // In a real implementation, you might distinguish based on paths or tags
@@ -212,7 +214,7 @@ impl AdminService {
     /// Get storage usage in bytes
     async fn get_storage_usage(&self) -> Result<u64, AdminError> {
         let stats = self.storage.get_stats().await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         Ok(stats.total_size_bytes)
     }
 
@@ -267,7 +269,7 @@ impl AdminService {
         };
         
         let entries = self.storage.list(&query_params).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         // Serialize all entries
         let backup_data = serde_json::to_string(&entries)
@@ -310,7 +312,7 @@ impl AdminService {
         };
         
         self.storage.store(&backup_entry).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         let backup_info = BackupInfo {
             id: backup_id,
@@ -341,11 +343,11 @@ impl AdminService {
         };
         
         let entries = self.storage.list(&query_params).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         let backups = entries.into_iter()
             .filter_map(|entry| {
-                let backup_id = entry.path.split('/').last()?.to_string();
+                let backup_id = entry.path.split('/').next_back()?.to_string();
                 Some(BackupInfo {
                     id: backup_id,
                     created_at: entry.created_at,
@@ -367,7 +369,7 @@ impl AdminService {
         
         let backup_path = format!("backups/{}", backup_id);
         let backup_entry = self.storage.get_by_path(&backup_path).await
-            .map_err(|e| AdminError::Storage(e))?
+            .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("Backup {} not found", backup_id)))?;
         
         // Get backup data
@@ -382,7 +384,7 @@ impl AdminService {
         for entry in &entries {
             if !entry.path.starts_with("backups/") {
                 self.storage.store(entry).await
-                    .map_err(|e| AdminError::Storage(e))?;
+                    .map_err(AdminError::Storage)?;
             }
         }
         
@@ -408,7 +410,7 @@ impl AdminService {
         
         // Clean expired sessions
         let expired_sessions = self.auth.cleanup_expired_sessions().await
-            .map_err(|e| AdminError::Auth(e))?;
+            .map_err(AdminError::Auth)?;
 
         // Clean expired secrets (this would need to be implemented in storage)
         let expired_secrets = self.cleanup_expired_secrets().await?;
@@ -466,7 +468,7 @@ impl AdminService {
         };
         
         let entries = self.storage.list(&query_params).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         let mut audit_logs: Vec<AuditLogEntry> = entries.into_iter()
             .filter_map(|entry| {
@@ -1147,7 +1149,7 @@ impl AdminService {
 
         // Check for failed login attempts
         let failed_logins = audit_logs.iter()
-            .filter(|log| log.action == "login" && log.success == false)
+            .filter(|log| log.action == "login" && !log.success)
             .count();
 
         if failed_logins > 10 {
@@ -1211,7 +1213,7 @@ impl AdminService {
         // Store configuration in system config path
         let config_path = "system/config";
         let current_config = self.storage.get_by_path(config_path).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         let mut config_data: HashMap<String, serde_json::Value> = current_config
             .and_then(|entry| {
@@ -1259,7 +1261,7 @@ impl AdminService {
         };
         
         self.storage.store(&config_entry).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
         
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
@@ -1292,7 +1294,7 @@ impl AdminService {
 
         let entries = self.storage.list(&query_params)
             .await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         let mut users = Vec::new();
         for entry in entries {
@@ -1309,7 +1311,7 @@ impl AdminService {
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let entry = self.storage.get_by_path(&path)
             .await
-            .map_err(|e| AdminError::Storage(e))?
+            .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
         self.secreton_entry_to_user_info(&entry)
@@ -1339,7 +1341,7 @@ impl AdminService {
         let entry = self.user_info_to_secreton_entry(&user)?;
         self.storage.store(&entry)
             .await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         Ok(user)
     }
@@ -1368,7 +1370,7 @@ impl AdminService {
         let entry = self.user_info_to_secreton_entry(&user)?;
         self.storage.update(&entry)
             .await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         Ok(user)
     }
@@ -1383,7 +1385,7 @@ impl AdminService {
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let deleted = self.storage.delete_by_path(&path)
             .await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         if !deleted {
             return Err(AdminError::NotFound(format!("User {} not found", user_id)));
@@ -1432,7 +1434,7 @@ impl AdminService {
     async fn storage_cleanup(&self) -> Result<u64, AdminError> {
         // Get current storage stats
         let before_stats = self.storage.get_stats().await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         // Perform cleanup operations (this would be backend-specific)
         // For now, simulate cleanup by returning a portion of current size
@@ -1455,25 +1457,18 @@ impl AdminService {
         };
 
         let entries = self.storage.list(&query_params).await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         for entry in entries {
             // Check if the secret has an expires_at field
-            if let Some(expires_at_str) = entry.metadata.get("expires_at") {
-                if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_at_str) {
-                    let expires_at_utc = expires_at.with_timezone(&chrono::Utc);
-                    if expires_at_utc <= now {
-                        // Secret has expired, delete it
-                        let deleted = self.storage.delete_by_path(&entry.path).await
-                            .map_err(|e| AdminError::Storage(e))?;
-
-                        if deleted {
-                            expired_count += 1;
-
-                            // Log the cleanup
-                            tracing::info!("Cleaned up expired secret: {}", entry.path);
-                        }
-                    }
+            if let Some(expires_at_str) = entry.metadata.get("expires_at")
+                && let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_at_str) {
+                let expires_at_utc = expires_at.with_timezone(&chrono::Utc);
+                if expires_at_utc <= now
+                    && self.storage.delete_by_path(&entry.path).await.map_err(AdminError::Storage)? {
+                    expired_count += 1;
+                    // Log the cleanup
+                    tracing::info!("Cleaned up expired secret: {}", entry.path);
                 }
             }
         }
@@ -1485,7 +1480,7 @@ impl AdminService {
     async fn perform_database_compaction(&self) -> Result<CompactionResult, AdminError> {
         // Get stats before compaction
         let stats_before = self.storage.get_stats().await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         // Perform compaction based on storage backend type
         // For now, this is a placeholder - real implementation would depend on backend
@@ -1493,7 +1488,7 @@ impl AdminService {
 
         // Get stats after compaction (simulated)
         let stats_after = self.storage.get_stats().await
-            .map_err(|e| AdminError::Storage(e))?;
+            .map_err(AdminError::Storage)?;
 
         let mut details = HashMap::new();
         details.insert("original_size_bytes".to_string(), serde_json::Value::Number(stats_before.total_size_bytes.into()));

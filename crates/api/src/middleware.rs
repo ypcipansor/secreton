@@ -3,6 +3,8 @@
 //! Provides authentication, rate limiting, request tracing,
 //! and other middleware functionality.
 
+#![allow(clippy::collapsible_if)]
+
 use axum::{
     Json,
     extract::{Extension, Request},
@@ -671,8 +673,8 @@ pub mod auth {
                 .and_then(|h| h.to_str().ok())
                 .ok_or(StatusCode::UNAUTHORIZED)?;
 
-            let token = if auth_header.starts_with("Bearer ") {
-                &auth_header[7..]
+            let token = if let Some(stripped) = auth_header.strip_prefix("Bearer ") {
+                stripped
             } else {
                 return Err(StatusCode::UNAUTHORIZED);
             };

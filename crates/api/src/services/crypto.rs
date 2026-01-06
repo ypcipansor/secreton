@@ -107,12 +107,14 @@ impl KeyStorage for SystemKeyStorage {
     }
 }
 
+type CacheEntry = (String, Vec<u8>, std::time::Instant);
+
 /// Crypto service for API operations
 pub struct CryptoService {
     key_manager: Arc<KeyManager>,
     crypto_engine: Arc<CryptoEngine>,
     // Cache: (key_id, key_bytes, timestamp)
-    active_key_cache: Arc<RwLock<Option<(String, Vec<u8>, std::time::Instant)>>>,
+    active_key_cache: Arc<RwLock<Option<CacheEntry>>>,
     cache_ttl: std::time::Duration,
 }
 
@@ -145,7 +147,7 @@ impl CryptoService {
         let key_manager = Arc::new(KeyManager::new(key_storage, rotation_interval));
 
         // Ensure an active key exists
-        if let Err(_) = key_manager.get_active_key().await {
+        if key_manager.get_active_key().await.is_err() {
             tracing::info!("No active key found. Initializing new system key.");
             if let Err(e) = key_manager.rotate_keys().await {
                  tracing::error!("Failed to initialize system key: {}", e);
@@ -180,6 +182,7 @@ impl CryptoService {
 
     /// Encrypt data with the active system key.
     /// Returns a serialized CryptoPacket containing key_id and encrypted data.
+    #[allow(clippy::collapsible_if)]
     pub async fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let mut key_info = None;
 

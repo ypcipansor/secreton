@@ -28,7 +28,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 .ok_or((StatusCode::UNAUTHORIZED, "Invalid authorization header".to_string()))?;
 
             state.auth.validate_token(&token).await
-                .map(|user| AuthenticatedUser(user))
+                .map(AuthenticatedUser)
                 .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))
         }
     }

@@ -545,7 +545,7 @@ mod tests {
             .get_access_patterns("secret/business")
             .await
             .unwrap();
-        assert!(pattern.peak_hours.len() > 0);
+        assert!(!pattern.peak_hours.is_empty());
     }
 
     #[tokio::test]

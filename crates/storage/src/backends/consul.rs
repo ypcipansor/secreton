@@ -511,8 +511,10 @@ mod tests {
 
     #[test]
     fn test_build_url_with_datacenter() {
-        let mut config = ConsulStorageConfig::default();
-        config.datacenter = Some("dc1".to_string());
+        let config = ConsulStorageConfig {
+            datacenter: Some("dc1".to_string()),
+            ..Default::default()
+        };
 
         let storage = ConsulStorage {
             config,

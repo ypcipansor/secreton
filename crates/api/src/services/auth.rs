@@ -291,7 +291,7 @@ impl AuthenticationService {
         Ok(User {
             id: claims.claims.sub,
             username: claims.claims.username.clone(),
-            email: claims.claims.email.clone().into(),
+            email: claims.claims.email.clone(),
             password_hash: "".to_string(),
             full_name: None,
             is_active: true,
@@ -323,7 +323,7 @@ impl AuthenticationService {
         let user = User {
             id: claims.claims.sub.clone(),
             username: claims.claims.username.clone(),
-            email: claims.claims.email.clone().into(),
+            email: claims.claims.email.clone(),
             display_name: None,
             disabled: false,
             password_hash: "".to_string(),
@@ -419,7 +419,7 @@ impl AuthenticationService {
         };
 
         let count = self.storage.count(&params).await
-            .map_err(|e| AuthError::Storage(e))?;
+            .map_err(AuthError::Storage)?;
 
         Ok(count)
     }
@@ -436,7 +436,7 @@ impl AuthenticationService {
         };
 
         let entries = self.storage.list(&params).await
-            .map_err(|e| AuthError::Storage(e))?;
+            .map_err(AuthError::Storage)?;
 
         let mut deleted_count = 0;
         let now = chrono::Utc::now();

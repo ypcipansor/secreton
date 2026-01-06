@@ -78,7 +78,7 @@ impl PrivateKey {
                     pem_data,
                 })
             }
-            _ => return Err("Unsupported EC key size. Use 256 or 384 bits.".into()),
+            _ => Err("Unsupported EC key size. Use 256 or 384 bits.".into()),
         }
     }
 

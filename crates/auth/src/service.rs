@@ -67,6 +67,12 @@ impl AuthMethodRegistry {
     }
 }
 
+impl Default for AuthMethodRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Main authentication method service
 pub struct AuthMethodService {
     registry: RwLock<AuthMethodRegistry>,

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tracing::{warn, info, error};
+use tracing::{warn, error};
 use thiserror::Error;
 use sha2::{Digest, Sha256, Sha512};
 use sha3::Sha3_256;
@@ -17,10 +17,6 @@ use secreton_auth::{IdentityService, policies::model::EvaluationContext};
 use secreton_performance::{SecretPerformanceOptimizer, AccessType};
 use secreton_crypto::EncryptedData;
 use secreton_storage::StorageBackend;
-use secreton_core::User;
-use uuid::Uuid;
-use secreton_security::policies::policy::{check_policy_with_sentinel, PolicyCheckConfig, Policy as RbacPolicy};
-use secreton_security::policies::sentinel::{SentinelPolicy, EnforcementLevel};
 
 /// Policy metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -187,7 +183,7 @@ impl SecretService {
 
         // Get encrypted secret from storage
         let encrypted_entry = self.storage.get_by_path(path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
 
         // Decrypt the secret data
@@ -260,7 +256,7 @@ impl SecretService {
 
         // Store encrypted data
         self.storage.store(&entry).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Update cache with plaintext data
         let _ = self.performance.put_cached(path.to_string(), json_data).await;
@@ -296,7 +292,7 @@ impl SecretService {
 
         // Check if secret exists before deletion
         let exists = self.storage.get_by_path(path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .is_some();
 
         if !exists {
@@ -305,7 +301,7 @@ impl SecretService {
 
         // Delete from storage using delete_by_path
         self.storage.delete_by_path(path).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Invalidate cache
         let _ = self.performance.invalidate_cached(path).await;
@@ -390,7 +386,7 @@ impl SecretService {
         // Get secrets from storage
         // The storage backend handles filtering by owner_id if set in query
         let entries = self.storage.list(&query).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Convert entries to SecretData
         let mut accessible_secrets = Vec::new();
@@ -480,7 +476,7 @@ impl SecretService {
         );
 
         self.storage.store(&metadata_entry).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Encrypt the key data before storing
         let encrypted_key_data = self.crypto.encrypt_data(&key_data).await
@@ -496,7 +492,7 @@ impl SecretService {
         );
 
         self.storage.store(&key_data_entry).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Log audit trail
         let _ = self.audit.log_event(
@@ -525,7 +521,7 @@ impl SecretService {
 
         // Retrieve key metadata from storage
         let entry = self.storage.get_by_path(&key_path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_id.to_string() })?;
 
         let metadata: serde_json::Value = serde_json::from_slice(&entry.encrypted_data)
@@ -566,6 +562,7 @@ impl SecretService {
     }
 
     /// List keys for a user
+    #[allow(clippy::collapsible_if)]
     pub async fn list_keys(&self, user: &secreton_auth::User, filter: Option<&str>) -> Result<Vec<KeyInfo>, SecretError> {
         self.check_permission(user, &format!("keys/{}/", user.id), "list").await?;
 
@@ -575,17 +572,16 @@ impl SecretService {
             .with_path_prefix(keys_prefix.clone());
 
         let entries = self.storage.list(&query).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         let mut keys = Vec::new();
         for entry in entries {
             // Extract key name from path
             if let Some(key_name) = entry.path.strip_prefix(&keys_prefix) {
                 // Apply filter if provided
-                if let Some(filter_str) = filter {
-                    if !key_name.contains(filter_str) {
-                        continue;
-                    }
+                if let Some(filter_str) = filter
+                    && !key_name.contains(filter_str) {
+                    continue;
                 }
 
                 // Parse key metadata
@@ -687,7 +683,7 @@ impl SecretService {
         );
 
         self.storage.store(&metadata_entry).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Store new key data with version
         let new_key_data_path = format!("key_data/{}/{}_v{}", user.id, key_id, new_version);
@@ -700,7 +696,7 @@ impl SecretService {
         );
 
         self.storage.store(&key_data_entry).await
-            .map_err(|e| SecretError::Storage(e))?;
+            .map_err(SecretError::Storage)?;
 
         // Log audit trail
         let _ = self.audit.log_event(
@@ -817,7 +813,7 @@ impl SecretService {
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
         let key_entry = self.storage.get_by_path(&key_data_path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data
@@ -869,7 +865,7 @@ impl SecretService {
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
         let key_entry = self.storage.get_by_path(&key_data_path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data

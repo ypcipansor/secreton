@@ -1,5 +1,6 @@
 //! Agent authentication and templating
 
+#[allow(clippy::module_inception)]
 pub mod agent;
 pub mod service;
 pub mod template;

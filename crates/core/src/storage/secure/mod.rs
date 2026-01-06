@@ -241,10 +241,7 @@ pub trait KeyStore: Send + Sync {
 /// key_store.set_current_key_id("test-key").await?;
 /// # Ok(())
 /// # }
-
-/// In-memory implementation of KeyStore for testing and development
-/// This implementation stores keys in memory and is not persistent across
-/// restarts. It's primarily intended for testing and development purposes.
+/// ```
 #[derive(Debug)]
 pub struct MemoryKeyStore {
     keys: RwLock<HashMap<String, KeyEntry>>,
@@ -283,7 +280,6 @@ impl MemoryKeyStore {
     }
 }
 
-#[async_trait]
 #[async_trait]
 impl KeyStore for MemoryKeyStore {
     async fn load_keys(&self) -> Result<HashMap<String, KeyEntry>, anyhow::Error> {

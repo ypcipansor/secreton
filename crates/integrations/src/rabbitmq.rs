@@ -198,6 +198,18 @@ impl RabbitMqConnection {
     }
 }
 
+/// Request structure for generating RabbitMQ credentials
+#[derive(Debug)]
+pub struct RabbitMqCredentialRequest {
+    pub username: String,
+    pub password: String,
+    pub tags: String,
+    pub vhost: String,
+    pub configure_perm: String,
+    pub write_perm: String,
+    pub read_perm: String,
+}
+
 /// RabbitMQ operations for common credential management
 pub struct RabbitMqOperations;
 
@@ -205,54 +217,47 @@ impl RabbitMqOperations {
     /// Generate RabbitMQ credentials with permissions
     pub async fn generate_credentials(
         config: &RabbitMqConfig,
-        username: &str,
-        password: &str,
-        tags: &str,
-        vhost: &str,
-        configure_perm: &str,
-        write_perm: &str,
-        read_perm: &str,
+        req: RabbitMqCredentialRequest,
     ) -> Result<HashMap<String, serde_json::Value>> {
         let conn = RabbitMqConnection::new(config.clone());
 
         // Create user
-        conn.create_user(username, password, tags).await?;
+        conn.create_user(&req.username, &req.password, &req.tags)
+            .await?;
 
         // Set permissions
         let permissions = RabbitMqPermissions {
-            user: username.to_string(),
-            vhost: vhost.to_string(),
-            configure: configure_perm.to_string(),
-            write: write_perm.to_string(),
-            read: read_perm.to_string(),
+            user: req.username.clone(),
+            vhost: req.vhost.clone(),
+            configure: req.configure_perm,
+            write: req.write_perm,
+            read: req.read_perm,
         };
 
-        conn.set_permissions(username, vhost, &permissions).await?;
+        conn.set_permissions(&req.username, &req.vhost, &permissions)
+            .await?;
 
         // Generate connection URI
-        let connection_uri = conn.generate_connection_uri(username, password)?;
+        let connection_uri = conn.generate_connection_uri(&req.username, &req.password)?;
 
         let mut creds_data = HashMap::new();
         creds_data.insert(
             "username".to_string(),
-            serde_json::Value::String(username.to_string()),
+            serde_json::Value::String(req.username),
         );
         creds_data.insert(
             "password".to_string(),
-            serde_json::Value::String(password.to_string()),
+            serde_json::Value::String(req.password),
         );
         creds_data.insert(
             "vhost".to_string(),
-            serde_json::Value::String(vhost.to_string()),
+            serde_json::Value::String(req.vhost),
         );
         creds_data.insert(
             "connection_uri".to_string(),
             serde_json::Value::String(connection_uri),
         );
-        creds_data.insert(
-            "tags".to_string(),
-            serde_json::Value::String(tags.to_string()),
-        );
+        creds_data.insert("tags".to_string(), serde_json::Value::String(req.tags));
 
         Ok(creds_data)
     }

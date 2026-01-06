@@ -46,7 +46,7 @@ impl SecretHistory {
         let previous_version = self.versions.get(&self.current_version);
         let mut hasher = Sha256::new();
         hasher.update(&created_by);
-        hasher.update(&Utc::now().timestamp().to_string());
+        hasher.update(Utc::now().timestamp().to_string());
         hasher.update(&value);
         if let Some(prev_version) = previous_version {
             hasher.update(prev_version.hash.as_bytes());

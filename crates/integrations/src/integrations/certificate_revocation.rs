@@ -294,11 +294,10 @@ impl CertificateRevocationService {
 
         // Update CRL if auto-rebuild enabled
         let configs = self.crl_config.read().await;
-        if let Some(_config) = configs.get(&issuer) {
-            if _config.auto_rebuild {
-                drop(configs);
-                self.rebuild_crl(&issuer).await?;
-            }
+        if let Some(_config) = configs.get(&issuer)
+            && _config.auto_rebuild {
+            drop(configs);
+            self.rebuild_crl(&issuer).await?;
         }
 
         Ok(())
@@ -460,7 +459,7 @@ impl CertificateRevocationService {
 
         revoked
             .values()
-            .filter(|c| issuer.map_or(true, |iss| c.issuer == iss))
+            .filter(|c| issuer.is_none_or(|iss| c.issuer == iss))
             .cloned()
             .collect()
     }
@@ -633,7 +632,7 @@ mod tests {
             OCSPStatus::Revoked { reason, .. } => {
                 assert_eq!(reason, RevocationReason::KeyCompromise);
             }
-            _ => assert!(false, "Expected Revoked _status"),
+            _ => panic!("Expected Revoked _status"),
         }
     }
 

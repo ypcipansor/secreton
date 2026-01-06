@@ -205,6 +205,12 @@ impl GithubAuthMethod {
     }
 }
 
+impl Default for GithubAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AuthMethodImpl for GithubAuthMethod {
     fn method_type(&self) -> AuthMethodType {

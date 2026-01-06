@@ -178,6 +178,12 @@ impl OktaAuthMethod {
     }
 }
 
+impl Default for OktaAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AuthMethodImpl for OktaAuthMethod {
     fn method_type(&self) -> AuthMethodType {

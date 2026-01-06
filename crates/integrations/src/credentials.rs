@@ -143,7 +143,7 @@ impl CredentialGenerator for MySqlCredentialGenerator {
         conn.query_drop(&create_user_query).await?;
 
         // Grant basic select permissions
-        conn.query_drop(&format!("GRANT SELECT ON *.* TO '{}'@'%'", username))
+        conn.query_drop(format!("GRANT SELECT ON *.* TO '{}'@'%'", username))
             .await?;
 
         let mut credential = DynamicCredential::with_expiration(

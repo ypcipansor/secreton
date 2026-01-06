@@ -82,10 +82,9 @@ impl SecretEngine for KvEngine {
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
         // Validate configuration
-        if let Some(kv_config) = config.config.get("kv") {
-            if let Ok(kv_config) = serde_json::from_value(kv_config.clone()) {
-                self.config = kv_config;
-            }
+        if let Some(kv_config) = config.config.get("kv")
+            && let Ok(kv_config) = serde_json::from_value(kv_config.clone()) {
+            self.config = kv_config;
         }
 
         self.enabled = config.enabled;
@@ -155,10 +154,9 @@ impl SecretEngine for KvEngine {
         }
 
         let mut storage = self.storage.write().await;
-        if let Some(versions) = storage.get_mut(path) {
-            if let Some(latest) = versions.last_mut() {
-                latest.deleted = true;
-            }
+        if let Some(versions) = storage.get_mut(path)
+            && let Some(latest) = versions.last_mut() {
+            latest.deleted = true;
         }
 
         Ok(())

@@ -97,10 +97,9 @@ impl SecretEngine for DatabaseEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(db_config) = config.config.get("database") {
-            if let Ok(db_config) = serde_json::from_value(db_config.clone()) {
-                self.config = db_config;
-            }
+        if let Some(db_config) = config.config.get("database")
+            && let Ok(db_config) = serde_json::from_value(db_config.clone()) {
+            self.config = db_config;
         }
 
         self.enabled = config.enabled;
@@ -114,9 +113,7 @@ impl SecretEngine for DatabaseEngine {
 
         // Database engine generates credentials on demand
         // Reading a role generates new credentials
-        if path.starts_with("creds/") {
-            let role_name = &path[6..]; // Remove "creds/" prefix
-
+        if let Some(role_name) = path.strip_prefix("creds/") {
             let data = self.generate_credentials(role_name).await?;
 
             let secret = Secret {
@@ -147,9 +144,7 @@ impl SecretEngine for DatabaseEngine {
         }
 
         // Handle role creation
-        if path.starts_with("roles/") {
-            let role_name = &path[6..]; // Remove "roles/" prefix
-
+        if let Some(role_name) = path.strip_prefix("roles/") {
             let sql = data.get("sql").and_then(|v| v.as_str()).ok_or_else(|| {
                 SecretError::InvalidConfiguration("Missing SQL for role".to_string())
             })?;
@@ -203,8 +198,7 @@ impl SecretEngine for DatabaseEngine {
             return Err(SecretError::EngineNotFound("database".to_string()));
         }
 
-        if path.starts_with("roles/") {
-            let role_name = &path[6..]; // Remove "roles/" prefix
+        if let Some(role_name) = path.strip_prefix("roles/") {
             self.roles.remove(role_name);
             Ok(())
         } else {

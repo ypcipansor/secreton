@@ -327,6 +327,7 @@ pub struct CreateSecretRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SecretMetadata {
     pub description: Option<String>,
     pub tags: Vec<String>,
@@ -379,6 +380,7 @@ pub struct KeyVersionInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct KeyMetadata {
     pub description: Option<String>,
     pub tags: Vec<String>,
@@ -1288,29 +1290,6 @@ pub async fn delete_policy(
     Ok(Json(ApiResponse::success(data)))
 }
 
-/// Backup operations
-impl Default for SecretMetadata {
-    fn default() -> Self {
-        Self {
-            description: None,
-            tags: vec![],
-            owner: None,
-            classification: None,
-        }
-    }
-}
-
-impl Default for KeyMetadata {
-    fn default() -> Self {
-        Self {
-            description: None,
-            tags: vec![],
-            owner: None,
-            purpose: None,
-        }
-    }
-}
-
 /// Helper function to get public key for a key (for asymmetric keys)
 async fn get_public_key_for_key(
     state: &AppState,
@@ -1393,7 +1372,7 @@ pub async fn create_backup(
     // For now we error out.
     // However, if we implemented service method, we'd pass user.
     
-    return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
+    Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()))
 }
 
 pub async fn list_backups(
@@ -1413,7 +1392,7 @@ pub async fn list_backups(
 
     // List backups via secreton service
     // Stub
-    return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
+    Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()))
 }
 
 pub async fn get_backup(
@@ -1434,7 +1413,7 @@ pub async fn get_backup(
 
     // Get backup info via secreton service
     // Stub
-    return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
+    Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()))
 }
 
 pub async fn restore_backup(
@@ -1444,7 +1423,7 @@ pub async fn restore_backup(
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Check permissions handled by service if implemented
     // Stub
-    return Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()));
+    Err(crate::ApiError::Internal("Backup functionality not implemented".to_string()))
 }
 
 pub async fn delete_backup(
