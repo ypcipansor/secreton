@@ -6,6 +6,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::{warn, info, error};
 use thiserror::Error;
+use sha2::{Digest, Sha256, Sha512};
+use sha3::Sha3_256;
+use hex;
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
@@ -936,6 +939,40 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         Ok((is_valid, key_info.version))
+    }
+
+    /// Compute hash of data
+    pub async fn hash_data(
+        &self,
+        data: &[u8],
+        algorithm: &str,
+        user: &secreton_auth::User,
+    ) -> Result<String, SecretError> {
+        self.check_permission(user, "sys/crypto", "hash").await?;
+
+        // Compute hash based on algorithm
+        let hash_hex = match algorithm {
+            "SHA-256" | "sha256" => {
+                let mut hasher = Sha256::new();
+                hasher.update(data);
+                hex::encode(hasher.finalize())
+            }
+            "SHA-512" | "sha512" => {
+                let mut hasher = Sha512::new();
+                hasher.update(data);
+                hex::encode(hasher.finalize())
+            }
+            "SHA3-256" | "sha3-256" => {
+                let mut hasher = Sha3_256::new();
+                hasher.update(data);
+                hex::encode(hasher.finalize())
+            }
+            _ => {
+                return Err(SecretError::InvalidOperation(format!("Unsupported hash algorithm: {}", algorithm)));
+            }
+        };
+
+        Ok(hash_hex)
     }
 }
 

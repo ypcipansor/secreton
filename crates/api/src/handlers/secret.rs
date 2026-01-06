@@ -14,7 +14,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use base64::prelude::*;
-use hex;
 
 use crate::handlers::{AppState};
 use crate::services::secret;
@@ -283,6 +282,30 @@ mod tests {
         assert_eq!(key.name, "signing-key");
         assert_eq!(key.algorithm, "RSA-2048");
         assert!(key.public_key.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_hash_data_works() {
+        let (server, token) = server_with_routes().await;
+        let request = serde_json::json!({
+            "data": "test data",
+            "algorithm": "SHA-256"
+        });
+
+        let response = server.post("/hash")
+            .add_header("Authorization", &format!("Bearer {}", token))
+            .json(&request)
+            .await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<HashResponse> = response.json();
+        assert!(body.success);
+        let hash_data = body.data.expect("hash response");
+        assert_eq!(hash_data.algorithm, "SHA-256");
+        // SHA-256 of "test data"
+        // echo -n "test data" | sha256sum
+        // 916f0027a575074ce72a331777c3478d6513f786a591bd892da1a577bf2335f9
+        assert_eq!(hash_data.hash, "916f0027a575074ce72a331777c3478d6513f786a591bd892da1a577bf2335f9");
     }
 }
 
@@ -1070,51 +1093,22 @@ pub async fn verify_signature(
 }
 
 pub async fn hash_data(
-    State(_state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
-
-    // Check permissions (RBAC) - hashing is generally allowed
-    // TODO: RBAC check_policy - placeholder allows all
-    if false {
-        return Err(crate::ApiError::Authorization("Access denied".to_string()));
-    }
 
     // Decode data from base64 if needed
     let data = BASE64_STANDARD.decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
 
-    // Compute hash based on algorithm
-    let hash = match request.algorithm.as_str() {
-        "SHA-256" | "sha256" => {
-            use sha2::Sha256;
-            use sha2::Digest;
-            let mut hasher = Sha256::new();
-            hasher.update(&data);
-            hasher.finalize().to_vec()
-        }
-        "SHA-512" | "sha512" => {
-            use sha2::Sha512;
-            use sha2::Digest;
-            let mut hasher = Sha512::new();
-            hasher.update(&data);
-            hasher.finalize().to_vec()
-        }
-        "SHA3-256" | "sha3-256" => {
-            use sha3::Sha3_256;
-            use sha3::Digest;
-            let mut hasher = Sha3_256::new();
-            hasher.update(&data);
-            hasher.finalize().to_vec()
-        }
-        _ => {
-            return Err(crate::ApiError::BadRequest(format!("Unsupported hash algorithm: {}", request.algorithm)));
-        }
-    };
-
-    // Encode hash as hex
-    let hash_hex = hex::encode(&hash);
+    // Compute hash via service (handles RBAC)
+    let hash_hex = state.secreton.hash_data(&data, &request.algorithm, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+             _ => crate::ApiError::Internal(format!("Failed to hash data: {}", e))
+        })?;
 
     let response = HashResponse {
         hash: hash_hex,
