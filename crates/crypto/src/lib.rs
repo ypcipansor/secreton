@@ -25,6 +25,7 @@ pub mod policy_enforced_crypto;
 // pub mod pqc; // Disabled for now
 pub mod secure_multi_party_computation;
 pub mod shamir;
+pub mod signing;
 pub mod transit;
 
 // Integration modules are now enabled
@@ -60,6 +61,7 @@ pub use secure_multi_party_computation::{
     SMPCProtocol, SMPCSession, SMPCSystem, SecretShare, SessionState, ThresholdSignature,
 };
 pub use shamir::*;
+pub use signing::*;
 pub use transit::TransitEngine;
 
 /// Supported cryptographic algorithms

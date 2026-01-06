@@ -236,15 +236,14 @@ impl CryptoService {
             .map_err(|e| anyhow::anyhow!("Decryption error: {}", e))
     }
 
-    pub fn sign_data(&self, _key: &[u8], _data: &[u8]) -> Result<Vec<u8>> {
-        // Placeholder signature
-        // TODO: Implement actual signing using key
-        Ok(vec![0u8; 64])
+    pub fn sign_data(&self, key: &[u8], data: &[u8], algorithm: AlgorithmId) -> Result<Vec<u8>> {
+        secreton_crypto::SigningEngine::sign(algorithm, key, data)
+            .map_err(|e| anyhow::anyhow!("Signing failed: {}", e))
     }
 
-    pub fn verify_signature(&self, _key: &[u8], _data: &[u8], _signature: &[u8]) -> Result<bool> {
-        // Placeholder verification
-        Ok(true)
+    pub fn verify_signature(&self, key: &[u8], data: &[u8], signature: &[u8], algorithm: AlgorithmId) -> Result<bool> {
+        secreton_crypto::SigningEngine::verify(algorithm, key, data, signature)
+            .map_err(|e| anyhow::anyhow!("Verification failed: {}", e))
     }
 }
 
@@ -252,6 +251,7 @@ impl CryptoService {
 mod tests {
     use super::*;
     use secreton_storage::MockStorageBackend;
+    use secreton_crypto::{AlgorithmId, generate_key};
 
     #[tokio::test]
     async fn test_crypto_service_lifecycle() {
@@ -282,5 +282,48 @@ mod tests {
 
         // Ciphertexts are different due to IV/Nonce
         assert_ne!(encrypted1, encrypted2);
+    }
+
+    #[tokio::test]
+    async fn test_signing_and_verification_ed25519() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let service = CryptoService::new(storage).await.unwrap();
+        let data = b"Important Document";
+
+        let key = generate_key(AlgorithmId::Ed25519).unwrap();
+
+        let signature = service.sign_data(&key, data, AlgorithmId::Ed25519)
+            .expect("Signing failed");
+
+        assert_eq!(signature.len(), 64); // Ed25519 signatures are 64 bytes
+
+        let verified = service.verify_signature(&key, data, &signature, AlgorithmId::Ed25519)
+            .expect("Verification failed");
+
+        assert!(verified);
+
+        // Test invalid signature
+        let mut invalid_signature = signature.clone();
+        invalid_signature[0] ^= 0xFF;
+        let verified_invalid = service.verify_signature(&key, data, &invalid_signature, AlgorithmId::Ed25519)
+            .expect("Verification failed");
+        assert!(!verified_invalid);
+    }
+
+    #[tokio::test]
+    async fn test_signing_and_verification_p256() {
+        let storage = Arc::new(MockStorageBackend::new());
+        let service = CryptoService::new(storage).await.unwrap();
+        let data = b"Important Document";
+
+        let key = generate_key(AlgorithmId::EcdsaP256).unwrap();
+
+        let signature = service.sign_data(&key, data, AlgorithmId::EcdsaP256)
+            .expect("Signing failed");
+
+        let verified = service.verify_signature(&key, data, &signature, AlgorithmId::EcdsaP256)
+            .expect("Verification failed");
+
+        assert!(verified);
     }
 }
