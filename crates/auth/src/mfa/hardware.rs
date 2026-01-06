@@ -107,6 +107,12 @@ impl InMemoryHardwareService {
     }
 }
 
+impl Default for InMemoryHardwareService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl HardwareService for InMemoryHardwareService {
     async fn register(
@@ -163,10 +169,9 @@ impl HardwareService for InMemoryHardwareService {
         let entity_enrollments = self.entity_enrollments.read().await;
         let enrollments = self.enrollments.read().await;
 
-        if let Some(credential_ids) = entity_enrollments.get(&entity_id) {
-            if let Some(first_credential_id) = credential_ids.first() {
-                return Ok(enrollments.get(first_credential_id).cloned());
-            }
+        if let Some(credential_ids) = entity_enrollments.get(&entity_id)
+            && let Some(first_credential_id) = credential_ids.first() {
+            return Ok(enrollments.get(first_credential_id).cloned());
         }
 
         Ok(None)

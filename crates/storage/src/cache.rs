@@ -96,11 +96,10 @@ impl CacheBackend for InMemoryCache {
 
         match data.get(key) {
             Some(entry) => {
-                if let Some(expires_at) = entry.expires_at {
-                    if std::time::Instant::now() > expires_at {
-                        stats.miss_count += 1;
-                        return Ok(None);
-                    }
+                if let Some(expires_at) = entry.expires_at
+                    && std::time::Instant::now() > expires_at {
+                    stats.miss_count += 1;
+                    return Ok(None);
                 }
 
                 stats.hit_count += 1;
@@ -190,73 +189,6 @@ pub struct CachedStorage<S: crate::StorageBackend, C: CacheBackend> {
     default_ttl: Duration,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-    use tokio::time::sleep;
-
-    #[tokio::test]
-    async fn test_in_memory_cache_set_get_and_stats() {
-        let cache = InMemoryCache::new();
-        let key = "secreton:test";
-
-        // Miss before value set
-        assert!(cache.get(key).await.unwrap().is_none());
-
-        cache
-            .set(key, b"encrypted-data".to_vec(), None)
-            .await
-            .unwrap();
-
-        let cached = cache.get(key).await.unwrap();
-        assert_eq!(cached, Some(b"encrypted-data".to_vec()));
-
-        let stats = cache.stats().await.unwrap();
-        assert_eq!(stats.hit_count, 1);
-        assert_eq!(stats.miss_count, 1);
-        assert_eq!(stats.entry_count, 1);
-        assert!(stats.hit_rate > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_cache_expiration() {
-        let cache = InMemoryCache::new();
-        let key = "secreton:expiring";
-
-        cache
-            .set(key, b"temp".to_vec(), Some(Duration::from_millis(50)))
-            .await
-            .unwrap();
-
-        assert!(cache.get(key).await.unwrap().is_some());
-
-        sleep(Duration::from_millis(60)).await;
-
-        assert!(cache.get(key).await.unwrap().is_none());
-
-        let stats = cache.stats().await.unwrap();
-        assert_eq!(stats.entry_count, 0);
-        assert!(stats.eviction_count >= 1);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_cache_exists_and_clear() {
-        let cache = InMemoryCache::new();
-        let key = "secreton:clear";
-
-        cache.set(key, b"value".to_vec(), None).await.unwrap();
-        assert!(cache.exists(key).await.unwrap());
-
-        cache.clear().await.unwrap();
-        assert!(!cache.exists(key).await.unwrap());
-
-        let stats = cache.stats().await.unwrap();
-        assert_eq!(stats.entry_count, 0);
-        assert_eq!(stats.memory_usage_bytes, 0);
-    }
-}
-
 impl<S, C> CachedStorage<S, C>
 where
     S: crate::StorageBackend,
@@ -317,28 +249,24 @@ where
         let cache_key = Self::cache_key_for_id(id);
 
         // Try cache first
-        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
+        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
+            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
                 &cached_data,
                 bincode::config::standard(),
             ) {
-                return Ok(Some(entry));
-            }
+            return Ok(Some(entry));
         }
 
         // Fall back to storage
         let entry = self.storage.get_by_id(id).await?;
 
         // Cache the result if found
-        if let Some(ref entry) = entry {
-            if let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
-            {
-                let _ = self
-                    .cache
-                    .set(&cache_key, serialized, Some(self.default_ttl))
-                    .await;
-            }
+        if let Some(ref entry) = entry
+            && let Ok(serialized) = bincode::serde::encode_to_vec(entry, bincode::config::standard()) {
+            let _ = self
+                .cache
+                .set(&cache_key, serialized, Some(self.default_ttl))
+                .await;
         }
 
         Ok(entry)
@@ -348,28 +276,24 @@ where
         let cache_key = Self::cache_key_for_path(path);
 
         // Try cache first
-        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await {
-            if let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
+        if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
+            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
                 &cached_data,
                 bincode::config::standard(),
             ) {
-                return Ok(Some(entry));
-            }
+            return Ok(Some(entry));
         }
 
         // Fall back to storage
         let entry = self.storage.get_by_path(path).await?;
 
         // Cache the result if found
-        if let Some(ref entry) = entry {
-            if let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
-            {
-                let _ = self
-                    .cache
-                    .set(&cache_key, serialized, Some(self.default_ttl))
-                    .await;
-            }
+        if let Some(ref entry) = entry
+            && let Ok(serialized) = bincode::serde::encode_to_vec(entry, bincode::config::standard()) {
+            let _ = self
+                .cache
+                .set(&cache_key, serialized, Some(self.default_ttl))
+                .await;
         }
 
         Ok(entry)
@@ -480,5 +404,72 @@ where
 
     async fn migrate(&self) -> StorageResult<()> {
         self.storage.migrate().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    #[tokio::test]
+    async fn test_in_memory_cache_set_get_and_stats() {
+        let cache = InMemoryCache::new();
+        let key = "secreton:test";
+
+        // Miss before value set
+        assert!(cache.get(key).await.unwrap().is_none());
+
+        cache
+            .set(key, b"encrypted-data".to_vec(), None)
+            .await
+            .unwrap();
+
+        let cached = cache.get(key).await.unwrap();
+        assert_eq!(cached, Some(b"encrypted-data".to_vec()));
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.hit_count, 1);
+        assert_eq!(stats.miss_count, 1);
+        assert_eq!(stats.entry_count, 1);
+        assert!(stats.hit_rate > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_cache_expiration() {
+        let cache = InMemoryCache::new();
+        let key = "secreton:expiring";
+
+        cache
+            .set(key, b"temp".to_vec(), Some(Duration::from_millis(50)))
+            .await
+            .unwrap();
+
+        assert!(cache.get(key).await.unwrap().is_some());
+
+        sleep(Duration::from_millis(60)).await;
+
+        assert!(cache.get(key).await.unwrap().is_none());
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.entry_count, 0);
+        assert!(stats.eviction_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_cache_exists_and_clear() {
+        let cache = InMemoryCache::new();
+        let key = "secreton:clear";
+
+        cache.set(key, b"value".to_vec(), None).await.unwrap();
+        assert!(cache.exists(key).await.unwrap());
+
+        cache.clear().await.unwrap();
+        assert!(!cache.exists(key).await.unwrap());
+
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.memory_usage_bytes, 0);
     }
 }

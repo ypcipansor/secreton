@@ -432,6 +432,12 @@ impl PolicyService {
     }
 }
 
+impl Default for PolicyService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl Service for PolicyService {
     async fn start(&self) -> ServiceResult<()> {

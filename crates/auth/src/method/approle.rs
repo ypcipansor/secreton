@@ -67,6 +67,12 @@ impl AppRoleAuthMethod {
     }
 }
 
+impl Default for AppRoleAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AuthMethodImpl for AppRoleAuthMethod {
     fn method_type(&self) -> AuthMethodType {

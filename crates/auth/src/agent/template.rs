@@ -129,6 +129,12 @@ impl InMemoryTemplateService {
     }
 }
 
+impl Default for InMemoryTemplateService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl TemplateService for InMemoryTemplateService {
     async fn create_template(

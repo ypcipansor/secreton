@@ -146,6 +146,12 @@ impl LdapAuthMethod {
     }
 }
 
+impl Default for LdapAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AuthMethodImpl for LdapAuthMethod {
     fn method_type(&self) -> AuthMethodType {

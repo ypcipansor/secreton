@@ -122,20 +122,11 @@ impl AuditEntry {
 
 /// Tamper-evident audit log storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AuditLog {
     pub entries: Vec<AuditEntry>,
     pub entry_index: HashMap<String, usize>, // audit_id -> index
     pub latest_hash: Option<String>,
-}
-
-impl Default for AuditLog {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-            entry_index: HashMap::new(),
-            latest_hash: None,
-        }
-    }
 }
 
 impl AuditLog {

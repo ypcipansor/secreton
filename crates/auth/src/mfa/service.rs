@@ -401,7 +401,7 @@ impl MfaService for CombinedMfaService {
     async fn enable_totp(
         &self,
         entity_id: Uuid,
-        issuer: String,
+        _issuer: String,
         account_name: String,
     ) -> AuthMethodResult<crate::mfa::totp::TotpEnrollment> {
         let enrollment = self.totp_service.enroll(entity_id, account_name).await?;

@@ -104,6 +104,12 @@ impl InMemoryIdentityService {
     }
 }
 
+impl Default for InMemoryIdentityService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl IdentityService for InMemoryIdentityService {
     async fn create_entity(

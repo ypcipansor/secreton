@@ -671,8 +671,8 @@ mod tests {
 
         let tag_set: HashSet<String> = entry.tags.iter().cloned().collect();
         assert_eq!(tag_set.len(), 2);
-        assert!(tag_set.contains(&"finance".to_string()));
-        assert!(tag_set.contains(&"internal".to_string()));
+        assert!(tag_set.contains("finance"));
+        assert!(tag_set.contains("internal"));
     }
 
     #[test]

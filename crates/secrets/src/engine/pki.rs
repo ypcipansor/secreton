@@ -31,10 +31,9 @@ impl SecretEngine for PkiEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(pki_config) = config.config.get("pki") {
-            if let Ok(pki_config) = serde_json::from_value(pki_config.clone()) {
-                self.config = pki_config;
-            }
+        if let Some(pki_config) = config.config.get("pki")
+            && let Ok(pki_config) = serde_json::from_value(pki_config.clone()) {
+            self.config = pki_config;
         }
 
         self.enabled = config.enabled;

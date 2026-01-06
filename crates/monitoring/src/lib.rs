@@ -910,9 +910,8 @@ impl Service for AlertManager {
 
     async fn health(&self) -> ServiceResult<ServiceHealth> {
         // Basic health check - check if we can access the alert storage
-        match self.active_alerts.len() {
-            _ => Ok(ServiceHealth::Healthy),
-        }
+        self.active_alerts.len();
+        Ok(ServiceHealth::Healthy)
     }
 
     fn name(&self) -> &str {

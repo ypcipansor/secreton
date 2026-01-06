@@ -326,16 +326,16 @@ impl CAManagement {
         );
 
         for cert in certificates.values() {
-            if cert.ca_id == ca_id && cert.revoked {
-                if let Some(entry) = revocation_list
+            if cert.ca_id == ca_id
+                && cert.revoked
+                && let Some(entry) = revocation_list
                     .iter()
                     .find(|_e| _e.serial_number == cert.serial_number)
-                {
-                    crl.push_str(&format!(
-                        "Serial: {}\nRevoked: {}\nReason: {}\n\n",
-                        entry.serial_number, entry.revoked_at, entry.reason
-                    ));
-                }
+            {
+                crl.push_str(&format!(
+                    "Serial: {}\nRevoked: {}\nReason: {}\n\n",
+                    entry.serial_number, entry.revoked_at, entry.reason
+                ));
             }
         }
 

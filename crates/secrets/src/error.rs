@@ -62,6 +62,9 @@ pub enum SecretError {
 
     #[error("Backend not supported: {0}")]
     BackendNotSupported(String),
+
+    #[error("Crypto error: {0}")]
+    CryptoError(String),
 }
 
 impl From<SecretError> for SecretonError {

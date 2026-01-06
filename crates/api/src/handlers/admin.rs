@@ -516,7 +516,7 @@ pub async fn delete_user(
     Path(user_id): Path<String>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let _result = state.admin.delete_user(&user_id).await
+    state.admin.delete_user(&user_id).await
         .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({

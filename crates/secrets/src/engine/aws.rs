@@ -39,10 +39,9 @@ impl SecretEngine for AwsEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(aws_config) = config.config.get("aws") {
-            if let Ok(aws_config) = serde_json::from_value(aws_config.clone()) {
-                self.config = aws_config;
-            }
+        if let Some(aws_config) = config.config.get("aws")
+            && let Ok(aws_config) = serde_json::from_value(aws_config.clone()) {
+            self.config = aws_config;
         }
 
         self.enabled = config.enabled;

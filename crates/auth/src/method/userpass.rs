@@ -1,4 +1,4 @@
-//! Username/password authentication method
+//! User/password authentication method
 
 use crate::model::*;
 use crate::service::*;
@@ -51,7 +51,7 @@ impl UserPassAuthMethod {
     }
 
     /// Verify password against hash
-    fn verify_password(&self, password: &str, hash: &str) -> AuthMethodResult<bool> {
+    fn check_password(&self, password: &str, hash: &str) -> AuthMethodResult<bool> {
         let parsed_hash = PasswordHash::new(hash).map_err(|_| SecretonError::InvalidCredentials)?;
 
         let argon2 = Argon2::default();
@@ -64,6 +64,12 @@ impl UserPassAuthMethod {
     async fn get_user(&self, username: &str) -> Option<UserEntry> {
         let users = self.users.read().await;
         users.get(username).cloned()
+    }
+}
+
+impl Default for UserPassAuthMethod {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -87,7 +93,7 @@ impl AuthMethodImpl for UserPassAuthMethod {
         match credentials {
             AuthCredentials::UserPass { username, password } => {
                 if let Some(user_entry) = self.get_user(username).await {
-                    if self.verify_password(password, &user_entry.password_hash)? {
+                    if self.check_password(password, &user_entry.password_hash)? {
                         let user_info = UserInfo {
                             id: Some(user_entry.id.clone()),
                             username: user_entry.username.to_string(),

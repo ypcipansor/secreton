@@ -277,6 +277,7 @@ mod tests {
         data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         mfa_secrets: Arc<RwLock<HashMap<String, String>>>,
         mfa_recovery_codes: Arc<RwLock<HashMap<String, Vec<String>>>>,
+        #[allow(clippy::type_complexity)]
         secret_versions: Arc<RwLock<HashMap<String, Vec<(u32, Value)>>>>,
         users: Arc<RwLock<HashMap<String, String>>>,
         roles: Arc<RwLock<HashMap<String, Vec<String>>>>,

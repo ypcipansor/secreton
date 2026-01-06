@@ -78,26 +78,35 @@ impl DisasterRecoveryService {
 
     /// Start replication as secondary
     pub async fn start_as_secondary(&self) -> Result<(), ReplicationError> {
-        let config = self.config.lock().unwrap();
-        let config = config.as_ref().ok_or(ReplicationError::NotConfigured)?;
+        // Validate config
+        {
+            let config = self.config.lock().unwrap();
+            let config = config.as_ref().ok_or(ReplicationError::NotConfigured)?;
 
-        if config.primary_cluster_addr.is_none() {
-            return Err(ReplicationError::InvalidConfiguration(
-                "Primary cluster address required for secondary".to_string(),
-            ));
+            if config.primary_cluster_addr.is_none() {
+                return Err(ReplicationError::InvalidConfiguration(
+                    "Primary cluster address required for secondary".to_string(),
+                ));
+            }
         }
-        // Config validated, can proceed
 
-        let mut is_primary = self.is_primary.lock().unwrap();
-        *is_primary = false;
+        // Update state
+        {
+            let mut is_primary = self.is_primary.lock().unwrap();
+            *is_primary = false;
 
-        let mut state = self.state.lock().unwrap();
-        *state = ReplicationState::Syncing;
+            let mut state = self.state.lock().unwrap();
+            *state = ReplicationState::Syncing;
+        }
 
         // Simulate initial sync
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        *state = ReplicationState::Active;
+        // Update state to active
+        {
+            let mut state = self.state.lock().unwrap();
+            *state = ReplicationState::Active;
+        }
 
         Ok(())
     }

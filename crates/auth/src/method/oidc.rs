@@ -151,6 +151,12 @@ impl OidcAuthMethod {
     }
 }
 
+impl Default for OidcAuthMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AuthMethodImpl for OidcAuthMethod {
     fn method_type(&self) -> AuthMethodType {

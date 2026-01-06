@@ -53,8 +53,8 @@ impl EngineRegistry {
         self.engines.insert(name, engine);
     }
 
-    pub fn get(&self, name: &str) -> Option<&Box<dyn SecretEngine>> {
-        self.engines.get(name)
+    pub fn get(&self, name: &str) -> Option<&dyn SecretEngine> {
+        self.engines.get(name).map(|e| e.as_ref())
     }
 
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Box<dyn SecretEngine>> {
@@ -67,6 +67,12 @@ impl EngineRegistry {
 
     pub fn remove(&mut self, name: &str) -> Option<Box<dyn SecretEngine>> {
         self.engines.remove(name)
+    }
+}
+
+impl Default for EngineRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -133,5 +139,11 @@ impl SecretService {
             .ok_or_else(|| SecretError::EngineNotFound(engine.to_string()))?;
 
         engine.list(path).await
+    }
+}
+
+impl Default for SecretService {
+    fn default() -> Self {
+        Self::new()
     }
 }

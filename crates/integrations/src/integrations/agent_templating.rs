@@ -431,28 +431,28 @@ mod tests {
             CTLFunction::Secret { _path } => {
                 assert_eq!(_path, "_secret/_data/app");
             }
-            _ => assert!(false, "Expected Secret function"),
+            _ => panic!("Expected Secret function"),
         }
 
         match &expressions[1].function {
             CTLFunction::With { _path } => {
                 assert_eq!(_path, "_secret/_data/db");
             }
-            _ => assert!(false, "Expected With function"),
+            _ => panic!("Expected With function"),
         }
 
         match &expressions[2].function {
             CTLFunction::Variable { _path } => {
                 assert_eq!(_path, ".Data.host");
             }
-            _ => assert!(false, "Expected Variable reference"),
+            _ => panic!("Expected Variable reference"),
         }
 
         match &expressions[3].function {
             CTLFunction::End => {
                 // Expected end control structure
             }
-            _ => assert!(false, "Expected End control structure"),
+            _ => panic!("Expected End control structure"),
         }
     }
 
@@ -576,7 +576,7 @@ mod tests {
                 assert_eq!(params.get("common_name"), Some(&"test.com".to_string()));
                 assert_eq!(params.get("ttl"), Some(&"24h".to_string()));
             }
-            _ => assert!(false, "Expected PkiCert function"),
+            _ => panic!("Expected PkiCert function"),
         }
     }
 }

@@ -140,10 +140,10 @@ fn generate_hotp(key: &[u8], counter: u64) -> u32 {
 
     // Dynamic truncation
     let offset = (result[19] & 0xf) as usize;
-    let code = ((result[offset] & 0x7f) as u32) << 24
-        | ((result[offset + 1] & 0xff) as u32) << 16
-        | ((result[offset + 2] & 0xff) as u32) << 8
-        | (result[offset + 3] & 0xff) as u32;
+        let code = ((result[offset] & 0x7f) as u32) << 24
+        | (u32::from(result[offset + 1])) << 16
+        | (u32::from(result[offset + 2])) << 8
+        | u32::from(result[offset + 3]);
 
     code % 1_000_000
 }
@@ -898,7 +898,7 @@ pub async fn oauth_login(
     Path(provider): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Validate supported providers
-    let supported_providers = vec!["google", "github", "microsoft", "okta"];
+    let supported_providers = ["google", "github", "microsoft", "okta"];
     if !supported_providers.contains(&provider.as_str()) {
         return Err(crate::ApiError::BadRequest(format!("Unsupported OAuth provider: {}", provider)));
     }

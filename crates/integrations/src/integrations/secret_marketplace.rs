@@ -269,12 +269,11 @@ impl SecretMarketplace {
         }
 
         // Check expiry
-        if let Some(expires_at) = shared.expires_at {
-            if Utc::now() > expires_at {
-                return Err(MarketplaceError::PermissionDenied(
-                    "Share expired".to_string(),
-                ));
-            }
+        if let Some(expires_at) = shared.expires_at
+            && Utc::now() > expires_at {
+            return Err(MarketplaceError::PermissionDenied(
+                "Share expired".to_string(),
+            ));
         }
 
         Ok(shared.clone())

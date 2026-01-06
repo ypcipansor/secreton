@@ -346,10 +346,9 @@ impl PushService for DefaultPushService {
         // Update last_used on the device if approved
         if let Some(device_id) = device_id {
             let mut enrollments = self.enrollments.write().await;
-            if let Some(devices) = enrollments.get_mut(&request.entity_id) {
-                if let Some(device) = devices.get_mut(&device_id) {
-                    device.last_used = Some(Utc::now());
-                }
+            if let Some(devices) = enrollments.get_mut(&request.entity_id)
+                && let Some(device) = devices.get_mut(&device_id) {
+                device.last_used = Some(Utc::now());
             }
         }
 

@@ -244,10 +244,9 @@ impl LeaseManager {
         }
 
         // Check max renewals
-        if let Some(max_renewals) = lease.max_renewals {
-            if lease.renew_count >= max_renewals {
-                return Err(LeaseError::RenewalNotAllowed);
-            }
+        if let Some(max_renewals) = lease.max_renewals
+            && lease.renew_count >= max_renewals {
+            return Err(LeaseError::RenewalNotAllowed);
         }
 
         // Calculate new expiration
