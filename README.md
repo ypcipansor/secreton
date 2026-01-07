@@ -1,527 +1,144 @@
 # Secreton
 
-> **Advanced Security & Secrets Management System built in Rust**
+> **High-Performance Secrets Management System in Rust**
 
-[![Rust CI](https://github.com/analisaperlengkapan/secreton/workflows/Rust%20CI/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/rust-ci.yml)
-[![CodeQL](https://github.com/analisaperlengkapan/secreton/workflows/CodeQL%20Analysis/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/codeql-analysis.yml)
-[![Security](https://github.com/analisaperlengkapan/secreton/workflows/Comprehensive%20Security%20Scan/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/security-comprehensive.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
-## Project Status
+**Secreton** is a modular, high-performance secrets management system inspired by HashiCorp Vault, built entirely in Rust. It focuses on memory safety, zero-trust security, and modern cryptography standards.
 
-- Early-stage, pre-1.0 project.
-- Not yet recommended for production use.
-- Many advanced features described below are under active development or experimental.
+**⚠️ Status: Early Development. Not for production use.**
 
-Secreton is a Rust-based secrets management platform. It is designed with security-first principles to provide secure storage, encryption, access control, and audit logging for sensitive data. Secreton aims for zero-trust and modern cloud-native features over time.
+## Features
 
-## Key Features
+- **Secrets Management**: Securely store and retrieve key-value secrets.
+- **Transit Engine**: Encryption-as-a-Service to encrypt/decrypt data without storing it.
+- **Cryptography**: Built on [RustCrypto](https://github.com/RustCrypto) primitives (AES-GCM, ChaCha20-Poly1305, Ed25519).
+- **Authentication**: Modular authentication system (JWT, MFA support).
+- **Storage Backends**: Pluggable storage (PostgreSQL, Redis, MongoDB).
+- **Architecture**: Microservices-ready workspace structure.
 
-### Core Security
+## Architecture
 
-- **Modern Cryptography**: Built on the RustCrypto suite with strong, audited primitives. Experimental post-quantum work is tracked in the repository but is not production-ready yet.
-- **Zero-Trust Architecture**: Every request requires authentication and authorization - no implicit trust
-- **Multi-Algorithm Encryption**: AES-256-GCM, ChaCha20-Poly1305, Ed25519, X25519
-- **Hardware Security Module (HSM)**: Integration support for hardware-backed key storage
-- **Memory Safety**: Built in Rust with automatic memory management and `zeroize` for sensitive data
+Secreton is organized as a Rust workspace with specialized crates:
 
-### Secret Engines
-
-#### Key-Value Secrets
-- Versioned secret storage with rollback capability
-- TTL (Time-To-Live) support for automatic secret expiration
-- Metadata and custom attributes
-
-#### PKI (Public Key Infrastructure)
-- Complete Certificate Authority (CA) functionality
-- Certificate generation, signing, and revocation
-- CRL (Certificate Revocation List) management
-- OCSP (Online Certificate Status Protocol) support
-
-#### Database Secrets
-- Dynamic database credential generation
-- Just-in-time access provisioning
-- Automatic credential rotation
-- Support for PostgreSQL, MySQL, MongoDB
-
-#### Transit Engine
-- Encryption-as-a-Service
-- Data encryption/decryption without storing data
-- Key derivation and rotation
-- Convergent encryption support
-
-### Authentication & Authorization
-
-#### Authentication Methods
-- **JWT Tokens**: Bearer token authentication with configurable TTL and refresh tokens
-- **OAuth 2.0 / OIDC**: Integration with Google, GitHub, Microsoft, Okta, and custom providers
-- **LDAP**: Active Directory and OpenLDAP integration
-- **RADIUS**: Network authentication protocol support
-- **Multi-Factor Authentication (MFA)**: TOTP, hardware tokens (U2F/FIDO2)
-- **Kubernetes**: Service account token authentication
-
-#### Authorization
-- **Role-Based Access Control (RBAC)**: Fine-grained permissions and policies
-- **Policy as Code**: Define access policies in declarative format
-- **Dynamic Secrets**: Generate credentials on-demand with automatic expiration
-- **Token Hierarchy**: Parent/child token relationships
-- **Granular Revocation**: Revoke individual tokens, roles, or entire auth chains
-
-### Infrastructure & Operations
-
-#### High Availability
-- **Data Replication**: Multi-node cluster with automatic failover
-- **Storage Backends**: PostgreSQL (recommended), Redis, MongoDB, SQLite
-- **Raft Consensus**: Distributed consensus for cluster coordination
-- **Backup & Restore**: Automated backup with point-in-time recovery
-
-#### Monitoring & Observability
-- **Prometheus Metrics**: Comprehensive metrics export
-- **OpenTelemetry**: Distributed tracing support
-- **Audit Logging**: Detailed security event logging for compliance
-- **Health Checks**: Deep health checks for all components
-- **Alert Integration**: PagerDuty, Slack, webhook notifications
-
-#### APIs & Integrations
-- **REST API**: Full-featured HTTP API with OpenAPI/Swagger documentation
-- **gRPC API**: High-performance RPC interface
-- **GraphQL**: Flexible query interface (optional)
-- **CLI Tool**: Command-line interface for all operations
-- **Agent**: Sidecar helper for auto-authentication and secret injection
-
-### Cloud & Platform Integrations
-
-- **AWS**: Building blocks for integrating with IAM/STS and Secrets Manager via the `integrations` crate (work in progress).
-- **Kubernetes**: Internal modules for operator-style integrations and storage backends; no published operator or CRDs yet.
-- **Docker**: The API server can be containerized using a custom Dockerfile; no official image is published yet.
-
-### Enterprise Features
-
-- **Compliance-Oriented Design**: Aims to make it easier to build systems that meet regulations such as FIPS 140-2, PCI DSS, SOX, HIPAA, and GDPR. There is no formal certification for Secreton itself yet.
-- **Secret Versioning**: Complete history with rollback
-- **Disaster Recovery**: Geo-redundant backups and recovery procedures
-- **Multi-Tenancy**: Namespace isolation for different teams/environments
-- **Performance**: High-throughput with connection pooling and caching
-- **Scalability**: Horizontal scaling for high-availability clusters
+- `crates/api`: The main HTTP REST API server (Axum).
+- `crates/cli`: Command-line interface tool.
+- `crates/core`: Core business logic and types.
+- `crates/crypto`: Cryptographic operations and abstractions.
+- `crates/storage`: Storage backend implementations.
+- `crates/auth`: Authentication and Identity management.
 
 ## Prerequisites
 
-- **Rust**: 1.90+ (2024 edition)
-- **PostgreSQL**: 15+ (recommended for production)
-- **Operating System**: Linux, macOS, or Windows
-- **Memory**: Minimum 512MB RAM (2GB+ recommended for production)
-- **Storage**: SSD recommended for optimal performance
+- **Rust**: Version 1.90 or later.
+- **PostgreSQL**: Required for the default storage backend.
+- **OpenSSL**: Development libraries (usually required for dependencies).
 
-## Quick Start
+## Getting Started
 
-### Installation
-
-#### 1. Clone the Repository
+### 1. Build the Project
 
 ```bash
-git clone https://github.com/analisaperlengkapan/secreton.git
-cd secreton
-```
-
-#### 2. Install Rust Toolchain
-
-```bash
-# Install Rust using rustup
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Update to latest stable
-rustup update stable
-
-# Add required components
-rustup component add rustfmt clippy
-```
-
-#### 3. Install System Dependencies
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libpq-dev pkg-config libssl-dev
-```
-
-**macOS:**
-```bash
-brew install postgresql openssl pkg-config
-```
-
-**Windows:**
-```powershell
-# Install Visual Studio Build Tools
-# Install PostgreSQL from https://www.postgresql.org/download/windows/
-```
-
-#### 4. Build the Project
-
-```bash
-# Development build
-cargo build --workspace
-
-# Release build (optimized)
+# Build release binaries
 cargo build --workspace --release
-
-# Build specific component
-cargo build -p secreton-api --release
 ```
 
-### Configuration
+### 2. Run the API Server
 
-#### 1. Setup Environment
+The API server runs on port `8080` by default.
 
 ```bash
-# Copy example environment file
-cp .env.example .env
-
-# Edit configuration
-nano .env
-```
-
-#### 2. Configure Database
-
-**Using Docker (Quick Setup):**
-```bash
-docker run --name secreton-db \
-  -e POSTGRES_USER=secreton_user \
-  -e POSTGRES_PASSWORD=your_secure_password \
-  -e POSTGRES_DB=secreton_db \
-  -p 5432:5432 \
-  -d postgres:15
-```
-
-**Manual PostgreSQL Setup:**
-```sql
-CREATE DATABASE secreton_db;
-CREATE USER secreton_user WITH ENCRYPTED PASSWORD 'your_secure_password';
-GRANT ALL PRIVILEGES ON DATABASE secreton_db TO secreton_user;
-```
-
-#### 3. Initialize Secreton
-
-```bash
-# Run database migrations
-cargo run -p secreton-api --bin migrate
-
-# Initialize the secreton
-cargo run -p secreton-api --bin init
-```
-
-### Running Secreton
-
-#### Start the API Server
-
-```bash
-# Development mode
+# Run directly with Cargo
 cargo run -p secreton-api --bin api_server
 
-# Production mode
+# Or run the binary
 ./target/release/api_server
 ```
 
-The server will start on `http://localhost:8080` (default).
+You can configure the port using the `PORT` environment variable:
+```bash
+PORT=9000 ./target/release/api_server
+```
 
-#### Start the Agent (Optional)
+### 3. Use the CLI
+
+The CLI tool allows you to interact with the Secreton API.
+**Note:** The CLI defaults to port `8200`. Since the default server runs on `8080`, you must specify the server URL or update your configuration.
 
 ```bash
-# Development mode
-cargo run -p secreton-agent
+# Alias for convenience (optional)
+alias secreton='cargo run -p secreton-cli --quiet --'
 
-# Production mode
-./target/release/secreton-agent
+# Check Status (specifying the server URL)
+secreton status --server http://localhost:8080
 ```
 
-#### Using the CLI
+## Usage Examples
+
+### Transit Engine (Encryption-as-a-Service)
+
+Encrypt data without storing the plaintext.
 
 ```bash
-# Set server address
-export SECRETON_ADDR=http://localhost:8080
+# 1. Create a named encryption key
+secreton transit create-key my-key --server http://localhost:8080
 
-# Authenticate
-secreton-cli login -t <your-token>
+# 2. Encrypt data
+secreton transit encrypt my-key --data "Secret Message" --server http://localhost:8080
+# Output: 🔐 Encrypted data: ...ciphertext...
 
-# Store a secret
-secreton-cli kv put secret/myapp/database password=supersecret
-
-# Retrieve a secret
-secreton-cli kv get secret/myapp/database
-
-# List secrets
-secreton-cli kv list secret/myapp/
+# 3. Decrypt data
+secreton transit decrypt my-key --data "...ciphertext..." --server http://localhost:8080
+# Output: 🔓 Decrypted data: Secret Message
 ```
 
-## Documentation
+### Secrets Engine (Key-Value)
 
-### Architecture
-
-Secreton is built as a modular Rust workspace with the following crates:
-
-```
-secreton/
-├── crates/
-│   ├── api/              # REST API server
-│   ├── agent/            # Sidecar agent for auto-auth
-│   ├── auth/             # Authentication methods
-│   ├── cli/              # Command-line interface
-│   ├── common/           # Shared utilities
-│   ├── config/           # Configuration management
-│   ├── core/             # Core business logic
-│   ├── crypto/           # Cryptography operations
-│   ├── enterprise/       # Enterprise features
-│   ├── errors/           # Error handling
-│   ├── infrastructure/   # Infrastructure integrations
-│   ├── integrations/     # Third-party integrations
-│   ├── monitoring/       # Metrics and observability
-│   ├── performance/      # Performance optimizations
-│   ├── replication/      # High availability
-│   ├── secrets/          # Secret engines
-│   ├── secrets-database/ # Database secret engine
-│   ├── secrets-pki/      # PKI secret engine
-│   ├── security/         # Security features
-│   ├── storage/          # Storage backends
-│   └── ui/               # Web UI (optional)
-└── tests/                # Integration tests
-```
-
-### API Documentation
-
-Once the server is running, access the interactive API documentation:
-
-- **Swagger UI**: http://localhost:8080/swagger-ui
-- **OpenAPI Spec**: http://localhost:8080/api-docs/openapi.json
-- **Health Check**: http://localhost:8080/health
-
-### Key Concepts
-
-#### Secrets
-Secrets are encrypted data stored in Secreton. Each secret has:
-- **Path**: Hierarchical location (e.g., `secret/myapp/database`)
-- **Data**: Key-value pairs
-- **Metadata**: Version, timestamps, custom attributes
-- **Policy**: Access control rules
-
-#### Tokens
-Tokens are credentials used to authenticate with Secreton:
-- **Root Token**: Initial superuser token (secure carefully!)
-- **Service Tokens**: For applications and services
-- **Batch Tokens**: High-performance, lightweight tokens
-- **TTL**: Configurable time-to-live
-
-#### Policies
-Policies define what actions a token can perform:
-```hcl
-# Example policy
-path "secret/myapp/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
-
-path "database/creds/readonly" {
-  capabilities = ["read"]
-}
-```
-
-#### Audit Logs
-All operations are logged for compliance and security:
-- Who performed the action
-- What action was performed
-- When it happened
-- Result (success/failure)
-
-## Testing
-
-### Run Tests
+Store and retrieve static secrets.
 
 ```bash
-# Run all tests
-cargo test --workspace --all-features
+# 1. Store a secret
+# Format: path key=value
+secreton secret put app/db/prod username=admin password=secure123 --server http://localhost:8080
 
-# Run specific crate tests
-cargo test -p secreton-core
+# 2. Get a secret
+secreton secret get app/db/prod --server http://localhost:8080
 
-# Run with output
-cargo test --workspace --all-features -- --nocapture
+# 3. List secrets
+secreton secret list --server http://localhost:8080
 
-# Run integration tests only
-cargo test --test '*'
+# 4. Delete a secret
+secreton secret delete app/db/prod --server http://localhost:8080
 ```
 
-### Code Coverage
+## Configuration
+
+Secreton uses a layered configuration system (Environment variables, Config files).
+Copy the example environment file to start:
 
 ```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
-
-# Generate coverage report
-cargo tarpaulin --workspace --all-features --out Html
-
-# Open coverage report
-open tarpaulin-report.html
+cp .env.example .env
 ```
 
-### Benchmarks
-
-```bash
-# Run benchmarks
-cargo bench --workspace
-
-# Run specific benchmark
-cargo bench -p secreton-crypto
-```
+Key Environment Variables:
+- `SECRETON_ADDR`: API Server address.
+- `DATABASE_URL`: PostgreSQL connection string.
+- `RUST_LOG`: Log level (e.g., `info`, `debug`).
 
 ## Development
 
-### Code Quality
+Run tests for the entire workspace:
 
 ```bash
-# Format code
-cargo fmt --all
-
-# Run linter
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-# Security audit
-cargo audit
-
-# Check for outdated dependencies
-cargo outdated
+cargo test --workspace
 ```
 
-### Development Workflow
+Run linter:
 
 ```bash
-# Watch for changes and run tests
-cargo watch -x test
-
-# Watch and run specific command
-cargo watch -x 'test -p secreton-api'
-
-# Run with logging
-RUST_LOG=debug cargo run -p secreton-api
+cargo clippy --workspace -- -D warnings
 ```
-
-## Docker
-
-### Build Docker
-
-Secreton does not currently ship an official Docker image or Dockerfile.
-
-- To containerize the API server, you can build a release binary with `cargo build --workspace --release` and create your own Dockerfile that copies the binary into a minimal base image (e.g. `gcr.io/distroless/cc` or `debian:stable-slim`).
-- A reference Dockerfile and Compose setup may be added to this repository in the future.
-
-## Kubernetes
-
-### Overview
-
-Kubernetes support is **work in progress**.
-
-- There are internal modules for Kubernetes-related integrations (e.g. operator-style components and storage backends), but there is no published Helm chart or operator manifest yet.
-- For now, you can run Secreton in Kubernetes like any other Rust service: build a container image, create a `Deployment`/`StatefulSet`, and configure `DATABASE_URL` plus other environment variables from Secrets/ConfigMaps.
-- A first-class Helm chart and operator are part of the roadmap.
-
-## Security
-
-### Reporting Security Issues
-
-**DO NOT** open public issues for security vulnerabilities.
-
-Please report security issues privately by:
-
-- Opening a private security advisory in GitHub ("Security" tab → "Advisories"), or
-- Contacting the maintainer via the email listed in `Cargo.toml` (currently `zynqrs@gmail.com`).
-
-We will review reports and work on a fix as soon as reasonably possible.
-
-### Security Features
-
-- All secrets encrypted at rest (AES-256-GCM)
-- All secrets encrypted in transit (TLS 1.3)
-- Memory wiped after use (`zeroize` crate)
-- Constant-time operations for crypto
-- No third-party analytics or telemetry
-- Regular security audits
-
-### Best Practices
-
-1. **Use Strong Tokens**: Generate tokens with sufficient entropy
-2. **Rotate Regularly**: Implement automatic key and token rotation
-3. **Principle of Least Privilege**: Grant minimal required permissions
-4. **Enable Audit Logging**: Monitor all access and changes
-5. **Backup Regularly**: Automated backups with encryption
-6. **Use TLS**: Always use HTTPS in production
-7. **Secure Root Token**: Store root token in secure location (HSM)
-
-## Performance
-
-### Benchmarks
-
-Formal performance benchmarking is **not** done yet. Current focus is on correctness and security.
-
-Design considerations for future performance work include:
-
-- Connection pooling for database access.
-- In-memory caching for frequently accessed secrets.
-- Async I/O throughout the stack.
-- Minimizing unnecessary copies and allocations.
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on:
-
-- Development setup
-- Code style guidelines
-- Testing requirements
-- Pull request process
-- Code of conduct
 
 ## License
 
-This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-Built with:
-- **Rust** - Memory-safe systems programming language
-- **RustCrypto** - Pure Rust cryptography implementations
-- **Tokio** - Async runtime for Rust
-- **Axum** - Web framework
-- **PostgreSQL** - Primary storage backend
-
-Inspired by:
-- HashiCorp Secreton
-- AWS Secrets Manager
-- Google Secret Manager
-
-## Support
-
-- **Documentation**: [`docs/`](https://github.com/analisaperlengkapan/secreton/tree/main/docs) directory in this repository (work in progress)
-- **Issues**: [GitHub Issues](https://github.com/analisaperlengkapan/secreton/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/analisaperlengkapan/secreton/discussions)
-- **Contact**: Use Issues/Discussions or the maintainer email listed in `Cargo.toml` for support and questions.
-
-## Roadmap
-
-### Version 0.2.0
-- [ ] Web UI dashboard
-- [ ] Advanced policy engine
-- [ ] FIPS 140-2 validation
-- [ ] Enhanced disaster recovery
-
-### Version 0.3.0
-- [ ] Multi-region replication
-- [ ] Advanced MFA options
-- [ ] Plugin system
-- [ ] Performance improvements
-
-### Version 1.0.0
-- [ ] Production-ready release
-- [ ] Complete documentation
-- [ ] Security audit
-- [ ] Enterprise support
-
----
-
-**Made with ❤️ by the Secreton Team**
-
-⭐ Star us on GitHub if you find this project useful!
+This project is licensed under the Apache License 2.0.
