@@ -5,6 +5,7 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,31 +87,35 @@ impl StorageTransaction for RedisTransaction {
 
         for op in self.operations {
             match op {
-                RedisTransactionOp::Store(entry) => {
+                RedisTransactionOp::Store(entry) | RedisTransactionOp::Update(entry) => {
                     let key = format!("secreton:entry:{}", entry.id);
                     let value = serde_json::to_string(&entry).map_err(|e| {
                         StorageError::SerializationError {
                             message: e.to_string(),
                         }
                     })?;
-                    conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
-                        StorageError::QueryFailed {
-                            message: format!("Failed to store entry in transaction: {}", e),
+
+                    if let Some(expires_at) = entry.expires_at {
+                        let ttl = (expires_at - Utc::now()).num_seconds();
+                        if ttl > 0 {
+                            conn.set_ex::<_, _, ()>(&key, &value, ttl as u64)
+                                .await
+                                .map_err(|e| StorageError::QueryFailed {
+                                    message: format!("Failed to store entry with TTL in transaction: {}", e),
+                                })?;
+                        } else {
+                            // Already expired, ensure it is removed
+                            conn.del::<_, ()>(&key).await.map_err(|e| StorageError::QueryFailed {
+                                message: format!("Failed to delete expired entry in transaction: {}", e),
+                            })?;
                         }
-                    })?;
-                }
-                RedisTransactionOp::Update(entry) => {
-                    let key = format!("secreton:entry:{}", entry.id);
-                    let value = serde_json::to_string(&entry).map_err(|e| {
-                        StorageError::SerializationError {
-                            message: e.to_string(),
-                        }
-                    })?;
-                    conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
-                        StorageError::QueryFailed {
-                            message: format!("Failed to update entry in transaction: {}", e),
-                        }
-                    })?;
+                    } else {
+                        conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
+                            StorageError::QueryFailed {
+                                message: format!("Failed to store entry in transaction: {}", e),
+                            }
+                        })?;
+                    }
                 }
                 RedisTransactionOp::Delete(id) => {
                     let key = format!("secreton:entry:{}", id);
@@ -162,20 +167,57 @@ impl StorageBackend for RedisBackend {
         })?;
 
         let mut conn = self.manager.lock().await;
-        conn.set::<_, _, ()>(&key, value)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to store entry: {}", e),
-            })?;
+
+        if let Some(expires_at) = entry.expires_at {
+            let ttl = (expires_at - Utc::now()).num_seconds();
+            if ttl > 0 {
+                conn.set_ex::<_, _, ()>(&key, value, ttl as u64)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to store entry with TTL: {}", e),
+                    })?;
+            } else {
+                // Already expired, ensure it is removed
+                conn.del::<_, ()>(&key)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to delete expired entry: {}", e),
+                    })?;
+            }
+        } else {
+            conn.set::<_, _, ()>(&key, value)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to store entry: {}", e),
+                })?;
+        }
 
         // Also store path mapping
         if !entry.path.is_empty() {
             let path_key = format!("secreton:path:{}", entry.path);
-            conn.set::<_, _, ()>(&path_key, entry.id.to_string())
-                .await
-                .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to store path mapping: {}", e),
-                })?;
+
+            if let Some(expires_at) = entry.expires_at {
+                let ttl = (expires_at - Utc::now()).num_seconds();
+                if ttl > 0 {
+                     conn.set_ex::<_, _, ()>(&path_key, entry.id.to_string(), ttl as u64)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to store path mapping with TTL: {}", e),
+                        })?;
+                } else {
+                     conn.del::<_, ()>(&path_key)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to delete expired path mapping: {}", e),
+                        })?;
+                }
+            } else {
+                conn.set::<_, _, ()>(&path_key, entry.id.to_string())
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to store path mapping: {}", e),
+                    })?;
+            }
         }
 
         Ok(())
@@ -282,5 +324,10 @@ impl StorageBackend for RedisBackend {
 
     async fn migrate(&self) -> StorageResult<()> {
         Ok(())
+    }
+
+    async fn delete_expired(&self, _path_prefix: Option<String>) -> StorageResult<u64> {
+        // Redis handles expiration automatically via TTL
+        Ok(0)
     }
 }
