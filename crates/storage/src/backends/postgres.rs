@@ -447,6 +447,39 @@ impl StorageBackend for PostgresBackend {
         Ok(Box::new(PostgresTransaction::new(Arc::clone(&self.pool))))
     }
 
+    async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let mut query = "DELETE FROM secreton_entries WHERE expires_at < NOW()".to_string();
+        let mut bind_params: Vec<Box<dyn tokio_postgres::types::ToSql + Send + Sync>> = Vec::new();
+
+        if let Some(prefix) = path_prefix {
+            query.push_str(" AND path LIKE $1");
+            let prefix_pattern = format!("{}%", prefix);
+            bind_params.push(Box::new(prefix_pattern));
+        }
+
+        let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
+            .iter()
+            .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
+
+        let rows_affected = client
+            .execute(&query, &bind_refs)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to delete expired entries: {}", e),
+            })?;
+
+        Ok(rows_affected)
+    }
+
     async fn migrate(&self) -> StorageResult<()> {
         let client = self
             .pool

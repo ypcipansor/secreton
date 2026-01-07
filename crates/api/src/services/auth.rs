@@ -453,36 +453,8 @@ impl AuthenticationService {
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
-        // TODO: Optimize this for large datasets. Currently it fetches all sessions and filters in memory.
-        // A better approach would be to have the storage backend support filtering by expiration or
-        // a dedicated expiration index.
-        let params = QueryParams {
-            path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
-            include_expired: true,
-            ..Default::default()
-        };
-
-        let entries = self.storage.list(&params).await
+        let deleted_count = self.storage.delete_expired(Some(SESSION_STORAGE_PREFIX.to_string())).await
             .map_err(AuthError::Storage)?;
-
-        let mut deleted_count = 0;
-        let now = chrono::Utc::now();
-
-        for entry in entries {
-            let is_expired = if let Some(expires_at) = entry.expires_at {
-                expires_at < now
-            } else {
-                false
-            };
-
-            if is_expired {
-                if let Err(e) = self.storage.delete_by_path(&entry.path).await {
-                    tracing::warn!("Failed to delete expired session {}: {}", entry.path, e);
-                    continue;
-                }
-                deleted_count += 1;
-            }
-        }
 
         if deleted_count > 0 {
             tracing::info!("Cleaned up {} expired sessions", deleted_count);
