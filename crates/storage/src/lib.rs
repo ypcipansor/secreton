@@ -324,6 +324,31 @@ pub trait StorageBackend: Send + Sync {
 
     /// Run migrations
     async fn migrate(&self) -> StorageResult<()>;
+
+    /// Delete expired entries
+    async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+        let params = QueryParams {
+            path_prefix,
+            include_expired: true,
+            ..Default::default()
+        };
+
+        let entries = self.list(&params).await?;
+        let mut deleted_count = 0;
+        let now = Utc::now();
+
+        for entry in entries {
+            if let Some(expires_at) = entry.expires_at {
+                if expires_at < now {
+                    if self.delete_by_id(entry.id).await? {
+                        deleted_count += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(deleted_count)
+    }
 }
 
 /// Transaction interface for atomic operations
@@ -582,6 +607,43 @@ impl StorageBackend for MockStorageBackend {
     async fn migrate(&self) -> StorageResult<()> {
         // Mock migration - nothing to do
         Ok(())
+    }
+
+    async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+        let now = Utc::now();
+        let mut data = self.data.write().unwrap();
+        let mut id_index = self.id_index.write().unwrap();
+        let mut deleted_count = 0;
+
+        // Collect keys to delete first to avoid borrowing issues
+        let keys_to_delete: Vec<String> = data
+            .iter()
+            .filter(|(_, entry)| {
+                let matches_prefix = if let Some(prefix) = &path_prefix {
+                    entry.path.starts_with(prefix)
+                } else {
+                    true
+                };
+
+                let is_expired = if let Some(expires_at) = entry.expires_at {
+                    expires_at < now
+                } else {
+                    false
+                };
+
+                matches_prefix && is_expired
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in keys_to_delete {
+            if let Some(entry) = data.remove(&key) {
+                id_index.remove(&entry.id);
+                deleted_count += 1;
+            }
+        }
+
+        Ok(deleted_count)
     }
 }
 
