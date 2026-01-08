@@ -1,3 +1,4 @@
+
 use crate::policies::sentinel::SentinelPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,11 +50,11 @@ impl PolicySet {
                     .unwrap_or(false)
             {
                 // Evaluasi control group
-                if let Some(cg) = &rule.control_group
-                    && cg.approved_by.len() < cg.required_approvals as usize
-                {
-                    // Belum cukup approval
-                    return false;
+                if let Some(cg) = &rule.control_group {
+                    if cg.approved_by.len() < cg.required_approvals as usize {
+                        // Belum cukup approval
+                        return false;
+                    }
                 }
                 // Evaluasi MFA
                 if rule.mfa == Some(true) {
@@ -281,5 +282,185 @@ pub async fn check_policy_with_sentinel(config: PolicyCheckConfig<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    // Tests temporarily disabled for compilation - to be re-enabled after core fixes
+    use super::*;
+    use crate::policies::sentinel::EnforcementLevel;
+    use chrono::Utc;
+    use serde_json::json;
+
+    #[test]
+    fn test_policy_set_evaluate_allow() {
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(set.evaluate("user1", "secret/foo", "read", None));
+        assert!(!set.evaluate("user1", "secret/foo", "write", None));
+        assert!(!set.evaluate("user1", "other/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_evaluate_deny() {
+        let rule = PolicyRule {
+            effect: "deny".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_control_group() {
+        let cg = ControlGroup {
+            required_approvals: 2,
+            approved_by: vec!["approver1".to_string()],
+        };
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: Some(cg),
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        // Not enough approvals
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_control_group_sufficient() {
+        let cg = ControlGroup {
+            required_approvals: 1,
+            approved_by: vec!["approver1".to_string()],
+        };
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: Some(cg),
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_mfa() {
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: Some(true),
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        // No context
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+
+        // Context without mfa_passed
+        let ctx = json!({ "foo": "bar" });
+        assert!(!set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+
+        // Context with mfa_passed = false
+        let ctx = json!({ "mfa_passed": false });
+        assert!(!set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+
+        // Context with mfa_passed = true
+        let ctx = json!({ "mfa_passed": true });
+        assert!(set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_sentinel_deny_all() {
+        let policy = SentinelPolicy {
+            name: "test-deny".to_string(),
+            policy_code: "deny_all".to_string(),
+            enforcement_level: EnforcementLevel::HardMandatory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let result = evaluate_with_sentinel(
+            &[policy],
+            "user1",
+            "secret/foo",
+            "read",
+            &PolicyContext {},
+        )
+        .await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_sentinel_wasm_placeholder() {
+        // Without wasmi feature, this logs warning and returns false if we assume feature is not enabled or enabled but invalid wasm.
+        // Actually the code says:
+        /*
+        if is_wasm {
+             if pol.policy_code == "wasm" {
+                 // warning
+                 return false;
+             }
+        */
+        // So "wasm" placeholder returns false.
+
+        let policy = SentinelPolicy {
+            name: "test-wasm-placeholder".to_string(),
+            policy_code: "wasm".to_string(),
+            enforcement_level: EnforcementLevel::HardMandatory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let result = evaluate_with_sentinel(
+            &[policy],
+            "user1",
+            "secret/foo",
+            "read",
+            &PolicyContext {},
+        )
+        .await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_sentinel_default() {
+        // If not deny_all, not wasm, not egp/rgp, it should be allowed (default)
+        let policy = SentinelPolicy {
+            name: "test-default".to_string(),
+            policy_code: "something_else".to_string(),
+            enforcement_level: EnforcementLevel::Advisory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let result = evaluate_with_sentinel(
+            &[policy],
+            "user1",
+            "secret/foo",
+            "read",
+            &PolicyContext {},
+        )
+        .await;
+        assert!(result);
+    }
 }
