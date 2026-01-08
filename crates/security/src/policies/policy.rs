@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(feature = "wasmi")]
-use crate::policies::wasm::evaluate_wasm_policy;
+use crate::policies::wasm::{evaluate_wasm_policy, DUMMY_WASM_ALLOW};
 #[cfg(feature = "wasmi")]
 use base64::{engine::general_purpose, Engine as _};
 
@@ -132,32 +132,32 @@ pub async fn evaluate_with_sentinel(
         let is_wasm = pol.policy_code.starts_with("wasm:") || pol.policy_code == "wasm";
 
         if is_wasm {
-             // Extract base64 code if prefix is present
-             let _b64_code = if pol.policy_code.starts_with("wasm:") {
-                 &pol.policy_code[5..]
-             } else {
-                 // For testing placeholder "wasm", we can't really execute it without code
-                 // But assuming the TODO meant "implement the execution logic"
-                 if pol.policy_code == "wasm" {
-                     tracing::warn!(
-                        user = %user,
-                        path = %path,
-                        policy = %pol.name,
-                        "WASM policy placeholder encountered. No code to execute. Denying."
-                     );
-                     return false;
-                 }
-                 &pol.policy_code
-             };
-
-             // Decode base64
+             // Decode base64 or load dummy
              #[cfg(feature = "wasmi")]
              {
-                 let wasm_bytes = match general_purpose::STANDARD.decode(_b64_code) {
-                     Ok(b) => b,
-                     Err(e) => {
-                         tracing::error!("Failed to decode WASM policy: {}", e);
-                         return false;
+                 let wasm_bytes = if pol.policy_code == "wasm" {
+                     // Use dummy/default WASM for testing placeholder
+                     tracing::info!(
+                         user = %user,
+                         path = %path,
+                         policy = %pol.name,
+                         "WASM policy placeholder encountered. Using DUMMY_WASM_ALLOW."
+                     );
+                     DUMMY_WASM_ALLOW.to_vec()
+                 } else {
+                     // Extract base64 code if prefix is present
+                     let b64_code = if pol.policy_code.starts_with("wasm:") {
+                         &pol.policy_code[5..]
+                     } else {
+                         &pol.policy_code
+                     };
+
+                     match general_purpose::STANDARD.decode(b64_code) {
+                         Ok(b) => b,
+                         Err(e) => {
+                             tracing::error!("Failed to decode WASM policy: {}", e);
+                             return false;
+                         }
                      }
                  };
 

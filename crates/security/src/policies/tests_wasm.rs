@@ -108,4 +108,29 @@ mod tests {
 
         assert!(!result, "Should deny");
     }
+
+    #[tokio::test]
+    async fn test_evaluate_wasm_policy_placeholder_allow() {
+        // Test "wasm" placeholder which should trigger DUMMY_WASM_ALLOW
+        let policy_code = "wasm".to_string();
+
+        let policy = SentinelPolicy {
+            name: "test-wasm-placeholder".to_string(),
+            enforcement_level: EnforcementLevel::HardMandatory,
+            policy_code,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let result = evaluate_with_sentinel(
+            &[policy],
+            "user1",
+            "secret/test",
+            "read",
+            &PolicyContext {},
+        ).await;
+
+        assert!(result, "Should allow using dummy default policy");
+    }
 }
