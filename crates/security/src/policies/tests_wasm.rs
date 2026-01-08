@@ -66,6 +66,7 @@ mod tests {
 
         let policy = SentinelPolicy {
             name: "test-wasm-allow".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::HardMandatory,
             policy_code,
             description: None,
@@ -91,6 +92,7 @@ mod tests {
 
         let policy = SentinelPolicy {
             name: "test-wasm-deny".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::HardMandatory,
             policy_code,
             description: None,
