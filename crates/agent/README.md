@@ -1,140 +1,86 @@
-# Secreton Adhyaksa Agent
+# Secreton Agent
 
-**Secreton Adhyaksa Agent** adalah aplikasi pendamping (helper/sidecar) untuk HashiCorp Secreton-like server (`secreton_adhyaksa`). Agent ini bertugas melakukan auto-auth, perpanjangan token otomatis, rendering template file dari secret Secreton, serta sink token ke file, environment, atau menjalankan aplikasi lain dengan token dinamis. Agent ini sangat cocok untuk DevOps, deployment cloud-native, dan kebutuhan compliance/enterprise.
-
----
-
-## Perbedaan Secreton Agent vs secreton_adhyaksa (Server)
-
-| Komponen             | secreton_adhyaksa (Server)         | secreton_adhyaksa_agent (Agent)         |
-|---------------------|----------------------------------|--------------------------------------|
-| **Fungsi utama**    | Server utama, API, storage, RBAC | Client/sidecar, auto-auth, template  |
-| **Proses**          | Service utama, satu per cluster  | Banyak, satu per aplikasi/VM/Pod     |
-| **Akses**           | Menyimpan & mengelola secrets    | Mengambil secrets, tidak menyimpan   |
-| **Kegunaan**        | Backend, pusat keamanan          | Otomasi aplikasi, DevOps, CI/CD      |
-| **Contoh deploy**   | VM, container, Kubernetes        | Sidecar, VM, container, pipeline     |
-| **Auto-auth**       | Tidak (hanya API)                | Ya (userpass, approle, k8s)          |
-| **Sink token**      | Tidak                            | Ya (file, env, child process)        |
-| **Template**        | Tidak                            | Ya (render file dari secret)         |
-| **Failover**        | Cluster/HA internal              | Multi-server fallback                |
-| **Reload config**   | API/admin                        | SIGHUP/file watcher (hot reload)     |
-| **Audit/Notifikasi**| Internal DB/file                 | File audit, webhook, log file        |
-
-**Singkatnya:**
-- `secreton_adhyaksa` = server utama, pusat API dan storage secret
-- `secreton_adhyaksa_agent` = client/sidecar untuk aplikasi, mengambil secret/token dari server, siap untuk DevOps/CI/CD
-
----
-
-## Kegunaan Secreton Agent
-- Otomatis login ke Secreton dan perpanjang token
-- Render file konfigurasi dari secret Secreton ke file lokal (template)
-- Sink token ke file, .env, atau jalankan aplikasi lain dengan token di environment
-- Monitoring, audit, notifikasi event penting (webhook)
-- Failover ke server backup jika server utama down
-- Hot reload config/template tanpa restart
-- Restart child process otomatis jika aplikasi crash
-- Siap untuk compliance, DevOps, dan cloud-native
-
----
+**Secreton Agent** adalah aplikasi pendamping (helper/sidecar) untuk Secreton server. Agent ini bertugas melakukan auto-auth, perpanjangan token otomatis, rendering template file dari secret Secreton, serta sink token ke file, environment, atau menjalankan aplikasi lain dengan token dinamis. Agent ini sangat cocok untuk DevOps, deployment cloud-native, dan kebutuhan compliance/enterprise.
 
 ## Fitur Utama
-- **Auto-auth**: userpass, approle, k8s
-- **Token renewal**: otomatis
-- **Template rendering**: file dari secret ke file lokal
-- **Sink**: file, env, child process
-- **Failover server**: multi-server
-- **Reload config/template**: SIGHUP (Linux), file watcher (Windows)
-- **Monitoring**: HTTP health endpoint (`/healthz`)
-- **Notifikasi eksternal**: webhook (Slack, Discord, dsb)
-- **Audit**: file audit JSONL
-- **Logging**: file/stdout, rotation, format JSON (opsional)
-- **Restart child process**: otomatis
 
----
+- **Auto-Auth**: Otentikasi otomatis ke Secreton menggunakan metode yang dikonfigurasi (seperti Kubernetes Service Account, AppRole, AWS IAM, Azure MSI, dll).
+- **Token Lifecycle Management**: Memperbarui token (renew) secara otomatis sebelum kadaluarsa.
+- **Templating**: Mengambil secret dari Secreton dan menuliskannya ke file konfigurasi menggunakan template engine (seperti Consul Template).
+- **Secret Sinking**: Menulis token atau secret ke lokasi file tertentu (sink) agar bisa dibaca aplikasi.
+- **Process Supervisor**: Menjalankan dan mengawasi proses aplikasi utama, menyuntikkan environment variable berisi secret.
 
-## Contoh Konfigurasi (`agent.yaml`)
-```yaml
-server_url: "https://secreton1:8200"
-server_urls:
-  - "https://secreton1:8200"
-  - "https://secreton2:8200"
-auth_method: userpass         # atau approle, k8s
-auth_config:
-  username: "myuser"
-  password: "mypassword"
-  # Untuk approle:
-  # role_id: "..."
-  # secret_id: "..."
-  # Untuk k8s:
-  # jwt_path: "/var/run/secrets/kubernetes.io/serviceaccount/token"
-  # role: "myrole"
-templates:
-  - source: "secret/data/myapp/config"
-    dest: "/etc/myapp/config.json"
-    mode: "interval"         # atau "one-shot"
-interval: 60                 # detik, render ulang setiap 60 detik
-sink: "file,env,child"       # bisa kombinasi: file, env, child
-log_file: "logs/agent.log"
-log_format: "json"           # atau "plain"
-audit_file: "logs/audit.log"
-run:
-  - "bash"
-  - "start_myapp.sh"
-notify:
-  webhook: "https://hooks.slack.com/services/xxx"
-restart_child: true
-restart_delay: 5             # detik
-```
+## Perbedaan Secreton Agent vs Secreton Server
 
----
+| Komponen             | Secreton (Server)         | Secreton Agent (Agent)         |
+|----------------------|------------------------------------|-----------------------------------------|
+| **Fungsi Utama**     | Menyimpan & mengelola secret       | Mengambil secret & mengelola token      |
+| **Lokasi**           | Server terpusat / Cluster          | Di node aplikasi / Sidecar container    |
+| **Otentikasi**       | Memverifikasi identitas client     | Melakukan login atas nama aplikasi      |
+| **Koneksi DB**       | Menyimpan data terenkripsi di DB   | Tidak punya database sendiri            |
+
+Secara sederhana:
+- `secreton` = server utama, pusat API dan storage secret
+- `secreton_agent` = client/sidecar untuk aplikasi, mengambil secret/token dari server, siap untuk DevOps/CI/CD
+
+## Cara Kerja
+
+1. **Startup**: Agent membaca konfigurasi.
+2. **Auth**: Agent melakukan login ke Secreton Server.
+3. **Token Maintenance**: Agent menjaga token tetap hidup (renew) di background.
+4. **Template Rendering**: Agent menarik secret yang diminta di template, merender ke file tujuan.
+5. **Sink**: Agent menulis token ke file sink (jika dikonfigurasi).
+6. **Exec**: Agent menjalankan perintah aplikasi (jika mode exec digunakan) dengan environment variable rahasia.
+
+## Struktur Project
+
+Project ini adalah crate Rust `secreton-agent`.
+
+- `src/main.rs`: Entry point.
+- `src/config.rs`: Definisi konfigurasi (YAML/TOML/JSON).
+- `src/agent.rs`: Logika utama agent loop.
+- `src/auth/`: Modul-modul otentikasi (Kubernetes, AppRole, dll).
+- `src/sink/`: Modul penulisan token/secret ke file.
+- `src/template/`: Modul rendering template.
 
 ## Cara Menjalankan
-1. **Build**
-   ```sh
-   cargo build --release -p secreton_adhyaksa_agent
-   ```
-2. **Jalankan**
-   ```sh
-   ./target/release/secreton_adhyaksa_agent --config agent.yaml
-   ```
-3. **Reload config/template**
-   - **Linux/Unix**:  `kill -HUP <pid>`
-   - **Windows**: edit & simpan file `agent.yaml`, agent reload otomatis
-4. **Health check**
-   - Endpoint: `http://localhost:9900/healthz`
-   - Response:
-     ```json
-     {
-       "status": "ok",
-       "token_valid": true,
-       "child_running": true,
-       "last_error": null
-     }
-     ```
 
----
+### Persiapan
+Pastikan Secreton Server sudah berjalan.
 
-## Best Practice
-- Jalankan agent sebagai sidecar/launcher aplikasi
-- Gunakan sink: child untuk aplikasi yang butuh token dinamis
-- Aktifkan audit dan notifikasi untuk compliance dan alerting
-- Gunakan health endpoint untuk monitoring otomatis
-- Gunakan failover server untuk high-availability
+### Build
+```bash
+cargo build --release -p secreton-agent
+```
 
----
+### Run
+```bash
+./target/release/secreton-agent --config agent.yaml
+```
 
-## Troubleshooting
-- Cek log file (`log_file`) dan audit file (`audit_file`) untuk semua event
-- Gunakan health endpoint (`/healthz`) untuk status agent
-- Pastikan permission file config, log, dan audit sesuai
+### Contoh Konfigurasi (agent.yaml)
 
----
+```yaml
+secreton:
+  address: "http://localhost:8200"
+  tls_skip_verify: true
 
-## Kontribusi & Pengembangan
-- Modular, mudah dikembangkan (tambah auth method, sink, dsb)
-- Siap diintegrasikan ke pipeline CI/CD, monitoring, dan SIEM
+auto_auth:
+  method: "approle"
+  config:
+    role_id: "uuid-role-id"
+    secret_id: "uuid-secret-id"
+    remove_secret_id_file_after_reading: false
+  sink:
+    - type: "file"
+      config:
+        path: "/tmp/secreton-token"
 
----
-
-**Secreton Agent = Otomasi, keamanan, dan DevOps Secreton Anda!** 
+templates:
+  - source: "/etc/myapp/config.tpl"
+    destination: "/etc/myapp/config.json"
+    contents: |
+      {
+        "db_password": "{{ with secret "secret/data/db" }}{{ .Data.data.password }}{{ end }}"
+      }
+```

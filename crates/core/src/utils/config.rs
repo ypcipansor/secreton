@@ -65,24 +65,24 @@ impl Config {
     // Removed default method to avoid conflict with Default trait
 
     pub fn from_env() -> Self {
-        let jwt_secret = std::env::var("VAULT_JWT_SECRET")
+        let jwt_secret = std::env::var("SECRETON_JWT_SECRET")
             .unwrap_or_else(|_| "your-super-secret-jwt-key-change-this-in-production".to_string());
-        let jwt_refresh_secret = std::env::var("VAULT_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
+        let jwt_refresh_secret = std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
             "your-super-secret-refresh-key-change-this-in-production".to_string()
         });
-        let server_host = std::env::var("VAULT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let server_port: u16 = std::env::var("VAULT_PORT")
+        let server_host = std::env::var("SECRETON_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let server_port: u16 = std::env::var("SECRETON_PORT")
             .unwrap_or_else(|_| "8080".to_string())
             .parse()
             .unwrap_or(8080);
-        let log_level = std::env::var("VAULT_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+        let log_level = std::env::var("SECRETON_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
 
         Self {
-            database_url: std::env::var("VAULT_DATABASE_URL")
+            database_url: std::env::var("SECRETON_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:secreton.db".to_string()),
             jwt_secret: jwt_secret.clone(),
             jwt_refresh_secret: jwt_refresh_secret.clone(),
-            encryption_key: std::env::var("VAULT_ENCRYPTION_KEY")
+            encryption_key: std::env::var("SECRETON_ENCRYPTION_KEY")
                 .unwrap_or_else(|_| "your-32-byte-encryption-key-here".to_string()),
             server_host: server_host.clone(),
             server_port,

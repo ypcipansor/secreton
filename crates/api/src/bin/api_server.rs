@@ -34,7 +34,7 @@ fn print_startup_banner() {
     println!(
         r#"
     ╔══════════════════════════════════════════════╗
-    ║              🔐 SECRETON VAULT 🔐             ║
+    ║             🔐 SECRETON SERVER 🔐             ║
     ║          Enterprise Transit Engine           ║
     ╠══════════════════════════════════════════════╣
     ║  Version: 2.0.1                             ║

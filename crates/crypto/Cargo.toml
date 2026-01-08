@@ -24,7 +24,7 @@ chrono.workspace = true
 
 # Cryptographic dependencies - RustCrypto suite
 ring.workspace = true
-rsa = "0.9.6"
+rsa = { version = "0.9.6", features = ["sha2"] }
 pkcs8 = "0.10.2"
 aes.workspace = true
 aes-gcm.workspace = true
