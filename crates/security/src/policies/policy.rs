@@ -115,10 +115,10 @@ pub async fn evaluate_with_sentinel(
     _context: &PolicyContext,
 ) -> bool {
     // Versioning logic: Group policies by name and select the highest version
-    let mut latest_policies: HashMap<&str, &SentinelPolicy> = HashMap::new();
+    let mut latest_policies_map: HashMap<&str, &SentinelPolicy> = HashMap::new();
 
     for pol in policies {
-        match latest_policies.entry(&pol.name) {
+        match latest_policies_map.entry(&pol.name) {
             std::collections::hash_map::Entry::Vacant(e) => {
                 e.insert(pol);
             }
@@ -130,8 +130,12 @@ pub async fn evaluate_with_sentinel(
         }
     }
 
-    // Iterate over the filtered (latest version) policies
-    for pol in latest_policies.values() {
+    // Convert to vector and sort by name for deterministic evaluation order
+    let mut effective_policies: Vec<&SentinelPolicy> = latest_policies_map.into_values().collect();
+    effective_policies.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Iterate over the filtered policies
+    for pol in effective_policies {
         if pol.policy_code == "deny_all" {
             // Add audit logging
             tracing::info!(
