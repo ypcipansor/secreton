@@ -1,4 +1,4 @@
-//! Audit logging for Secreton Adhyaksa
+//! Audit logging for Secreton
 
 use chrono::Utc;
 use parking_lot;

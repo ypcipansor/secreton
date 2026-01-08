@@ -26,10 +26,10 @@ pub enum AuthMethod {
     ClientSecret,
 }
 
-/// Azure Key Secret configuration
+/// Azure Secrets configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AzureKeySecretConfig {
-    pub secreton_url: String, // https://{secreton-name}.secreton.azure.net
+pub struct AzureSecretsConfig {
+    pub secreton_url: String, // https://{secreton-name}.vault.azure.net
     pub tenant_id: String,
     pub auth_method: AuthMethod,
     pub subscription_id: String,
@@ -104,16 +104,16 @@ pub struct SyncConfig {
     pub conflict_resolution: ConflictResolution,
 }
 
-/// Azure Key Secret Backend
-pub struct AzureKeySecretBackend {
-    config: Arc<RwLock<AzureKeySecretConfig>>,
+/// Azure Secrets Backend
+pub struct AzureSecretsBackend {
+    config: Arc<RwLock<AzureSecretsConfig>>,
     sync_config: Arc<RwLock<SyncConfig>>,
     secrets: Arc<RwLock<HashMap<String, AzureSecret>>>,
     keys: Arc<RwLock<HashMap<String, AzureKey>>>,
 }
 
-impl AzureKeySecretBackend {
-    pub fn new(config: AzureKeySecretConfig, sync_config: SyncConfig) -> Self {
+impl AzureSecretsBackend {
+    pub fn new(config: AzureSecretsConfig, sync_config: SyncConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
             sync_config: Arc::new(RwLock::new(sync_config)),
@@ -122,7 +122,7 @@ impl AzureKeySecretBackend {
         }
     }
 
-    /// Store secret to Azure Key Secret
+    /// Store secret to Azure Secrets
     pub async fn store_secret(
         &self,
         secret_name: &str,
@@ -153,7 +153,7 @@ impl AzureKeySecretBackend {
         Ok(azure_secret)
     }
 
-    /// Retrieve secret from Azure Key Secret
+    /// Retrieve secret from Azure Secrets
     pub async fn retrieve_secret(&self, secret_name: &str) -> Result<AzureSecret> {
         let secrets = self.secrets.read().await;
         secrets
@@ -215,7 +215,7 @@ impl AzureKeySecretBackend {
         })
     }
 
-    /// Create key in Azure Key Secret
+    /// Create key in Azure Secrets
     pub async fn create_key(
         &self,
         key_name: &str,
@@ -346,9 +346,9 @@ pub struct AzureStatistics {
 mod tests {
     use super::*;
 
-    fn create_test_config() -> AzureKeySecretConfig {
-        AzureKeySecretConfig {
-            secreton_url: "https://my-secreton.secreton.azure.net".to_string(),
+    fn create_test_config() -> AzureSecretsConfig {
+        AzureSecretsConfig {
+            secreton_url: "https://my-secreton.vault.azure.net".to_string(),
             tenant_id: "12345678-1234-1234-1234-123456789012".to_string(),
             auth_method: AuthMethod::ManagedIdentity,
             subscription_id: "sub-12345".to_string(),
@@ -366,7 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_secret() {
-        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureSecretsBackend::new(create_test_config(), create_test_sync_config());
 
         let mut tags = HashMap::new();
         tags.insert("env".to_string(), "production".to_string());
@@ -389,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retrieve_secret() {
-        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureSecretsBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .store_secret(
@@ -408,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_secrets() {
-        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureSecretsBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .store_secret(
@@ -427,7 +427,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_key() {
-        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureSecretsBackend::new(create_test_config(), create_test_sync_config());
 
         let key = backend
             .create_key(
@@ -445,7 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_encrypt_with_azure_key() {
-        let backend = AzureKeySecretBackend::new(create_test_config(), create_test_sync_config());
+        let backend = AzureSecretsBackend::new(create_test_config(), create_test_sync_config());
 
         backend
             .create_key(

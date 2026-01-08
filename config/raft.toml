@@ -29,7 +29,7 @@ performance_multiplier = 1
 
 [security]
 # Secreton seal configuration
-seal_type = "auto"  # auto, shamir, transit, gcpkms, awskms, azurekeysecreton
+seal_type = "auto"  # auto, shamir, transit, gcpkms, awskms, azurekeysecret
 
 # Authentication
 default_auth_method = "token"
