@@ -78,7 +78,7 @@ mod tests {
             "user1",
             "secret/test",
             "read",
-            &PolicyContext {},
+            &PolicyContext::default(),
         ).await;
 
         assert!(result, "Should allow");
@@ -103,7 +103,7 @@ mod tests {
             "user1",
             "secret/test",
             "read",
-            &PolicyContext {},
+            &PolicyContext::default(),
         ).await;
 
         assert!(!result, "Should deny");
