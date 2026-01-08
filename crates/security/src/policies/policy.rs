@@ -81,9 +81,10 @@ impl PolicySet {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PolicyContext {
-    // Placeholder for future policy evaluation context
+    pub roles: Vec<String>,
+    pub additional_context: serde_json::Value,
 }
 
 #[derive(Debug)]
@@ -104,6 +105,7 @@ struct WasmInput<'a> {
     user: &'a str,
     path: &'a str,
     action: &'a str,
+    context: &'a PolicyContext,
 }
 
 pub async fn evaluate_with_sentinel(
@@ -111,7 +113,7 @@ pub async fn evaluate_with_sentinel(
     user: &str,
     path: &str,
     action: &str,
-    _context: &PolicyContext,
+    context: &PolicyContext,
 ) -> bool {
     // For now, just evaluate all policies (no versioning logic yet)
     for pol in policies {
@@ -165,6 +167,7 @@ pub async fn evaluate_with_sentinel(
                      user,
                      path,
                      action,
+                     context,
                  };
                  let input_json = match serde_json::to_string(&input) {
                      Ok(s) => s,
@@ -256,13 +259,19 @@ pub async fn evaluate_with_sentinel(
 
 // Integrasi ke policy engine utama
 pub async fn check_policy_with_sentinel(config: PolicyCheckConfig<'_>) -> bool {
+    // Construct PolicyContext
+    let context = PolicyContext {
+        roles: config.rbac_roles.to_vec(),
+        additional_context: config._context.cloned().unwrap_or(serde_json::Value::Null),
+    };
+
     // Implement sentinel policy evaluation
     if !evaluate_with_sentinel(
         config.sentinel_policies,
         config.user,
         config.path,
         config.action,
-        &PolicyContext {},
+        &context,
     )
     .await
     {
