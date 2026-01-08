@@ -43,6 +43,9 @@ pub struct SentinelPolicy {
     /// Policy name
     pub name: String,
 
+    /// Policy version
+    pub version: u32,
+
     /// Enforcement level
     pub enforcement_level: EnforcementLevel,
 
@@ -348,6 +351,7 @@ mod tests {
 
         let policy = SentinelPolicy {
             name: "test-advisory".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::Advisory,
             policy_code: "allow if path matches secret/*".to_string(),
             description: Some("Test policy".to_string()),
@@ -377,6 +381,7 @@ mod tests {
 
         let policy = SentinelPolicy {
             name: "require-admin".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::HardMandatory,
             policy_code: "allow if identity has role:admin".to_string(),
             description: None,
@@ -410,6 +415,7 @@ mod tests {
 
         let policy = SentinelPolicy {
             name: "business-hours".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::SoftMandatory,
             policy_code: "deny if not business_hours".to_string(),
             description: None,
@@ -439,6 +445,7 @@ mod tests {
 
         let policy1 = SentinelPolicy {
             name: "path-check".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::Advisory,
             policy_code: "allow if path matches secret/*".to_string(),
             description: None,
@@ -448,6 +455,7 @@ mod tests {
 
         let policy2 = SentinelPolicy {
             name: "identity-check".to_string(),
+            version: 1,
             enforcement_level: EnforcementLevel::HardMandatory,
             policy_code: "allow if identity has role:admin".to_string(),
             description: None,

@@ -1,6 +1,7 @@
 use crate::policies::sentinel::SentinelPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[cfg(feature = "wasmi")]
 use crate::policies::wasm::{evaluate_wasm_policy, DUMMY_WASM_ALLOW};
@@ -115,8 +116,28 @@ pub async fn evaluate_with_sentinel(
     action: &str,
     context: &PolicyContext,
 ) -> bool {
-    // For now, just evaluate all policies (no versioning logic yet)
+    // Versioning logic: Group policies by name and select the highest version
+    let mut latest_policies_map: HashMap<&str, &SentinelPolicy> = HashMap::new();
+
     for pol in policies {
+        match latest_policies_map.entry(&pol.name) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(pol);
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if pol.version > e.get().version {
+                    e.insert(pol);
+                }
+            }
+        }
+    }
+
+    // Convert to vector and sort by name for deterministic evaluation order
+    let mut effective_policies: Vec<&SentinelPolicy> = latest_policies_map.into_values().collect();
+    effective_policies.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Iterate over the filtered policies
+    for pol in effective_policies {
         if pol.policy_code == "deny_all" {
             // Add audit logging
             tracing::info!(
@@ -290,5 +311,48 @@ pub async fn check_policy_with_sentinel(config: PolicyCheckConfig<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    // Tests temporarily disabled for compilation - to be re-enabled after core fixes
+    use super::*;
+    use crate::policies::sentinel::EnforcementLevel;
+    use chrono::Utc;
+
+    #[tokio::test]
+    async fn test_evaluate_with_sentinel_versioning() {
+        let policy_v1 = SentinelPolicy {
+            name: "test-policy".to_string(),
+            version: 1,
+            enforcement_level: EnforcementLevel::HardMandatory,
+            policy_code: "deny_all".to_string(), // v1 denies
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let policy_v2 = SentinelPolicy {
+            name: "test-policy".to_string(),
+            version: 2,
+            enforcement_level: EnforcementLevel::HardMandatory,
+            policy_code: "allow".to_string(), // v2 allows (or at least doesn't deny_all)
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        // Case 1: Only v1 (deny)
+        assert!(!evaluate_with_sentinel(
+            &[policy_v1.clone()],
+            "user", "path", "read", &PolicyContext {}
+        ).await);
+
+        // Case 2: v1 (deny) and v2 (allow). Should pick v2.
+        assert!(evaluate_with_sentinel(
+            &[policy_v1.clone(), policy_v2.clone()],
+            "user", "path", "read", &PolicyContext {}
+        ).await);
+
+        // Case 3: v2 (allow) and v1 (deny). Should pick v2.
+        assert!(evaluate_with_sentinel(
+            &[policy_v2.clone(), policy_v1.clone()],
+            "user", "path", "read", &PolicyContext {}
+        ).await);
+    }
 }
