@@ -188,10 +188,14 @@ impl AuthenticationService {
         let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
         if let Ok(entries) = storage.list(&params).await {
             for entry in entries {
-                // SecretEntry stores Vec<u8> in encrypted_data.
-                // For now, we store plaintext JSON in encrypted_data for users,
-                // relying on StorageBackend's own security.
-                if let Ok(user) = serde_json::from_slice::<User>(&entry.encrypted_data) {
+                // Try decrypting the data, falling back to plaintext if needed (legacy data)
+                let user_data = if let Ok(decrypted) = crypto.decrypt(&entry.encrypted_data).await {
+                    decrypted
+                } else {
+                    entry.encrypted_data.clone()
+                };
+
+                if let Ok(user) = serde_json::from_slice::<User>(&user_data) {
                     userpass_method.add_user(
                         user.username.clone(),
                         user.password_hash.clone(),

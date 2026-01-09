@@ -12,6 +12,7 @@ use uuid;
 // sha2::Digest is imported locally where needed (e.g., create_backup)
 
 use crate::services::audit::AuditLogger;
+use crate::services::crypto::CryptoService;
 use secreton_storage::{StorageBackend, QueryParams};
 use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
 use secreton_performance::SecretPerformanceOptimizer;
@@ -123,6 +124,7 @@ pub struct AdminService {
     _request_count: Arc<std::sync::Mutex<u64>>,
     #[allow(dead_code)] // Reserved for rate calculation
     _last_request_time: Arc<std::sync::Mutex<std::time::Instant>>,
+    crypto: Option<Arc<CryptoService>>,
 }
 
 impl AdminService {
@@ -140,7 +142,14 @@ impl AdminService {
             performance,
             _request_count: Arc::new(std::sync::Mutex::new(0)),
             _last_request_time: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+            crypto: None,
         })
+    }
+
+    /// Set crypto service
+    pub fn with_crypto(mut self, crypto: Arc<CryptoService>) -> Self {
+        self.crypto = Some(crypto);
+        self
     }
 
     /// Get system statistics
@@ -1298,7 +1307,7 @@ impl AdminService {
 
         let mut users = Vec::new();
         for entry in entries {
-            if let Ok(user) = self.secreton_entry_to_user_info(&entry) {
+            if let Ok(user) = self.secreton_entry_to_user_info(&entry).await {
                 users.push(user);
             }
         }
@@ -1314,7 +1323,7 @@ impl AdminService {
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
-        self.secreton_entry_to_user_info(&entry)
+        self.secreton_entry_to_user_info(&entry).await
     }
 
     /// Create a new user
@@ -1338,7 +1347,7 @@ impl AdminService {
             metadata: HashMap::new(),
         };
 
-        let entry = self.user_info_to_secreton_entry(&user)?;
+        let entry = self.user_info_to_secreton_entry(&user).await?;
         self.storage.store(&entry)
             .await
             .map_err(AdminError::Storage)?;
@@ -1367,7 +1376,7 @@ impl AdminService {
         user.updated_at = chrono::Utc::now();
 
         // Store updated user
-        let entry = self.user_info_to_secreton_entry(&user)?;
+        let entry = self.user_info_to_secreton_entry(&user).await?;
         self.storage.update(&entry)
             .await
             .map_err(AdminError::Storage)?;
@@ -1395,20 +1404,27 @@ impl AdminService {
     }
 
     /// Helper method to convert UserInfo to SecretEntry for storage
-    fn user_info_to_secreton_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
+    async fn user_info_to_secreton_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
         use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
 
         let user_data = serde_json::to_vec(user)
             .map_err(|e| AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e)))?;
 
-        // Create encryption metadata (placeholder - in real implementation would use actual encryption)
-        let encryption_metadata = EncryptionMetadata {
-            algorithm: "aes256-gcm".to_string(),
-            key_id: "user-key".to_string(),
-            iv: vec![0; 12], // 96 bits
-            auth_tag: Some(vec![0; 16]), // 128 bits
-            aad: None,
+        // Create encryption metadata
+        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
+            let enc = crypto.encrypt_data(&user_data).await
+                .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
+            (enc, EncryptionMetadata::default())
+        } else {
+            // Fallback for tests or if crypto not configured (should not happen in prod)
+            (user_data, EncryptionMetadata {
+                algorithm: "none".to_string(),
+                key_id: "none".to_string(),
+                iv: vec![],
+                auth_tag: None,
+                aad: None,
                 kdf_params: None,
+            })
         };
 
         let user_id = uuid::Uuid::parse_str(&user.id)
@@ -1416,7 +1432,7 @@ impl AdminService {
 
         Ok(SecretEntry::new(
             format!("{}{}", USER_STORAGE_PREFIX, user.id),
-            user_data,
+            encrypted_data,
             encryption_metadata,
             SecurityLevel::Secret,
             user_id, // owner_id
@@ -1424,8 +1440,20 @@ impl AdminService {
     }
 
     /// Helper method to convert SecretEntry to UserInfo
-    fn secreton_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
-        let user: UserInfo = serde_json::from_slice(&entry.encrypted_data)
+    async fn secreton_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
+        let data = if let Some(crypto) = &self.crypto {
+            match crypto.decrypt(&entry.encrypted_data).await {
+                Ok(d) => d,
+                Err(_) => {
+                    // Try plaintext fallback if decryption fails (legacy data)
+                    entry.encrypted_data.clone()
+                }
+            }
+        } else {
+            entry.encrypted_data.clone()
+        };
+
+        let user: UserInfo = serde_json::from_slice(&data)
             .map_err(|e| AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e)))?;
         Ok(user)
     }

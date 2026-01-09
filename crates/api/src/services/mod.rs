@@ -120,7 +120,8 @@ impl ApiServiceContainer {
             auth.clone(),
             audit.clone(),
             performance.clone(),
-        ).await?);
+        ).await?
+        .with_crypto(crypto.clone()));
 
         // Initialize MFA Services using configuration
         let mfa_config = &config.auth.mfa;
