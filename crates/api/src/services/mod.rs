@@ -93,7 +93,8 @@ impl ApiServiceContainer {
             storage.clone(),
             crypto.clone(),
             &config.auth,
-        ).await?);
+        ).await?
+        .with_audit(audit.clone()));
 
         // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());

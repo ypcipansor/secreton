@@ -246,14 +246,22 @@ impl SecretService {
         let owner_id = Uuid::parse_str(&user.id)
             .unwrap_or_else(|_| Uuid::new_v4());
 
+        // Get existing secret to check for version
+        let version = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            existing.version + 1
+        } else {
+            1
+        };
+
         // Create SecretEntry
-        let entry = secreton_storage::SecretEntry::new(
+        let mut entry = secreton_storage::SecretEntry::new(
             path.to_string(),
             encrypted_data,
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::Confidential,
             owner_id,
         );
+        entry.version = version;
 
         // Store encrypted data
         self.storage.store(&entry).await
