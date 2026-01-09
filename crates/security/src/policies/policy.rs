@@ -421,11 +421,11 @@ mod tests {
 
         // Direct helper test
         let result = evaluate_with_sentinel(
-             &[policy],
-             "user1",
-             "secret/foo",
-             "read",
-             &PolicyContext {},
+            &[policy],
+            "user1",
+            "secret/foo",
+            "read",
+            &PolicyContext {},
         ).await;
         assert!(result);
     }
