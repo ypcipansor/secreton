@@ -15,6 +15,8 @@ pub struct SealService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     jwt_secret: String,
+    jwt_issuer: String,
+    jwt_audience: String,
 
     // In-memory buffer for unseal shares
     // (share_index, share_data)
@@ -64,11 +66,19 @@ struct Claims {
 }
 
 impl SealService {
-    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>, jwt_secret: String) -> Self {
+    pub fn new(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        crypto: Arc<CryptoService>,
+        jwt_secret: String,
+        jwt_issuer: String,
+        jwt_audience: String,
+    ) -> Self {
         Self {
             storage,
             crypto,
             jwt_secret,
+            jwt_issuer,
+            jwt_audience,
             unseal_buffer: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -185,8 +195,8 @@ impl SealService {
             iat: now.timestamp() as usize,
             exp: exp.timestamp() as usize,
             jti: Uuid::new_v4().to_string(),
-            iss: "secreton".to_string(), // Matches default config
-            aud: "secreton-api".to_string(),
+            iss: self.jwt_issuer.clone(),
+            aud: self.jwt_audience.clone(),
         };
 
         let root_token = encode(
@@ -298,7 +308,13 @@ mod tests {
         // Clean env to ensure sealed start
         std::env::remove_var("SECRETON_ROOT_KEY");
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let seal_service = SealService::new(storage.clone(), crypto.clone(), "test-secret".to_string());
+        let seal_service = SealService::new(
+            storage.clone(),
+            crypto.clone(),
+            "test-secret".to_string(),
+            "secreton".to_string(),
+            "secreton-api".to_string()
+        );
 
         // 1. Check initial state
         assert!(!seal_service.is_initialized().await);
