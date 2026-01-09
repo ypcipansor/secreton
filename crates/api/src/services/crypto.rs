@@ -21,12 +21,12 @@ struct CryptoPacket {
 #[derive(Clone)]
 struct SystemKeyStorage {
     storage: Arc<dyn StorageBackend + Send + Sync>,
-    root_key: Vec<u8>, // KEK (Key Encryption Key) for encrypting system keys
+    root_key: Arc<RwLock<Option<Vec<u8>>>>, // KEK (Key Encryption Key) for encrypting system keys
     crypto_engine: Arc<CryptoEngine>,
 }
 
 impl SystemKeyStorage {
-    fn new(storage: Arc<dyn StorageBackend + Send + Sync>, root_key: Vec<u8>) -> Self {
+    fn new(storage: Arc<dyn StorageBackend + Send + Sync>, root_key: Arc<RwLock<Option<Vec<u8>>>>) -> Self {
         Self {
             storage,
             root_key,
@@ -35,11 +35,14 @@ impl SystemKeyStorage {
     }
 
     /// Encrypt a key before storing it
-    fn encrypt_key(&self, key_data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn encrypt_key(&self, key_data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let root_key_guard = self.root_key.read().await;
+        let root_key = root_key_guard.as_ref().ok_or(CryptoError::Internal("System is sealed".to_string()))?;
+
         let encrypted = self.crypto_engine.encrypt(
             AlgorithmId::Aes256Gcm,
             key_data,
-            &self.root_key
+            root_key
         )?;
 
         // Serialize EncryptedData to bytes
@@ -47,11 +50,14 @@ impl SystemKeyStorage {
     }
 
     /// Decrypt a key after retrieving it
-    fn decrypt_key(&self, encrypted_bytes: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn decrypt_key(&self, encrypted_bytes: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let root_key_guard = self.root_key.read().await;
+        let root_key = root_key_guard.as_ref().ok_or(CryptoError::Internal("System is sealed".to_string()))?;
+
         let encrypted: EncryptedData = serde_json::from_slice(encrypted_bytes)
             .map_err(|e| CryptoError::Internal(format!("Deserialization error: {}", e)))?;
 
-        self.crypto_engine.decrypt(&encrypted, &self.root_key)
+        self.crypto_engine.decrypt(&encrypted, root_key)
     }
 
     fn get_path(&self, key_id: &str) -> String {
@@ -62,7 +68,7 @@ impl SystemKeyStorage {
 #[async_trait::async_trait]
 impl KeyStorage for SystemKeyStorage {
     async fn store_key(&self, key_id: &str, key_data: &[u8]) -> Result<(), CryptoError> {
-        let encrypted_key = self.encrypt_key(key_data)?;
+        let encrypted_key = self.encrypt_key(key_data).await?;
 
         let path = self.get_path(key_id);
         let entry = SecretEntry::new(
@@ -81,7 +87,7 @@ impl KeyStorage for SystemKeyStorage {
         let path = self.get_path(key_id);
 
         match self.storage.get_by_path(&path).await {
-            Ok(Some(entry)) => self.decrypt_key(&entry.encrypted_data),
+            Ok(Some(entry)) => self.decrypt_key(&entry.encrypted_data).await,
             Ok(None) => Err(CryptoError::KeyNotFound(key_id.to_string())),
             Err(e) => Err(CryptoError::StorageError(e.to_string())),
         }
@@ -116,51 +122,81 @@ pub struct CryptoService {
     // Cache: (key_id, key_bytes, timestamp)
     active_key_cache: Arc<RwLock<Option<CacheEntry>>>,
     cache_ttl: std::time::Duration,
+    root_key_store: Arc<RwLock<Option<Vec<u8>>>>,
 }
 
 impl CryptoService {
     /// Initialize new CryptoService with storage backend for key persistence
     pub async fn new(storage: Arc<dyn StorageBackend + Send + Sync>) -> Result<Self> {
-        // Get root key from env or generate a new one (warn if generated)
-        let root_key = std::env::var("SECRETON_ROOT_KEY")
-            .map(|k| BASE64.decode(&k).unwrap_or_else(|_| k.into_bytes()))
-            .unwrap_or_else(|_| {
-                tracing::warn!("No SECRETON_ROOT_KEY found. Generating ephemeral root key. System keys will be lost on restart if storage is persistent!");
-                secreton_crypto::generate_key(AlgorithmId::Aes256Gcm).unwrap()
-            });
+        // Init with empty root key (Sealed state)
+        // If SECRETON_ROOT_KEY is present, we can auto-unseal (optional, but good for dev)
+        let env_root_key = std::env::var("SECRETON_ROOT_KEY")
+            .ok()
+            .map(|k| BASE64.decode(&k).unwrap_or_else(|_| k.into_bytes()));
 
-        // Ensure root key is 32 bytes for AES-256
-        let root_key = if root_key.len() != 32 {
-            // Hash it to get 32 bytes
-            use sha2::{Sha256, Digest};
-            let mut hasher = Sha256::new();
-            hasher.update(&root_key);
-            hasher.finalize().to_vec()
+        let root_key_store = Arc::new(RwLock::new(None));
+
+        // If env var is set, auto-unseal
+        if let Some(mut key) = env_root_key {
+            if key.len() != 32 {
+                use sha2::{Sha256, Digest};
+                let mut hasher = Sha256::new();
+                hasher.update(&key);
+                key = hasher.finalize().to_vec();
+            }
+            *root_key_store.write().await = Some(key);
+            tracing::info!("Auto-unsealed using SECRETON_ROOT_KEY environment variable");
         } else {
-            root_key
-        };
+            tracing::info!("System starting in SEALED state. Waiting for unseal operation.");
+        }
 
-        let key_storage = Arc::new(SystemKeyStorage::new(storage.clone(), root_key));
+        let key_storage = Arc::new(SystemKeyStorage::new(storage.clone(), root_key_store.clone()));
 
         // Use 30 days rotation interval by default
         let rotation_interval = std::time::Duration::from_secs(30 * 24 * 60 * 60);
         let key_manager = Arc::new(KeyManager::new(key_storage, rotation_interval));
 
-        // Ensure an active key exists
-        if key_manager.get_active_key().await.is_err() {
-            tracing::info!("No active key found. Initializing new system key.");
-            if let Err(e) = key_manager.rotate_keys().await {
-                 tracing::error!("Failed to initialize system key: {}", e);
-                 // Fallback to in-memory for dev/test environments if storage fails
-            }
-        }
+        // Note: We don't initialize keys here anymore because we might be sealed.
+        // The first operation after unseal will trigger key gen if needed.
 
         Ok(Self {
             key_manager,
             crypto_engine: Arc::new(CryptoEngine::new()),
             active_key_cache: Arc::new(RwLock::new(None)),
             cache_ttl: std::time::Duration::from_secs(300), // 5 minutes cache
+            root_key_store,
         })
+    }
+
+    /// Set the root key (Unseal operation)
+    pub async fn set_root_key(&self, key: Vec<u8>) -> Result<()> {
+        let mut store = self.root_key_store.write().await;
+        *store = Some(key);
+
+        // Clear cache as it might be invalid or from previous session
+        *self.active_key_cache.write().await = None;
+
+        // Try to ensure active key exists now that we are unsealed
+        if self.key_manager.get_active_key().await.is_err() {
+            tracing::info!("No active system key found after unseal. Generating new one.");
+             if let Err(e) = self.key_manager.rotate_keys().await {
+                 tracing::error!("Failed to initialize system key after unseal: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Clear the root key (Seal operation)
+    pub async fn clear_root_key(&self) {
+        let mut store = self.root_key_store.write().await;
+        *store = None;
+        *self.active_key_cache.write().await = None;
+    }
+
+    /// Check if system is unsealed
+    pub async fn is_unsealed(&self) -> bool {
+        self.root_key_store.read().await.is_some()
     }
 
     /// Encrypt using a specific key (low-level)
@@ -259,6 +295,8 @@ mod tests {
     #[tokio::test]
     async fn test_crypto_service_lifecycle() {
         let storage = Arc::new(MockStorageBackend::new());
+        // Set env var to ensure unsealed for test
+        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         let service = CryptoService::new(storage).await.unwrap();
         let plaintext = b"Hello, World!";
 
@@ -277,6 +315,7 @@ mod tests {
     #[tokio::test]
     async fn test_unique_ciphertexts() {
         let storage = Arc::new(MockStorageBackend::new());
+        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         let service = CryptoService::new(storage).await.unwrap();
         let plaintext = b"Hello, World!";
 
@@ -290,6 +329,7 @@ mod tests {
     #[tokio::test]
     async fn test_signing_and_verification_ed25519() {
         let storage = Arc::new(MockStorageBackend::new());
+        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         let service = CryptoService::new(storage).await.unwrap();
         let data = b"Important Document";
 
@@ -316,6 +356,7 @@ mod tests {
     #[tokio::test]
     async fn test_signing_and_verification_p256() {
         let storage = Arc::new(MockStorageBackend::new());
+        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         let service = CryptoService::new(storage).await.unwrap();
         let data = b"Important Document";
 

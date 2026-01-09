@@ -49,6 +49,57 @@ enum Commands {
         #[command(subcommand)]
         cmd: SecretCommand,
     },
+    /// Operator commands (init, seal, unseal)
+    Operator {
+        #[command(subcommand)]
+        cmd: OperatorCommand,
+    },
+    /// Login to the system
+    Login {
+        /// The token to use
+        token: Option<String>,
+    },
+    /// Logout from the system
+    Logout,
+    /// User management commands
+    User {
+        #[command(subcommand)]
+        cmd: UserCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OperatorCommand {
+    /// Initialize the system
+    Init {
+        #[arg(short, long, default_value = "5")]
+        shares: u8,
+        #[arg(short, long, default_value = "3")]
+        threshold: u8,
+    },
+    /// Unseal the system
+    Unseal {
+        /// The unseal key/share
+        key: Option<String>,
+    },
+    /// Seal the system
+    Seal,
+    /// Check seal status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum UserCommand {
+    /// Create a new user
+    Create {
+        username: String,
+        #[arg(short, long)]
+        password: Option<String>,
+        #[arg(short, long)]
+        email: Option<String>,
+        #[arg(short, long, value_delimiter = ',')]
+        roles: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -122,6 +173,22 @@ async fn main() -> Result<()> {
         config.server_url = server_url.clone();
     }
 
+    // Load token from file if not in config
+    if config.token.is_none() {
+        if let Some(path) = get_token_path() {
+            if path.exists() {
+                if let Ok(token) = tokio::fs::read_to_string(path).await {
+                     config.token = Some(token.trim().to_string());
+                }
+            }
+        }
+    }
+
+    // Override token from env var
+    if let Ok(token) = std::env::var("SECRETON_TOKEN") {
+        config.token = Some(token);
+    }
+
     info!("Using server: {}", config.server_url);
 
     // Execute commands
@@ -130,36 +197,48 @@ async fn main() -> Result<()> {
         Commands::Config { cmd } => config_command(cmd, &config).await,
         Commands::Transit { cmd } => transit_command(cmd, &config).await,
         Commands::Secret { cmd } => secret_command(cmd, &config).await,
+        Commands::Operator { cmd } => operator_command(cmd, &config).await,
+        Commands::Login { token } => login_command(token).await,
+        Commands::Logout => logout_command().await,
+        Commands::User { cmd } => user_command(cmd, &config).await,
     }
 }
 
+fn get_token_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".secreton-token"))
+}
+
+fn create_client(config: &CliConfig) -> Result<reqwest::Client> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = &config.token {
+        let mut auth_val = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))?;
+        auth_val.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, auth_val);
+    }
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| e.into())
+}
+
 async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         ConfigCommand::Apply { file } => {
-            // Read file
             let content = std::fs::read_to_string(&file)?;
 
-            // Parse as TOML to validate (and potentially convert if we wanted to support other formats,
-            // but for now we just assume the server accepts what we send or we send it as a structure)
-            // Note: Server endpoint expects the ApiConfig structure as JSON.
-            // We should parse TOML locally and send as JSON.
-
-            // We use serde_json::Value to avoid dependency on secreton-api which causes circular deps or missing crate issues
             let toml_value: toml::Value = toml::from_str(&content)
                 .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
 
-            // Convert TOML Value to JSON Value
-            // This is a bit hacky but works for transport
             let json_value: serde_json::Value = serde_json::to_value(toml_value)
                  .map_err(|e| anyhow::anyhow!("Failed to convert config to JSON: {}", e))?;
 
-            let url = format!("{}/sys/config", config.server_url);
+            let url = format!("{}/api/v1/sys/config", config.server_url);
             let response = client
                 .post(&url)
                 .header("Content-Type", "application/json")
-                .header("X-Admin-Token", "root-token-placeholder") // In production, this would be user-supplied or from login
                 .json(&json_value)
                 .send()
                 .await?;
@@ -176,8 +255,182 @@ async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
+async fn login_command(token: Option<String>) -> Result<()> {
+    let token_to_save = if let Some(t) = token {
+        t
+    } else {
+        use std::io::{self, Write};
+        print!("Token (hidden): ");
+        io::stdout().flush()?;
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer)?;
+        buffer.trim().to_string()
+    };
+
+    if let Some(path) = get_token_path() {
+        tokio::fs::write(path, token_to_save).await?;
+        println!("Success! Token saved to ~/.secreton-token");
+    } else {
+        println!("Error: Could not determine home directory to save token.");
+    }
+
+    Ok(())
+}
+
+async fn logout_command() -> Result<()> {
+    if let Some(path) = get_token_path() {
+        if path.exists() {
+            tokio::fs::remove_file(path).await?;
+            println!("Success! Token removed.");
+        } else {
+            println!("No active login found.");
+        }
+    } else {
+        println!("Error: Could not determine home directory.");
+    }
+    Ok(())
+}
+
+async fn user_command(cmd: UserCommand, config: &CliConfig) -> Result<()> {
+    let client = create_client(config)?;
+
+    match cmd {
+        UserCommand::Create { username, password, email, roles } => {
+            let password_val = if let Some(p) = password {
+                p
+            } else {
+                use std::io::{self, Write};
+                print!("Password: ");
+                io::stdout().flush()?;
+                let mut buffer = String::new();
+                io::stdin().read_line(&mut buffer)?;
+                buffer.trim().to_string()
+            };
+
+            let roles_val = if roles.is_empty() {
+                vec!["user".to_string()]
+            } else {
+                roles
+            };
+
+            let url = format!("{}/api/v1/auth/users", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "username": username,
+                    "password": password_val,
+                    "email": email,
+                    "roles": roles_val
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                println!("✅ User '{}' created successfully.", username);
+            } else {
+                println!("❌ Failed to create user: {}", response.status());
+                println!("   {}", response.text().await?);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()> {
+    let client = create_client(config)?;
+
+    match cmd {
+        OperatorCommand::Init { shares, threshold } => {
+            let url = format!("{}/api/v1/sys/init", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "shares": shares,
+                    "threshold": threshold
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                let body: serde_json::Value = response.json().await?;
+                if let Some(data) = body.get("data") {
+                    println!("Unseal Keys:");
+                    if let Some(keys) = data.get("keys").and_then(|k| k.as_array()) {
+                        for (i, key) in keys.iter().enumerate() {
+                            println!("Key {}: {}", i + 1, key.as_str().unwrap_or(""));
+                        }
+                    }
+                    println!("\nInitial Root Token: {}", data.get("root_token").and_then(|t| t.as_str()).unwrap_or(""));
+                    println!("\nSecreton is initialized! The system is sealed.");
+                    println!("You must provide the unseal keys to unseal the system.");
+                }
+            } else {
+                 let err_text = response.text().await?;
+                 println!("Error initializing: {}", err_text);
+            }
+        }
+        OperatorCommand::Unseal { key } => {
+            let key_str = if let Some(k) = key {
+                k
+            } else {
+                use std::io::{self, Write};
+                print!("Unseal Key: ");
+                io::stdout().flush()?;
+                let mut buffer = String::new();
+                io::stdin().read_line(&mut buffer)?;
+                buffer.trim().to_string()
+            };
+
+            let url = format!("{}/api/v1/sys/unseal", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "key": key_str
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                let body: serde_json::Value = response.json().await?;
+                if let Some(data) = body.get("data") {
+                    println!("Sealed: {}", data.get("sealed").unwrap());
+                    println!("Progress: {}/{}", data.get("progress").unwrap(), data.get("t").unwrap());
+                }
+            } else {
+                 let err_text = response.text().await?;
+                 println!("Error unsealing: {}", err_text);
+            }
+        }
+        OperatorCommand::Seal => {
+             let url = format!("{}/api/v1/sys/seal", config.server_url);
+             let response = client.post(&url).send().await?;
+             if response.status().is_success() {
+                 println!("Success! System is now sealed.");
+             } else {
+                 println!("Error sealing system: {}", response.status());
+             }
+        }
+        OperatorCommand::Status => {
+             let url = format!("{}/api/v1/sys/seal-status", config.server_url);
+             let response = client.get(&url).send().await?;
+             if response.status().is_success() {
+                 let body: serde_json::Value = response.json().await?;
+                 if let Some(data) = body.get("data") {
+                      println!("Sealed: {}", data.get("sealed").unwrap());
+                      println!("Threshold: {}", data.get("t").unwrap());
+                      println!("Shares: {}", data.get("n").unwrap());
+                      println!("Progress: {}", data.get("progress").unwrap());
+                 }
+             } else {
+                 println!("Error getting status: {}", response.status());
+             }
+        }
+    }
+    Ok(())
+}
+
 async fn status_command(config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     // Check health
     let health_url = format!("{}/health", config.server_url);
@@ -208,7 +461,7 @@ async fn status_command(config: &CliConfig) -> Result<()> {
 }
 
 async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         TransitCommand::CreateKey { name } => {
@@ -323,7 +576,7 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
 }
 
 async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         SecretCommand::Put { path, data } => {

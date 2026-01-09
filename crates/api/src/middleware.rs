@@ -659,12 +659,17 @@ pub mod auth {
         ) -> Result<Response, StatusCode> {
             let path = req.uri().path().to_string();
             // Exempt public paths: root, health, version, auth endpoints (login, oauth, etc.)
+            // Exempt sys initialization endpoints
             if path == "/" 
                 || path.ends_with("/health") 
                 || path.ends_with("/version") 
                 || path.contains("/auth/")
                 || path.ends_with("/login")  // Handler unit test uses /login directly
                 || path.ends_with("/oauth")
+                || path.contains("/sys/init")
+                || path.contains("/sys/unseal")
+                || path.contains("/sys/seal-status")
+                || path.contains("/sys/health")
             {
                 return Ok(next.run(req).await);
             }
@@ -687,6 +692,52 @@ pub mod auth {
             // Create request context or simplified user info to store in extensions
             // The handlers expect AuthenticatedUser extractor which likely looks for User in extensions
             req.extensions_mut().insert(user);
+
+            Ok(next.run(req).await)
+        }
+    }
+}
+
+pub mod seal {
+    use axum::{
+        extract::Request,
+        middleware::Next,
+        response::Response,
+        http::StatusCode,
+        response::IntoResponse,
+        Json,
+    };
+    use serde_json::json;
+
+    #[derive(Clone)]
+    pub struct SealMiddleware;
+
+    impl SealMiddleware {
+        pub async fn check(
+            axum::extract::State(state): axum::extract::State<crate::handlers::AppState>,
+            req: Request,
+            next: Next,
+        ) -> Result<Response, Response> {
+            let path = req.uri().path().to_string();
+
+            // Paths allowed when sealed
+            if path.contains("/sys/init")
+                || path.contains("/sys/unseal")
+                || path.contains("/sys/seal-status")
+                || path.contains("/sys/health")
+                || path.ends_with("/health") // Global health
+            {
+                return Ok(next.run(req).await);
+            }
+
+            // Check if sealed
+            if state.seal.is_sealed().await {
+                 let body = Json(json!({
+                    "error": "Secreton is sealed",
+                    "code": 503
+                }));
+                return Err((StatusCode::SERVICE_UNAVAILABLE, body).into_response());
+            }
 
             Ok(next.run(req).await)
         }

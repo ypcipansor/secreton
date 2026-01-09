@@ -5,10 +5,11 @@ use crate::service::*;
 use argon2::Argon2;
 use async_trait::async_trait;
 use chrono::Utc;
-use password_hash::{PasswordHash, PasswordVerifier};
+use password_hash::{PasswordHash, PasswordVerifier, PasswordHasher, SaltString};
 use secreton_errors::SecretonError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
+use rand::rngs::OsRng;
 
 /// User/password authentication method
 pub struct UserPassAuthMethod {
@@ -48,6 +49,26 @@ impl UserPassAuthMethod {
 
         let mut users = self.users.write().await;
         users.insert(username, user_entry);
+    }
+
+    /// Create a user with raw password (hashes it)
+    pub async fn create_user(
+        &self,
+        username: String,
+        password: &str,
+        id: String,
+        groups: Vec<String>,
+        policies: Vec<String>,
+    ) -> AuthMethodResult<String> {
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|_| SecretonError::Internal { message: "Password hashing failed".to_string() })?
+            .to_string();
+
+        self.add_user(username, password_hash.clone(), id, groups, policies).await;
+        Ok(password_hash)
     }
 
     /// Verify password against hash

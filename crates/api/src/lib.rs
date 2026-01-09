@@ -692,16 +692,6 @@ async fn security_metrics_handler() -> Result<impl Reply, Rejection> {
 pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting Enhanced Security API server on port {}", port);
 
-    let routes = SecurityAPI::routes()
-        .with(
-            warp::cors()
-                .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
-                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
-        )
-        .with(warp::log("security_api"))
-        .recover(handle_rejection);
-
     info!(
         "🚀 Secreton Enhanced Security API server starting on http://127.0.0.1:{}",
         port
