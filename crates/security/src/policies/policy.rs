@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_policy_with_sentinel_default_pass() {
+    async fn test_evaluate_with_sentinel_unknown_policy_code_allows() {
         // Ensures an advisory Sentinel policy allows the request when evaluated with `evaluate_with_sentinel`.
         let policy = SentinelPolicy {
             name: "test-default".to_string(),
