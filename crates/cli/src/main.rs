@@ -159,6 +159,7 @@ async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
             let response = client
                 .post(&url)
                 .header("Content-Type", "application/json")
+                .header("X-Admin-Token", "root-token-placeholder") // In production, this would be user-supplied or from login
                 .json(&json_value)
                 .send()
                 .await?;

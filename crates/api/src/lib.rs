@@ -428,9 +428,13 @@ impl SecurityAPI {
             .and(warp::get())
             .and_then(security_metrics_handler);
 
+        // Simple auth filter for admin operations
+        let admin_auth = warp::header::<String>("x-admin-token");
+
         let config_post = warp::path("sys")
             .and(warp::path("config"))
             .and(warp::post())
+            .and(admin_auth)
             .and(warp::body::json())
             .and(storage_filter.clone())
             .and_then(crate::handlers::config::handle_post_config);
@@ -692,7 +696,7 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
         .with(
             warp::cors()
                 .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
                 .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
         )
         .with(warp::log("security_api"))
