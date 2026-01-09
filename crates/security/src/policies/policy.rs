@@ -409,23 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_policy_with_sentinel_default_pass() {
-        // If Sentinel allows, it falls through to RBAC.
-        // If RBAC denies (empty policies), result is false.
-        // To verify Sentinel *allowed*, we need to know RBAC behavior or mock it (not possible easily here).
-        // However, we can assert that if Sentinel denied, we'd get false.
-        // Since we can't easily force RBAC to true without setting up RBAC policies,
-        // we can rely on `evaluate_with_sentinel` tests if we kept them, OR setup minimal RBAC.
-
-        // Let's rely on the fact that if Sentinel passes, we reach RBAC.
-        // But wait, to test Sentinel logic purely via `check_policy_with_sentinel` is hard if RBAC is strict.
-        // Let's keep `evaluate_with_sentinel` tests as unit tests for the helper,
-        // AND add `check_policy_with_sentinel` tests for integration.
-        // The reviewer complained about "Sentinel tests use the wrong function name".
-        // They might have meant "You should use the public API".
-        // But `evaluate_with_sentinel` IS public.
-        // I will keep `evaluate_with_sentinel` tests but rename them to make it clear they test the helper.
-        // AND I will add `check_policy_with_sentinel` tests.
-
+        // Ensures an advisory Sentinel policy allows the request when evaluated with `evaluate_with_sentinel`.
         let policy = SentinelPolicy {
             name: "test-default".to_string(),
             policy_code: "something_else".to_string(),
