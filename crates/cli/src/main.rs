@@ -54,6 +54,8 @@ enum Commands {
         /// The token to use
         token: Option<String>,
     },
+    /// Logout from the system
+    Logout,
 }
 
 #[derive(Subcommand)]
@@ -162,6 +164,7 @@ async fn main() -> Result<()> {
         Commands::Secret { cmd } => secret_command(cmd, &config).await,
         Commands::Operator { cmd } => operator_command(cmd, &config).await,
         Commands::Login { token } => login_command(token).await,
+        Commands::Logout => logout_command().await,
     }
 }
 
@@ -203,6 +206,20 @@ async fn login_command(token: Option<String>) -> Result<()> {
         println!("Error: Could not determine home directory to save token.");
     }
 
+    Ok(())
+}
+
+async fn logout_command() -> Result<()> {
+    if let Some(path) = get_token_path() {
+        if path.exists() {
+            tokio::fs::remove_file(path).await?;
+            println!("Success! Token removed.");
+        } else {
+            println!("No active login found.");
+        }
+    } else {
+        println!("Error: Could not determine home directory.");
+    }
     Ok(())
 }
 
