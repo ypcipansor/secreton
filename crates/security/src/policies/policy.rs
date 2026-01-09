@@ -1,3 +1,4 @@
+
 use crate::policies::sentinel::SentinelPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,6 +37,7 @@ pub struct PolicyRule {
     pub mfa: Option<bool>,                    // requires MFA?
 }
 
+/// A set of policy rules to be evaluated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicySet {
     pub rules: Vec<PolicyRule>,
@@ -50,11 +52,11 @@ impl PolicySet {
                     .unwrap_or(false)
             {
                 // Evaluasi control group
-                if let Some(cg) = &rule.control_group
-                    && cg.approved_by.len() < cg.required_approvals as usize
-                {
-                    // Belum cukup approval
-                    return false;
+                if let Some(cg) = &rule.control_group {
+                    if cg.approved_by.len() < cg.required_approvals as usize {
+                        // Belum cukup approval
+                        return false;
+                    }
                 }
                 // Evaluasi MFA
                 if rule.mfa == Some(true) {
@@ -224,21 +226,6 @@ pub async fn evaluate_with_sentinel(
              }
         } else if pol.policy_code == "egp" || pol.policy_code == "rgp" {
              // Legacy/Test placeholder logic
-             // If it was meant to be WASM but handled above, this block might be redundant or for non-WASM egp/rgp
-             // But existing code had inner check for "wasm", which was unreachable.
-
-             // Since we handled WASM above, here we handle other "types" if any.
-             // But based on previous code:
-             /*
-                if pol.policy_code == "egp" || pol.policy_code == "rgp" {
-                    // Execution WASM if policy_code wasm
-                    if pol.policy_code == "wasm" { ... }
-                }
-             */
-             // That was unreachable. So we can ignore it or assume "egp"/"rgp" meant something else.
-             // We'll keep the HCL logic here.
-
-            // HCL/dummy: if policy_code contains "allow", allow
             let allowed = pol.policy_code.contains("allow");
             // Add audit logging
             tracing::info!(
@@ -254,25 +241,6 @@ pub async fn evaluate_with_sentinel(
             }
         } else {
              // Existing logic for other policies?
-             // The original code iterated all policies.
-             // If not deny_all, egp, rgp, or wasm, it did nothing (implicitly allowed).
-             // Wait, original code:
-             /*
-                for pol in policies {
-                    if deny_all { ... return false }
-                    if egp || rgp {
-                        if wasm { ... return false }
-                        else { check allow; if !allowed return false }
-                    }
-                }
-             */
-             // So if not egp/rgp/deny_all, it just continued.
-
-             // But we should probably check if it's the "Sentinel DSL" which uses `evaluate_policy_code`?
-             // `sentinel.rs` has `evaluate_policy_code`.
-             // But `evaluate_with_sentinel` seems to ignore that and implement its own logic.
-             // This seems to be a disconnect in the codebase.
-             // However, my task is WASM.
         }
     }
     true
@@ -314,6 +282,179 @@ mod tests {
     use super::*;
     use crate::policies::sentinel::EnforcementLevel;
     use chrono::Utc;
+    use serde_json::json;
+
+    #[test]
+    fn test_policy_set_evaluate_allow() {
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(set.evaluate("user1", "secret/foo", "read", None));
+        assert!(!set.evaluate("user1", "secret/foo", "write", None));
+        assert!(!set.evaluate("user1", "other/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_evaluate_deny() {
+        let rule = PolicyRule {
+            effect: "deny".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_control_group() {
+        let cg = ControlGroup {
+            required_approvals: 2,
+            approved_by: vec!["approver1".to_string()],
+        };
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: Some(cg),
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        // Not enough approvals
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_control_group_sufficient() {
+        let cg = ControlGroup {
+            required_approvals: 1,
+            approved_by: vec!["approver1".to_string()],
+        };
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: Some(cg),
+            mfa: None,
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        assert!(set.evaluate("user1", "secret/foo", "read", None));
+    }
+
+    #[test]
+    fn test_policy_set_mfa() {
+        let rule = PolicyRule {
+            effect: "allow".to_string(),
+            action: "read".to_string(),
+            path: "secret/*".to_string(),
+            condition: None,
+            control_group: None,
+            mfa: Some(true),
+        };
+        let set = PolicySet { rules: vec![rule] };
+
+        // No context
+        assert!(!set.evaluate("user1", "secret/foo", "read", None));
+
+        // Context without mfa_passed
+        let ctx = json!({ "foo": "bar" });
+        assert!(!set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+
+        // Context with mfa_passed = false
+        let ctx = json!({ "mfa_passed": false });
+        assert!(!set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+
+        // Context with mfa_passed = true
+        let ctx = json!({ "mfa_passed": true });
+        assert!(set.evaluate("user1", "secret/foo", "read", Some(&ctx)));
+    }
+
+    #[tokio::test]
+    async fn test_check_policy_with_sentinel_deny_all() {
+        let policy = SentinelPolicy {
+            name: "test-deny".to_string(),
+            policy_code: "deny_all".to_string(),
+            enforcement_level: EnforcementLevel::HardMandatory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let config = PolicyCheckConfig {
+            sentinel_policies: &[policy],
+            user: "user1",
+            path: "secret/foo",
+            action: "read",
+            _context: None,
+            rbac_roles: &[],
+            rbac_policies: &[],
+            policyset_json: None,
+        };
+
+        let result = check_policy_with_sentinel(config).await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_check_policy_with_sentinel_wasm_placeholder() {
+        let policy = SentinelPolicy {
+            name: "test-wasm-placeholder".to_string(),
+            policy_code: "wasm".to_string(),
+            enforcement_level: EnforcementLevel::HardMandatory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let config = PolicyCheckConfig {
+            sentinel_policies: &[policy],
+            user: "user1",
+            path: "secret/foo",
+            action: "read",
+            _context: None,
+            rbac_roles: &[],
+            rbac_policies: &[],
+            policyset_json: None,
+        };
+
+        let result = check_policy_with_sentinel(config).await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_sentinel_unknown_policy_code_allows() {
+        let policy = SentinelPolicy {
+            name: "test-default".to_string(),
+            policy_code: "something_else".to_string(),
+            enforcement_level: EnforcementLevel::Advisory,
+            description: None,
+            created_at: Utc::now(),
+            modified_at: Utc::now(),
+        };
+
+        let result = evaluate_with_sentinel(
+            &[policy],
+            "user1",
+            "secret/foo",
+            "read",
+            &PolicyContext::default(),
+        ).await;
+        assert!(result);
+    }
 
     #[tokio::test]
     async fn test_evaluate_with_sentinel_versioning() {
@@ -321,7 +462,7 @@ mod tests {
             name: "test-policy".to_string(),
             version: 1,
             enforcement_level: EnforcementLevel::HardMandatory,
-            policy_code: "deny_all".to_string(), // v1 denies
+            policy_code: "deny_all".to_string(),
             description: None,
             created_at: Utc::now(),
             modified_at: Utc::now(),
@@ -331,7 +472,7 @@ mod tests {
             name: "test-policy".to_string(),
             version: 2,
             enforcement_level: EnforcementLevel::HardMandatory,
-            policy_code: "allow".to_string(), // v2 allows (or at least doesn't deny_all)
+            policy_code: "allow".to_string(),
             description: None,
             created_at: Utc::now(),
             modified_at: Utc::now(),
@@ -340,19 +481,20 @@ mod tests {
         // Case 1: Only v1 (deny)
         assert!(!evaluate_with_sentinel(
             &[policy_v1.clone()],
-            "user", "path", "read", &PolicyContext {}
+            "user", "path", "read", &PolicyContext::default()
         ).await);
 
         // Case 2: v1 (deny) and v2 (allow). Should pick v2.
         assert!(evaluate_with_sentinel(
             &[policy_v1.clone(), policy_v2.clone()],
-            "user", "path", "read", &PolicyContext {}
+            "user", "path", "read", &PolicyContext::default()
         ).await);
 
         // Case 3: v2 (allow) and v1 (deny). Should pick v2.
         assert!(evaluate_with_sentinel(
             &[policy_v2.clone(), policy_v1.clone()],
-            "user", "path", "read", &PolicyContext {}
+            "user", "path", "read", &PolicyContext::default()
         ).await);
     }
 }
+
