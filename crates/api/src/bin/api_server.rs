@@ -1,8 +1,13 @@
 use std::env;
-use tracing::info;
+use std::sync::Arc;
+use tracing::{info, warn};
+use warp::Filter;
+use secreton_api::config::ApiConfig;
+use secreton_api::services::config::ConfigService;
+use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType, FileBackendConfig};
 
 // Use the existing security API from lib.rs
-use secreton_api::start_security_server;
+use secreton_api::{SecurityAPI, handle_rejection};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,8 +29,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Secreton Security API server on port {}", port);
 
-    // Use the existing start_security_server function from lib.rs
-    start_security_server(port).await?;
+    // Initialize Storage
+    // This part effectively replaces .env dependency for core configuration
+    // We bootstrap a storage connection here.
+    let storage_config = StorageFactoryConfig {
+        backend_type: if let Ok(path) = env::var("SECRETON_STORAGE_FILE_PATH") {
+            StorageBackendType::File
+        } else {
+             StorageBackendType::Memory
+        },
+        file_config: env::var("SECRETON_STORAGE_FILE_PATH").ok().map(|p| FileBackendConfig { base_path: p }),
+        ..Default::default()
+    };
+
+    let storage = StorageFactory::create(storage_config).await?;
+    info!("Storage backend initialized");
+
+    // Load Configuration from Storage
+    let _api_config = match ConfigService::load_config(storage.as_ref()).await {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Could not load configuration from storage: {}. Using defaults.", e);
+            ApiConfig::default()
+        }
+    };
+
+    // Construct Routes
+    let routes = SecurityAPI::routes(storage.clone())
+        .with(
+            warp::cors()
+                .allow_any_origin()
+                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
+        )
+        .with(warp::log("security_api"))
+        .recover(handle_rejection);
+
+    info!("📋 Available endpoints:");
+    info!("   GET  /health - System health check");
+    info!("   GET  /security/status - Security components status");
+    info!("   POST /sys/config - Apply configuration");
+    info!("   GET  /sys/config - Read configuration");
+    info!("   POST /auth/login - User authentication");
+
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }

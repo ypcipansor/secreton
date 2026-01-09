@@ -14,6 +14,7 @@ use warp::{Filter, Rejection, Reply, reject};
 use axum::Json;
 
 use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
+use secreton_storage::StorageBackend;
 
 pub mod services;
 pub mod middleware;
@@ -385,7 +386,11 @@ impl SecurityAPI {
     }
 
     /// Create all API routes with enhanced security operations
-    pub fn routes() -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
+    pub fn routes(
+        storage: Arc<dyn StorageBackend>,
+    ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
+        let storage_filter = warp::any().map(move || storage.clone());
+
         let health = warp::path("health")
             .and(warp::get())
             .and_then(health_handler);
@@ -423,6 +428,23 @@ impl SecurityAPI {
             .and(warp::get())
             .and_then(security_metrics_handler);
 
+        // Simple auth filter for admin operations
+        let admin_auth = warp::header::<String>("x-admin-token");
+
+        let config_post = warp::path("sys")
+            .and(warp::path("config"))
+            .and(warp::post())
+            .and(admin_auth)
+            .and(warp::body::json())
+            .and(storage_filter.clone())
+            .and_then(crate::handlers::config::handle_post_config);
+
+        let config_get = warp::path("sys")
+            .and(warp::path("config"))
+            .and(warp::get())
+            .and(storage_filter.clone())
+            .and_then(crate::handlers::config::handle_get_config);
+
         health
             .or(security_status)
             .or(audit_events)
@@ -430,6 +452,8 @@ impl SecurityAPI {
             .or(hsm_operations)
             .or(audit_operations)
             .or(security_metrics)
+            .or(config_post)
+            .or(config_get)
     }
 }
 
@@ -672,7 +696,7 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
         .with(
             warp::cors()
                 .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
                 .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
         )
         .with(warp::log("security_api"))
@@ -691,7 +715,24 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     info!("   POST /hsm - HSM operations");
     info!("   POST /audit/operations - Audit operations");
 
-    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+    // Initialize default storage for the simplified server start
+    // In production, use api_server.rs which configures storage properly
+    let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+
+    // Inject storage into routes
+    // For start_security_server, we just use the mock storage since this function
+    // doesn't accept storage configuration
+    let routes_with_storage = SecurityAPI::routes(storage)
+        .with(
+            warp::cors()
+                .allow_any_origin()
+                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
+        )
+        .with(warp::log("security_api"))
+        .recover(handle_rejection);
+
+    warp::serve(routes_with_storage).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }

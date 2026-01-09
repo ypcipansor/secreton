@@ -34,6 +34,11 @@ struct Cli {
 enum Commands {
     /// System health and status commands
     Status,
+    /// Configuration management
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCommand,
+    },
     /// Transit engine operations (encryption/decryption)
     Transit {
         #[command(subcommand)]
@@ -43,6 +48,16 @@ enum Commands {
     Secret {
         #[command(subcommand)]
         cmd: SecretCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Apply a configuration file to the server
+    Apply {
+        /// Path to the configuration file (TOML)
+        #[arg(short, long)]
+        file: String,
     },
 }
 
@@ -112,9 +127,53 @@ async fn main() -> Result<()> {
     // Execute commands
     match cli.command {
         Commands::Status => status_command(&config).await,
+        Commands::Config { cmd } => config_command(cmd, &config).await,
         Commands::Transit { cmd } => transit_command(cmd, &config).await,
         Commands::Secret { cmd } => secret_command(cmd, &config).await,
     }
+}
+
+async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
+    let client = reqwest::Client::new();
+
+    match cmd {
+        ConfigCommand::Apply { file } => {
+            // Read file
+            let content = std::fs::read_to_string(&file)?;
+
+            // Parse as TOML to validate (and potentially convert if we wanted to support other formats,
+            // but for now we just assume the server accepts what we send or we send it as a structure)
+            // Note: Server endpoint expects the ApiConfig structure as JSON.
+            // We should parse TOML locally and send as JSON.
+
+            // We use serde_json::Value to avoid dependency on secreton-api which causes circular deps or missing crate issues
+            let toml_value: toml::Value = toml::from_str(&content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
+
+            // Convert TOML Value to JSON Value
+            // This is a bit hacky but works for transport
+            let json_value: serde_json::Value = serde_json::to_value(toml_value)
+                 .map_err(|e| anyhow::anyhow!("Failed to convert config to JSON: {}", e))?;
+
+            let url = format!("{}/sys/config", config.server_url);
+            let response = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("X-Admin-Token", "root-token-placeholder") // In production, this would be user-supplied or from login
+                .json(&json_value)
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                println!("✅ Configuration applied successfully.");
+            } else {
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                println!("❌ Failed to apply configuration: {} - {}", status, text);
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn status_command(config: &CliConfig) -> Result<()> {

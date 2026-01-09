@@ -7,6 +7,7 @@ pub mod auth;
 pub mod secret;
 pub mod admin;
 pub mod health;
+pub mod config;
 
 use axum::{
     extract::State,
