@@ -5,8 +5,9 @@
 use crate::config::VaultConfig;
 use secreton_errors::SecretonError;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 
 /// Handles authentication with Secreton API
 #[derive(Clone)]
@@ -23,6 +24,66 @@ impl AuthHandler {
             config,
             client: reqwest::Client::new(),
             token: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Start the token renewal loop
+    pub async fn start_renewal_service(
+        &self,
+        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<(), SecretonError> {
+        if self.config.is_none() {
+            return Ok(());
+        }
+
+        info!("Starting token renewal service");
+
+        // Default renewal check interval
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Err(e) = self.renew_token().await {
+                        warn!("Token renewal failed: {}", e);
+                    }
+                }
+                _ = shutdown_rx.recv() => {
+                    info!("Token renewal service shutting down");
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Renew the current token
+    async fn renew_token(&self) -> Result<(), SecretonError> {
+        let token = self.get_token().await;
+        if token.is_none() {
+            return Ok(());
+        }
+
+        let config = self.config.as_ref().unwrap();
+        let url = format!("{}/api/v1/auth/token/renew-self", config.server_url.trim_end_matches('/'));
+
+        match self.client
+            .post(&url)
+            .header("X-Vault-Token", token.unwrap())
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    debug!("Token renewed successfully");
+                    Ok(())
+                } else {
+                    Err(SecretonError::Authentication {
+                        message: format!("Failed to renew token: {}", response.status())
+                    })
+                }
+            }
+            Err(e) => Err(SecretonError::Network { message: e.to_string() })
         }
     }
 
@@ -103,7 +164,7 @@ impl AuthHandler {
         }
     }
 
-    /// Fetch a secret from the API
+    /// Fetch a secret from the API with retries
     pub async fn get_secret(&self, path: &str) -> Result<serde_json::Value, SecretonError> {
         let token = self.get_token().await.ok_or_else(|| {
             SecretonError::Authentication { message: "No authentication token available".to_string() }
@@ -124,22 +185,48 @@ impl AuthHandler {
 
         let url = format!("{}/{}", config.server_url.trim_end_matches('/'), api_path);
 
-        let response = self.client
-            .get(&url)
-            .header("X-Vault-Token", token)
-            .send()
-            .await
-            .map_err(|e| SecretonError::Network { message: e.to_string() })?;
+        // Retry logic: 3 attempts with exponential backoff
+        let mut attempts = 0;
+        let max_attempts = 3;
+        let mut delay = Duration::from_millis(100);
 
-        if !response.status().is_success() {
-            return Err(SecretonError::ServiceUnavailable {
-                service: format!("API Error: {}", response.status())
-            });
+        loop {
+            attempts += 1;
+            match self.client
+                .get(&url)
+                .header("X-Vault-Token", &token)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let body: serde_json::Value = response.json().await
+                            .map_err(|e| SecretonError::Network { message: format!("Response deserialization failed: {}", e) })?;
+                        return Ok(body);
+                    } else if response.status().is_server_error() && attempts < max_attempts {
+                        warn!("Server error fetching secret (attempt {}/{}): {}", attempts, max_attempts, response.status());
+                    } else {
+                        return Err(SecretonError::ServiceUnavailable {
+                            service: format!("API Error fetching {}: {}", path, response.status())
+                        });
+                    }
+                }
+                Err(e) => {
+                    if attempts < max_attempts {
+                        warn!("Network error fetching secret (attempt {}/{}): {}", attempts, max_attempts, e);
+                    } else {
+                        return Err(SecretonError::Network { message: e.to_string() });
+                    }
+                }
+            }
+
+            if attempts >= max_attempts {
+                break;
+            }
+            tokio::time::sleep(delay).await;
+            delay *= 2;
         }
 
-        let body: serde_json::Value = response.json().await
-            .map_err(|e| SecretonError::Network { message: format!("Response deserialization failed: {}", e) })?;
-
-        Ok(body)
+        Err(SecretonError::Network { message: "Max retry attempts exceeded".to_string() })
     }
 }

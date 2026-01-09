@@ -98,6 +98,7 @@ impl SecretonAgent {
         let health_task = self.start_health_service(shutdown_rx.resubscribe());
         let metrics_task = self.start_metrics_service(shutdown_rx.resubscribe());
         let template_task = self.start_template_service(shutdown_rx.resubscribe());
+        let auth_task = self.start_auth_service(shutdown_rx.resubscribe());
 
         info!("All agent services started successfully");
 
@@ -108,6 +109,7 @@ impl SecretonAgent {
             _ = health_task => warn!("Health service stopped"),
             _ = metrics_task => warn!("Metrics service stopped"),
             _ = template_task => warn!("Template service stopped"),
+            _ = auth_task => warn!("Auth service stopped"),
             _ = shutdown_rx.recv() => info!("Shutdown signal received"),
             _ = tokio::signal::ctrl_c() => info!("Ctrl+C received, shutting down"),
         }
@@ -159,6 +161,28 @@ impl SecretonAgent {
         .await
         .map_err(|e| CoreError::Internal {
             message: format!("Security service task failed: {}", e),
+        })??;
+
+        Ok(())
+    }
+
+    /// Start authentication renewal service
+    async fn start_auth_service(
+        &self,
+        shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<(), SecretonError> {
+        let auth_handler = Arc::clone(&self.auth_handler);
+
+        tokio::spawn(async move {
+            if let Err(e) = auth_handler.start_renewal_service(shutdown_rx).await {
+                 tracing::error!("Auth renewal service error: {}", e);
+                 return Err(SecretonError::Internal { message: format!("Auth renewal failed: {}", e) });
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| CoreError::Internal {
+            message: format!("Auth service task failed: {}", e),
         })??;
 
         Ok(())
