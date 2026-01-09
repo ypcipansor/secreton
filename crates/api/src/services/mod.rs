@@ -93,7 +93,8 @@ impl ApiServiceContainer {
             storage.clone(),
             crypto.clone(),
             &config.auth,
-        ).await?);
+        ).await?
+        .with_audit(audit.clone()));
 
         // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());
@@ -119,7 +120,8 @@ impl ApiServiceContainer {
             auth.clone(),
             audit.clone(),
             performance.clone(),
-        ).await?);
+        ).await?
+        .with_crypto(crypto.clone()));
 
         // Initialize MFA Services using configuration
         let mfa_config = &config.auth.mfa;

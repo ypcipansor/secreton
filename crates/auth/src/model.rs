@@ -297,4 +297,8 @@ pub struct User {
     pub mfa_enabled: bool,
     pub mfa_secret: Option<String>,
     pub last_login: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub failed_login_attempts: u32,
+    #[serde(default)]
+    pub locked_until: Option<DateTime<Utc>>,
 }

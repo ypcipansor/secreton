@@ -151,13 +151,19 @@ pub struct AuthenticationService {
 
     /// Token blacklist
     token_blacklist: Arc<tokio::sync::RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
+
+    /// Crypto service
+    crypto: Arc<CryptoService>,
+
+    /// Audit logger
+    audit: Option<Arc<crate::services::audit::AuditLogger>>,
 }
 
 impl AuthenticationService {
     /// Create new authentication service
     pub async fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
-        _crypto: Arc<CryptoService>,
+        crypto: Arc<CryptoService>,
         config: &AuthConfig,
     ) -> Result<Self> {
         // Create token service
@@ -182,10 +188,14 @@ impl AuthenticationService {
         let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
         if let Ok(entries) = storage.list(&params).await {
             for entry in entries {
-                // SecretEntry stores Vec<u8> in encrypted_data.
-                // For now, we store plaintext JSON in encrypted_data for users,
-                // relying on StorageBackend's own security.
-                if let Ok(user) = serde_json::from_slice::<User>(&entry.encrypted_data) {
+                // Try decrypting the data, falling back to plaintext if needed (legacy data)
+                let user_data = if let Ok(decrypted) = crypto.decrypt(&entry.encrypted_data).await {
+                    decrypted
+                } else {
+                    entry.encrypted_data.clone()
+                };
+
+                if let Ok(user) = serde_json::from_slice::<User>(&user_data) {
                     userpass_method.add_user(
                         user.username.clone(),
                         user.password_hash.clone(),
@@ -204,11 +214,47 @@ impl AuthenticationService {
             storage,
             config: config.clone(),
             token_blacklist: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            audit: None,
+            crypto,
         })
+    }
+
+    pub fn with_audit(mut self, audit: Arc<crate::services::audit::AuditLogger>) -> Self {
+        self.audit = Some(audit);
+        self
     }
 
     /// Authenticate user with username and password
     pub async fn login(&self, req: ApiLoginRequest) -> ApiResult<ApiLoginResponse> {
+        // Check lockout status before attempting login
+        let user_path = format!("{}{}", USER_STORAGE_PREFIX, req.username);
+        let mut user_entry = self.storage.get_by_path(&user_path).await.ok().flatten();
+        let mut stored_user: Option<User> = None;
+
+        if let Some(ref entry) = user_entry {
+            // Decrypt and deserialize user
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                if let Ok(u) = serde_json::from_slice::<User>(&decrypted) {
+                    stored_user = Some(u.clone());
+                    if let Some(locked_until) = u.locked_until {
+                        if locked_until > chrono::Utc::now() {
+                            if let Some(audit) = &self.audit {
+                                let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: req.username.clone(),
+                                    method: "userpass".to_string(),
+                                    reason: "Account locked".to_string(),
+                                }).await;
+                            }
+                            return Err(secreton_errors::SecretonError::Authentication { message: "Account is locked. Please try again later.".to_string() }.into());
+                        }
+                    }
+                }
+            } else if let Ok(u) = serde_json::from_slice::<User>(&entry.encrypted_data) {
+                // Fallback for legacy plaintext data
+                stored_user = Some(u.clone());
+            }
+        }
+
         // Create login request
         let request = LoginRequest {
             username: req.username.clone(),
@@ -222,6 +268,34 @@ impl AuthenticationService {
             .map_err(|e| secreton_errors::SecretonError::Authentication { message: e.to_string() })?;
 
         if !response.success {
+            // Handle failed login attempt
+            if let Some(mut u) = stored_user {
+                u.failed_login_attempts += 1;
+
+                // Max attempts check (e.g. 5)
+                if u.failed_login_attempts >= 5 {
+                     u.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                     // Log lockout
+                     if let Some(audit) = &self.audit {
+                        let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
+                            user: req.username.clone(),
+                            method: "userpass".to_string(),
+                            reason: "Account locked due to too many failed attempts".to_string(),
+                        }).await;
+                    }
+                }
+
+                // Encrypt and update user in storage
+                if let Ok(user_data) = serde_json::to_vec(&u) {
+                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                        if let Some(mut entry) = user_entry {
+                            entry.encrypted_data = encrypted;
+                            let _ = self.storage.store(&entry).await;
+                        }
+                    }
+                }
+            }
+
             return Err(secreton_errors::SecretonError::Authentication { message: "Invalid credentials".to_string() }.into());
         }
 
@@ -229,26 +303,62 @@ impl AuthenticationService {
             .ok_or_else(|| secreton_errors::SecretonError::Internal { message: "No user info returned".to_string() })?;
 
         // Convert UserInfo to User (simplified)
-        let user = User {
-            id: user_info.id.clone().unwrap_or_default(),
-            username: user_info.username.clone(),
-            email: user_info.email,
-            display_name: user_info.display_name.clone(),
-            full_name: user_info.display_name,
-            password_hash: "".to_string(), // Not used in API responses
-            is_active: true,
-            is_superuser: false,
-            disabled: false,
-            roles: user_info.roles.clone(),
-            policies: vec!["default".to_string()], // Default policies as UserInfo lacks them
-            enabled: true,
-            mfa_enabled: false,
-            mfa_secret: None,
-            last_login: None, // UserInfo lacks last_login
-            created_at: chrono::Utc::now(), // UserInfo lacks created_at
-            updated_at: chrono::Utc::now(),
-            metadata: user_info.metadata.clone(),
+        let mut user = if let Some(u) = stored_user {
+             u
+        } else {
+             User {
+                id: user_info.id.clone().unwrap_or_default(),
+                username: user_info.username.clone(),
+                email: user_info.email,
+                display_name: user_info.display_name.clone(),
+                full_name: user_info.display_name,
+                password_hash: "".to_string(), // Not used in API responses
+                is_active: true,
+                is_superuser: false,
+                disabled: false,
+                roles: user_info.roles.clone(),
+                policies: vec!["default".to_string()], // Default policies as UserInfo lacks them
+                enabled: true,
+                mfa_enabled: false,
+                mfa_secret: None,
+                last_login: None, // UserInfo lacks last_login
+                created_at: chrono::Utc::now(), // UserInfo lacks created_at
+                updated_at: chrono::Utc::now(),
+                metadata: user_info.metadata.clone(),
+                failed_login_attempts: 0,
+                locked_until: None,
+            }
         };
+
+        // Reset failed login attempts on success
+        // Also ensure user is persisted if it didn't exist (new user)
+        let should_persist = user_entry.is_none() || user.failed_login_attempts > 0 || user.locked_until.is_some();
+
+        if user.failed_login_attempts > 0 || user.locked_until.is_some() {
+            user.failed_login_attempts = 0;
+            user.locked_until = None;
+        }
+
+        if should_persist {
+             // Update user in storage
+             if let Ok(user_data) = serde_json::to_vec(&user) {
+                if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                    let entry = if let Some(mut e) = user_entry {
+                        e.encrypted_data = encrypted;
+                        e
+                    } else {
+                         SecretEntry::new(
+                            user_path,
+                            encrypted,
+                            EncryptionMetadata::default(),
+                            SecurityLevel::Secret,
+                            Uuid::parse_str(&user.id).unwrap_or_default(),
+                        )
+                    };
+                    let _ = self.storage.store(&entry).await;
+                }
+            }
+        }
 
         // Create token pair
         let token_pair = self.token_service.create_token_pair(
@@ -447,14 +557,16 @@ impl AuthenticationService {
         };
 
         // Store user
-        // We store it as plaintext in encrypted_data for now to allow loading without unseal logic complexity here.
-        // In a real scenario, we should encrypt it, and load it only after unseal.
         let user_data = serde_json::to_vec(&user)
              .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
 
+        // Encrypt user data
+        let encrypted_data = self.crypto.encrypt_data(&user_data).await
+            .map_err(|e| AuthError::Crypto(e))?;
+
         let entry = SecretEntry::new(
             path,
-            user_data,
+            encrypted_data,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::parse_str(&user.id).unwrap_or_default(),
