@@ -7,6 +7,7 @@ pub mod auth;
 pub mod secret;
 pub mod admin;
 pub mod health;
+pub mod sys;
 
 use axum::{
     extract::State,
@@ -24,7 +25,7 @@ use tower_http::{
 };
 
 
-use crate::middleware::{auth::AuthMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
+use crate::middleware::{auth::AuthMiddleware, seal::SealMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
 use crate::{ApiResponse, ApiResult};
 use axum::middleware::{self};
 use secreton_config::ApiConfig;
@@ -42,6 +43,7 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
         .nest("/auth", auth::create_routes())
         .nest("/secret", secret::create_routes())
         .nest("/admin", admin::create_routes())
+        .nest("/sys", sys::create_routes())
         .route("/health", get(health::health_check))
         .route("/version", get(get_version))
         .route("/metrics", get(get_metrics));
@@ -58,6 +60,7 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
                 .layer(tower_http::timeout::TimeoutLayer::new(std::time::Duration::from_secs(30)))
                 .layer(create_cors_layer())
                 .layer(middleware::from_fn(RateLimitMiddleware::limit))
+                .layer(middleware::from_fn_with_state(app_state.clone(), SealMiddleware::check))
                 .layer(middleware::from_fn_with_state(app_state.clone(), AuthMiddleware::authenticate)),
         )
         .with_state(app_state)

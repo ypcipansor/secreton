@@ -14,9 +14,11 @@ use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::StorageBackend;
 pub mod audit;
 pub mod crypto;
+pub mod seal;
 use crate::services::audit::AuditLogger;
 use crate::config::ApiConfig;  // Use local ApiConfig with auth field
 use crate::services::crypto::CryptoService;
+use crate::services::seal::SealService;
 use crate::services::auth::AuthenticationService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_auth::{InMemoryIdentityService, IdentityService};
@@ -49,6 +51,7 @@ pub struct ApiServiceContainer {
     // Publicly accessible services
     pub storage: Arc<dyn StorageBackend + Send + Sync>,
     pub crypto: Arc<CryptoService>,
+    pub seal: Arc<SealService>,
     pub audit: Arc<AuditLogger>,
     pub auth: Arc<AuthenticationService>,
     pub policy: Arc<PolicyService>,
@@ -71,6 +74,9 @@ impl ApiServiceContainer {
 
         // Initialize crypto service
         let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
+
+        // Initialize seal service
+        let seal = Arc::new(SealService::new(storage.clone(), crypto.clone()));
 
         // Initialize audit logger
         let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
@@ -197,6 +203,7 @@ impl ApiServiceContainer {
         let mut registry = StandardServiceContainer::new();
         registry.register_service("storage".to_string(), storage.clone());
         registry.register_service("crypto".to_string(), crypto.clone());
+        registry.register_service("seal".to_string(), seal.clone());
         registry.register_service("audit".to_string(), audit.clone());
         registry.register_service("auth".to_string(), auth.clone());
         registry.register_service("policy".to_string(), policy_service.clone());
@@ -212,6 +219,7 @@ impl ApiServiceContainer {
             initialized: std::sync::atomic::AtomicBool::new(true),
             storage,
             crypto,
+            seal,
             audit,
             auth,
             policy: policy_service,

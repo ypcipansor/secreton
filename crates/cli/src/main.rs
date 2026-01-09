@@ -44,6 +44,31 @@ enum Commands {
         #[command(subcommand)]
         cmd: SecretCommand,
     },
+    /// Operator commands (init, seal, unseal)
+    Operator {
+        #[command(subcommand)]
+        cmd: OperatorCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OperatorCommand {
+    /// Initialize the system
+    Init {
+        #[arg(short, long, default_value = "5")]
+        shares: u8,
+        #[arg(short, long, default_value = "3")]
+        threshold: u8,
+    },
+    /// Unseal the system
+    Unseal {
+        /// The unseal key/share
+        key: Option<String>,
+    },
+    /// Seal the system
+    Seal,
+    /// Check seal status
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -114,7 +139,101 @@ async fn main() -> Result<()> {
         Commands::Status => status_command(&config).await,
         Commands::Transit { cmd } => transit_command(cmd, &config).await,
         Commands::Secret { cmd } => secret_command(cmd, &config).await,
+        Commands::Operator { cmd } => operator_command(cmd, &config).await,
     }
+}
+
+async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()> {
+    let client = reqwest::Client::new();
+
+    match cmd {
+        OperatorCommand::Init { shares, threshold } => {
+            let url = format!("{}/api/v1/sys/init", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "shares": shares,
+                    "threshold": threshold
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                let body: serde_json::Value = response.json().await?;
+                if let Some(data) = body.get("data") {
+                    println!("Unseal Keys:");
+                    if let Some(keys) = data.get("keys").and_then(|k| k.as_array()) {
+                        for (i, key) in keys.iter().enumerate() {
+                            println!("Key {}: {}", i + 1, key.as_str().unwrap_or(""));
+                        }
+                    }
+                    println!("\nInitial Root Token: {}", data.get("root_token").and_then(|t| t.as_str()).unwrap_or(""));
+                    println!("\nSecreton is initialized! The system is sealed.");
+                    println!("You must provide the unseal keys to unseal the system.");
+                }
+            } else {
+                 let err_text = response.text().await?;
+                 println!("Error initializing: {}", err_text);
+            }
+        }
+        OperatorCommand::Unseal { key } => {
+            let key_str = if let Some(k) = key {
+                k
+            } else {
+                use std::io::{self, Write};
+                print!("Unseal Key: ");
+                io::stdout().flush()?;
+                let mut buffer = String::new();
+                io::stdin().read_line(&mut buffer)?;
+                buffer.trim().to_string()
+            };
+
+            let url = format!("{}/api/v1/sys/unseal", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "key": key_str
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                let body: serde_json::Value = response.json().await?;
+                if let Some(data) = body.get("data") {
+                    println!("Sealed: {}", data.get("sealed").unwrap());
+                    println!("Progress: {}/{}", data.get("progress").unwrap(), data.get("t").unwrap());
+                }
+            } else {
+                 let err_text = response.text().await?;
+                 println!("Error unsealing: {}", err_text);
+            }
+        }
+        OperatorCommand::Seal => {
+             let url = format!("{}/api/v1/sys/seal", config.server_url);
+             let response = client.post(&url).send().await?;
+             if response.status().is_success() {
+                 println!("Success! System is now sealed.");
+             } else {
+                 println!("Error sealing system: {}", response.status());
+             }
+        }
+        OperatorCommand::Status => {
+             let url = format!("{}/api/v1/sys/seal-status", config.server_url);
+             let response = client.get(&url).send().await?;
+             if response.status().is_success() {
+                 let body: serde_json::Value = response.json().await?;
+                 if let Some(data) = body.get("data") {
+                      println!("Sealed: {}", data.get("sealed").unwrap());
+                      println!("Threshold: {}", data.get("t").unwrap());
+                      println!("Shares: {}", data.get("n").unwrap());
+                      println!("Progress: {}", data.get("progress").unwrap());
+                 }
+             } else {
+                 println!("Error getting status: {}", response.status());
+             }
+        }
+    }
+    Ok(())
 }
 
 async fn status_command(config: &CliConfig) -> Result<()> {
