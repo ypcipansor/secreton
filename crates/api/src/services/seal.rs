@@ -7,12 +7,14 @@ use uuid::Uuid;
 use crate::services::crypto::CryptoService;
 use secreton_crypto::{AlgorithmId, EncryptedData};
 use secreton_crypto::shamir::{self, Share};
+use jsonwebtoken::{encode, Header, EncodingKey};
 
 /// Seal/Unseal Service
 /// Manages the initialization and sealing status of the vault.
 pub struct SealService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
+    jwt_secret: String,
 
     // In-memory buffer for unseal shares
     // (share_index, share_data)
@@ -48,11 +50,25 @@ struct EncryptedRootKey {
 const INIT_PATH: &str = "sys/init";
 const ROOT_KEY_PATH: &str = "sys/root_key_enc";
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    username: String,
+    email: String,
+    roles: Vec<String>,
+    iat: usize,
+    exp: usize,
+    jti: String,
+    iss: String,
+    aud: String,
+}
+
 impl SealService {
-    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>) -> Self {
+    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>, jwt_secret: String) -> Self {
         Self {
             storage,
             crypto,
+            jwt_secret,
             unseal_buffer: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -157,13 +173,27 @@ impl SealService {
             .collect();
 
         // Generate a Root Token (Initial Root Token)
-        // For now, we just return a placeholder. The Identity/Auth service should actually create this.
-        // We will generate a UUID.
-        let root_token = Uuid::new_v4().to_string();
+        // We generate a valid JWT token with 'root' role/policy
+        let now = chrono::Utc::now();
+        let exp = now + chrono::Duration::days(365 * 100); // Long lived root token
 
-        // TODO: Store this root token in Auth system so it can be used!
-        // For this task, we assume the user will copy it.
-        // Real implementation: crate::services::auth::AuthenticationService::create_root_token()
+        let claims = Claims {
+            sub: "root".to_string(),
+            username: "root".to_string(),
+            email: "root@system.local".to_string(),
+            roles: vec!["root".to_string(), "admin".to_string()],
+            iat: now.timestamp() as usize,
+            exp: exp.timestamp() as usize,
+            jti: Uuid::new_v4().to_string(),
+            iss: "secreton".to_string(), // Matches default config
+            aud: "secreton-api".to_string(),
+        };
+
+        let root_token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
+        ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
 
         Ok(InitResponse {
             keys: keys_hex,
@@ -268,7 +298,7 @@ mod tests {
         // Clean env to ensure sealed start
         std::env::remove_var("SECRETON_ROOT_KEY");
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let seal_service = SealService::new(storage.clone(), crypto.clone());
+        let seal_service = SealService::new(storage.clone(), crypto.clone(), "test-secret".to_string());
 
         // 1. Check initial state
         assert!(!seal_service.is_initialized().await);

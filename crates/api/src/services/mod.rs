@@ -76,7 +76,7 @@ impl ApiServiceContainer {
         let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
 
         // Initialize seal service
-        let seal = Arc::new(SealService::new(storage.clone(), crypto.clone()));
+        let seal = Arc::new(SealService::new(storage.clone(), crypto.clone(), config.auth.jwt.secret.clone()));
 
         // Initialize audit logger
         let audit = Arc::new(AuditLogger::new(storage.clone()).await?);

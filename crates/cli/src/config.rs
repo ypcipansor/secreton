@@ -5,12 +5,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     pub server_url: String,
+    pub token: Option<String>,
 }
 
 impl Default for CliConfig {
     fn default() -> Self {
         Self {
             server_url: "http://127.0.0.1:8200".to_string(),
+            token: None,
         }
     }
 }

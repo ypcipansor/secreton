@@ -49,6 +49,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: OperatorCommand,
     },
+    /// Login to the system
+    Login {
+        /// The token to use
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -132,6 +137,22 @@ async fn main() -> Result<()> {
         config.server_url = server_url.clone();
     }
 
+    // Load token from file if not in config
+    if config.token.is_none() {
+        if let Some(path) = get_token_path() {
+            if path.exists() {
+                if let Ok(token) = tokio::fs::read_to_string(path).await {
+                     config.token = Some(token.trim().to_string());
+                }
+            }
+        }
+    }
+
+    // Override token from env var
+    if let Ok(token) = std::env::var("SECRETON_TOKEN") {
+        config.token = Some(token);
+    }
+
     info!("Using server: {}", config.server_url);
 
     // Execute commands
@@ -140,11 +161,53 @@ async fn main() -> Result<()> {
         Commands::Transit { cmd } => transit_command(cmd, &config).await,
         Commands::Secret { cmd } => secret_command(cmd, &config).await,
         Commands::Operator { cmd } => operator_command(cmd, &config).await,
+        Commands::Login { token } => login_command(token).await,
     }
 }
 
+fn get_token_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".secreton-token"))
+}
+
+fn create_client(config: &CliConfig) -> Result<reqwest::Client> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = &config.token {
+        let mut auth_val = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))?;
+        auth_val.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, auth_val);
+    }
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| e.into())
+}
+
+async fn login_command(token: Option<String>) -> Result<()> {
+    let token_to_save = if let Some(t) = token {
+        t
+    } else {
+        use std::io::{self, Write};
+        print!("Token (hidden): ");
+        io::stdout().flush()?;
+        // Ideally use rpassword, but for now simple read
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer)?;
+        buffer.trim().to_string()
+    };
+
+    if let Some(path) = get_token_path() {
+        tokio::fs::write(path, token_to_save).await?;
+        println!("Success! Token saved to ~/.secreton-token");
+    } else {
+        println!("Error: Could not determine home directory to save token.");
+    }
+
+    Ok(())
+}
+
 async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         OperatorCommand::Init { shares, threshold } => {
@@ -237,7 +300,7 @@ async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()
 }
 
 async fn status_command(config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     // Check health
     let health_url = format!("{}/health", config.server_url);
@@ -268,7 +331,7 @@ async fn status_command(config: &CliConfig) -> Result<()> {
 }
 
 async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         TransitCommand::CreateKey { name } => {
@@ -383,7 +446,7 @@ async fn transit_command(cmd: TransitCommand, config: &CliConfig) -> Result<()> 
 }
 
 async fn secret_command(cmd: SecretCommand, config: &CliConfig) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = create_client(config)?;
 
     match cmd {
         SecretCommand::Put { path, data } => {
