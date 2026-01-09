@@ -375,17 +375,7 @@ mod tests {
             policyset_json: None,
         };
 
-        // Note: check_policy_with_sentinel returns true only if both sentinel AND rbac allow it.
-        // Since rbac is empty, rbac::check_policy likely returns false by default?
-        // Let's assume for this test we only care about sentinel returning false explicitly.
-        // But check_policy_with_sentinel has:
-        /*
-            if !evaluate_with_sentinel(...) { return false; }
-            crate::policies::rbac::check_policy(...)
-        */
-        // If Sentinel denies, it returns false immediately.
-        // If Sentinel allows, it calls rbac.
-        // So if we expect false, it works.
+        // Verify that deny_all policy immediately denies access regardless of RBAC configuration.
 
         let result = check_policy_with_sentinel(config).await;
         assert!(!result);
