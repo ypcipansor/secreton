@@ -56,6 +56,11 @@ enum Commands {
     },
     /// Logout from the system
     Logout,
+    /// User management commands
+    User {
+        #[command(subcommand)]
+        cmd: UserCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -76,6 +81,20 @@ enum OperatorCommand {
     Seal,
     /// Check seal status
     Status,
+}
+
+#[derive(Subcommand)]
+enum UserCommand {
+    /// Create a new user
+    Create {
+        username: String,
+        #[arg(short, long)]
+        password: Option<String>,
+        #[arg(short, long)]
+        email: Option<String>,
+        #[arg(short, long, value_delimiter = ',')]
+        roles: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -165,6 +184,7 @@ async fn main() -> Result<()> {
         Commands::Operator { cmd } => operator_command(cmd, &config).await,
         Commands::Login { token } => login_command(token).await,
         Commands::Logout => logout_command().await,
+        Commands::User { cmd } => user_command(cmd, &config).await,
     }
 }
 
@@ -219,6 +239,51 @@ async fn logout_command() -> Result<()> {
         }
     } else {
         println!("Error: Could not determine home directory.");
+    }
+    Ok(())
+}
+
+async fn user_command(cmd: UserCommand, config: &CliConfig) -> Result<()> {
+    let client = create_client(config)?;
+
+    match cmd {
+        UserCommand::Create { username, password, email, roles } => {
+            let password_val = if let Some(p) = password {
+                p
+            } else {
+                use std::io::{self, Write};
+                print!("Password: ");
+                io::stdout().flush()?;
+                let mut buffer = String::new();
+                io::stdin().read_line(&mut buffer)?;
+                buffer.trim().to_string()
+            };
+
+            let roles_val = if roles.is_empty() {
+                vec!["user".to_string()]
+            } else {
+                roles
+            };
+
+            let url = format!("{}/api/v1/auth/users", config.server_url);
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "username": username,
+                    "password": password_val,
+                    "email": email,
+                    "roles": roles_val
+                }))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                println!("✅ User '{}' created successfully.", username);
+            } else {
+                println!("❌ Failed to create user: {}", response.status());
+                println!("   {}", response.text().await?);
+            }
+        }
     }
     Ok(())
 }

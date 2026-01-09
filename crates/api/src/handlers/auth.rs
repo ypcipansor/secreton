@@ -90,6 +90,7 @@ pub fn create_routes() -> Router<AppState> {
         .route("/oauth/{provider}/callback", get(oauth_callback))
         .route("/sessions", get(list_sessions))
         .route("/sessions/{session_id}", delete(revoke_session))
+        .route("/users", post(create_user))
 }
 
 /// Basic TOTP validation function
@@ -329,6 +330,14 @@ pub struct MfaVerifyRequest {
 #[derive(Debug, Deserialize)]
 pub struct MfaDisableRequest {
     pub password: String, // Require password confirmation for security
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub password: String,
+    pub email: Option<String>,
+    pub roles: Vec<String>,
 }
 
 /// OAuth provider configuration
@@ -1199,6 +1208,39 @@ pub async fn revoke_session(
         .await;
 
     Ok(Json(ApiResponse::success(data)))
+}
+
+/// Create a new user (admin only)
+pub async fn create_user(
+    State(state): State<AppState>,
+    AuthenticatedUser(admin_user): AuthenticatedUser,
+    Json(request): Json<CreateUserRequest>,
+) -> ApiResult<Json<ApiResponse<UserInfo>>> {
+    // Check permissions
+    if !admin_user.is_superuser && !admin_user.roles.contains(&"admin".to_string()) && !admin_user.roles.contains(&"root".to_string()) {
+         return Err(crate::ApiError::Authorization("Insufficient permissions".to_string()));
+    }
+
+    // Create user
+    let user = state.auth.register_user(
+        &request.username,
+        &request.password,
+        request.email,
+        request.roles
+    ).await.map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+
+    // Return info
+    let user_info = UserInfo {
+        id: Some(user.id),
+        username: user.username,
+        email: user.email,
+        display_name: user.display_name,
+        roles: user.roles,
+        permissions: vec![],
+        metadata: user.metadata,
+        last_login: user.last_login,
+    };
+    Ok(Json(ApiResponse::success(user_info)))
 }
 
 /// Extract client IP address from request headers

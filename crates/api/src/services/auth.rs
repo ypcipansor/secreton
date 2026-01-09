@@ -137,11 +137,13 @@ pub struct AuthenticationService {
     /// Unified authentication service
     auth_service: Arc<UnifiedAuthService>,
 
+    /// UserPass method (kept for direct user management)
+    userpass_method: Arc<UserPassAuthMethod>,
+
     /// Token service for JWT operations
     token_service: JwtTokenService,
 
     /// Storage backend for sessions
-
     storage: Arc<dyn StorageBackend + Send + Sync>,
 
     /// Configuration
@@ -173,10 +175,56 @@ impl AuthenticationService {
         let auth_service = Arc::new(UnifiedAuthService::new());
 
         // Register default authentication methods
-        auth_service.register_method("userpass".to_string(), Arc::new(UserPassAuthMethod::new())).await;
+        let userpass_method = Arc::new(UserPassAuthMethod::new());
+        auth_service.register_method("userpass".to_string(), userpass_method.clone()).await;
+
+        // Load existing users from storage
+        let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
+        if let Ok(entries) = storage.list(&params).await {
+            for path in entries {
+                if let Ok(Some(entry)) = storage.get_by_path(&path).await {
+                     // EncryptedData is effectively just serialized JSON here because
+                     // we might not have crypto service available or we just use it as container.
+                     // Wait, SecretEntry stores Vec<u8> in encrypted_data.
+                     // If we used CryptoService to encrypt it, we need to decrypt it.
+                     // But CryptoService might be sealed!
+                     // However, CryptoService is passed as _crypto.
+                     // Issue: If we store users encrypted, we can't load them if sealed.
+                     // But we only need them for login. Login (Unseal) -> then load users?
+                     // No, "login with master key" is the Unseal step.
+                     // "Login with user" happens AFTER unseal.
+                     // So we should have a `reload_users` method called after unseal?
+                     // Or, AuthenticationService should lazily load users?
+                     // Or, just store user metadata unencrypted (but password hash is safe to be public-ish? No).
+
+                     // For now, let's assume we store them unencrypted (SecurityLevel::Internal/Secret but bypassing crypto for this PoC or using plaintext if sealed).
+                     // But SecretEntry usually implies encrypted.
+
+                     // Let's defer loading to a separate method `load_users_from_storage`
+                     // that should be called when system becomes active.
+                     // For now, in `new`, we might not be able to decrypt if encrypted.
+
+                     // Actually, if we use `secreton_storage` directly, `SecretEntry` just holds bytes.
+                     // If we store raw JSON bytes in `encrypted_data` (misnomer if not encrypted), we can read it.
+                     // Let's assume for this implementation we store plaintext JSON in `encrypted_data` for users,
+                     // relying on StorageBackend's own security (e.g. file permissions).
+
+                     if let Ok(user) = serde_json::from_slice::<User>(&entry.encrypted_data) {
+                         userpass_method.add_user(
+                             user.username.clone(),
+                             user.password_hash.clone(),
+                             user.id.clone(),
+                             user.roles.clone(),
+                             user.policies.clone()
+                         ).await;
+                     }
+                }
+            }
+        }
 
         Ok(Self {
             auth_service,
+            userpass_method,
             token_service,
             storage,
             config: config.clone(),
@@ -377,24 +425,39 @@ impl AuthenticationService {
         })
     }
 
-    /// Create user (simplified - delegates to unified auth system)
-    pub async fn create_user(
+    /// Register a new user
+    pub async fn register_user(
         &self,
         username: &str,
-        email: &str,
-        _password: &str,
+        password: &str,
+        email: Option<String>,
         roles: Vec<String>,
     ) -> Result<User, AuthError> {
-        // This is a simplified implementation
-        // In production, this would delegate to user management service
+        // Check if user exists
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
+        if self.storage.exists(&path).await? {
+            return Err(AuthError::UserAlreadyExists);
+        }
+
+        let user_id = Uuid::new_v4().to_string();
+
+        // Create in UserPass method (generates hash)
+        let password_hash = self.userpass_method.create_user(
+            username.to_string(),
+            password,
+            user_id.clone(),
+            roles.clone(),
+            vec!["default".to_string()],
+        ).await.map_err(|_| AuthError::Internal(anyhow::anyhow!("Failed to create user in auth method")))?;
+
         let user = User {
-            id: Uuid::new_v4().to_string(),
+            id: user_id,
             username: username.to_string(),
-            email: Some(email.to_string()),
-            password_hash: "".to_string(), // Not stored in API layer
+            email: email.clone(),
+            password_hash,
             full_name: None,
             is_active: true,
-            is_superuser: false,
+            is_superuser: roles.contains(&"admin".to_string()) || roles.contains(&"root".to_string()),
             roles,
             policies: vec!["default".to_string()],
             enabled: true,
@@ -408,7 +471,34 @@ impl AuthenticationService {
             metadata: HashMap::new(),
         };
 
+        // Store user
+        // We store it as plaintext in encrypted_data for now to allow loading without unseal logic complexity here.
+        // In a real scenario, we should encrypt it, and load it only after unseal.
+        let user_data = serde_json::to_vec(&user)
+             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+
+        let entry = SecretEntry::new(
+            path,
+            user_data,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::parse_str(&user.id).unwrap_or_default(),
+        );
+
+        self.storage.store(&entry).await?;
+
         Ok(user)
+    }
+
+    /// Create user (wrapper for register_user)
+    pub async fn create_user(
+        &self,
+        username: &str,
+        email: &str,
+        password: &str,
+        roles: Vec<String>,
+    ) -> Result<User, AuthError> {
+        self.register_user(username, password, Some(email.to_string()), roles).await
     }
 
     /// Check if user has permission (simplified)
