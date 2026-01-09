@@ -25,6 +25,8 @@ mod agent_core_tests {
             health: Default::default(),
             metrics: Default::default(),
             logging: Default::default(),
+            vault: None,
+            templates: Vec::new(),
         };
 
         assert_eq!(config.agent_id, "test-agent");
@@ -204,6 +206,8 @@ mod agent_integration_tests {
             health: Default::default(),
             metrics: Default::default(),
             logging: Default::default(),
+            vault: None,
+            templates: Vec::new(),
         };
 
         // Agent should initialize with all components
@@ -238,6 +242,8 @@ mod agent_integration_tests {
                 health: Default::default(),
                 metrics: Default::default(),
                 logging: Default::default(),
+                vault: None,
+                templates: Vec::new(),
             },
             AgentConfig {
                 agent_id: "test-agent-2".to_string(),
@@ -248,6 +254,8 @@ mod agent_integration_tests {
                 health: Default::default(),
                 metrics: Default::default(),
                 logging: Default::default(),
+                vault: None,
+                templates: Vec::new(),
             },
         ];
 

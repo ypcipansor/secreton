@@ -12,21 +12,25 @@ use tokio::time::{Duration, sleep};
 use tracing::{debug, info, warn};
 
 // Local modules
+pub mod auth;
 pub mod config;
 pub mod health;
 pub mod metrics;
 // pub mod monitoring;  // Removed - use secreton_monitoring crate instead
 pub mod security;
+pub mod templating;
 
 // Re-export from monitoring crate
 pub use secreton_monitoring::*;
 
 // Re-export local modules
+pub use auth::*;
 pub use config::*;
 pub use health::*;
 pub use metrics::*;
 // pub use monitoring::*;  // Removed - use secreton_monitoring crate instead
 pub use security::*;
+pub use templating::*;
 
 use secreton_core::CoreError;
 use secreton_errors::SecretonError;
@@ -36,6 +40,8 @@ pub struct SecretonAgent {
     // monitor: Arc<secreton_monitoring::SystemMonitor>,  // Using monitoring crate directly
     security_enforcer: Arc<SecurityEnforcer>,
     health_checker: Arc<HealthChecker>,
+    auth_handler: Arc<AuthHandler>,
+    template_manager: Arc<TemplateManager>,
     shutdown_tx: Option<tokio::sync::broadcast::Sender<()>>,
 }
 
@@ -57,11 +63,24 @@ impl SecretonAgent {
         let security_enforcer = Arc::new(SecurityEnforcer::new(config.security.clone(), event_tx));
         let health_checker = Arc::new(HealthChecker::new(config.health.clone(), health_tx));
 
+        // Initialize Vault/Secreton Agent features
+        let auth_handler = Arc::new(AuthHandler::new(config.vault.clone()));
+        if let Err(e) = auth_handler.initialize().await {
+            warn!("Failed to initialize authentication: {}", e);
+        }
+
+        let template_manager = Arc::new(TemplateManager::new(
+            (*auth_handler).clone(),
+            config.templates.clone()
+        ));
+
         Ok(Self {
             config,
             // monitor,  // Using monitoring crate directly
             security_enforcer,
             health_checker,
+            auth_handler,
+            template_manager,
             shutdown_tx: None,
         })
     }
@@ -78,6 +97,7 @@ impl SecretonAgent {
         let security_task = self.start_security_service(shutdown_rx.resubscribe());
         let health_task = self.start_health_service(shutdown_rx.resubscribe());
         let metrics_task = self.start_metrics_service(shutdown_rx.resubscribe());
+        let template_task = self.start_template_service(shutdown_rx.resubscribe());
 
         info!("All agent services started successfully");
 
@@ -87,6 +107,7 @@ impl SecretonAgent {
             _ = security_task => warn!("Security service stopped"),
             _ = health_task => warn!("Health service stopped"),
             _ = metrics_task => warn!("Metrics service stopped"),
+            _ = template_task => warn!("Template service stopped"),
             _ = shutdown_rx.recv() => info!("Shutdown signal received"),
             _ = tokio::signal::ctrl_c() => info!("Ctrl+C received, shutting down"),
         }
@@ -138,6 +159,28 @@ impl SecretonAgent {
         .await
         .map_err(|e| CoreError::Internal {
             message: format!("Security service task failed: {}", e),
+        })??;
+
+        Ok(())
+    }
+
+    /// Start template rendering service
+    async fn start_template_service(
+        &self,
+        shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<(), SecretonError> {
+        let template_manager = Arc::clone(&self.template_manager);
+
+        tokio::spawn(async move {
+            if let Err(e) = template_manager.start(shutdown_rx).await {
+                 tracing::error!("Template manager error: {}", e);
+                 return Err(SecretonError::Internal { message: format!("Template manager failed: {}", e) });
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| CoreError::Internal {
+            message: format!("Template service task failed: {}", e),
         })??;
 
         Ok(())
