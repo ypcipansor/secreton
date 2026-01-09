@@ -30,6 +30,48 @@ pub struct AgentConfig {
 
     /// Metrics configuration
     pub metrics: MetricsConfig,
+
+    /// Vault/Secreton connection configuration
+    #[serde(default)]
+    pub vault: Option<VaultConfig>,
+
+    /// Template rendering configuration
+    #[serde(default)]
+    pub templates: Vec<TemplateConfig>,
+}
+
+/// Vault/Secreton connection configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultConfig {
+    /// Secreton server URL
+    pub server_url: String,
+
+    /// Authentication token (optional, can be loaded from file/env)
+    pub token: Option<String>,
+
+    /// Path to token file (like ~/.secreton-token)
+    pub token_file: Option<String>,
+}
+
+/// Template rendering configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateConfig {
+    /// Source template file path
+    pub source: String,
+
+    /// Destination file path
+    pub destination: String,
+
+    /// Optional command to run after rendering (e.g. reload service)
+    pub command: Option<String>,
+
+    /// Refresh interval in seconds (default: 300)
+    #[serde(default = "default_template_interval")]
+    pub refresh_interval_seconds: u64,
+}
+
+fn default_template_interval() -> u64 {
+    300
 }
 
 /// Health checking configuration (agent-specific)
@@ -66,6 +108,8 @@ impl Default for AgentConfig {
             health: HealthConfig::default(),
             metrics: MetricsConfig::default(),
             logging: LoggingConfig::default(),
+            vault: None,
+            templates: Vec::new(),
         }
     }
 }
