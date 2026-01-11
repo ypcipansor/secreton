@@ -151,26 +151,10 @@ impl MySQLStorage {
         // Prevent SQL keywords as table names
         let uppercase = name.to_uppercase();
         let sql_keywords = [
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "DROP",
-            "CREATE",
-            "ALTER",
-            "TABLE",
-            "DATABASE",
-            "INDEX",
-            "VIEW",
-            "PROCEDURE",
-            "FUNCTION",
-            "TRIGGER",
-            "USER",
-            "GRANT",
-            "REVOKE",
-            "FROM",
-            "WHERE",
-            "JOIN",
+            "SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TABLE", "DATABASE",
+            "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "USER", "GRANT", "REVOKE",
+            "FROM", "WHERE", "JOIN", "ORDER", "GROUP", "BY", "KEY", "LIMIT", "OFFSET", "HAVING",
+            "UNION", "VALUES", "SET",
         ];
 
         if sql_keywords.contains(&uppercase.as_str()) {
@@ -226,7 +210,7 @@ impl MySQLStorage {
 
         let create_table_query = format!(
             r#"
-            CREATE TABLE IF NOT EXISTS {} (
+            CREATE TABLE IF NOT EXISTS `{}` (
                 id CHAR(36) PRIMARY KEY,
                 path VARCHAR(512) UNIQUE NOT NULL,
                 encrypted_data LONGBLOB NOT NULL,
@@ -260,7 +244,7 @@ impl MySQLStorage {
     fn build_upsert_query(&self, _entry: &SecretEntry) -> String {
         format!(
             r#"
-            INSERT INTO {} (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
+            INSERT INTO `{}` (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 encrypted_data = VALUES(encrypted_data),
@@ -279,26 +263,26 @@ impl MySQLStorage {
     /// Build MySQL query for selecting entries
     fn build_select_query(&self, _path: &str) -> String {
         format!(
-            "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM {} WHERE path = ?",
+            "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE path = ?",
             self.config.table_name
         )
     }
 
     /// Build MySQL query for deleting entries
     fn build_delete_query(&self, _path: &str) -> String {
-        format!("DELETE FROM {} WHERE path = ?", self.config.table_name)
+        format!("DELETE FROM `{}` WHERE path = ?", self.config.table_name)
     }
 
     /// Build MySQL query for listing entries with prefix
     fn build_list_query(&self, prefix: &str) -> String {
         if prefix.is_empty() {
             format!(
-                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM {} ORDER BY path",
+                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` ORDER BY path",
                 self.config.table_name
             )
         } else {
             format!(
-                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM {} WHERE path LIKE ? ORDER BY path",
+                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE path LIKE ? ORDER BY path",
                 self.config.table_name
             )
         }
@@ -680,6 +664,36 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_sql_identifier() {
+        // Valid names
+        assert!(MySQLStorage::validate_sql_identifier("users").is_ok());
+        assert!(MySQLStorage::validate_sql_identifier("user_data").is_ok());
+        assert!(MySQLStorage::validate_sql_identifier("app1_secrets").is_ok());
+        assert!(MySQLStorage::validate_sql_identifier("_hidden").is_ok());
+
+        // Invalid length
+        assert!(MySQLStorage::validate_sql_identifier("").is_err());
+        let long_name = "a".repeat(65);
+        assert!(MySQLStorage::validate_sql_identifier(&long_name).is_err());
+
+        // Invalid characters
+        assert!(MySQLStorage::validate_sql_identifier("user-data").is_err()); // dash
+        assert!(MySQLStorage::validate_sql_identifier("user data").is_err()); // space
+        assert!(MySQLStorage::validate_sql_identifier("users;drop").is_err()); // semicolon
+        assert!(MySQLStorage::validate_sql_identifier("table`").is_err()); // backtick
+
+        // Reserved keywords
+        assert!(MySQLStorage::validate_sql_identifier("SELECT").is_err());
+        assert!(MySQLStorage::validate_sql_identifier("select").is_err()); // case insensitive
+        assert!(MySQLStorage::validate_sql_identifier("TABLE").is_err());
+        assert!(MySQLStorage::validate_sql_identifier("ORDER").is_err());
+        assert!(MySQLStorage::validate_sql_identifier("GROUP").is_err());
+
+        // Check start with digit
+        assert!(MySQLStorage::validate_sql_identifier("1users").is_err());
+    }
+
+    #[test]
     fn test_build_upsert_query() {
         let config = MySQLStorageConfig::default();
         let storage = MySQLStorage {
@@ -704,7 +718,7 @@ mod tests {
         );
 
         let query = storage.build_upsert_query(&entry);
-        assert!(query.contains("INSERT INTO secreton_kv_store"));
+        assert!(query.contains("INSERT INTO `secreton_kv_store`"));
         assert!(query.contains("ON DUPLICATE KEY UPDATE"));
     }
 
@@ -719,7 +733,7 @@ mod tests {
 
         let query = storage.build_select_query("test/path");
         assert!(query.contains("SELECT"));
-        assert!(query.contains("FROM secreton_kv_store"));
+        assert!(query.contains("FROM `secreton_kv_store`"));
         assert!(query.contains("WHERE path = ?"));
     }
 }
