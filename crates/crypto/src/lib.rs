@@ -26,6 +26,7 @@ pub mod policy_enforced_crypto;
 pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod signing;
+pub mod transform;
 pub mod transit;
 
 // Integration modules are now enabled
