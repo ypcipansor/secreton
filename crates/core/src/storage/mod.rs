@@ -127,6 +127,8 @@ pub trait StorageBackend: Send + Sync {
         version: u32,
     ) -> Result<(), CoreError>;
     async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError>;
+    async fn list_users(&self) -> Result<Vec<secreton_auth::UserInfo>, CoreError>;
+    async fn get_user_details(&self, username: &str) -> Result<Option<secreton_auth::UserInfo>, CoreError>;
 }
 
 pub enum StorageType {
@@ -1587,6 +1589,88 @@ impl StorageBackend for PostgresStorage {
                 message: e.to_string(),
             })?;
         Ok(())
+    }
+
+    async fn list_users(&self) -> Result<Vec<secreton_auth::UserInfo>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database {
+            message: e.to_string(),
+        })?;
+
+        let query = r#"
+            SELECT u.id, u.username, u.created_at, array_agg(r.name) as roles
+            FROM users u
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            GROUP BY u.id, u.username, u.created_at
+        "#;
+
+        let rows = client
+            .query(query, &[])
+            .await
+            .map_err(|e| CoreError::Database {
+                message: e.to_string(),
+            })?;
+
+        let mut users = Vec::new();
+        for row in rows {
+            let id: i32 = row.get("id");
+            let username: String = row.get("username");
+            let roles: Option<Vec<String>> = row.get("roles");
+
+            let user = secreton_auth::UserInfo {
+                id: Some(id.to_string()),
+                username,
+                email: None,
+                display_name: None,
+                roles: roles.unwrap_or_default(),
+                permissions: vec![],
+                metadata: std::collections::HashMap::new(),
+                last_login: None,
+            };
+            users.push(user);
+        }
+        Ok(users)
+    }
+
+    async fn get_user_details(&self, username: &str) -> Result<Option<secreton_auth::UserInfo>, CoreError> {
+        let client = self.pool.get().await.map_err(|e| CoreError::Database {
+            message: e.to_string(),
+        })?;
+
+        let query = r#"
+            SELECT u.id, u.username, u.created_at, array_agg(r.name) as roles
+            FROM users u
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            LEFT JOIN roles r ON ur.role_id = r.id
+            WHERE u.username = $1
+            GROUP BY u.id, u.username, u.created_at
+        "#;
+
+        let rows = client
+            .query(query, &[&username])
+            .await
+            .map_err(|e| CoreError::Database {
+                message: e.to_string(),
+            })?;
+
+        if let Some(row) = rows.first() {
+            let id: i32 = row.get("id");
+            let username: String = row.get("username");
+            let roles: Option<Vec<String>> = row.get("roles");
+
+            Ok(Some(secreton_auth::UserInfo {
+                id: Some(id.to_string()),
+                username,
+                email: None,
+                display_name: None,
+                roles: roles.unwrap_or_default(),
+                permissions: vec![],
+                metadata: std::collections::HashMap::new(),
+                last_login: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
 

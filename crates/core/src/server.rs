@@ -1,4 +1,4 @@
-use crate::{AppError, auth::auth_impl::AuthService, utils::config::Config};
+use crate::{AppError, auth::auth_impl::AuthService, utils::config::Config, storage::{PostgresStorage, StorageBackend}};
 use axum::{
     Router,
     body::Body,
@@ -35,6 +35,20 @@ impl Server {
         // Initialize logging
         self.init_logging()?;
 
+        // Initialize storage backend
+        let storage: Option<Arc<dyn StorageBackend + Send + Sync>> = if self.config.database_url.starts_with("postgres") {
+             match PostgresStorage::from_url(&self.config.database_url).await {
+                Ok(s) => Some(Arc::new(s)),
+                Err(e) => {
+                    tracing::warn!("Failed to connect to Postgres: {}. Falling back to memory auth.", e);
+                    None
+                }
+             }
+        } else {
+             tracing::info!("Using in-memory storage (database_url does not start with postgres)");
+             None
+        };
+
         // Create auth service
         let token_config = secreton_auth::TokenConfig {
             jwt_secret: self.config.auth.jwt_secret.clone(),
@@ -45,7 +59,7 @@ impl Server {
             audience: "secreton-api".to_string(),
         };
         let jwt_token_service = secreton_auth::JwtTokenService::new(token_config.clone());
-        let auth_service = AuthService::new(jwt_token_service, token_config);
+        let auth_service = AuthService::new(jwt_token_service, token_config, storage);
 
         // Create application state
         let state = Arc::new(AppState {
