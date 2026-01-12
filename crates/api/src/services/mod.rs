@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
-use secreton_storage::StorageBackend;
+use secreton_storage::{StorageBackend, StorageFactory};
 pub mod audit;
 pub mod crypto;
 pub mod seal;
@@ -69,7 +69,7 @@ impl ApiServiceContainer {
         let _registry = StandardServiceContainer::new();
         
         // Initialize storage backend
-        let storage = secreton_storage::StorageFactory::create(config.storage.clone()).await?;
+        let storage = StorageFactory::create(config.storage.clone()).await?;
 
         // Initialize crypto service
         let crypto = Arc::new(CryptoService::new(storage.clone()).await?);

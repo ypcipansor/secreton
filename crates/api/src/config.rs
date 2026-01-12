@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use secreton_storage::StorageFactoryConfig;
 
 /// Main API configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -37,7 +38,7 @@ pub struct ApiConfig {
     pub logging: LoggingConfig,
 
     /// Storage configuration
-    pub storage: secreton_storage::StorageFactoryConfig,
+    pub storage: StorageFactoryConfig,
 }
 
 /// HTTP server configuration
@@ -749,7 +750,7 @@ mod tests {
                 file: None,
                 rotation: None,
             },
-            storage: secreton_storage::StorageFactoryConfig::default(),
+            storage: StorageFactoryConfig::default(),
         }
     }
 
