@@ -226,13 +226,38 @@ impl AuthService {
     pub async fn register_user(
         &self,
         username: &str,
-        _password: &str,
+        password: &str,
         email: Option<&str>,
         roles: &[String],
     ) -> Result<UserInfo, SecretonError> {
-        // For now, just return a user info
-        // In production, this would create the user in the database
+        let mut user_store = self.user_store.write().await;
+
+        if user_store.contains_key(username) {
+             return Err(SecretonError::Authentication {
+                message: format!("User {} already exists", username),
+            });
+        }
+
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let password_hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| SecretonError::Authentication { message: e.to_string() })?
+            .to_string();
+
         let user_id = format!("user-{}", username);
+        let user_record = UserRecord {
+            id: user_id.clone(),
+            username: username.to_string(),
+            email: email.map(|s| s.to_string()),
+            password_hash,
+            roles: roles.to_vec(),
+            policies: vec!["default".to_string()],
+            created_at: chrono::Utc::now(),
+            last_login: None,
+        };
+
+        user_store.insert(username.to_string(), user_record);
 
         Ok(UserInfo {
             id: Some(user_id),
@@ -248,30 +273,23 @@ impl AuthService {
 
     /// List all users
     pub async fn list_users(&self) -> Result<Vec<UserInfo>, SecretonError> {
-        // For now, return hardcoded users
-        // In production, this would query the database
-        Ok(vec![
-            UserInfo {
-                id: Some("admin-user-id".to_string()),
-                username: "admin".to_string(),
-                email: None,
-                display_name: Some("Administrator".to_string()),
-                roles: vec!["admin".to_string(), "user".to_string()],
+        let user_store = self.user_store.read().await;
+        let mut users = Vec::new();
+
+        for record in user_store.values() {
+            users.push(UserInfo {
+                id: Some(record.id.clone()),
+                username: record.username.clone(),
+                email: record.email.clone(),
+                display_name: None,
+                roles: record.roles.clone(),
                 permissions: vec![],
                 metadata: HashMap::new(),
-                last_login: None,
-            },
-            UserInfo {
-                id: Some("user-user-id".to_string()),
-                username: "user".to_string(),
-                email: None,
-                display_name: Some("Regular User".to_string()),
-                roles: vec!["user".to_string()],
-                permissions: vec![],
-                metadata: HashMap::new(),
-                last_login: None,
-            },
-        ])
+                last_login: record.last_login,
+            });
+        }
+
+        Ok(users)
     }
 }
 
@@ -293,4 +311,64 @@ pub struct LoginResult {
 pub struct RefreshResult {
     pub token: String,
     pub expires_in: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_list_users() {
+        let config = TokenConfig {
+            jwt_secret: "secret".to_string(),
+            jwt_refresh_secret: "secret".to_string(),
+            access_token_duration: chrono::Duration::hours(1),
+            refresh_token_duration: chrono::Duration::hours(1),
+            issuer: "test".to_string(),
+            audience: "test".to_string(),
+        };
+        let token_service = JwtTokenService::new(config.clone());
+        let auth_service = AuthService::new(token_service, config);
+
+        let users = auth_service.list_users().await.unwrap();
+        // Should have "admin" and "user"
+        assert_eq!(users.len(), 2);
+
+        let usernames: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
+        assert!(usernames.contains(&"admin".to_string()));
+        assert!(usernames.contains(&"user".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_register_and_list_users() {
+        let config = TokenConfig {
+            jwt_secret: "secret".to_string(),
+            jwt_refresh_secret: "secret".to_string(),
+            access_token_duration: chrono::Duration::hours(1),
+            refresh_token_duration: chrono::Duration::hours(1),
+            issuer: "test".to_string(),
+            audience: "test".to_string(),
+        };
+        let token_service = JwtTokenService::new(config.clone());
+        let auth_service = AuthService::new(token_service, config);
+
+        // Initial state
+        let initial_users = auth_service.list_users().await.unwrap();
+        assert_eq!(initial_users.len(), 2);
+
+        // Register new user
+        let new_user = auth_service
+            .register_user("newuser", "password123", Some("new@example.com"), &["user".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(new_user.username, "newuser");
+
+        // Verify list updates
+        let users = auth_service.list_users().await.unwrap();
+        assert_eq!(users.len(), 3);
+
+        let usernames: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
+        assert!(usernames.contains(&"newuser".to_string()));
+    }
 }
