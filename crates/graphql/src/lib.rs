@@ -3,10 +3,9 @@
 //! This module provides a GraphQL interface for the Secreton secrets management system.
 //! It allows clients to query and mutate secrets using GraphQL queries and mutations.
 
-use async_graphql::{Context, EmptyMutation, EmptySubscription, FieldError, FieldResult, Object, Schema, SimpleObject};
+use async_graphql::{Context, EmptySubscription, FieldError, FieldResult, Object, Schema, SimpleObject};
 use async_graphql::{InputObject, Enum};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -142,13 +141,13 @@ pub struct OperationResult {
 /// GraphQL query root
 pub struct QueryRoot {
     /// Secrets manager instance
-    secrets_manager: Arc<dyn SecretsManager>,
+    _secrets_manager: Arc<dyn SecretsManager>,
 }
 
 /// GraphQL mutation root
 pub struct MutationRoot {
     /// Secrets manager instance
-    secrets_manager: Arc<dyn SecretsManager>,
+    _secrets_manager: Arc<dyn SecretsManager>,
 }
 
 /// Secrets manager trait for GraphQL integration
@@ -182,7 +181,7 @@ pub trait SecretsManager: Send + Sync {
 impl QueryRoot {
     /// Create a new query root
     pub fn new(secrets_manager: Arc<dyn SecretsManager>) -> Self {
-        Self { secrets_manager }
+        Self { _secrets_manager: secrets_manager }
     }
 }
 
@@ -217,12 +216,17 @@ impl QueryRoot {
             .await
             .map_err(|e| FieldError::new(format!("Failed to unwrap response: {}", e)))
     }
+
+    /// Get the API version
+    async fn version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_string()
+    }
 }
 
 impl MutationRoot {
     /// Create a new mutation root
     pub fn new(secrets_manager: Arc<dyn SecretsManager>) -> Self {
-        Self { secrets_manager }
+        Self { _secrets_manager: secrets_manager }
     }
 }
 
@@ -299,6 +303,12 @@ impl DefaultSecretsManager {
     }
 }
 
+impl Default for DefaultSecretsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl SecretsManager for DefaultSecretsManager {
     async fn create_secret(&self, path: &str, data: &str, ttl: Option<i64>) -> Result<GQLSecret, String> {
@@ -328,7 +338,7 @@ impl SecretsManager for DefaultSecretsManager {
     async fn update_secret(&self, path: &str, data: &str) -> Result<GQLSecret, String> {
         let mut secrets = self.secrets.write().await;
 
-        if let Some(mut secret) = secrets.get_mut(path) {
+        if let Some(secret) = secrets.get_mut(path) {
             secret.data = data.to_string();
             secret.updated_at = Utc::now();
             secret.version += 1;
@@ -514,10 +524,12 @@ pub async fn start_graphql_server(
     config: GraphQLConfig,
     secrets_manager: Arc<dyn SecretsManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = create_graphql_schema(secrets_manager);
+    let _schema = create_graphql_schema(secrets_manager);
 
-    let app = async_graphql::http::GraphiQLConfiguration::new(&format!("http://{}:{}/graphql", config.bind_address, config.port))
-        .title("Secreton GraphQL API");
+    let _app = async_graphql::http::GraphiQLSource::build()
+        .endpoint(&format!("http://{}:{}/graphql", config.bind_address, config.port))
+        .title("Secreton GraphQL API")
+        .finish();
 
     // In a real implementation, this would start an HTTP server
     // For demonstration, we'll just print the configuration
@@ -531,7 +543,6 @@ pub async fn start_graphql_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_graphql::{Object, Schema};
 
     #[tokio::test]
     async fn test_graphql_secret_creation() {
@@ -539,7 +550,7 @@ mod tests {
         let schema = create_graphql_schema(secrets_manager);
 
         // Test GraphQL query
-        let query = r#"
+        let _query = r#"
             mutation {
                 createSecret(input: {
                     path: "test/secret",
@@ -556,7 +567,14 @@ mod tests {
 
         // In a real test, this would execute the query against the schema
         // For demonstration, we'll just verify the schema was created
-        assert!(schema.query_type().name() == "Query");
+        // We cannot access query_type().name() directly in newer async-graphql versions without trait imports or it might be private/changed.
+        // Instead, we can execute a simple introspection query to verify the schema.
+        let query = "{ __schema { queryType { name } } }";
+        let res = schema.execute(query).await;
+        assert!(res.is_ok());
+        let json = res.data.into_json().unwrap();
+        let name = json["__schema"]["queryType"]["name"].as_str().unwrap();
+        assert_eq!(name, "QueryRoot");
     }
 
     #[tokio::test]
@@ -582,5 +600,20 @@ mod tests {
         assert_eq!(result.success_count, 2);
         assert_eq!(result.failure_count, 0);
         assert_eq!(result.results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_version_query() {
+        let secrets_manager = Arc::new(DefaultSecretsManager::new());
+        let schema = create_graphql_schema(secrets_manager);
+
+        let query = "{ version }";
+        let res = schema.execute(query).await;
+
+        assert!(res.is_ok());
+        let data = res.data.into_json().unwrap();
+        let version = data.get("version").unwrap().as_str().unwrap();
+
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
     }
 }
