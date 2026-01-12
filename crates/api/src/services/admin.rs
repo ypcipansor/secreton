@@ -1465,9 +1465,16 @@ impl AdminService {
         let before_stats = self.storage.get_stats().await
             .map_err(AdminError::Storage)?;
 
-        // Perform cleanup operations (this would be backend-specific)
-        // For now, simulate cleanup by returning a portion of current size
-        let cleanup_bytes = (before_stats.total_size_bytes / 100).min(2_621_440); // Max 2.5MB cleanup
+        // Perform cleanup operations
+        self.storage.delete_expired(None).await
+            .map_err(AdminError::Storage)?;
+
+        // Get stats after cleanup
+        let after_stats = self.storage.get_stats().await
+            .map_err(AdminError::Storage)?;
+
+        // Calculate cleanup bytes
+        let cleanup_bytes = before_stats.total_size_bytes.saturating_sub(after_stats.total_size_bytes);
 
         Ok(cleanup_bytes)
     }
@@ -1645,5 +1652,57 @@ mod tests {
         assert!(result.details.contains_key("expired_sessions"));
         assert!(result.details.contains_key("expired_secrets"));
         assert!(result.details.contains_key("storage_cleaned_bytes"));
+    }
+
+    #[tokio::test]
+    async fn test_storage_cleanup_removes_expired_items() {
+        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+
+        let storage = Arc::new(MockStorageBackend::new());
+
+        // Add an expired entry
+        let expired_entry = SecretEntry::new(
+            "expired/path".to_string(),
+            vec![1, 2, 3, 4, 5], // 5 bytes
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            uuid::Uuid::new_v4(),
+        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+
+        storage.store(&expired_entry).await.unwrap();
+
+        // Add a valid entry
+        let valid_entry = SecretEntry::new(
+            "valid/path".to_string(),
+            vec![1, 2, 3], // 3 bytes
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            uuid::Uuid::new_v4(),
+        ).with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
+
+        storage.store(&valid_entry).await.unwrap();
+
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let config = AuthConfig::default();
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let service = AdminService::new(storage.clone(), auth, audit, performance).await.unwrap();
+
+        // Verify initial state
+        assert_eq!(storage.get_stats().await.unwrap().total_entries, 2);
+        assert_eq!(storage.get_stats().await.unwrap().total_size_bytes, 8);
+
+        // Run cleanup
+        let cleaned_bytes = service.storage_cleanup().await.unwrap();
+
+        // Verify result
+        assert_eq!(cleaned_bytes, 5); // Should have removed 5 bytes
+        assert_eq!(storage.get_stats().await.unwrap().total_entries, 1);
+        assert_eq!(storage.get_stats().await.unwrap().total_size_bytes, 3);
+
+        // Verify the correct entry was removed
+        assert!(storage.get_by_path("expired/path").await.unwrap().is_none());
+        assert!(storage.get_by_path("valid/path").await.unwrap().is_some());
     }
 }
