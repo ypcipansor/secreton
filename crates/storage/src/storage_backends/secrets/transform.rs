@@ -4,6 +4,8 @@
 //! requirements. Protects sensitive _data while maintaining format.
 
 use chrono::{DateTime, Utc};
+use rand::RngCore;
+use secreton_crypto::hashing::compute_hmac_sha256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,6 +24,9 @@ pub enum TransformError {
 
     #[error("Invalid alphabet")]
     InvalidAlphabet,
+
+    #[error("Input too long for FPE (max 38 digits or equivalent)")]
+    InputTooLong,
 
     #[error("Encode failed: {0}")]
     EncodeFailed(String),
@@ -88,6 +93,9 @@ pub struct Transformation {
     /// Tweak (additional input for FPE)
     pub tweak: Option<String>,
 
+    /// Key for FPE
+    pub key: Option<Vec<u8>>,
+
     /// Masking character
     pub masking_char: Option<char>,
 
@@ -98,12 +106,16 @@ pub struct Transformation {
 impl Transformation {
     /// Create new transformation
     pub fn new(_name: String, transformation_type: TransformationType) -> Self {
+        let mut key = vec![0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+
         Self {
             _name,
             transformation_type,
             template: None,
             alphabet: Some(Alphabet::Alphanumeric),
             tweak: None,
+            key: Some(key),
             masking_char: Some('*'),
             created_at: Utc::now(),
         }
@@ -259,36 +271,61 @@ impl TransformEngine {
         }
     }
 
-    /// Format-preserving encryption (simplified)
+    /// Format-preserving encryption using Feistel network
     async fn encode_fpe(
         &self,
         transformation: &Transformation,
         value: &str,
     ) -> Result<String, TransformError> {
-        let alphabet = transformation
+        let alphabet_obj = transformation
             .alphabet
             .as_ref()
             .ok_or(TransformError::InvalidAlphabet)?;
 
-        let chars = alphabet.chars();
-        let radix = chars.len();
+        let alphabet_chars = alphabet_obj.chars();
+        let radix = alphabet_chars.len() as u128;
 
-        // Simplified FPE: shift each character by a fixed amount
-        let shift = 7; // Use transformation _key in production
+        // Filter input to only alphabet characters for FPE, keeping indices of others
+        let mut fpe_input_indices = Vec::new();
+        let mut fpe_input_chars = Vec::new();
 
-        let encoded: String = value
-            .chars()
-            .map(|c| {
-                if let Some(pos) = chars.iter().position(|&ch| ch == c) {
-                    let new_pos = (pos + shift) % radix;
-                    chars[new_pos]
-                } else {
-                    c // Keep non-alphabet characters as-is
-                }
-            })
-            .collect();
+        for (i, c) in value.chars().enumerate() {
+            if alphabet_chars.contains(&c) {
+                fpe_input_indices.push(i);
+                fpe_input_chars.push(c);
+            }
+        }
 
-        Ok(encoded)
+        if fpe_input_chars.is_empty() {
+            return Ok(value.to_string());
+        }
+
+        // Get or derive key
+        let key = if let Some(k) = &transformation.key {
+            k.clone()
+        } else {
+            // Fallback for legacy transformations: derive from name
+            let salt = b"secreton_fpe_fallback_salt";
+            compute_hmac_sha256(salt, transformation._name.as_bytes())
+                .map_err(|e| TransformError::EncodeFailed(e.to_string()))?
+        };
+
+        // Perform Feistel encryption on the filtered string
+        let encoded_chars = self.feistel_encrypt(
+            &fpe_input_chars,
+            &alphabet_chars,
+            radix,
+            &key,
+            transformation.tweak.as_deref(),
+        )?;
+
+        // Reconstruct the string
+        let mut result = value.chars().collect::<Vec<char>>();
+        for (idx, &char_idx) in fpe_input_indices.iter().enumerate() {
+            result[char_idx] = encoded_chars[idx];
+        }
+
+        Ok(result.into_iter().collect())
     }
 
     /// Decode FPE
@@ -297,28 +334,250 @@ impl TransformEngine {
         transformation: &Transformation,
         value: &str,
     ) -> Result<String, TransformError> {
-        let alphabet = transformation
+        let alphabet_obj = transformation
             .alphabet
             .as_ref()
             .ok_or(TransformError::InvalidAlphabet)?;
 
-        let chars = alphabet.chars();
-        let radix = chars.len();
-        let shift = 7;
+        let alphabet_chars = alphabet_obj.chars();
+        let radix = alphabet_chars.len() as u128;
 
-        let decoded: String = value
-            .chars()
+        let mut fpe_input_indices = Vec::new();
+        let mut fpe_input_chars = Vec::new();
+
+        for (i, c) in value.chars().enumerate() {
+            if alphabet_chars.contains(&c) {
+                fpe_input_indices.push(i);
+                fpe_input_chars.push(c);
+            }
+        }
+
+        if fpe_input_chars.is_empty() {
+            return Ok(value.to_string());
+        }
+
+        // Get or derive key
+        let key = if let Some(k) = &transformation.key {
+            k.clone()
+        } else {
+            let salt = b"secreton_fpe_fallback_salt";
+            compute_hmac_sha256(salt, transformation._name.as_bytes())
+                .map_err(|e| TransformError::DecodeFailed(e.to_string()))?
+        };
+
+        let decoded_chars = self.feistel_decrypt(
+            &fpe_input_chars,
+            &alphabet_chars,
+            radix,
+            &key,
+            transformation.tweak.as_deref(),
+        )?;
+
+        let mut result = value.chars().collect::<Vec<char>>();
+        for (idx, &char_idx) in fpe_input_indices.iter().enumerate() {
+            result[char_idx] = decoded_chars[idx];
+        }
+
+        Ok(result.into_iter().collect())
+    }
+
+    /// Feistel network encrypt
+    fn feistel_encrypt(
+        &self,
+        input: &[char],
+        alphabet: &[char],
+        radix: u128,
+        key: &[u8],
+        tweak: Option<&str>,
+    ) -> Result<Vec<char>, TransformError> {
+        let n = input.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Map chars to indices
+        let indices: Vec<u128> = input
+            .iter()
             .map(|c| {
-                if let Some(pos) = chars.iter().position(|&ch| ch == c) {
-                    let new_pos = (pos + radix - shift) % radix;
-                    chars[new_pos]
-                } else {
-                    c
-                }
+                alphabet
+                    .iter()
+                    .position(|x| x == c)
+                    .unwrap() as u128
             })
             .collect();
 
-        Ok(decoded)
+        // Check input length limits for u128 arithmetic
+        // 10^38 fits in u128, so 38 digits is safe.
+        // For larger alphabets, length limit is lower.
+        // We do a rough check here.
+        if n > 38 {
+            return Err(TransformError::InputTooLong);
+        }
+
+        let u = n / 2;
+
+        let mut left = indices[0..u].to_vec();
+        let mut right = indices[u..n].to_vec();
+
+        let rounds = 10;
+
+        for i in 0..rounds {
+            let left_num = self.to_number(&left, radix)?;
+            let right_num = self.to_number(&right, radix)?;
+
+            let round_key = self.derive_round_key(key, tweak, i, right_num)?;
+
+            // Length of L determines the modulus for the Feistel addition.
+            // L_new = R (len v).
+            // R_new = (L + F(R)) % radix^len(L).
+            // But wait, lengths swap: next round uses v, u.
+            // In unbalanced Feistel:
+            // Input: L (len u), R (len v).
+            // L' = R.
+            // R' = (L + F(R)) mod radix^u.
+            // Output: L' (len v), R' (len u).
+            let len_l = left.len();
+            let modulus = self.checked_pow(radix, len_l as u32)?;
+
+            let f_val = (u128::from_be_bytes(round_key[0..16].try_into().unwrap())) % modulus;
+            let new_right_val = (left_num + f_val) % modulus;
+
+            let new_right = self.from_number(new_right_val, radix, len_l);
+            let new_left = right;
+
+            left = new_left;
+            right = new_right;
+        }
+
+        let mut result = Vec::with_capacity(n);
+        result.extend_from_slice(&left);
+        result.extend_from_slice(&right);
+
+        Ok(result
+            .iter()
+            .map(|&idx| alphabet[idx as usize])
+            .collect())
+    }
+
+    /// Feistel network decrypt
+    fn feistel_decrypt(
+        &self,
+        input: &[char],
+        alphabet: &[char],
+        radix: u128,
+        key: &[u8],
+        tweak: Option<&str>,
+    ) -> Result<Vec<char>, TransformError> {
+        let n = input.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        let indices: Vec<u128> = input
+            .iter()
+            .map(|c| {
+                alphabet
+                    .iter()
+                    .position(|x| x == c)
+                    .unwrap() as u128
+            })
+            .collect();
+
+        let u_orig = n / 2;
+
+        let mut left = indices[0..u_orig].to_vec();
+        let mut right = indices[u_orig..n].to_vec();
+
+        let rounds = 10;
+
+        for i in (0..rounds).rev() {
+            // Inverse step.
+            // Current state: L_{i+1}, R_{i+1}.
+            // L_{i+1} = R_i.
+            // R_{i+1} = (L_i + F(R_i)) % radix^{len(L_i)}.
+            //
+            // So:
+            // R_i = L_{i+1}.
+            // L_i = (R_{i+1} - F(R_i)) % radix^{len(L_i)}.
+
+            // Calculate len(L_i).
+            // Round 0: u, v -> v, u.
+            // Round 1: v, u -> u, v.
+            // If i is even, start len is u. If i is odd, start len is v.
+            let len_l_i = if i % 2 == 0 { u_orig } else { n - u_orig };
+
+            let r_i = left.clone(); // Since L_{i+1} = R_i
+            let r_i_num = self.to_number(&r_i, radix)?;
+
+            let round_key = self.derive_round_key(key, tweak, i, r_i_num)?;
+
+            let modulus = self.checked_pow(radix, len_l_i as u32)?;
+            let f_val = (u128::from_be_bytes(round_key[0..16].try_into().unwrap())) % modulus;
+
+            let r_next_num = self.to_number(&right, radix)?; // This is R_{i+1}
+
+            // L_i = (R_{i+1} - F) mod modulus
+            let l_i_val = if r_next_num >= f_val {
+                r_next_num - f_val
+            } else {
+                modulus - (f_val - r_next_num)
+            };
+
+            let l_i = self.from_number(l_i_val, radix, len_l_i);
+
+            left = l_i;
+            right = r_i;
+        }
+
+        let mut result = Vec::with_capacity(n);
+        result.extend_from_slice(&left);
+        result.extend_from_slice(&right);
+
+        Ok(result
+            .iter()
+            .map(|&idx| alphabet[idx as usize])
+            .collect())
+    }
+
+    fn to_number(&self, indices: &[u128], radix: u128) -> Result<u128, TransformError> {
+        let mut num: u128 = 0;
+        for &idx in indices {
+            num = num
+                .checked_mul(radix)
+                .ok_or(TransformError::InputTooLong)?;
+            num = num.checked_add(idx).ok_or(TransformError::InputTooLong)?;
+        }
+        Ok(num)
+    }
+
+    fn from_number(&self, mut num: u128, radix: u128, len: usize) -> Vec<u128> {
+        let mut indices = vec![0; len];
+        for i in (0..len).rev() {
+            indices[i] = num % radix;
+            num /= radix;
+        }
+        indices
+    }
+
+    fn derive_round_key(
+        &self,
+        key: &[u8],
+        tweak: Option<&str>,
+        round: usize,
+        r_val: u128,
+    ) -> Result<Vec<u8>, TransformError> {
+        let mut data = Vec::new();
+        if let Some(t) = tweak {
+            data.extend_from_slice(t.as_bytes());
+        }
+        data.extend_from_slice(&(round as u64).to_be_bytes());
+        data.extend_from_slice(&r_val.to_be_bytes());
+
+        compute_hmac_sha256(key, &data).map_err(|e| TransformError::EncodeFailed(e.to_string()))
+    }
+
+    fn checked_pow(&self, base: u128, exp: u32) -> Result<u128, TransformError> {
+        base.checked_pow(exp).ok_or(TransformError::InputTooLong)
     }
 
     /// Tokenization encoding
