@@ -565,17 +565,18 @@ impl AdminService {
         
         let mut findings = Vec::new();
 
-        // Check for weak passwords
-        findings.extend(self.check_password_security().await?);
-        
-        // Check for expired certificates/keys
-        findings.extend(self.check_certificate_expiry().await?);
-        
-        // Check for insecure configurations
-        findings.extend(self.check_security_configuration().await?);
-        
-        // Check for suspicious activities
-        findings.extend(self.check_suspicious_activity().await?);
+        // Run checks concurrently
+        let (pw_res, cert_res, config_res, activity_res) = tokio::join!(
+            self.check_password_security(),
+            self.check_certificate_expiry(),
+            self.check_security_configuration(),
+            self.check_suspicious_activity()
+        );
+
+        findings.extend(pw_res?);
+        findings.extend(cert_res?);
+        findings.extend(config_res?);
+        findings.extend(activity_res?);
 
         let completed_at = chrono::Utc::now();
 
