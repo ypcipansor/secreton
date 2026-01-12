@@ -449,6 +449,8 @@ impl AuthenticationService {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata: HashMap::new(),
+            failed_login_attempts: 0,
+            locked_until: None,
         })
     }
 
@@ -499,6 +501,8 @@ impl AuthenticationService {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata: HashMap::new(),
+            failed_login_attempts: 0,
+            locked_until: None,
         };
 
         Ok(AuthToken {
@@ -554,6 +558,8 @@ impl AuthenticationService {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata: HashMap::new(),
+            failed_login_attempts: 0,
+            locked_until: None,
         };
 
         // Store user
@@ -562,7 +568,7 @@ impl AuthenticationService {
 
         // Encrypt user data
         let encrypted_data = self.crypto.encrypt_data(&user_data).await
-            .map_err(|e| AuthError::Crypto(e))?;
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
 
         let entry = SecretEntry::new(
             path,
@@ -764,6 +770,8 @@ impl AuthenticationService {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata: std::collections::HashMap::new(),
+            failed_login_attempts: 0,
+            locked_until: None,
         };
         
         Ok(user)

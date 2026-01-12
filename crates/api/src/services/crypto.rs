@@ -296,7 +296,9 @@ mod tests {
     async fn test_crypto_service_lifecycle() {
         let storage = Arc::new(MockStorageBackend::new());
         // Set env var to ensure unsealed for test
-        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let service = CryptoService::new(storage).await.unwrap();
         let plaintext = b"Hello, World!";
 
@@ -315,7 +317,9 @@ mod tests {
     #[tokio::test]
     async fn test_unique_ciphertexts() {
         let storage = Arc::new(MockStorageBackend::new());
-        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let service = CryptoService::new(storage).await.unwrap();
         let plaintext = b"Hello, World!";
 
@@ -329,7 +333,9 @@ mod tests {
     #[tokio::test]
     async fn test_signing_and_verification_ed25519() {
         let storage = Arc::new(MockStorageBackend::new());
-        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let service = CryptoService::new(storage).await.unwrap();
         let data = b"Important Document";
 
@@ -356,7 +362,9 @@ mod tests {
     #[tokio::test]
     async fn test_signing_and_verification_p256() {
         let storage = Arc::new(MockStorageBackend::new());
-        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let service = CryptoService::new(storage).await.unwrap();
         let data = b"Important Document";
 

@@ -70,6 +70,13 @@ impl AuditLogger {
             SecurityEventType::VerificationOperation { key_id, user, data_size, valid } =>
                 (CoreAuditEventType::Custom("crypto.verify".to_string()), if valid { AuditStatus::Success } else { AuditStatus::Failure }, user, key_id, "verify".to_string(),
                  Some(vec![("data_size".to_string(), data_size.to_string()), ("valid".to_string(), valid.to_string())].into_iter().collect())),
+            SecurityEventType::PolicyChange { policy_name, user, action } =>
+                (CoreAuditEventType::Custom("policy.change".to_string()), AuditStatus::Success, user, policy_name, action, None),
+            SecurityEventType::ConfigChange { user, changed_keys } =>
+                (CoreAuditEventType::Custom("config.change".to_string()), AuditStatus::Success, user, "config".to_string(), "change".to_string(),
+                 Some(vec![("changed_keys".to_string(), changed_keys.join(","))].into_iter().collect())),
+            SecurityEventType::SealOperation { operation, user, success } =>
+                (CoreAuditEventType::Custom("seal.operation".to_string()), if success { AuditStatus::Success } else { AuditStatus::Failure }, user, "seal".to_string(), operation, None),
         };
 
         let mut audit_event = AuditEvent::new(core_type, status, user, resource, op);
