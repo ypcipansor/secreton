@@ -404,8 +404,18 @@ mod tests {
             connection_options: HashMap::new(),
             created_at: Utc::now(),
         };
-        let result_valid = db_conn.register_template(valid_template).await;
+        let result_valid = db_conn.register_template(valid_template.clone()).await;
         assert!(result_valid.is_ok());
+
+        // Verify end-to-end integration: Generate a connection string using the registered valid template
+        let config = create_test_config();
+        let connection_result = db_conn
+            .generate_connection_string("valid", config, 3600)
+            .await;
+        assert!(connection_result.is_ok());
+
+        let connection = connection_result.unwrap();
+        assert!(connection.connection_string.contains("mysql://appuser:secret123@localhost:3306/myapp"));
 
         // Test invalid template (missing placeholders)
         let invalid_template = ConnectionTemplate {
