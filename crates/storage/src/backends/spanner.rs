@@ -4,10 +4,8 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-use tracing::{debug, error, info};
 
 use crate::{
     StorageBackend, StorageError, SecretEntry, StorageResult,
@@ -24,7 +22,9 @@ pub struct SpannerConfig {
 }
 
 pub struct SpannerStorage {
+    #[allow(dead_code)]
     config: SpannerConfig,
+    #[allow(dead_code)]
     client: Option<Arc<SpannerClient>>,
 }
 
@@ -88,14 +88,4 @@ impl StorageBackend for SpannerStorage {
     async fn migrate(&self) -> StorageResult<()> {
         Err(StorageError::BackendError { backend: "Spanner".to_string(), message: "Not implemented".to_string() })
     }
-}
-
-struct MockTransaction;
-#[async_trait]
-impl StorageTransaction for MockTransaction {
-    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> { Ok(()) }
-    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> { Ok(()) }
-    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> { Ok(true) }
-    async fn commit(self: Box<Self>) -> StorageResult<()> { Ok(()) }
-    async fn rollback(self: Box<Self>) -> StorageResult<()> { Ok(()) }
 }
