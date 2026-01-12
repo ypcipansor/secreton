@@ -4,7 +4,6 @@
 //! functionality that was previously in the separate token crate.
 
 use chrono::{Duration, Utc};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -163,20 +162,12 @@ impl Default for TokenConfig {
     fn default() -> Self {
         Self {
             jwt_secret: std::env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| {
-                let secret: String = rand::thread_rng()
-                    .sample_iter(&rand::distributions::Alphanumeric)
-                    .take(32)
-                    .map(char::from)
-                    .collect();
+                let secret = Uuid::new_v4().to_string();
                 eprintln!("NOTICE: SECRETON_JWT_SECRET not set. Generated a random secret. Tokens will be invalid after restart.");
                 secret
             }),
             jwt_refresh_secret: std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
-                let secret: String = rand::thread_rng()
-                    .sample_iter(&rand::distributions::Alphanumeric)
-                    .take(32)
-                    .map(char::from)
-                    .collect();
+                let secret = Uuid::new_v4().to_string();
                 eprintln!("NOTICE: SECRETON_JWT_REFRESH_SECRET not set. Generated a random secret. Tokens will be invalid after restart.");
                 secret
             }),
@@ -373,9 +364,9 @@ mod tests {
             assert_ne!(config1.jwt_secret, config2.jwt_secret);
             assert_ne!(config1.jwt_refresh_secret, config2.jwt_refresh_secret);
 
-            // Check length
-            assert_eq!(config1.jwt_secret.len(), 32);
-            assert_eq!(config1.jwt_refresh_secret.len(), 32);
+        // Check length (UUID is 36 chars)
+        assert_eq!(config1.jwt_secret.len(), 36);
+        assert_eq!(config1.jwt_refresh_secret.len(), 36);
         }
     }
 }
