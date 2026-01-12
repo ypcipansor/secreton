@@ -93,6 +93,8 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            failed_login_attempts: 0,
+            locked_until: None,
             last_login: None,
             mfa_enabled: false,
             mfa_secret: None,
