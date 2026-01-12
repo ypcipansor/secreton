@@ -183,8 +183,6 @@ mod tests {
             enabled: true,
             is_active: true,
             is_superuser: false,
-            failed_login_attempts: 0,
-            locked_until: None,
         };
         let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
 

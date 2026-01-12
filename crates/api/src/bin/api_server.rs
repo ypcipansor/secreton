@@ -12,6 +12,10 @@ use secreton_api::{SecurityAPI, handle_rejection};
 use secreton_api::services::crypto::CryptoService;
 use secreton_api::services::auth::AuthenticationService;
 use secreton_api::services::audit::AuditLogger;
+use secreton_api::services::seal::SealService;
+use secreton_api::services::secret::SecretService;
+use secreton_auth::{InMemoryIdentityService, PolicyService};
+use secreton_performance::{SecretPerformanceOptimizer, SecretPerformanceConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,11 +65,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize Services
     let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
     let auth_config = AuthConfig::default(); // Using default as we don't have full config load setup yet
-    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &auth_config).await?);
+    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?);
     let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
 
+    // Initialize Seal Service
+    let jwt_secret = env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| "default-dev-secret-do-not-use-in-prod".to_string());
+    let jwt_issuer = env::var("SECRETON_JWT_ISSUER").unwrap_or_else(|_| "secreton".to_string());
+    let jwt_audience = env::var("SECRETON_JWT_AUDIENCE").unwrap_or_else(|_| "secreton-api".to_string());
+
+    let seal = Arc::new(SealService::new(
+        storage.clone(),
+        crypto.clone(),
+        jwt_secret,
+        jwt_issuer,
+        jwt_audience
+    ));
+
+    // Initialize Secret Service components
+    let identity = Arc::new(InMemoryIdentityService::new());
+    let policy_service = Arc::new(PolicyService::new());
+    let performance = Arc::new(SecretPerformanceOptimizer::new(SecretPerformanceConfig::default()));
+
+    let secreton = Arc::new(SecretService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+        identity,
+        policy_service,
+        performance
+    ).await?);
+
     // Construct Routes
-    let routes = SecurityAPI::routes(storage.clone(), auth, audit)
+    let routes = SecurityAPI::routes(storage.clone(), auth, audit, seal, secreton)
         .with(
             warp::cors()
                 .allow_any_origin()
