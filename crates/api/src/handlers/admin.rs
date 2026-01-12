@@ -101,6 +101,8 @@ mod tests {
             enabled: true,
             is_active: true,
             is_superuser: true,
+            failed_login_attempts: 0,
+            locked_until: None,
         };
         // Simplified: Direct storage injection would be better if we knew the schema, 
         // but assuming we can't easily access storage internal map. 
@@ -198,6 +200,22 @@ mod tests {
         let config = body.data.expect("config payload");
         assert!(config.security.mfa_enabled);
         assert_eq!(config.api.version, "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn test_run_security_scan() {
+        let server = server_with_routes().await;
+
+        let response = server.post("/security/scan").await;
+        response.assert_status_ok();
+
+        let body: ApiResponse<SecurityScanResult> = response.json();
+        assert!(body.success);
+        let result = body.data.expect("scan result");
+
+        assert_ne!(result.scan_id, "placeholder_id");
+        assert_eq!(result.status, "completed");
+        assert!(!result.findings.is_empty());
     }
 }
 
@@ -698,19 +716,22 @@ pub async fn get_system_status(
 pub async fn run_security_scan(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<SecurityScanResult>>> {
-    let _report = state.admin.run_security_scan().await
+    let report = state.admin.run_security_scan().await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    // Assuming the report can be converted into a SecurityScanResult or contains the necessary data
-    // This part of the instruction is a bit ambiguous as `scan_result` is not defined from `report`.
-    // For now, we'll create a placeholder SecurityScanResult.
-    // In a real scenario, `state.admin.run_security_scan()` would return SecurityScanResult directly.
     let scan_result = SecurityScanResult {
-        scan_id: "placeholder_id".to_string(),
-        status: "completed".to_string(),
-        started_at: chrono::Utc::now(),
-        completed_at: Some(chrono::Utc::now()),
-        findings: vec![],
+        scan_id: report.scan_id,
+        status: report.status,
+        started_at: report.started_at,
+        completed_at: report.completed_at,
+        findings: report.findings.into_iter().map(|f| SecurityFinding {
+            severity: f.severity,
+            category: f.category,
+            title: f.title,
+            description: f.description,
+            recommendation: f.recommendation,
+            affected_resources: f.affected_resources,
+        }).collect(),
     };
 
     Ok(Json(ApiResponse::success(scan_result)))

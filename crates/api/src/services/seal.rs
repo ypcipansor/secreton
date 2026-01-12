@@ -306,7 +306,9 @@ mod tests {
     async fn test_seal_flow() {
         let storage = Arc::new(MockStorageBackend::new());
         // Clean env to ensure sealed start
-        std::env::remove_var("SECRETON_ROOT_KEY");
+        unsafe {
+            std::env::remove_var("SECRETON_ROOT_KEY");
+        }
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let seal_service = SealService::new(
             storage.clone(),
