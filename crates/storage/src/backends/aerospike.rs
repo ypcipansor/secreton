@@ -4,12 +4,13 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use thiserror::Error;
-use tracing::{debug, error, info};
+use uuid::Uuid;
 
-use crate::{StorageBackend, StorageError, SecretEntry, StorageResult};
+use crate::{
+    StorageBackend, StorageError, SecretEntry, StorageResult,
+    StorageTransaction, HealthStatus, StorageStats, QueryParams
+};
 
 /// Aerospike storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,15 +49,14 @@ pub struct AerospikeTlsConfig {
 
 /// Aerospike storage backend
 pub struct AerospikeStorage {
+    #[allow(dead_code)]
     config: AerospikeConfig,
+    #[allow(dead_code)]
     client: Option<Arc<AerospikeClient>>,
 }
 
 /// Aerospike client wrapper
-struct AerospikeClient {
-    // In a real implementation, this would contain the actual Aerospike client
-    // For now, we'll use a mock implementation
-}
+struct AerospikeClient;
 
 impl AerospikeStorage {
     /// Create a new Aerospike storage backend
@@ -66,127 +66,102 @@ impl AerospikeStorage {
             client: None,
         }
     }
-
-    /// Initialize the Aerospike client
-    async fn init_client(&self) -> Result<Arc<AerospikeClient>, StorageError> {
-        // In a real implementation, this would:
-        // 1. Create Aerospike client with the given configuration
-        // 2. Connect to the Aerospike cluster
-        // 3. Set up TLS if configured
-        // 4. Perform health check
-
-        info!("Initializing Aerospike client with hosts: {:?}", self.config.hosts);
-
-        // Mock implementation for now
-        let client = AerospikeClient {};
-        Ok(Arc::new(client))
-    }
 }
 
 #[async_trait]
-impl Storage for AerospikeStorage {
-    async fn initialize(&mut self, _config: StorageConfig) -> Result<(), StorageError> {
-        let client = self.init_client().await?;
-        self.client = Some(client);
-        info!("Aerospike storage initialized successfully");
-        Ok(())
+impl StorageBackend for AerospikeStorage {
+    async fn store(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    async fn get(&self, key: &str) -> Result<Option<StorageEntry>, StorageError> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| StorageError::NotInitialized("Aerospike client not initialized".to_string()))?;
-
-        debug!("Getting key: {}", key);
-
-        // In a real implementation, this would:
-        // 1. Query Aerospike for the key in the configured namespace/set
-        // 2. Parse the returned data
-        // 3. Return the StorageEntry
-
-        // Mock implementation - return None for demonstration
-        Ok(None)
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    async fn put(&self, entry: &StorageEntry) -> Result<(), StorageError> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| StorageError::NotInitialized("Aerospike client not initialized".to_string()))?;
-
-        debug!("Putting entry with key: {}", entry.key);
-
-        // In a real implementation, this would:
-        // 1. Serialize the StorageEntry
-        // 2. Store it in Aerospike with appropriate TTL and metadata
-        // 3. Handle conflicts and versioning
-
-        // Mock implementation
-        Ok(())
+    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| StorageError::NotInitialized("Aerospike client not initialized".to_string()))?;
-
-        debug!("Deleting key: {}", key);
-
-        // In a real implementation, this would:
-        // 1. Delete the key from Aerospike
-        // 2. Handle cleanup of associated metadata
-
-        // Mock implementation
-        Ok(())
+    async fn update(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| StorageError::NotInitialized("Aerospike client not initialized".to_string()))?;
-
-        debug!("Listing keys with prefix: {}", prefix);
-
-        // In a real implementation, this would:
-        // 1. Query Aerospike for keys matching the prefix
-        // 2. Return the list of keys
-
-        // Mock implementation - return empty list
-        Ok(Vec::new())
+    async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        let client = self.client.as_ref()
-            .ok_or_else(|| StorageError::NotInitialized("Aerospike client not initialized".to_string()))?;
-
-        debug!("Checking existence of key: {}", key);
-
-        // In a real implementation, this would:
-        // 1. Check if the key exists in Aerospike
-
-        // Mock implementation - return false
-        Ok(false)
+    async fn delete_by_path(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    fn name(&self) -> &str {
-        "aerospike"
+    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    fn supports_versioning(&self) -> bool {
-        true
+    async fn count(&self, _params: &QueryParams) -> StorageResult<u64> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 
-    fn supports_transactions(&self) -> bool {
-        true
+    async fn exists(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
-}
 
-impl Default for AerospikeConfig {
-    fn default() -> Self {
-        Self {
-            hosts: vec!["localhost:3000".to_string()],
-            namespace: "secreton".to_string(),
-            set_name: "secrets".to_string(),
-            connection_timeout: 30,
-            read_timeout: 30,
-            write_timeout: 30,
-            max_connections: 100,
-            tls: None,
-        }
+    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
+    }
+
+    async fn health_check(&self) -> StorageResult<HealthStatus> {
+        Ok(HealthStatus {
+            is_healthy: false,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: Some("Not implemented".to_string()),
+            uptime_seconds: 0,
+        })
+    }
+
+    async fn get_stats(&self) -> StorageResult<StorageStats> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
+    }
+
+    async fn migrate(&self) -> StorageResult<()> {
+        Err(StorageError::BackendError {
+            backend: "Aerospike".to_string(),
+            message: "Not implemented".to_string()
+        })
     }
 }

@@ -3,8 +3,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::{StorageBackend, StorageError, SecretEntry, StorageResult};
+use crate::{
+    StorageBackend, StorageError, SecretEntry, StorageResult,
+    StorageTransaction, HealthStatus, StorageStats, QueryParams
+};
 
 /// AliCloud OSS configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,7 +23,9 @@ pub struct AliCloudOSSConfig {
 }
 
 pub struct AliCloudOSSStorage {
+    #[allow(dead_code)]
     config: AliCloudOSSConfig,
+    #[allow(dead_code)]
     client: Option<Arc<AliCloudOSSClient>>,
 }
 
@@ -32,42 +38,55 @@ impl AliCloudOSSStorage {
 }
 
 #[async_trait]
-impl Storage for AliCloudOSSStorage {
-    async fn initialize(&mut self, _config: StorageConfig) -> Result<(), StorageError> {
-        let client = Arc::new(AliCloudOSSClient);
-        self.client = Some(client);
-        Ok(())
+impl StorageBackend for AliCloudOSSStorage {
+    async fn store(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn update(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn delete_by_path(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn count(&self, _params: &QueryParams) -> StorageResult<u64> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn exists(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn get(&self, key: &str) -> Result<Option<StorageEntry>, StorageError> {
-        Ok(None)
+    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn put(&self, _entry: &StorageEntry) -> Result<(), StorageError> {
-        Ok(())
+    async fn health_check(&self) -> StorageResult<HealthStatus> {
+        Ok(HealthStatus {
+            is_healthy: false,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: Some("Not implemented".to_string()),
+            uptime_seconds: 0,
+        })
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), StorageError> {
-        Ok(())
+    async fn get_stats(&self) -> StorageResult<StorageStats> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn list(&self, _prefix: &str) -> Result<Vec<String>, StorageError> {
-        Ok(Vec::new())
-    }
-
-    async fn exists(&self, _key: &str) -> Result<bool, StorageError> {
-        Ok(false)
-    }
-
-    fn name(&self) -> &str {
-        "alicloud_oss"
-    }
-
-    fn supports_versioning(&self) -> bool {
-        true
-    }
-
-    fn supports_transactions(&self) -> bool {
-        false
+    async fn migrate(&self) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "AliCloudOSS".to_string(), message: "Not implemented".to_string() })
     }
 }
