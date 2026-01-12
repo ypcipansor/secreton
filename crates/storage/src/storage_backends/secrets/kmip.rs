@@ -423,6 +423,7 @@ impl KmipEngine {
                         attributes: HashMap::new(),
                     },
                 }
+            }
             KmipOperation::Register => {
                 let algorithm = _request.algorithm.unwrap_or_else(|| "AES".to_string());
                 let key_material = _request.key_material.unwrap_or_default();
