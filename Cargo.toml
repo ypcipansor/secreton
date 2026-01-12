@@ -24,7 +24,7 @@ members = [
     "crates/secrets",
     "crates/auth",
     # "crates/policies",  # Merged into auth crate
-    # "crates/graphql",  # Temporarily disabled
+    "crates/graphql",
     # "crates/grpc",  # Temporarily disabled
 ]
 
