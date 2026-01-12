@@ -1,19 +1,29 @@
-//! OCI storage backend implementation
+//! OCI storage backend for Secreton
+//!
+//! This module provides a OCI-based storage backend implementation.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
+use tracing::{debug, error, info};
 
-use crate::{StorageBackend, StorageError, SecretEntry, StorageResult};
+use crate::{
+    StorageBackend, StorageError, SecretEntry, StorageResult,
+    StorageTransaction, HealthStatus, StorageStats, QueryParams
+};
 
-/// OCI configuration
+/// OCI storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OCIConfig {
-    pub compartment_id: String,
-    pub bucket: String,
+    pub namespace: String,
+    pub bucket_name: String,
     pub region: String,
-    pub config_file: String,
-    pub profile: String,
+    pub tenancy: String,
+    pub user: String,
+    pub fingerprint: String,
+    pub key_file: String,
 }
 
 pub struct OCIStorage {
@@ -30,42 +40,65 @@ impl OCIStorage {
 }
 
 #[async_trait]
-impl Storage for OCIStorage {
-    async fn initialize(&mut self, _config: StorageConfig) -> Result<(), StorageError> {
-        let client = Arc::new(OCIClient);
-        self.client = Some(client);
-        Ok(())
+impl StorageBackend for OCIStorage {
+    async fn store(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn get_by_path(&self, _path: &str) -> StorageResult<Option<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn update(&self, _entry: &SecretEntry) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn delete_by_path(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn count(&self, _params: &QueryParams) -> StorageResult<u64> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+    }
+    async fn exists(&self, _path: &str) -> StorageResult<bool> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn get(&self, key: &str) -> Result<Option<StorageEntry>, StorageError> {
-        Ok(None)
+    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn put(&self, _entry: &StorageEntry) -> Result<(), StorageError> {
-        Ok(())
+    async fn health_check(&self) -> StorageResult<HealthStatus> {
+        Ok(HealthStatus {
+            is_healthy: false,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: Some("Not implemented".to_string()),
+            uptime_seconds: 0,
+        })
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), StorageError> {
-        Ok(())
+    async fn get_stats(&self) -> StorageResult<StorageStats> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
     }
 
-    async fn list(&self, _prefix: &str) -> Result<Vec<String>, StorageError> {
-        Ok(Vec::new())
+    async fn migrate(&self) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
     }
+}
 
-    async fn exists(&self, _key: &str) -> Result<bool, StorageError> {
-        Ok(false)
-    }
-
-    fn name(&self) -> &str {
-        "oci"
-    }
-
-    fn supports_versioning(&self) -> bool {
-        true
-    }
-
-    fn supports_transactions(&self) -> bool {
-        false
-    }
+struct MockTransaction;
+#[async_trait]
+impl StorageTransaction for MockTransaction {
+    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> { Ok(()) }
+    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> { Ok(()) }
+    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> { Ok(true) }
+    async fn commit(self: Box<Self>) -> StorageResult<()> { Ok(()) }
+    async fn rollback(self: Box<Self>) -> StorageResult<()> { Ok(()) }
 }

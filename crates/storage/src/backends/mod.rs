@@ -20,16 +20,16 @@ pub mod s3;
 // pub mod gcs;
 
 // Additional storage backends
-// pub mod aerospike;
-// pub mod alicloud_oss;
-// pub mod couchdb;
-// pub mod foundationdb;
-// pub mod manta;
-// pub mod mssql;
-// pub mod oci;
-// pub mod spanner;
-// pub mod swift;
-// pub mod zookeeper;
+pub mod aerospike;
+pub mod alicloud_oss;
+pub mod couchdb;
+pub mod foundationdb;
+pub mod manta;
+pub mod mssql;
+pub mod oci;
+pub mod spanner;
+pub mod swift;
+pub mod zookeeper;
 // pub mod additional_backends;
 
 pub use file::FileBackend;
@@ -52,13 +52,13 @@ pub use s3::{S3Storage, S3StorageConfig};
 // pub use gcs::{GcsConfig, GoogleCloudStorage};
 
 // Export additional backends
-// pub use aerospike::{AerospikeStorage, AerospikeConfig};
-// pub use alicloud_oss::{AliCloudOSSStorage, AliCloudOSSConfig};
-// pub use couchdb::{CouchDBStorage, CouchDBConfig};
-// pub use foundationdb::{FoundationDBStorage, FoundationDBConfig};
-// pub use manta::{MantaStorage, MantaConfig};
-// pub use mssql::{MSSQLStorage, MSSQLConfig};
-// pub use oci::{OCIStorage, OCIConfig};
-// pub use spanner::{SpannerStorage, SpannerConfig};
-// pub use swift::{SwiftStorage, SwiftConfig};
-// pub use zookeeper::{ZooKeeperStorage, ZooKeeperConfig};
+pub use aerospike::{AerospikeStorage, AerospikeConfig};
+pub use alicloud_oss::{AliCloudOSSStorage, AliCloudOSSConfig};
+pub use couchdb::{CouchDBStorage, CouchDBConfig};
+pub use foundationdb::{FoundationDBStorage, FoundationDBConfig};
+pub use manta::{MantaStorage, MantaConfig};
+pub use mssql::{MSSQLStorage, MSSQLConfig};
+pub use oci::{OCIStorage, OCIConfig};
+pub use spanner::{SpannerStorage, SpannerConfig};
+pub use swift::{SwiftStorage, SwiftConfig};
+pub use zookeeper::{ZooKeeperStorage, ZooKeeperConfig};
