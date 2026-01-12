@@ -393,19 +393,34 @@ mod tests {
     async fn test_template_validation() {
         let db_conn = DatabaseConnectionStrings::new();
 
+        // Test valid template (Fixed missing placeholders)
+        let valid_template = ConnectionTemplate {
+            template_id: "valid".to_string(),
+            name: "Valid".to_string(),
+            database_type: DatabaseType::MySQL,
+            template_string: "mysql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}".to_string(),
+            default_port: 3306,
+            ssl_enabled: false,
+            connection_options: HashMap::new(),
+            created_at: Utc::now(),
+        };
+        let result_valid = db_conn.register_template(valid_template).await;
+        assert!(result_valid.is_ok());
+
+        // Test invalid template (missing placeholders)
         let invalid_template = ConnectionTemplate {
             template_id: "invalid".to_string(),
             name: "Invalid".to_string(),
             database_type: DatabaseType::MySQL,
-            template_string: "mysql://{{username}}@{{host}}".to_string(), // Missing placeholders
+            template_string: "mysql://{{username}}@{{host}}".to_string(),
             default_port: 3306,
             ssl_enabled: false,
             connection_options: HashMap::new(),
             created_at: Utc::now(),
         };
 
-        let result = db_conn.register_template(invalid_template).await;
-        assert!(result.is_err());
+        let result_invalid = db_conn.register_template(invalid_template).await;
+        assert!(result_invalid.is_err());
     }
 
     #[tokio::test]
