@@ -2,12 +2,16 @@ use std::env;
 use std::sync::Arc;
 use tracing::{info, warn};
 use warp::Filter;
-use secreton_api::config::ApiConfig;
+use secreton_api::config::{ApiConfig, AuthConfig};
 use secreton_api::services::config::ConfigService;
-use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType, FileBackendConfig};
+use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType};
+use secreton_storage::factory::FileBackendConfig;
 
 // Use the existing security API from lib.rs
 use secreton_api::{SecurityAPI, handle_rejection};
+use secreton_api::services::crypto::CryptoService;
+use secreton_api::services::auth::AuthenticationService;
+use secreton_api::services::audit::AuditLogger;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This part effectively replaces .env dependency for core configuration
     // We bootstrap a storage connection here.
     let storage_config = StorageFactoryConfig {
-        backend_type: if let Ok(path) = env::var("SECRETON_STORAGE_FILE_PATH") {
+        backend_type: if let Ok(_path) = env::var("SECRETON_STORAGE_FILE_PATH") {
             StorageBackendType::File
         } else {
              StorageBackendType::Memory
@@ -54,12 +58,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Initialize Services
+    let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
+    let auth_config = AuthConfig::default(); // Using default as we don't have full config load setup yet
+    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &auth_config).await?);
+    let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
+
     // Construct Routes
-    let routes = SecurityAPI::routes(storage.clone())
+    let routes = SecurityAPI::routes(storage.clone(), auth, audit)
         .with(
             warp::cors()
                 .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
                 .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
         )
         .with(warp::log("security_api"))

@@ -2,6 +2,7 @@ use crate::services::config::ConfigService;
 use crate::config::ApiConfig;
 use secreton_storage::StorageBackend;
 use crate::services::auth::AuthenticationService;
+use crate::services::audit::{AuditLogger, SecurityEventType};
 use warp::{Rejection, Reply};
 use std::sync::Arc;
 use tracing::{info, error, warn};
@@ -12,7 +13,10 @@ pub async fn handle_post_config(
     config: ApiConfig,
     storage: Arc<dyn StorageBackend>,
     auth: Arc<AuthenticationService>,
+    audit: Arc<AuditLogger>,
 ) -> Result<impl Reply, Rejection> {
+
+    let mut username = "system".to_string();
 
     // Validate token and check permissions
     match auth.validate_token(&token).await {
@@ -23,7 +27,8 @@ pub async fn handle_post_config(
                 warn!("Unauthorized config update attempt by user: {}", user.username);
                 return Err(warp::reject::custom(crate::ApiError::Authorization("Insufficient permissions".to_string())));
             }
-            info!("Authorized config update by user: {}", user.username);
+            username = user.username.clone();
+            info!("Authorized config update by user: {}", username);
         },
         Err(_) => {
             // Allow if bootstrapping (no users exist yet)
@@ -31,6 +36,7 @@ pub async fn handle_post_config(
             let user_count = auth.get_user_count().await.unwrap_or(0);
             if user_count == 0 {
                 info!("Allowing config update during bootstrapping (no users found)");
+                username = "bootstrapper".to_string();
             } else {
                  warn!("Unauthorized config update attempt: invalid token");
                  return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
@@ -43,6 +49,13 @@ pub async fn handle_post_config(
     match ConfigService::save_config(storage.as_ref(), &config).await {
         Ok(_) => {
             info!("Configuration updated successfully");
+
+            // Log audit event
+            let _ = audit.log_event(SecurityEventType::ConfigChange {
+                user: username,
+                changed_keys: vec!["all".to_string()], // We don't diff yet
+            }).await;
+
             Ok(warp::reply::json(&crate::ApiResponse::<()>::success(())))
         }
         Err(e) => {
