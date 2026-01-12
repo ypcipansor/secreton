@@ -69,9 +69,7 @@ impl ApiServiceContainer {
         let _registry = StandardServiceContainer::new();
         
         // Initialize storage backend
-        // Use default/mock for now as per create_storage_backend placeholder
-        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(secreton_storage::MockStorageBackend::new()); 
-        // Note: Real implementation would use config to pick backend
+        let storage = secreton_storage::StorageFactory::create(config.storage.clone()).await?;
 
         // Initialize crypto service
         let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
@@ -240,14 +238,6 @@ impl ApiServiceContainer {
         })
     }
 
-    /// Create storage backend based on configuration
-    /// Reserved for future implementation of configurable storage backends
-    #[allow(dead_code)]
-    async fn create_storage_backend(&self) -> Result<Arc<dyn StorageBackend + Send + Sync>> {
-        // Implementation would go here - simplified for now
-        // This would use the config to determine which storage backend to create
-        Ok(Arc::new(secreton_storage::MockStorageBackend::new()))
-    }
 
     pub fn get_service<T: 'static>(&self, name: &str) -> Result<&T> {
         self.registry.get_service(name)

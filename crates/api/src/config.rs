@@ -35,6 +35,9 @@ pub struct ApiConfig {
 
     /// Logging configuration
     pub logging: LoggingConfig,
+
+    /// Storage configuration
+    pub storage: secreton_storage::StorageFactoryConfig,
 }
 
 /// HTTP server configuration
@@ -746,6 +749,7 @@ mod tests {
                 file: None,
                 rotation: None,
             },
+            storage: secreton_storage::StorageFactoryConfig::default(),
         }
     }
 
