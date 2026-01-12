@@ -76,7 +76,8 @@ impl AuditLogger {
                 (CoreAuditEventType::Custom("config.change".to_string()), AuditStatus::Success, user, "config".to_string(), "change".to_string(),
                  Some(vec![("changed_keys".to_string(), changed_keys.join(","))].into_iter().collect())),
             SecurityEventType::SealOperation { operation, user, success } =>
-                (CoreAuditEventType::Custom("seal.operation".to_string()), if success { AuditStatus::Success } else { AuditStatus::Failure }, user, "seal".to_string(), operation, None),
+                (CoreAuditEventType::Custom("seal.operation".to_string()), if success { AuditStatus::Success } else { AuditStatus::Failure }, user, "seal".to_string(), operation,
+                 Some(vec![("success".to_string(), success.to_string())].into_iter().collect())),
         };
 
         let mut audit_event = AuditEvent::new(core_type, status, user, resource, op);

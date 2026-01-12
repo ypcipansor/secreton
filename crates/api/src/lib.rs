@@ -388,8 +388,12 @@ impl SecurityAPI {
     /// Create all API routes with enhanced security operations
     pub fn routes(
         storage: Arc<dyn StorageBackend>,
+        auth: Arc<crate::services::auth::AuthenticationService>,
+        audit: Arc<crate::services::audit::AuditLogger>,
     ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let storage_filter = warp::any().map(move || storage.clone());
+        let auth_filter = warp::any().map(move || auth.clone());
+        let audit_filter = warp::any().map(move || audit.clone());
 
         let health = warp::path("health")
             .and(warp::get())
@@ -437,6 +441,8 @@ impl SecurityAPI {
             .and(admin_auth)
             .and(warp::body::json())
             .and(storage_filter.clone())
+            .and(auth_filter.clone())
+            .and(audit_filter.clone())
             .and_then(crate::handlers::config::handle_post_config);
 
         let config_get = warp::path("sys")
@@ -709,10 +715,16 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     // In production, use api_server.rs which configures storage properly
     let storage = Arc::new(secreton_storage::MockStorageBackend::new());
 
-    // Inject storage into routes
+    // Initialize required services for auth and audit
+    let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+    let auth_config = crate::config::AuthConfig::default();
+    let auth = Arc::new(crate::services::auth::AuthenticationService::new(storage.clone(), crypto, &auth_config).await.unwrap());
+    let audit = Arc::new(crate::services::audit::AuditLogger::new(storage.clone()).await.unwrap());
+
+    // Inject storage, auth and audit into routes
     // For start_security_server, we just use the mock storage since this function
     // doesn't accept storage configuration
-    let routes_with_storage = SecurityAPI::routes(storage)
+    let routes_with_storage = SecurityAPI::routes(storage, auth, audit)
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -789,7 +801,7 @@ impl axum::response::IntoResponse for ApiError {
 impl reject::Reject for ApiError {}
 
 /// Global error handler for API rejections
-async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
     let code;
     let message;
 
