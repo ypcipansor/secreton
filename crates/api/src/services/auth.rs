@@ -568,7 +568,7 @@ impl AuthenticationService {
 
         // Encrypt user data
         let encrypted_data = self.crypto.encrypt_data(&user_data).await
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Encryption error: {}", e)))?;
 
         let entry = SecretEntry::new(
             path,

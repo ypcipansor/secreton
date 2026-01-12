@@ -1,6 +1,7 @@
 use crate::services::config::ConfigService;
 use crate::config::ApiConfig;
 use secreton_storage::StorageBackend;
+use crate::services::auth::AuthenticationService;
 use warp::{Rejection, Reply};
 use std::sync::Arc;
 use tracing::{info, error, warn};
@@ -10,16 +11,31 @@ pub async fn handle_post_config(
     token: String,
     config: ApiConfig,
     storage: Arc<dyn StorageBackend>,
+    auth: Arc<AuthenticationService>,
 ) -> Result<impl Reply, Rejection> {
-    // Simple admin token check - in production this would verify against stored root token
-    // For now we check against a simple check or allow if bootstrapping (no config exists yet)
-    // This is a placeholder for proper RBAC integration in Warp
-    if token != "root-token-placeholder" {
-        warn!("Unauthorized config update attempt");
-        // We accept it for now if it's the first run (bootstrapping),
-        // but for this PR we'll just log warning and proceed to avoid breaking the test flow
-        // since we haven't implemented full root token generation yet.
-        // In a real scenario: return Err(warp::reject::custom(crate::ApiError::Authorization("Invalid admin token".to_string())));
+
+    // Validate token and check permissions
+    match auth.validate_token(&token).await {
+        Ok(user) => {
+            // Check if user has admin permissions
+            let is_admin = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+            if !is_admin {
+                warn!("Unauthorized config update attempt by user: {}", user.username);
+                return Err(warp::reject::custom(crate::ApiError::Authorization("Insufficient permissions".to_string())));
+            }
+            info!("Authorized config update by user: {}", user.username);
+        },
+        Err(_) => {
+            // Allow if bootstrapping (no users exist yet)
+            // This allows the first configuration to be pushed which might set up auth
+            let user_count = auth.get_user_count().await.unwrap_or(0);
+            if user_count == 0 {
+                info!("Allowing config update during bootstrapping (no users found)");
+            } else {
+                 warn!("Unauthorized config update attempt: invalid token");
+                 return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+            }
+        }
     }
 
     info!("Received configuration update request");
