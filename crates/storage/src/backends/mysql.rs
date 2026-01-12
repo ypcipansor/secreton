@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
-use mysql::prelude::Queryable;
+use mysql_async::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -41,31 +41,35 @@ impl Default for MySQLStorageConfig {
 /// MySQL storage backend
 pub struct MySQLStorage {
     config: MySQLStorageConfig,
-    pool: mysql::Pool,
+    pool: mysql_async::Pool,
     cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// MySQL transaction implementation
 pub struct MySQLTransaction {
+    pool: mysql_async::Pool,
+    table_name: String,
+    cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
     operations: Vec<MySQLOperation>,
     committed: bool,
 }
 
 enum MySQLOperation {
-    Store(()),
-    Update(()),
-    Delete(()),
-}
-
-impl Default for MySQLTransaction {
-    fn default() -> Self {
-        Self::new()
-    }
+    Store(SecretEntry),
+    Update(SecretEntry),
+    Delete(Uuid),
 }
 
 impl MySQLTransaction {
-    pub fn new() -> Self {
+    pub fn new(
+        pool: mysql_async::Pool,
+        table_name: String,
+        cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
+    ) -> Self {
         Self {
+            pool,
+            table_name,
+            cache,
             operations: Vec::new(),
             committed: false,
         }
@@ -74,33 +78,35 @@ impl MySQLTransaction {
 
 #[async_trait]
 impl StorageTransaction for MySQLTransaction {
-    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
+    async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Store(()));
+        self.operations
+            .push(MySQLOperation::Store(entry.clone()));
         Ok(())
     }
 
-    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
+    async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Update(()));
+        self.operations
+            .push(MySQLOperation::Update(entry.clone()));
         Ok(())
     }
 
-    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
+    async fn delete(&mut self, id: Uuid) -> StorageResult<bool> {
         if self.committed {
             return Err(StorageError::TransactionFailed {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations.push(MySQLOperation::Delete(()));
+        self.operations.push(MySQLOperation::Delete(id));
         Ok(true)
     }
 
@@ -111,10 +117,130 @@ impl StorageTransaction for MySQLTransaction {
             });
         }
 
-        // In a real MySQL implementation, you would execute all operations
-        // in a transaction using the mysql crate's transaction support
-        // For now, we just mark as committed since we don't have a real connection
+        if self.operations.is_empty() {
+            self.committed = true;
+            return Ok(());
+        }
+
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let mut tx = conn
+            .start_transaction(mysql_async::TxOpts::default())
+            .await
+            .map_err(|e| StorageError::TransactionFailed {
+                message: format!("Failed to start transaction: {}", e),
+            })?;
+
+        // Cache updates to apply after successful commit
+        let mut cache_inserts = Vec::new();
+        let mut cache_removals = Vec::new();
+
+        for op in &self.operations {
+            match op {
+                MySQLOperation::Store(entry) | MySQLOperation::Update(entry) => {
+                    let query = MySQLStorage::build_upsert_query(&self.table_name);
+
+                    let encryption_metadata_json =
+                        serde_json::to_string(&entry.encryption_metadata).map_err(|e| {
+                            StorageError::SerializationError {
+                                message: format!("Failed to serialize encryption metadata: {}", e),
+                            }
+                        })?;
+
+                    let metadata_json =
+                        serde_json::to_string(&entry.metadata).map_err(|e| {
+                            StorageError::SerializationError {
+                                message: format!("Failed to serialize metadata: {}", e),
+                            }
+                        })?;
+
+                    let tags_json =
+                        serde_json::to_string(&entry.tags).map_err(|e| {
+                            StorageError::SerializationError {
+                                message: format!("Failed to serialize tags: {}", e),
+                            }
+                        })?;
+
+                    let expires_at: Option<NaiveDateTime> =
+                        entry.expires_at.map(|dt| dt.naive_utc());
+
+                    tx.exec_drop(
+                        &query,
+                        (
+                            &entry.id.to_string(),
+                            &entry.path,
+                            &entry.encrypted_data,
+                            &encryption_metadata_json,
+                            entry.security_level as u8,
+                            &metadata_json,
+                            &tags_json,
+                            entry.version,
+                            &entry.owner_id.to_string(),
+                            entry.created_at.naive_utc(),
+                            entry.updated_at.naive_utc(),
+                            &expires_at,
+                        ),
+                    )
+                    .await
+                    .map_err(|e| StorageError::BackendError {
+                        backend: "mysql".to_string(),
+                        message: format!("Failed to execute transaction operation: {}", e),
+                    })?;
+
+                    cache_inserts.push(entry.clone());
+                }
+                MySQLOperation::Delete(id) => {
+                    // Try to get path for cache invalidation
+                    let select_query =
+                        format!("SELECT path FROM `{}` WHERE id = ?", self.table_name);
+                    let path: Option<String> = tx
+                        .exec_first(&select_query, (id.to_string(),))
+                        .await
+                        .map_err(|e| StorageError::BackendError {
+                            backend: "mysql".to_string(),
+                            message: format!("Failed to query path for deletion: {}", e),
+                        })?;
+
+                    if let Some(p) = path {
+                        let delete_query = MySQLStorage::build_delete_query_by_id(&self.table_name);
+                        tx.exec_drop(&delete_query, (id.to_string(),))
+                            .await
+                            .map_err(|e| StorageError::BackendError {
+                                backend: "mysql".to_string(),
+                                message: format!("Failed to execute delete operation: {}", e),
+                            })?;
+
+                        cache_removals.push(p);
+                    }
+                }
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| StorageError::TransactionFailed {
+                message: format!("Failed to commit transaction: {}", e),
+            })?;
+
         self.committed = true;
+
+        // Apply cache updates
+        if !cache_inserts.is_empty() || !cache_removals.is_empty() {
+            let mut cache = self.cache.write().await;
+            for entry in cache_inserts {
+                cache.insert(entry.path.clone(), entry);
+            }
+            for path in cache_removals {
+                cache.remove(&path);
+            }
+        }
+
         Ok(())
     }
 
@@ -178,14 +304,12 @@ impl MySQLStorage {
         // SECURITY FIX: Validate table name before use
         Self::validate_sql_identifier(&config.table_name)?;
 
-        let opts = mysql::Opts::from_url(&config.connection_string).map_err(|e| {
+        let opts = mysql_async::Opts::from_url(&config.connection_string).map_err(|e| {
             StorageError::ConnectionFailed {
                 message: format!("Invalid MySQL URL: {}", e),
             }
         })?;
-        let pool = mysql::Pool::new(opts).map_err(|e| StorageError::ConnectionFailed {
-            message: format!("Failed to create MySQL pool: {}", e),
-        })?;
+        let pool = mysql_async::Pool::new(opts);
 
         // Create table if not exists
         Self::create_table_if_not_exists(&pool, &config.table_name).await?;
@@ -199,11 +323,12 @@ impl MySQLStorage {
 
     /// Create table if not exists
     async fn create_table_if_not_exists(
-        pool: &mysql::Pool,
+        pool: &mysql_async::Pool,
         table_name: &str,
     ) -> Result<(), StorageError> {
         let mut conn = pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
@@ -232,6 +357,7 @@ impl MySQLStorage {
         );
 
         conn.query_drop(create_table_query)
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to create table: {}", e),
@@ -241,7 +367,7 @@ impl MySQLStorage {
     }
 
     /// Build MySQL query for inserting/updating entries
-    fn build_upsert_query(&self, _entry: &SecretEntry) -> String {
+    fn build_upsert_query(table_name: &str) -> String {
         format!(
             r#"
             INSERT INTO `{}` (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)
@@ -256,34 +382,39 @@ impl MySQLStorage {
                 updated_at = CURRENT_TIMESTAMP,
                 expires_at = VALUES(expires_at)
             "#,
-            self.config.table_name
+            table_name
         )
     }
 
     /// Build MySQL query for selecting entries
-    fn build_select_query(&self, _path: &str) -> String {
+    fn build_select_query(table_name: &str) -> String {
         format!(
             "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE path = ?",
-            self.config.table_name
+            table_name
         )
     }
 
-    /// Build MySQL query for deleting entries
-    fn build_delete_query(&self, _path: &str) -> String {
-        format!("DELETE FROM `{}` WHERE path = ?", self.config.table_name)
+    /// Build MySQL query for deleting entries by path
+    fn build_delete_query(table_name: &str) -> String {
+        format!("DELETE FROM `{}` WHERE path = ?", table_name)
+    }
+
+    /// Build MySQL query for deleting entries by id
+    fn build_delete_query_by_id(table_name: &str) -> String {
+        format!("DELETE FROM `{}` WHERE id = ?", table_name)
     }
 
     /// Build MySQL query for listing entries with prefix
-    fn build_list_query(&self, prefix: &str) -> String {
+    fn build_list_query(table_name: &str, prefix: &str) -> String {
         if prefix.is_empty() {
             format!(
                 "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` ORDER BY path",
-                self.config.table_name
+                table_name
             )
         } else {
             format!(
                 "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE path LIKE ? ORDER BY path",
-                self.config.table_name
+                table_name
             )
         }
     }
@@ -295,11 +426,12 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = self.build_upsert_query(entry);
+        let query = MySQLStorage::build_upsert_query(&self.config.table_name);
 
         let encryption_metadata_json =
             serde_json::to_string(&entry.encryption_metadata).map_err(|e| {
@@ -337,6 +469,7 @@ impl StorageBackend for MySQLStorage {
                 &expires_at,
             ),
         )
+        .await
         .map_err(|e| StorageError::BackendError {
             backend: "mysql".to_string(),
             message: format!("Failed to store entry: {}", e),
@@ -367,21 +500,23 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = self.build_select_query(path);
+        let query = MySQLStorage::build_select_query(&self.config.table_name);
 
-        let rows: Vec<mysql::Row> =
+        let rows: Vec<mysql_async::Row> =
             conn.exec(&query, (path,))
+                .await
                 .map_err(|e| StorageError::BackendError {
                     backend: "mysql".to_string(),
                     message: format!("Failed to query entry: {}", e),
                 })?;
 
         if let Some(row) = rows.first() {
-            let entry = self.row_to_secreton_entry(row)?;
+            let entry = MySQLStorage::row_to_secreton_entry(row)?;
             let mut cache = self.cache.write().await;
             cache.insert(path.to_string(), entry.clone());
             Ok(Some(entry))
@@ -404,13 +539,15 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = self.build_delete_query(path);
+        let query = MySQLStorage::build_delete_query(&self.config.table_name);
 
         conn.exec_drop(&query, (path,))
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to delete entry: {}", e),
@@ -427,14 +564,20 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = self.build_list_query(params.path_prefix.as_deref().unwrap_or(""));
+        let query = MySQLStorage::build_list_query(
+            &self.config.table_name,
+            params.path_prefix.as_deref().unwrap_or(""),
+        );
 
-        let rows: Vec<mysql::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty() {
+        let rows: Vec<mysql_async::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty()
+        {
             conn.exec(&query, ())
+                .await
                 .map_err(|e| StorageError::BackendError {
                     backend: "mysql".to_string(),
                     message: format!("Failed to list entries: {}", e),
@@ -444,6 +587,7 @@ impl StorageBackend for MySQLStorage {
                 &query,
                 (format!("{}%", params.path_prefix.as_deref().unwrap_or("")),),
             )
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to list entries: {}", e),
@@ -452,7 +596,7 @@ impl StorageBackend for MySQLStorage {
 
         let mut entries = Vec::new();
         for row in rows {
-            let entry = self.row_to_secreton_entry(&row)?;
+            let entry = MySQLStorage::row_to_secreton_entry(&row)?;
             entries.push(entry);
         }
 
@@ -488,13 +632,18 @@ impl StorageBackend for MySQLStorage {
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        Ok(Box::new(MySQLTransaction::new()))
+        Ok(Box::new(MySQLTransaction::new(
+            self.pool.clone(),
+            self.config.table_name.clone(),
+            self.cache.clone(),
+        )))
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         let start = std::time::Instant::now();
 
-        let result = self.pool.get_conn();
+        // mysql_async doesn't have a direct health check, but we can try to get a connection
+        let result = self.pool.get_conn().await;
 
         let duration = start.elapsed().as_millis() as f64;
 
@@ -553,7 +702,7 @@ impl StorageBackend for MySQLStorage {
 
 impl MySQLStorage {
     /// Convert MySQL row to SecretEntry
-    fn row_to_secreton_entry(&self, row: &mysql::Row) -> Result<SecretEntry, StorageError> {
+    fn row_to_secreton_entry(row: &mysql_async::Row) -> Result<SecretEntry, StorageError> {
         let id: String = row.get(0).ok_or_else(|| StorageError::SerializationError {
             message: "Missing id field".to_string(),
         })?;
@@ -695,43 +844,14 @@ mod tests {
 
     #[test]
     fn test_build_upsert_query() {
-        let config = MySQLStorageConfig::default();
-        let storage = MySQLStorage {
-            config,
-            pool: mysql::Pool::new("mysql://test").unwrap(),
-            cache: Arc::new(RwLock::new(HashMap::new())),
-        };
-
-        let entry = SecretEntry::new(
-            "test/path".to_string(),
-            vec![1, 2, 3],
-            crate::EncryptionMetadata {
-                algorithm: "aes-256-gcm".to_string(),
-                key_id: "key-123".to_string(),
-                iv: vec![0; 12],
-                auth_tag: None,
-                aad: None,
-                kdf_params: None,
-            },
-            crate::SecurityLevel::Secret,
-            Uuid::new_v4(),
-        );
-
-        let query = storage.build_upsert_query(&entry);
+        let query = MySQLStorage::build_upsert_query("secreton_kv_store");
         assert!(query.contains("INSERT INTO `secreton_kv_store`"));
         assert!(query.contains("ON DUPLICATE KEY UPDATE"));
     }
 
     #[test]
     fn test_build_select_query() {
-        let config = MySQLStorageConfig::default();
-        let storage = MySQLStorage {
-            config,
-            pool: mysql::Pool::new("mysql://test").unwrap(),
-            cache: Arc::new(RwLock::new(HashMap::new())),
-        };
-
-        let query = storage.build_select_query("test/path");
+        let query = MySQLStorage::build_select_query("secreton_kv_store");
         assert!(query.contains("SELECT"));
         assert!(query.contains("FROM `secreton_kv_store`"));
         assert!(query.contains("WHERE path = ?"));
