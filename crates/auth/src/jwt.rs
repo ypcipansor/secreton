@@ -162,12 +162,14 @@ impl Default for TokenConfig {
     fn default() -> Self {
         Self {
             jwt_secret: std::env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| {
-                eprintln!("WARNING: Using default insecure JWT secret! Set SECRETON_JWT_SECRET in production.");
-                "default-secret-change-in-production".to_string()
+                let secret = Uuid::new_v4().to_string();
+                eprintln!("NOTICE: SECRETON_JWT_SECRET not set. Generated a random secret. Tokens will be invalid after restart.");
+                secret
             }),
             jwt_refresh_secret: std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
-                eprintln!("WARNING: Using default insecure JWT refresh secret! Set SECRETON_JWT_REFRESH_SECRET in production.");
-                "default-refresh-secret-change-in-production".to_string()
+                let secret = Uuid::new_v4().to_string();
+                eprintln!("NOTICE: SECRETON_JWT_REFRESH_SECRET not set. Generated a random secret. Tokens will be invalid after restart.");
+                secret
             }),
             access_token_duration: Duration::hours(1),
             refresh_token_duration: Duration::days(7),
@@ -332,5 +334,39 @@ impl JwtTokenService {
             &[],   // Policies not stored in refresh token (should be fetched from user data)
             false, // MFA status should be checked separately
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_config_random_secrets() {
+        // Ensure environment variables are not set for this test
+        // Note: tests run in parallel, so modifying env vars might affect other tests
+        // But since we only care about the default case here, we can try to rely on them not being set
+        // or temporarily unset them if we can serialize tests.
+        // Ideally we shouldn't modify global env in tests.
+        // However, TokenConfig::default() reads env vars directly.
+        // Assuming they are not set in the build environment.
+
+        // We will only run assertions if the env vars are NOT set.
+        if std::env::var("SECRETON_JWT_SECRET").is_err() {
+            let config1 = TokenConfig::default();
+            let config2 = TokenConfig::default();
+
+            // Check it's not the old default
+            assert_ne!(config1.jwt_secret, "default-secret-change-in-production");
+            assert_ne!(config1.jwt_refresh_secret, "default-refresh-secret-change-in-production");
+
+            // Check randomness (highly unlikely to match)
+            assert_ne!(config1.jwt_secret, config2.jwt_secret);
+            assert_ne!(config1.jwt_refresh_secret, config2.jwt_refresh_secret);
+
+        // Check length (UUID is 36 chars)
+        assert_eq!(config1.jwt_secret.len(), 36);
+        assert_eq!(config1.jwt_refresh_secret.len(), 36);
+        }
     }
 }
