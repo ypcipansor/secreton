@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
-use mysql::prelude::Queryable;
+use mysql_async::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -41,13 +41,13 @@ impl Default for MySQLStorageConfig {
 /// MySQL storage backend
 pub struct MySQLStorage {
     config: MySQLStorageConfig,
-    pool: mysql::Pool,
+    pool: mysql_async::Pool,
     cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
 }
 
 /// MySQL transaction implementation
 pub struct MySQLTransaction {
-    pool: mysql::Pool,
+    pool: mysql_async::Pool,
     table_name: String,
     cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
     operations: Vec<MySQLOperation>,
@@ -62,7 +62,7 @@ enum MySQLOperation {
 
 impl MySQLTransaction {
     pub fn new(
-        pool: mysql::Pool,
+        pool: mysql_async::Pool,
         table_name: String,
         cache: Arc<RwLock<HashMap<String, SecretEntry>>>,
     ) -> Self {
@@ -125,12 +125,14 @@ impl StorageTransaction for MySQLTransaction {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
         let mut tx = conn
-            .start_transaction(mysql::TxOpts::default())
+            .start_transaction(mysql_async::TxOpts::default())
+            .await
             .map_err(|e| StorageError::TransactionFailed {
                 message: format!("Failed to start transaction: {}", e),
             })?;
@@ -185,6 +187,7 @@ impl StorageTransaction for MySQLTransaction {
                             &expires_at,
                         ),
                     )
+                    .await
                     .map_err(|e| StorageError::BackendError {
                         backend: "mysql".to_string(),
                         message: format!("Failed to execute transaction operation: {}", e),
@@ -198,6 +201,7 @@ impl StorageTransaction for MySQLTransaction {
                         format!("SELECT path FROM `{}` WHERE id = ?", self.table_name);
                     let path: Option<String> = tx
                         .exec_first(&select_query, (id.to_string(),))
+                        .await
                         .map_err(|e| StorageError::BackendError {
                             backend: "mysql".to_string(),
                             message: format!("Failed to query path for deletion: {}", e),
@@ -206,6 +210,7 @@ impl StorageTransaction for MySQLTransaction {
                     if let Some(p) = path {
                         let delete_query = MySQLStorage::build_delete_query_by_id(&self.table_name);
                         tx.exec_drop(&delete_query, (id.to_string(),))
+                            .await
                             .map_err(|e| StorageError::BackendError {
                                 backend: "mysql".to_string(),
                                 message: format!("Failed to execute delete operation: {}", e),
@@ -218,6 +223,7 @@ impl StorageTransaction for MySQLTransaction {
         }
 
         tx.commit()
+            .await
             .map_err(|e| StorageError::TransactionFailed {
                 message: format!("Failed to commit transaction: {}", e),
             })?;
@@ -298,14 +304,12 @@ impl MySQLStorage {
         // SECURITY FIX: Validate table name before use
         Self::validate_sql_identifier(&config.table_name)?;
 
-        let opts = mysql::Opts::from_url(&config.connection_string).map_err(|e| {
+        let opts = mysql_async::Opts::from_url(&config.connection_string).map_err(|e| {
             StorageError::ConnectionFailed {
                 message: format!("Invalid MySQL URL: {}", e),
             }
         })?;
-        let pool = mysql::Pool::new(opts).map_err(|e| StorageError::ConnectionFailed {
-            message: format!("Failed to create MySQL pool: {}", e),
-        })?;
+        let pool = mysql_async::Pool::new(opts);
 
         // Create table if not exists
         Self::create_table_if_not_exists(&pool, &config.table_name).await?;
@@ -319,11 +323,12 @@ impl MySQLStorage {
 
     /// Create table if not exists
     async fn create_table_if_not_exists(
-        pool: &mysql::Pool,
+        pool: &mysql_async::Pool,
         table_name: &str,
     ) -> Result<(), StorageError> {
         let mut conn = pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
@@ -352,6 +357,7 @@ impl MySQLStorage {
         );
 
         conn.query_drop(create_table_query)
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to create table: {}", e),
@@ -420,6 +426,7 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
@@ -462,6 +469,7 @@ impl StorageBackend for MySQLStorage {
                 &expires_at,
             ),
         )
+        .await
         .map_err(|e| StorageError::BackendError {
             backend: "mysql".to_string(),
             message: format!("Failed to store entry: {}", e),
@@ -492,14 +500,16 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
         let query = MySQLStorage::build_select_query(&self.config.table_name);
 
-        let rows: Vec<mysql::Row> =
+        let rows: Vec<mysql_async::Row> =
             conn.exec(&query, (path,))
+                .await
                 .map_err(|e| StorageError::BackendError {
                     backend: "mysql".to_string(),
                     message: format!("Failed to query entry: {}", e),
@@ -529,6 +539,7 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
@@ -536,6 +547,7 @@ impl StorageBackend for MySQLStorage {
         let query = MySQLStorage::build_delete_query(&self.config.table_name);
 
         conn.exec_drop(&query, (path,))
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to delete entry: {}", e),
@@ -552,6 +564,7 @@ impl StorageBackend for MySQLStorage {
         let mut conn = self
             .pool
             .get_conn()
+            .await
             .map_err(|e| StorageError::ConnectionFailed {
                 message: format!("Failed to get connection: {}", e),
             })?;
@@ -561,8 +574,10 @@ impl StorageBackend for MySQLStorage {
             params.path_prefix.as_deref().unwrap_or(""),
         );
 
-        let rows: Vec<mysql::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty() {
+        let rows: Vec<mysql_async::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty()
+        {
             conn.exec(&query, ())
+                .await
                 .map_err(|e| StorageError::BackendError {
                     backend: "mysql".to_string(),
                     message: format!("Failed to list entries: {}", e),
@@ -572,6 +587,7 @@ impl StorageBackend for MySQLStorage {
                 &query,
                 (format!("{}%", params.path_prefix.as_deref().unwrap_or("")),),
             )
+            .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to list entries: {}", e),
@@ -626,7 +642,8 @@ impl StorageBackend for MySQLStorage {
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         let start = std::time::Instant::now();
 
-        let result = self.pool.get_conn();
+        // mysql_async doesn't have a direct health check, but we can try to get a connection
+        let result = self.pool.get_conn().await;
 
         let duration = start.elapsed().as_millis() as f64;
 
@@ -685,7 +702,7 @@ impl StorageBackend for MySQLStorage {
 
 impl MySQLStorage {
     /// Convert MySQL row to SecretEntry
-    fn row_to_secreton_entry(row: &mysql::Row) -> Result<SecretEntry, StorageError> {
+    fn row_to_secreton_entry(row: &mysql_async::Row) -> Result<SecretEntry, StorageError> {
         let id: String = row.get(0).ok_or_else(|| StorageError::SerializationError {
             message: "Missing id field".to_string(),
         })?;

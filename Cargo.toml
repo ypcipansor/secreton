@@ -318,7 +318,7 @@ qrcode = "0.14.1"  # QR code generation
 # ldap3 = { version = "0.12.1" }  # Already defined above
 
 # Database
-mysql_async = { version = "0.36", default-features = false, features = ["default-rustls"] }
+mysql_async = { version = "0.36", default-features = false, features = ["default-rustls", "chrono"] }
 
 # WebAssembly (pure Rust, audited)
 # wasmtime = "35.0.0"  # Removed to avoid old ring

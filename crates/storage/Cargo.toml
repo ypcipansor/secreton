@@ -41,7 +41,8 @@ deadpool-postgres.workspace = true
 redis.workspace = true
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
-mysql.workspace = true
+# mysql.workspace = true
+mysql_async.workspace = true
 aws-sdk-dynamodb.workspace = true
 aws-sdk-s3.workspace = true
 aws-config.workspace = true
