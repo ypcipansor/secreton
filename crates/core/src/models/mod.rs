@@ -1,4 +1,5 @@
 pub mod approle;
+pub mod oauth_state;
 pub mod pki;
 pub mod plugin;
 // pub mod policy; // Moved to security crate
