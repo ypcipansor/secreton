@@ -152,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup gRPC Server
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
-    let grpc_service = GrpcSecretService::new(secreton.clone());
+    let grpc_service = GrpcSecretService::new(secreton.clone(), auth.clone());
 
     let grpc_server = Server::builder()
         .add_service(SecretServiceServer::new(grpc_service))
