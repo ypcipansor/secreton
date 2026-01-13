@@ -93,57 +93,6 @@ pub fn create_routes() -> Router<AppState> {
         .route("/users", post(create_user))
 }
 
-/// Basic TOTP validation function
-/// Reserved for future MFA integration when MFA service is added to ApiServiceContainer
-#[allow(dead_code)]
-fn validate_totp_code(code: &str, secret: &str) -> bool {
-    if code.len() != 6 || !code.chars().all(|c| c.is_numeric()) {
-        return false;
-    }
-
-    let code_num = match code.parse::<u32>() {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
-
-    // Get current time window (30 second intervals)
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() / 30;
-
-    // Check current and adjacent time windows (±1)
-    for time_window in (now.saturating_sub(1))..=(now + 1) {
-        let expected_code = generate_hotp(secret.as_bytes(), time_window);
-        if expected_code == code_num {
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Generate HOTP code
-/// Reserved for future MFA integration when MFA service is added to ApiServiceContainer
-#[allow(dead_code)]
-fn generate_hotp(key: &[u8], counter: u64) -> u32 {
-    use hmac::{Hmac, Mac};
-    use sha1::Sha1;
-
-    let mut mac = Hmac::<Sha1>::new_from_slice(key).expect("HMAC can take key of any size");
-    mac.update(&counter.to_be_bytes());
-    let result = mac.finalize().into_bytes();
-
-    // Dynamic truncation
-    let offset = (result[19] & 0xf) as usize;
-        let code = ((result[offset] & 0x7f) as u32) << 24
-        | (u32::from(result[offset + 1])) << 16
-        | (u32::from(result[offset + 2])) << 8
-        | u32::from(result[offset + 3]);
-
-    code % 1_000_000
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +104,11 @@ mod tests {
 
     async fn create_test_server() -> TestServer {
         let mut config = ApiConfig::default();
+        // Configure JWT secret for tests to avoid panic
+        config.auth.jwt.secret = Some("default-secret-change-in-production".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+
         config.auth.oauth2 = Some(crate::config::OAuth2Config {
             providers: vec![crate::config::OAuth2Provider {
                 name: "github".to_string(),
