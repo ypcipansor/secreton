@@ -15,25 +15,9 @@ use crate::extractors::AuthenticatedUser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use secreton_core::models::oauth_state::OAuthState;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-
-// In-memory OAuth state storage (in production, use database)
-lazy_static::lazy_static! {
-    static ref OAUTH_STATE_STORE: Arc<RwLock<HashMap<String, OAuthState>>> = Arc::new(RwLock::new(HashMap::new()));
-}
-
-/// OAuth state information
-#[derive(Debug, Clone)]
-struct OAuthState {
-    #[allow(dead_code)] // Used for OAuth flow validation
-    provider: String,
-    #[allow(dead_code)] // CSRF protection state token
-    state: String,
-    #[allow(dead_code)] // State creation timestamp
-    created_at: chrono::DateTime<chrono::Utc>,
-    expires_at: chrono::DateTime<chrono::Utc>,
-}
 
 // Session storage
 pub type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
@@ -913,7 +897,14 @@ pub async fn oauth_login(
         .map(char::from)
         .collect();
 
-    // Store state in memory with expiration (10 minutes)
+    // Store state in the database with expiration (10 minutes)
+    // Clean up expired states before storing a new one.
+    // This is a simple cleanup strategy. A better approach might be a background job.
+    if let Err(e) = state.storage.delete_expired_oauth_states().await {
+        tracing::error!("Failed to delete expired OAuth states: {}", e);
+    }
+
+    // Store state in the database with expiration (10 minutes)
     let oauth_state = OAuthState {
         provider: provider.clone(),
         state: oauth_state_str.clone(),
@@ -921,14 +912,11 @@ pub async fn oauth_login(
         expires_at: chrono::Utc::now() + chrono::Duration::minutes(10),
     };
 
-    {
-        let mut state_store = OAUTH_STATE_STORE.write().await;
-        
-        // Clean up expired states
-        state_store.retain(|_, s| s.expires_at > chrono::Utc::now());
-        
-        state_store.insert(oauth_state_str.clone(), oauth_state);
-    }
+    state
+        .storage
+        .store_oauth_state(&oauth_state)
+        .await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to store OAuth state: {}", e)))?;
 
     // Build authorization URL based on provider
     let auth_url = if let Some(oauth2_config) = state.config.auth.oauth2.as_ref() {
@@ -1017,24 +1005,16 @@ pub async fn oauth_callback(
     })?;
 
     // Verify state parameter against stored state for CSRF protection
-    let stored_state: OAuthState = {
-        let mut state_store = OAUTH_STATE_STORE.write().await;
-        
-        // Clean up expired states first
-        state_store.retain(|_, s| s.expires_at > chrono::Utc::now());
-        
-        state_store.remove(state_param)
-            .ok_or_else(|| crate::ApiError::Authentication("Invalid or expired OAuth state".to_string()))?
-    };
+    let stored_state = state
+        .storage
+        .get_oauth_state(state_param)
+        .await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to get OAuth state: {}", e)))?
+        .ok_or_else(|| crate::ApiError::Authentication("Invalid or expired OAuth state".to_string()))?;
 
     // Verify the state matches the expected provider
     if stored_state.provider != provider {
         return Err(crate::ApiError::Authentication("OAuth state provider mismatch".to_string()));
-    }
-
-    // Verify state hasn't expired
-    if stored_state.expires_at < chrono::Utc::now() {
-        return Err(crate::ApiError::Authentication("OAuth state has expired".to_string()));
     }
 
     if let Some(error) = params.get("error") {
