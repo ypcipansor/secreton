@@ -6,26 +6,18 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "gRPC API implementation for Secreton"
+description = "gRPC definitions and server implementation for Secreton"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Core dependencies
-secreton-common.workspace = true
-secreton-errors.workspace = true
-secreton-config.workspace = true
-secreton-core.workspace = true
-secreton-auth.workspace = true
-secreton-policies.workspace = true
-secreton-secrets.workspace = true
-secreton-storage.workspace = true
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tonic.workspace = true
+tonic = { workspace = true, features = ["transport"] }
 prost.workspace = true
+tokio.workspace = true
+secreton-common.workspace = true
+futures-util.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
+protoc-bin-vendored = "3.0"
