@@ -46,7 +46,10 @@ lazy_static::lazy_static! {
 pub struct Session {
     pub id: String,
     pub user_id: String,
+    pub ip_address: String,
+    pub user_agent: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_accessed: chrono::DateTime<chrono::Utc>,
     pub expires_at: chrono::DateTime<chrono::Utc>,
     pub metadata: HashMap<String, String>,
 }
@@ -534,21 +537,18 @@ pub async fn login(
 
             // Create and store session
             let session_id = Uuid::new_v4().to_string();
-            // Assuming Session and SessionInfo are compatible or using SessionInfo for store
-            // If store expects Session (internal), we need to construct it.
-            // For now, let's assume store expects SessionInfo or Session.
-            // Error said found SessionInfo, expected Session.
-            // Let's create Session from SessionInfo fields.
+
             // Create Session from fields
+            let now = chrono::Utc::now();
             let session = crate::handlers::auth::Session {
                 id: session_id.clone(),
-                user_id: response.user.id.clone().unwrap_or_default(), // Handle Option
-                metadata: HashMap::from([
-                    ("ip_address".to_string(), ip_address.clone()),
-                    ("user_agent".to_string(), user_agent.clone()),
-                ]),
-                created_at: chrono::Utc::now(),
-                expires_at: chrono::Utc::now() + chrono::Duration::hours(24),
+                user_id: response.user.id.clone().unwrap_or_default(),
+                ip_address: ip_address.clone(),
+                user_agent: user_agent.clone(),
+                created_at: now,
+                last_accessed: now,
+                expires_at: now + chrono::Duration::hours(24),
+                metadata: HashMap::new(),
             };
 
             // Store session
@@ -1132,14 +1132,13 @@ pub async fn list_sessions(
 
     // Mark the current session (based on some criteria, e.g., recent access)
     let sessions_info: Vec<SessionInfo> = sessions.into_iter().map(|session| {
-        // Use created_at as proxy for last_accessed if missing
-        let last_accessed = session.created_at; 
+        let last_accessed = session.last_accessed;
         let is_current = last_accessed > chrono::Utc::now() - chrono::Duration::minutes(5);
         SessionInfo {
              id: session.id,
              user_id: session.user_id,
-             ip_address: session.metadata.get("ip_address").cloned().unwrap_or_else(|| "unknown".to_string()),
-             user_agent: session.metadata.get("user_agent").cloned().unwrap_or_else(|| "unknown".to_string()),
+             ip_address: session.ip_address,
+             user_agent: session.user_agent,
              last_accessed,
              created_at: session.created_at,
              expires_at: session.expires_at,
