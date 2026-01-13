@@ -10,7 +10,7 @@ use tracing::{info, error, warn};
 /// Handler for saving configuration
 pub async fn handle_post_config(
     token: Option<String>,
-    config: ApiConfig,
+    mut config: ApiConfig,
     storage: Arc<dyn StorageBackend>,
     auth: Arc<AuthenticationService>,
     audit: Arc<AuditLogger>,
@@ -42,6 +42,26 @@ pub async fn handle_post_config(
                  warn!("Unauthorized config update attempt: invalid token");
                  return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
             }
+        }
+    }
+
+    // Handle JWT secret persistence
+    if config.auth.jwt.secret.is_none() {
+        // Try to load existing config
+        if let Ok(current_config) = ConfigService::load_config(storage.as_ref()).await {
+            // Use existing secret if available
+            if let Some(s) = current_config.auth.jwt.secret {
+                info!("Preserving existing JWT secret from stored configuration");
+                config.auth.jwt.secret = Some(s);
+            } else {
+                // Generate new secret if no existing secret found
+                info!("No existing JWT secret found. Generating a new secure random secret.");
+                config.auth.jwt.secret = Some(uuid::Uuid::new_v4().to_string());
+            }
+        } else {
+            // No existing config (first run), generate new
+            info!("Generating initial JWT secret for new configuration.");
+            config.auth.jwt.secret = Some(uuid::Uuid::new_v4().to_string());
         }
     }
 

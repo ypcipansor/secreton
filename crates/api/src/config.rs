@@ -109,8 +109,8 @@ pub struct AuthConfig {
 /// JWT configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtConfig {
-    /// JWT signing secret
-    pub secret: String,
+    /// JWT signing secret (auto-generated if not provided)
+    pub secret: Option<String>,
 
     /// Token expiration time (seconds)
     pub expiration: u64,
@@ -511,7 +511,7 @@ impl Default for GrpcConfig {
 impl Default for JwtConfig {
     fn default() -> Self {
         Self {
-            secret: "change-this-secret-in-production".to_string(),
+            secret: None,
             expiration: 3600, // 1 hour
             refresh_expiration: 86400 * 7, // 7 days
             algorithm: "HS256".to_string(),
@@ -655,7 +655,7 @@ mod tests {
             },
             auth: AuthConfig {
                 jwt: JwtConfig {
-                    secret: "super-secret-key".to_string(),
+                    secret: Some("super-secret-key".to_string()),
                     expiration: 3600,
                     refresh_expiration: 86400,
                     algorithm: "HS256".to_string(),

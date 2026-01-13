@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Storage backend initialized");
 
     // Load Configuration from Storage
-    let api_config = match ConfigService::load_config(storage.as_ref()).await {
+    let mut api_config = match ConfigService::load_config(storage.as_ref()).await {
         Ok(c) => {
             info!("Loaded configuration from storage");
             c
@@ -65,9 +65,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Use JWT configuration from stored config, falling back to defaults if not set in DB yet
-    // This allows the configuration to be managed via the API after initial bootstrap
-    let jwt_secret = api_config.auth.jwt.secret.clone();
+    // Ensure JWT secret exists (auto-generate if missing/None)
+    if api_config.auth.jwt.secret.is_none() {
+        info!("JWT secret not found in configuration. Generating a new secure random secret.");
+        let new_secret = uuid::Uuid::new_v4().to_string();
+        api_config.auth.jwt.secret = Some(new_secret);
+
+        // Save the updated config back to storage to ensure persistence across restarts
+        if let Err(e) = ConfigService::save_config(storage.as_ref(), &api_config).await {
+            warn!("Failed to persist generated JWT secret to storage: {}", e);
+        } else {
+            info!("Persisted generated JWT secret to storage.");
+        }
+    }
+
+    // Use JWT configuration from stored config
+    // We unwrap here safely because we just ensured it is Some
+    let jwt_secret = api_config.auth.jwt.secret.clone().unwrap_or_else(|| "fallback-secret-should-not-happen".to_string());
     let jwt_issuer = api_config.auth.jwt.issuer.clone();
     let jwt_audience = api_config.auth.jwt.audience.clone();
 
