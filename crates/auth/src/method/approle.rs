@@ -122,6 +122,7 @@ impl AuthMethodImpl for AppRoleAuthMethod {
                     success: true,
                     user_info: Some(user_info),
                     token: None,
+                    refresh_token: None,
                     policies: role.policies.clone(),
                     metadata: HashMap::new(),
                     mfa_required: false,

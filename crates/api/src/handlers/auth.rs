@@ -516,7 +516,7 @@ pub async fn login(
             
             let response = LoginResponse {
                 access_token: Some(access_token.clone()),
-                refresh_token: Some(access_token.clone()), // Use same token as refresh for now
+                refresh_token: auth_token.refresh_token.clone(),
                 token_type: "Bearer".to_string(),
                 expires_in: 3600, // 1 hour default
                 user: UserInfo {

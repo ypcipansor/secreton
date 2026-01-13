@@ -243,6 +243,7 @@ pub struct AuthResult {
     pub success: bool,
     pub user_info: Option<UserInfo>,
     pub token: Option<String>,
+    pub refresh_token: Option<String>,
     pub policies: Vec<String>,
     pub metadata: HashMap<String, String>,
     pub mfa_required: bool,

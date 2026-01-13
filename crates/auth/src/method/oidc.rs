@@ -147,6 +147,7 @@ impl OidcAuthMethod {
             policies: vec![],
             metadata: HashMap::new(),
             token: Some(format!("oidc_token_{}", Uuid::new_v4())),
+            refresh_token: None,
         })
     }
 }

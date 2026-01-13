@@ -304,6 +304,7 @@ impl AuthMethodImpl for GithubAuthMethod {
                     success: true,
                     user_info: Some(user),
                     token: Some(access_token),
+                    refresh_token: None,
                     policies: Vec::new(),
                     metadata: HashMap::new(),
                     mfa_required: false,

@@ -740,6 +740,7 @@ impl AuthenticationService {
         Ok(secreton_core::AuthResult {
             success: true,
             token: Some(token_pair.access_token),
+            refresh_token: Some(token_pair.refresh_token),
             user_info: result.user_info,
             policies,
             metadata: std::collections::HashMap::new(),
