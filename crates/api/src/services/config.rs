@@ -39,6 +39,14 @@ impl ConfigService {
         Ok(())
     }
 
+    /// Delete configuration from storage
+    pub async fn delete_config(storage: &dyn StorageBackend) -> StorageResult<()> {
+        info!("Deleting configuration from storage");
+        storage.delete_by_path(CONFIG_PATH).await?;
+        info!("Configuration deleted successfully");
+        Ok(())
+    }
+
     /// Load configuration from storage
     pub async fn load_config(storage: &dyn StorageBackend) -> StorageResult<ApiConfig> {
         info!("Loading configuration from storage");

@@ -116,7 +116,7 @@ pub async fn evaluate_with_sentinel(
     user: &str,
     path: &str,
     action: &str,
-    context: &PolicyContext,
+    _context: &PolicyContext,
 ) -> bool {
     // Versioning logic: Group policies by name and select the highest version
     let mut latest_policies_map: HashMap<&str, &SentinelPolicy> = HashMap::new();
@@ -190,7 +190,7 @@ pub async fn evaluate_with_sentinel(
                      user,
                      path,
                      action,
-                     context,
+                     context: _context,
                  };
                  let input_json = match serde_json::to_string(&input) {
                      Ok(s) => s,

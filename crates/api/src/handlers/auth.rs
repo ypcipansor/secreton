@@ -601,7 +601,7 @@ pub async fn logout(
     // Extract session ID from token for accurate auditing
     let session_id = {
         use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
-        let decoding_key = DecodingKey::from_secret(state.config.auth.jwt.secret.as_bytes());
+        let decoding_key = DecodingKey::from_secret(state.config.auth.jwt.secret.as_ref().expect("JWT secret must be configured").as_bytes());
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[&state.config.auth.jwt.issuer]);
         validation.set_audience(&[&state.config.auth.jwt.audience]);

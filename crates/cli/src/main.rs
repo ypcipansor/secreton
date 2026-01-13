@@ -110,6 +110,8 @@ enum ConfigCommand {
         #[arg(short, long)]
         file: String,
     },
+    /// Delete configuration from the server
+    Delete,
 }
 
 #[derive(Subcommand)]
@@ -249,6 +251,21 @@ async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
                 println!("❌ Failed to apply configuration: {} - {}", status, text);
+            }
+        }
+        ConfigCommand::Delete => {
+            let url = format!("{}/api/v1/sys/config", config.server_url);
+            let response = client
+                .delete(&url)
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                println!("✅ Configuration deleted successfully.");
+            } else {
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                println!("❌ Failed to delete configuration: {} - {}", status, text);
             }
         }
     }
