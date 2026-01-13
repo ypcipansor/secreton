@@ -16,7 +16,7 @@ pub async fn handle_post_config(
     audit: Arc<AuditLogger>,
 ) -> Result<impl Reply, Rejection> {
 
-    let mut username = "system".to_string();
+    let username;
 
     // Validate token and check permissions
     let token_str = token.unwrap_or_default();

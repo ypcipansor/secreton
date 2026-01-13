@@ -2,7 +2,7 @@ use std::env;
 use std::sync::Arc;
 use tracing::{info, warn};
 use warp::Filter;
-use secreton_api::config::{ApiConfig, AuthConfig};
+use secreton_api::config::ApiConfig;
 use secreton_api::services::config::ConfigService;
 use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType};
 use secreton_storage::factory::FileBackendConfig;

@@ -1125,7 +1125,7 @@ pub async fn hash_data(
 /// Policy operations
 pub async fn list_policies(
     State(state): State<AppState>,
-    AuthenticatedUser(user): AuthenticatedUser,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<PolicyResponse>>>> {
 
@@ -1366,7 +1366,7 @@ pub struct RestoreRequest {
 
 pub async fn create_backup(
     State(state): State<AppState>,
-    AuthenticatedUser(user): AuthenticatedUser,
+    AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<BackupInfo>>> {
 
     // Check permissions (RBAC) - backup requires admin privileges
@@ -1389,7 +1389,7 @@ pub async fn list_backups(
         .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
 
     // Get user from token
-    let user = state.auth.validate_token(token).await
+    let _user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // List backups via secreton service
@@ -1420,8 +1420,8 @@ pub async fn get_backup(
 
 pub async fn restore_backup(
     State(state): State<AppState>,
-    AuthenticatedUser(user): AuthenticatedUser,
-    Path(backup_id): Path<String>,
+    AuthenticatedUser(_user): AuthenticatedUser,
+    Path(_backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Check permissions handled by service if implemented
     // Stub
