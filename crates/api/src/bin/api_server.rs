@@ -17,6 +17,11 @@ use secreton_api::services::secret::SecretService;
 use secreton_auth::{InMemoryIdentityService, PolicyService};
 use secreton_performance::{SecretPerformanceOptimizer, SecretPerformanceConfig};
 
+// gRPC imports
+use tonic::transport::Server;
+use secreton_grpc::secreton::v1::secret_service_server::SecretServiceServer;
+use secreton_api::grpc::server::GrpcSecretService;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging with simple tracing
@@ -30,12 +35,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_startup_banner();
 
     // Get port from environment or default to 8080
-    let port = env::var("PORT")
+    let http_port = env::var("PORT")
         .unwrap_or_else(|_| "8080".to_string())
         .parse::<u16>()
         .expect("PORT must be a valid port number");
 
-    info!("Starting Secreton Security API server on port {}", port);
+    let grpc_port = env::var("GRPC_PORT")
+        .unwrap_or_else(|_| "50051".to_string())
+        .parse::<u16>()
+        .expect("GRPC_PORT must be a valid port number");
+
+    info!("Starting Secreton Security API server");
+    info!("HTTP Port: {}", http_port);
+    info!("gRPC Port: {}", grpc_port);
 
     // Initialize Storage
     // This part effectively replaces .env dependency for core configuration
@@ -117,8 +129,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         performance
     ).await?);
 
-    // Construct Routes
-    let routes = SecurityAPI::routes(storage.clone(), auth, audit, seal, secreton)
+    // Construct HTTP Routes
+    let routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone())
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -135,7 +147,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   GET  /sys/config - Read configuration");
     info!("   POST /auth/login - User authentication");
 
-    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+    // Spawn HTTP Server
+    let http_server = warp::serve(routes).run(([127, 0, 0, 1], http_port));
+
+    // Setup gRPC Server
+    let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
+    let grpc_service = GrpcSecretService::new(secreton.clone());
+
+    let grpc_server = Server::builder()
+        .add_service(SecretServiceServer::new(grpc_service))
+        .serve(grpc_addr);
+
+    info!("🚀 Servers starting...");
+
+    // Run both servers concurrently
+    let (http_res, grpc_res) = tokio::join!(http_server, grpc_server);
+
+    if let Err(e) = grpc_res {
+        warn!("gRPC server failed: {}", e);
+    }
+
+    info!("Servers stopped.");
 
     Ok(())
 }
@@ -151,7 +183,7 @@ fn print_startup_banner() {
     ║  Build: Production Ready                     ║
     ║  Crypto: RustCrypto Suite                    ║
     ╠══════════════════════════════════════════════╣
-    ║  🚀 Starting HTTP API Server...              ║
+    ║  🚀 Starting API Servers...                  ║
     ╚══════════════════════════════════════════════╝
     "#
     );
