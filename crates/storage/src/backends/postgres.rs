@@ -4,6 +4,7 @@ use crate::{
     HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
     StorageResult, StorageStats, StorageTransaction,
 };
+use secreton_core::models::oauth_state::OAuthState;
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
 use std::sync::Arc;
@@ -507,6 +508,14 @@ impl StorageBackend for PostgresBackend {
             CREATE INDEX IF NOT EXISTS idx_secreton_entries_path ON secreton_entries(path);
             CREATE INDEX IF NOT EXISTS idx_secreton_entries_owner ON secreton_entries(owner_id);
             CREATE INDEX IF NOT EXISTS idx_secreton_entries_security_level ON secreton_entries(security_level);
+
+            CREATE TABLE IF NOT EXISTS oauth_state (
+                state VARCHAR(255) PRIMARY KEY,
+                provider VARCHAR(255) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_oauth_state_expires_at ON oauth_state(expires_at);
         "#;
 
         client
@@ -517,6 +526,95 @@ impl StorageBackend for PostgresBackend {
             })?;
 
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, state: &OAuthState) -> StorageResult<()> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = r#"
+            INSERT INTO oauth_state (state, provider, created_at, expires_at)
+            VALUES ($1, $2, $3, $4)
+        "#;
+
+        client
+            .execute(
+                query,
+                &[
+                    &state.state,
+                    &state.provider,
+                    &state.created_at,
+                    &state.expires_at,
+                ],
+            )
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to store OAuth state: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = r#"
+            DELETE FROM oauth_state
+            WHERE state = $1 AND expires_at > NOW()
+            RETURNING state, provider, created_at, expires_at
+        "#;
+
+        let rows = client
+            .query(query, &[&state])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to get OAuth state: {}", e),
+            })?;
+
+        if rows.is_empty() {
+            return Ok(None);
+        }
+
+        let row = &rows[0];
+        let oauth_state = OAuthState {
+            state: row.get("state"),
+            provider: row.get("provider"),
+            created_at: row.get("created_at"),
+            expires_at: row.get("expires_at"),
+        };
+
+        Ok(Some(oauth_state))
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = "DELETE FROM oauth_state WHERE expires_at < NOW()";
+
+        let rows_affected = client.execute(query, &[]).await.map_err(|e| {
+            StorageError::QueryFailed {
+                message: format!("Failed to delete expired OAuth states: {}", e),
+            }
+        })?;
+
+        Ok(rows_affected)
     }
 }
 
