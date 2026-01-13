@@ -4,7 +4,7 @@ use axum::{
     routing::{get, post},
     http::StatusCode,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use crate::handlers::AppState;
 use crate::{ApiResult, ApiResponse};
 use crate::services::seal::{InitResponse, UnsealResponse};

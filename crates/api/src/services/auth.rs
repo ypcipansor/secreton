@@ -228,7 +228,7 @@ impl AuthenticationService {
     pub async fn login(&self, req: ApiLoginRequest) -> ApiResult<ApiLoginResponse> {
         // Check lockout status before attempting login
         let user_path = format!("{}{}", USER_STORAGE_PREFIX, req.username);
-        let mut user_entry = self.storage.get_by_path(&user_path).await.ok().flatten();
+        let user_entry = self.storage.get_by_path(&user_path).await.ok().flatten();
         let mut stored_user: Option<User> = None;
 
         if let Some(ref entry) = user_entry {

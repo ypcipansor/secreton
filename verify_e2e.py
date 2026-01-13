@@ -9,7 +9,7 @@ API_PREFIX = BASE_URL
 
 def wait_for_server():
     print("Waiting for server to start...")
-    for _ in range(30):
+    for _ in range(300):
         try:
             resp = requests.get(f"{API_PREFIX}/health")
             if resp.status_code == 200:
