@@ -349,6 +349,11 @@ pub trait StorageBackend: Send + Sync {
 
         Ok(deleted_count)
     }
+
+    /// Delete a secret entry directly by path (convenience wrapper for delete_by_path)
+    async fn delete_secret(&self, path: &str) -> StorageResult<bool> {
+        self.delete_by_path(path).await
+    }
 }
 
 /// Transaction interface for atomic operations

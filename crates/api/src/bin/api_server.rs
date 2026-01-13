@@ -54,27 +54,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Storage backend initialized");
 
     // Load Configuration from Storage
-    let _api_config = match ConfigService::load_config(storage.as_ref()).await {
-        Ok(c) => c,
+    let api_config = match ConfigService::load_config(storage.as_ref()).await {
+        Ok(c) => {
+            info!("Loaded configuration from storage");
+            c
+        },
         Err(e) => {
-            warn!("Could not load configuration from storage: {}. Using defaults.", e);
+            warn!("Could not load configuration from storage: {}. Using defaults/bootstrapping.", e);
             ApiConfig::default()
         }
     };
 
-    // Load JWT configuration from environment
-    let jwt_secret = env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| "change-this-secret-in-production".to_string());
-    let jwt_issuer = env::var("SECRETON_JWT_ISSUER").unwrap_or_else(|_| "secreton".to_string());
-    let jwt_audience = env::var("SECRETON_JWT_AUDIENCE").unwrap_or_else(|_| "secreton-api".to_string());
+    // Use JWT configuration from stored config, falling back to defaults if not set in DB yet
+    // This allows the configuration to be managed via the API after initial bootstrap
+    let jwt_secret = api_config.auth.jwt.secret.clone();
+    let jwt_issuer = api_config.auth.jwt.issuer.clone();
+    let jwt_audience = api_config.auth.jwt.audience.clone();
 
     // Initialize Services
     let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
 
-    // Create AuthConfig with consistent JWT settings
-    let mut auth_config = AuthConfig::default();
-    auth_config.jwt.secret = jwt_secret.clone();
-    auth_config.jwt.issuer = jwt_issuer.clone();
-    auth_config.jwt.audience = jwt_audience.clone();
+    // Create AuthConfig from loaded config
+    let auth_config = api_config.auth.clone();
 
     let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?);
     let audit = Arc::new(AuditLogger::new(storage.clone()).await?);

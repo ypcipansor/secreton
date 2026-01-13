@@ -9,7 +9,7 @@ use tracing::{info, error, warn};
 
 /// Handler for saving configuration
 pub async fn handle_post_config(
-    token: String,
+    token: Option<String>,
     config: ApiConfig,
     storage: Arc<dyn StorageBackend>,
     auth: Arc<AuthenticationService>,
@@ -19,7 +19,8 @@ pub async fn handle_post_config(
     let mut username = "system".to_string();
 
     // Validate token and check permissions
-    match auth.validate_token(&token).await {
+    let token_str = token.unwrap_or_default();
+    match auth.validate_token(&token_str).await {
         Ok(user) => {
             // Check if user has admin permissions
             let is_admin = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
@@ -62,6 +63,58 @@ pub async fn handle_post_config(
             error!("Failed to update configuration: {}", e);
             Ok(warp::reply::json(&crate::ApiResponse::<()>::error(format!(
                 "Failed to update configuration: {}",
+                e
+            ))))
+        }
+    }
+}
+
+/// Handler for deleting configuration
+pub async fn handle_delete_config(
+    token: Option<String>,
+    storage: Arc<dyn StorageBackend>,
+    auth: Arc<AuthenticationService>,
+    audit: Arc<AuditLogger>,
+) -> Result<impl Reply, Rejection> {
+    let username: String;
+
+    // Validate token and check permissions
+    let token_str = token.unwrap_or_default();
+    match auth.validate_token(&token_str).await {
+        Ok(user) => {
+            // Check if user has admin permissions
+            let is_admin = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+            if !is_admin {
+                warn!("Unauthorized config delete attempt by user: {}", user.username);
+                return Err(warp::reject::custom(crate::ApiError::Authorization("Insufficient permissions".to_string())));
+            }
+            username = user.username.clone();
+            info!("Authorized config delete by user: {}", username);
+        },
+        Err(_) => {
+             warn!("Unauthorized config delete attempt: invalid token");
+             return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+        }
+    }
+
+    info!("Received configuration delete request");
+
+    match ConfigService::delete_config(storage.as_ref()).await {
+        Ok(_) => {
+            info!("Configuration deleted successfully");
+
+            // Log audit event
+            let _ = audit.log_event(SecurityEventType::ConfigChange {
+                user: username,
+                changed_keys: vec!["deleted".to_string()],
+            }).await;
+
+            Ok(warp::reply::json(&crate::ApiResponse::<()>::success(())))
+        }
+        Err(e) => {
+            error!("Failed to delete configuration: {}", e);
+            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(format!(
+                "Failed to delete configuration: {}",
                 e
             ))))
         }

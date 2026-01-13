@@ -170,8 +170,8 @@ impl AuthenticationService {
         let token_config = TokenConfig {
             jwt_secret: config.jwt.secret.clone(),
             jwt_refresh_secret: config.jwt.secret.clone(), // Use same secret as no refresh_secret field
-            access_token_duration: chrono::Duration::from_std(config.jwt.expiration).unwrap_or(chrono::Duration::hours(1)),
-            refresh_token_duration: chrono::Duration::from_std(config.jwt.refresh_expiration).unwrap_or(chrono::Duration::days(7)),
+            access_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(config.jwt.expiration)).unwrap_or(chrono::Duration::hours(1)),
+            refresh_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(config.jwt.refresh_expiration)).unwrap_or(chrono::Duration::days(7)),
             issuer: config.jwt.issuer.clone(),
             audience: config.jwt.audience.clone(),
         };
@@ -372,7 +372,7 @@ impl AuthenticationService {
 
         // Create and store session
         let now = chrono::Utc::now();
-        let expires_at = now + chrono::Duration::from_std(self.config.jwt.expiration)
+        let expires_at = now + chrono::Duration::from_std(std::time::Duration::from_secs(self.config.jwt.expiration))
             .unwrap_or(chrono::Duration::hours(1));
 
         // Use JTI if available from tokens, otherwise generate UUID

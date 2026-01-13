@@ -421,21 +421,26 @@ impl SecurityAPI {
             .and(warp::get())
             .and_then(security_status_handler);
 
-        let sys_init = warp::path("sys")
+        let api_v1 = warp::path("api").and(warp::path("v1"));
+
+        let sys_init = api_v1.clone()
+            .and(warp::path("sys"))
             .and(warp::path("init"))
             .and(warp::post())
             .and(warp::body::json())
             .and(seal_filter.clone())
             .and_then(handle_sys_init);
 
-        let sys_unseal = warp::path("sys")
+        let sys_unseal = api_v1.clone()
+            .and(warp::path("sys"))
             .and(warp::path("unseal"))
             .and(warp::post())
             .and(warp::body::json())
             .and(seal_filter.clone())
             .and_then(handle_sys_unseal);
 
-        let sys_seal_status = warp::path("sys")
+        let sys_seal_status = api_v1.clone()
+            .and(warp::path("sys"))
             .and(warp::path("seal-status"))
             .and(warp::get())
             .and(seal_filter.clone())
@@ -495,20 +500,38 @@ impl SecurityAPI {
             .and(warp::get())
             .and_then(security_metrics_handler);
 
-        // Simple auth filter for admin operations
-        let admin_auth = warp::header::<String>("x-admin-token");
+        // Auth token extraction filter (optional)
+        // Checks both Authorization (Bearer) and X-Admin-Token headers
+        let auth_token = warp::header::optional::<String>("authorization")
+            .and(warp::header::optional::<String>("x-admin-token"))
+            .map(|auth: Option<String>, admin: Option<String>| {
+                auth.map(|h| h.strip_prefix("Bearer ").unwrap_or(&h).to_string())
+                    .or(admin)
+            });
 
-        let config_post = warp::path("sys")
+        let config_post = api_v1.clone()
+            .and(warp::path("sys"))
             .and(warp::path("config"))
             .and(warp::post())
-            .and(admin_auth)
+            .and(auth_token.clone())
             .and(warp::body::json())
             .and(storage_filter.clone())
             .and(auth_filter.clone())
             .and(audit_filter.clone())
             .and_then(crate::handlers::config::handle_post_config);
 
-        let config_get = warp::path("sys")
+        let config_delete = api_v1.clone()
+            .and(warp::path("sys"))
+            .and(warp::path("config"))
+            .and(warp::delete())
+            .and(auth_token.clone())
+            .and(storage_filter.clone())
+            .and(auth_filter.clone())
+            .and(audit_filter.clone())
+            .and_then(crate::handlers::config::handle_delete_config);
+
+        let config_get = api_v1.clone()
+            .and(warp::path("sys"))
             .and(warp::path("config"))
             .and(warp::get())
             .and(storage_filter.clone())
@@ -528,6 +551,7 @@ impl SecurityAPI {
             .or(audit_operations)
             .or(security_metrics)
             .or(config_post)
+            .or(config_delete)
             .or(config_get)
     }
 }
@@ -998,7 +1022,8 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
                 code = warp::http::StatusCode::BAD_REQUEST;
                 message = "Invalid request format";
             }
-            SecretonError::Internal { .. } => {
+            SecretonError::Internal { message: ref msg } => {
+                warn!("Internal error: {}", msg);
                 code = warp::http::StatusCode::INTERNAL_SERVER_ERROR;
                 message = "Internal server error";
             }

@@ -43,18 +43,19 @@ pub struct ApiConfig {
 
 /// HTTP server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HttpConfig {
     /// Address to bind HTTP server
     pub bind_address: SocketAddr,
 
-    /// Request timeout
-    pub timeout: Duration,
+    /// Request timeout (seconds)
+    pub timeout: u64,
 
     /// Maximum request body size (bytes)
     pub max_body_size: usize,
 
-    /// Keep-alive timeout
-    pub keep_alive: Duration,
+    /// Keep-alive timeout (seconds)
+    pub keep_alive: u64,
 
     /// Enable compression
     pub compression: bool,
@@ -65,6 +66,7 @@ pub struct HttpConfig {
 
 /// gRPC server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GrpcConfig {
     /// Enable gRPC server
     pub enabled: bool,
@@ -72,8 +74,8 @@ pub struct GrpcConfig {
     /// Address to bind gRPC server
     pub bind_address: SocketAddr,
 
-    /// Request timeout
-    pub timeout: Duration,
+    /// Request timeout (seconds)
+    pub timeout: u64,
 
     /// Maximum message size (bytes)
     pub max_message_size: usize,
@@ -87,6 +89,7 @@ pub struct GrpcConfig {
 
 /// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AuthConfig {
     /// JWT configuration
     pub jwt: JwtConfig,
@@ -110,11 +113,11 @@ pub struct JwtConfig {
     /// JWT signing secret
     pub secret: String,
 
-    /// Token expiration time
-    pub expiration: Duration,
+    /// Token expiration time (seconds)
+    pub expiration: u64,
 
-    /// Refresh token expiration
-    pub refresh_expiration: Duration,
+    /// Refresh token expiration (seconds)
+    pub refresh_expiration: u64,
 
     /// JWT algorithm
     pub algorithm: String,
@@ -180,8 +183,8 @@ pub struct MtlsConfig {
 /// Session configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
-    /// Session timeout
-    pub timeout: Duration,
+    /// Session timeout (seconds)
+    pub timeout: u64,
 
     /// Session store type
     pub store: SessionStore,
@@ -309,6 +312,7 @@ pub struct WebAuthnConfig {
 
 /// Rate limiting configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RateLimitConfig {
     /// Enable rate limiting
     pub enabled: bool,
@@ -332,8 +336,8 @@ pub struct RateLimitRule {
     /// Requests per time window
     pub requests: u32,
 
-    /// Time window duration
-    pub window: Duration,
+    /// Time window duration (seconds)
+    pub window: u64,
 
     /// Burst size
     pub burst: Option<u32>,
@@ -386,6 +390,7 @@ pub struct JaegerConfig {
 
 /// Monitoring configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MonitoringConfig {
     /// Enable metrics
     pub metrics: bool,
@@ -405,6 +410,7 @@ pub struct MonitoringConfig {
 
 /// CORS configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CorsConfig {
     /// Enable CORS
     pub enabled: bool,
@@ -421,8 +427,8 @@ pub struct CorsConfig {
     /// Exposed headers
     pub exposed_headers: Vec<String>,
 
-    /// Max age
-    pub max_age: Option<Duration>,
+    /// Max age (seconds)
+    pub max_age: Option<u64>,
 
     /// Allow credentials
     pub allow_credentials: bool,
@@ -446,6 +452,7 @@ pub struct StaticFilesConfig {
 
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LoggingConfig {
     /// Log level
     pub level: String,
@@ -480,9 +487,9 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             bind_address: "127.0.0.1:8080".parse().unwrap(),
-            timeout: Duration::from_secs(30),
+            timeout: 30,
             max_body_size: 16 * 1024 * 1024, // 16MB
-            keep_alive: Duration::from_secs(75),
+            keep_alive: 75,
             compression: true,
             static_files: None,
         }
@@ -494,7 +501,7 @@ impl Default for GrpcConfig {
         Self {
             enabled: true,
             bind_address: "127.0.0.1:9090".parse().unwrap(),
-            timeout: Duration::from_secs(30),
+            timeout: 30,
             max_message_size: 4 * 1024 * 1024, // 4MB
             reflection: false,
             health_check: true,
@@ -506,8 +513,8 @@ impl Default for JwtConfig {
     fn default() -> Self {
         Self {
             secret: "change-this-secret-in-production".to_string(),
-            expiration: Duration::from_secs(3600), // 1 hour
-            refresh_expiration: Duration::from_secs(86400 * 7), // 7 days
+            expiration: 3600, // 1 hour
+            refresh_expiration: 86400 * 7, // 7 days
             algorithm: "HS256".to_string(),
             issuer: "secreton".to_string(),
             audience: "secreton-api".to_string(),
@@ -518,7 +525,7 @@ impl Default for JwtConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            timeout: Duration::from_secs(3600), // 1 hour
+            timeout: 3600, // 1 hour
             store: SessionStore::Memory,
             cookie: CookieConfig::default(),
         }
@@ -556,18 +563,18 @@ impl Default for RateLimitConfig {
             enabled: true,
             global: RateLimitRule {
                 requests: 1000,
-                window: Duration::from_secs(60),
+                window: 60,
                 burst: Some(100),
             },
             endpoints: vec![],
             per_user: Some(RateLimitRule {
                 requests: 100,
-                window: Duration::from_secs(60),
+                window: 60,
                 burst: Some(10),
             }),
             per_ip: Some(RateLimitRule {
                 requests: 200,
-                window: Duration::from_secs(60),
+                window: 60,
                 burst: Some(20),
             }),
         }
@@ -605,7 +612,7 @@ impl Default for CorsConfig {
                 "X-Requested-With".to_string(),
             ],
             exposed_headers: vec![],
-            max_age: Some(Duration::from_secs(3600)),
+            max_age: Some(3600),
             allow_credentials: true,
         }
     }
@@ -633,16 +640,16 @@ mod tests {
         ApiConfig {
             http: HttpConfig {
                 bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8200),
-                timeout: Duration::from_secs(30),
+                timeout: 30,
                 max_body_size: 5 * 1024 * 1024,
-                keep_alive: Duration::from_secs(15),
+                keep_alive: 15,
                 compression: true,
                 static_files: None,
             },
             grpc: GrpcConfig {
                 enabled: true,
                 bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8201),
-                timeout: Duration::from_secs(30),
+                timeout: 30,
                 max_message_size: 16 * 1024 * 1024,
                 reflection: true,
                 health_check: true,
@@ -650,8 +657,8 @@ mod tests {
             auth: AuthConfig {
                 jwt: JwtConfig {
                     secret: "super-secret-key".to_string(),
-                    expiration: Duration::from_secs(3600),
-                    refresh_expiration: Duration::from_secs(86400),
+                    expiration: 3600,
+                    refresh_expiration: 86400,
                     algorithm: "HS256".to_string(),
                     issuer: "secreton".to_string(),
                     audience: "secreton-users".to_string(),
@@ -664,7 +671,7 @@ mod tests {
                     crl: None,
                 }),
                 session: SessionConfig {
-                    timeout: Duration::from_secs(1800),
+                    timeout: 1800,
                     store: SessionStore::Memory,
                     cookie: CookieConfig {
                         name: "secreton-session".to_string(),
@@ -697,20 +704,20 @@ mod tests {
                 enabled: true,
                 global: RateLimitRule {
                     requests: 1000,
-                    window: Duration::from_secs(60),
+                    window: 60,
                     burst: Some(100),
                 },
                 endpoints: vec![EndpointRateLimit {
                     pattern: "/v1/auth/login".to_string(),
                     rule: RateLimitRule {
                         requests: 20,
-                        window: Duration::from_secs(60),
+                        window: 60,
                         burst: Some(10),
                     },
                 }],
                 per_user: Some(RateLimitRule {
                     requests: 200,
-                    window: Duration::from_secs(60),
+                    window: 60,
                     burst: None,
                 }),
                 per_ip: None,
@@ -740,7 +747,7 @@ mod tests {
                 allowed_methods: vec!["GET".to_string(), "POST".to_string()],
                 allowed_headers: vec!["Authorization".to_string()],
                 exposed_headers: vec![],
-                max_age: Some(Duration::from_secs(600)),
+                max_age: Some(600),
                 allow_credentials: true,
             },
             logging: LoggingConfig {
@@ -772,7 +779,7 @@ mod tests {
     fn test_rate_limit_rule_burst_defaults() {
         let rule = RateLimitRule {
             requests: 50,
-            window: Duration::from_secs(10),
+            window: 10,
             burst: None,
         };
         assert_eq!(rule.requests, 50);
