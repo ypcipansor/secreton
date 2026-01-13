@@ -4,7 +4,6 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
@@ -51,19 +50,13 @@ pub struct AerospikeTlsConfig {
 pub struct AerospikeStorage {
     #[allow(dead_code)]
     config: AerospikeConfig,
-    #[allow(dead_code)]
-    client: Option<Arc<AerospikeClient>>,
 }
-
-/// Aerospike client wrapper
-struct AerospikeClient;
 
 impl AerospikeStorage {
     /// Create a new Aerospike storage backend
     pub fn new(config: AerospikeConfig) -> Self {
         Self {
             config,
-            client: None,
         }
     }
 }

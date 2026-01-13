@@ -30,7 +30,6 @@ pub mod oci;
 pub mod spanner;
 pub mod swift;
 pub mod zookeeper;
-// pub mod additional_backends;
 
 pub use file::FileBackend;
 pub use postgres::PostgresBackend;
