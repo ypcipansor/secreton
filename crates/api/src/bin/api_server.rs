@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Load JWT configuration from environment
-    let jwt_secret = env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| "default-dev-secret-do-not-use-in-prod".to_string());
+    let jwt_secret = env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| "change-this-secret-in-production".to_string());
     let jwt_issuer = env::var("SECRETON_JWT_ISSUER").unwrap_or_else(|_| "secreton".to_string());
     let jwt_audience = env::var("SECRETON_JWT_AUDIENCE").unwrap_or_else(|_| "secreton-api".to_string());
 
