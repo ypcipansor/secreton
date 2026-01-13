@@ -90,6 +90,26 @@ pub trait MfaService: Send + Sync {
     /// Disable TOTP for an entity
     async fn disable_totp(&self, entity_id: Uuid) -> AuthMethodResult<()>;
 
+    /// Enable SMS for an entity
+    async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()>;
+
+    /// Enable Email for an entity
+    async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()>;
+
+    /// Start WebAuthn registration
+    async fn start_webauthn_registration(
+        &self,
+        entity_id: Uuid,
+        user_name: &str,
+        display_name: &str,
+    ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge>;
+
+    /// Complete WebAuthn registration
+    async fn complete_webauthn_registration(
+        &self,
+        response: crate::mfa::webauthn::RegistrationResponse,
+    ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential>;
+
     /// Regenerate recovery codes for an entity
     async fn regenerate_recovery_codes(&self, entity_id: Uuid) -> AuthMethodResult<Vec<String>>;
 }
@@ -200,6 +220,104 @@ impl CombinedMfaService {
         self.totp_service.remove_enrollment(entity_id).await
             .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
         Ok(())
+    }
+
+    /// Enable SMS for an entity (initiate enrollment)
+    pub async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
+        self.sms_service.enroll(entity_id, phone_number).await?;
+        self.sms_service.send_code(entity_id).await?;
+        Ok(())
+    }
+
+    /// Verify and finalize SMS enrollment
+    pub async fn verify_and_enable_sms(&self, entity_id: Uuid, code: String) -> AuthMethodResult<bool> {
+        let request = SmsValidationRequest {
+            entity_id,
+            code,
+        };
+        let is_valid = self.sms_service.validate(request).await?;
+
+        if is_valid {
+            let mut enrollments = self.enrollments.write().await;
+            let entry = enrollments.entry(entity_id).or_insert(MfaEnrollment {
+                entity_id,
+                methods: Vec::new(),
+                required_methods: Vec::new(),
+                enrolled_at: Utc::now(),
+            });
+
+            if !entry.methods.contains(&MfaMethod::Sms) {
+                entry.methods.push(MfaMethod::Sms);
+            }
+        }
+
+        Ok(is_valid)
+    }
+
+    /// Enable Email for an entity (initiate enrollment)
+    pub async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
+        self.email_service.enroll(entity_id, email).await?;
+        self.email_service.send_code(entity_id).await?;
+        Ok(())
+    }
+
+    /// Verify and finalize Email enrollment
+    pub async fn verify_and_enable_email(&self, entity_id: Uuid, code: String) -> AuthMethodResult<bool> {
+        let request = EmailValidationRequest {
+            entity_id,
+            code,
+        };
+        let is_valid = self.email_service.validate(request).await?;
+
+        if is_valid {
+            let mut enrollments = self.enrollments.write().await;
+            let entry = enrollments.entry(entity_id).or_insert(MfaEnrollment {
+                entity_id,
+                methods: Vec::new(),
+                required_methods: Vec::new(),
+                enrolled_at: Utc::now(),
+            });
+
+            if !entry.methods.contains(&MfaMethod::Email) {
+                entry.methods.push(MfaMethod::Email);
+            }
+        }
+
+        Ok(is_valid)
+    }
+
+    /// Start WebAuthn registration
+    pub async fn start_webauthn_registration(
+        &self,
+        entity_id: Uuid,
+        user_name: &str,
+        display_name: &str,
+    ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge> {
+        self.webauthn_service
+            .start_registration(entity_id, user_name, display_name)
+            .await
+    }
+
+    /// Complete WebAuthn registration
+    pub async fn complete_webauthn_registration(
+        &self,
+        response: crate::mfa::webauthn::RegistrationResponse,
+    ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
+        let credential = self.webauthn_service.complete_registration(response).await?;
+
+        let mut enrollments = self.enrollments.write().await;
+        let entry = enrollments.entry(credential.entity_id).or_insert(MfaEnrollment {
+            entity_id: credential.entity_id,
+            methods: Vec::new(),
+            required_methods: Vec::new(),
+            enrolled_at: Utc::now(),
+        });
+
+        if !entry.methods.contains(&MfaMethod::WebAuthn) {
+            entry.methods.push(MfaMethod::WebAuthn);
+        }
+
+        Ok(credential)
     }
 
     /// Validate based on MFA method
@@ -456,5 +574,29 @@ impl MfaService for CombinedMfaService {
         }
 
         Ok(response.codes)
+    }
+
+    async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
+        self.enable_sms(entity_id, phone_number).await
+    }
+
+    async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
+        self.enable_email(entity_id, email).await
+    }
+
+    async fn start_webauthn_registration(
+        &self,
+        entity_id: Uuid,
+        user_name: &str,
+        display_name: &str,
+    ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge> {
+        self.start_webauthn_registration(entity_id, user_name, display_name).await
+    }
+
+    async fn complete_webauthn_registration(
+        &self,
+        response: crate::mfa::webauthn::RegistrationResponse,
+    ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
+        self.complete_webauthn_registration(response).await
     }
 }

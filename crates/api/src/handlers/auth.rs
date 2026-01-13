@@ -84,6 +84,7 @@ pub fn create_routes() -> Router<AppState> {
         .route("/refresh", post(refresh_token))
         .route("/verify", post(verify_token))
         .route("/mfa/setup", post(setup_mfa))
+        .route("/mfa/setup/complete", post(complete_mfa_setup))
         .route("/mfa/verify", post(verify_mfa))
         .route("/mfa/disable", post(disable_mfa))
         .route("/oauth/{provider}", get(oauth_login))
@@ -280,6 +281,165 @@ mod tests {
         assert_eq!(data["provider"], "github");
         assert!(data["auth_url"].as_str().unwrap().contains("github.com"));
     }
+
+    #[tokio::test]
+    async fn test_mfa_setup_sms() {
+        let server = create_test_server().await;
+
+        // Generate valid token
+        let secret = "default-secret-change-in-production";
+        let claims = crate::services::auth::Claims {
+            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            roles: vec![],
+            iat: chrono::Utc::now().timestamp() as usize,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            jti: "unique".to_string(),
+            iss: "secreton".to_string(),
+            aud: "secreton-api".to_string(),
+        };
+
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
+        ).expect("Failed to create token");
+
+        let request = MfaSetupRequest {
+            method: "sms".to_string(),
+            phone_number: Some("+1234567890".to_string()),
+            email: None,
+        };
+
+        let response = server.post("/mfa/setup")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .json(&request)
+            .await;
+
+        response.assert_status_ok();
+
+        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.unwrap();
+        assert_eq!(data.method, "sms");
+        assert!(data.backup_codes.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_mfa_setup_email() {
+        let server = create_test_server().await;
+
+        // Generate valid token
+        let secret = "default-secret-change-in-production";
+        let claims = crate::services::auth::Claims {
+            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            roles: vec![],
+            iat: chrono::Utc::now().timestamp() as usize,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            jti: "unique".to_string(),
+            iss: "secreton".to_string(),
+            aud: "secreton-api".to_string(),
+        };
+
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
+        ).expect("Failed to create token");
+
+        let request = MfaSetupRequest {
+            method: "email".to_string(),
+            phone_number: None,
+            email: Some("test@example.com".to_string()),
+        };
+
+        let response = server.post("/mfa/setup")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .json(&request)
+            .await;
+
+        response.assert_status_ok();
+
+        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.unwrap();
+        assert_eq!(data.method, "email");
+        assert!(data.backup_codes.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_mfa_setup_webauthn() {
+        let server = create_test_server().await;
+
+        // Generate valid token
+        let secret = "default-secret-change-in-production";
+        let claims = crate::services::auth::Claims {
+            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            roles: vec![],
+            iat: chrono::Utc::now().timestamp() as usize,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            jti: "unique".to_string(),
+            iss: "secreton".to_string(),
+            aud: "secreton-api".to_string(),
+        };
+
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
+        ).expect("Failed to create token");
+
+        let request = MfaSetupRequest {
+            method: "webauthn".to_string(),
+            phone_number: None,
+            email: None,
+        };
+
+        let response = server.post("/mfa/setup")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .json(&request)
+            .await;
+
+        response.assert_status_ok();
+
+        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.unwrap();
+        assert_eq!(data.method, "webauthn");
+        assert!(data.webauthn_challenge.is_some());
+
+        // Complete setup
+        let challenge = data.webauthn_challenge.unwrap();
+        use secreton_auth::mfa::webauthn::{RegistrationResponse, CredentialType};
+        let completion_request = MfaSetupCompleteRequest {
+            method: "webauthn".to_string(),
+            webauthn_response: Some(RegistrationResponse {
+                challenge_id: challenge.id,
+                credential_id: "test-cred".to_string(),
+                attestation_object: "mock-attestation".to_string(),
+                client_data_json: "mock-client-data".to_string(),
+                credential_type: CredentialType::CrossPlatform,
+                name: "Test Key".to_string(),
+            }),
+            code: None,
+        };
+
+        let response = server.post("/mfa/setup/complete")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .json(&completion_request)
+            .await;
+
+        response.assert_status_ok();
+        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
+        assert!(body.success);
+        let data = body.data.unwrap();
+        assert!(data.backup_codes.len() > 0);
+    }
 }
 
 // LoginRequest, RefreshTokenRequest, UserInfo imported from secreton_auth
@@ -310,12 +470,21 @@ pub struct MfaSetupRequest {
 }
 
 /// MFA setup response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MfaSetupResponse {
     pub method: String,
     pub secret: Option<String>, // For TOTP
     pub qr_code: Option<String>, // For TOTP
+    pub webauthn_challenge: Option<secreton_auth::mfa::webauthn::RegistrationChallenge>, // For WebAuthn
     pub backup_codes: Vec<String>,
+}
+
+/// MFA setup completion request (for WebAuthn, SMS, Email)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaSetupCompleteRequest {
+    pub method: String,
+    pub webauthn_response: Option<secreton_auth::mfa::webauthn::RegistrationResponse>,
+    pub code: Option<String>,
 }
 
 /// MFA verification request
@@ -711,35 +880,125 @@ pub async fn verify_token(
 /// Setup MFA for user
 pub async fn setup_mfa(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<MfaSetupRequest>,
 ) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
-
-    // Get user from token
-    let user = state.auth.validate_token(token).await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // Parse user ID to UUID
     let user_id = Uuid::parse_str(&user.id)
         .map_err(|_| crate::ApiError::Authentication("Invalid user ID".to_string()))?;
 
-    // Only support TOTP for now via this endpoint as per original logic
-    if request.method != "totp" {
-        return Err(crate::ApiError::BadRequest("Only TOTP is currently supported for direct setup".to_string()));
+    let mut response = MfaSetupResponse {
+        method: request.method.clone(),
+        secret: None,
+        qr_code: None,
+        webauthn_challenge: None,
+        backup_codes: Vec::new(),
+    };
+
+    match request.method.as_str() {
+        "totp" => {
+            let totp_config = state.mfa.enable_totp(
+                user_id,
+                user.username.clone(),
+            ).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to setup MFA: {}", e))
+            })?;
+
+            response.secret = Some(totp_config.secret);
+            response.qr_code = Some(totp_config.url);
+        }
+        "sms" => {
+            let phone_number = request.phone_number.ok_or_else(|| {
+                crate::ApiError::BadRequest("Phone number is required for SMS MFA".to_string())
+            })?;
+
+            state.mfa.enable_sms(user_id, phone_number).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to setup SMS MFA: {}", e))
+            })?;
+        }
+        "email" => {
+            let email = request.email.ok_or_else(|| {
+                crate::ApiError::BadRequest("Email is required for Email MFA".to_string())
+            })?;
+
+            state.mfa.enable_email(user_id, email).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to setup Email MFA: {}", e))
+            })?;
+        }
+        "webauthn" => {
+            let challenge = state.mfa.start_webauthn_registration(
+                user_id,
+                &user.username,
+                &user.display_name.unwrap_or_else(|| user.username.clone()),
+            ).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to start WebAuthn registration: {}", e))
+            })?;
+
+            response.webauthn_challenge = Some(challenge);
+        }
+        _ => return Err(crate::ApiError::BadRequest("Unsupported MFA method".to_string())),
     }
 
-    let totp_config = state.mfa.enable_totp(
-        user_id,
-        user.username.clone(),
-    ).await.map_err(|e| {
-        crate::ApiError::Internal(format!("Failed to setup MFA: {}", e))
-    })?;
+    // Generate backup codes if not just starting webauthn
+    if request.method != "webauthn" {
+        let codes = state.mfa.regenerate_recovery_codes(user_id).await.map_err(|e| {
+            crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
+        })?;
+        response.backup_codes = codes;
+    }
+
+    // Audit: MFA setup
+    let _ = state
+        .audit
+        .log_event(SecurityEventType::MfaSetup {
+                user: user.username,
+                method: request.method,
+            })
+        .await;
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// Complete MFA setup (e.g. for WebAuthn, SMS, Email)
+pub async fn complete_mfa_setup(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(request): Json<MfaSetupCompleteRequest>,
+) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
+    // Parse user ID to UUID
+    let user_id = Uuid::parse_str(&user.id)
+        .map_err(|_| crate::ApiError::Authentication("Invalid user ID".to_string()))?;
+
+    match request.method.as_str() {
+        "webauthn" => {
+            if let Some(response) = request.webauthn_response {
+                state.mfa.complete_webauthn_registration(response).await.map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to complete WebAuthn registration: {}", e))
+                })?;
+            } else {
+                return Err(crate::ApiError::BadRequest("Missing WebAuthn response".to_string()));
+            }
+        }
+        "sms" => {
+            let code = request.code.ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+            let valid = state.mfa.verify_and_enable_sms(user_id, code).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to verify SMS code: {}", e))
+            })?;
+            if !valid {
+                return Err(crate::ApiError::BadRequest("Invalid SMS code".to_string()));
+            }
+        }
+        "email" => {
+            let code = request.code.ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+            let valid = state.mfa.verify_and_enable_email(user_id, code).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to verify Email code: {}", e))
+            })?;
+            if !valid {
+                return Err(crate::ApiError::BadRequest("Invalid Email code".to_string()));
+            }
+        }
+        _ => return Err(crate::ApiError::BadRequest("Unsupported MFA method for completion".to_string())),
+    }
 
     // Generate backup codes
     let codes = state.mfa.regenerate_recovery_codes(user_id).await.map_err(|e| {
@@ -747,13 +1006,14 @@ pub async fn setup_mfa(
     })?;
 
     let response = MfaSetupResponse {
-        method: "totp".to_string(),
-        secret: Some(totp_config.secret),
-        qr_code: Some(totp_config.url), // TotpEnrollment has url, not qr_code_url
+        method: request.method.clone(),
+        secret: None,
+        qr_code: None,
+        webauthn_challenge: None,
         backup_codes: codes,
     };
 
-    // Audit: MFA setup
+    // Audit: MFA setup complete
     let _ = state
         .audit
         .log_event(SecurityEventType::MfaSetup {
