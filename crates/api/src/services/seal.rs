@@ -58,11 +58,13 @@ struct Claims {
     username: String,
     email: String,
     roles: Vec<String>,
+    policies: Vec<String>,
     iat: usize,
     exp: usize,
     jti: String,
     iss: String,
     aud: String,
+    token_type: String,
 }
 
 impl SealService {
@@ -192,11 +194,13 @@ impl SealService {
             username: "root".to_string(),
             email: "root@system.local".to_string(),
             roles: vec!["root".to_string(), "admin".to_string()],
+            policies: vec!["root".to_string()],
             iat: now.timestamp() as usize,
             exp: exp.timestamp() as usize,
             jti: Uuid::new_v4().to_string(),
             iss: self.jwt_issuer.clone(),
             aud: self.jwt_audience.clone(),
+            token_type: "access".to_string(),
         };
 
         let root_token = encode(

@@ -170,8 +170,10 @@ impl CryptoService {
 
     /// Set the root key (Unseal operation)
     pub async fn set_root_key(&self, key: Vec<u8>) -> Result<()> {
-        let mut store = self.root_key_store.write().await;
-        *store = Some(key);
+        {
+            let mut store = self.root_key_store.write().await;
+            *store = Some(key);
+        } // Write lock dropped here to avoid deadlock with key_manager operations that need Read lock
 
         // Clear cache as it might be invalid or from previous session
         *self.active_key_cache.write().await = None;

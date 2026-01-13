@@ -62,17 +62,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Initialize Services
-    let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
-    let auth_config = AuthConfig::default(); // Using default as we don't have full config load setup yet
-    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?);
-    let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
-
-    // Initialize Seal Service
+    // Load JWT configuration from environment
     let jwt_secret = env::var("SECRETON_JWT_SECRET").unwrap_or_else(|_| "default-dev-secret-do-not-use-in-prod".to_string());
     let jwt_issuer = env::var("SECRETON_JWT_ISSUER").unwrap_or_else(|_| "secreton".to_string());
     let jwt_audience = env::var("SECRETON_JWT_AUDIENCE").unwrap_or_else(|_| "secreton-api".to_string());
 
+    // Initialize Services
+    let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
+
+    // Create AuthConfig with consistent JWT settings
+    let mut auth_config = AuthConfig::default();
+    auth_config.jwt.secret = jwt_secret.clone();
+    auth_config.jwt.issuer = jwt_issuer.clone();
+    auth_config.jwt.audience = jwt_audience.clone();
+
+    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?);
+    let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
+
+    // Initialize Seal Service
     let seal = Arc::new(SealService::new(
         storage.clone(),
         crypto.clone(),
