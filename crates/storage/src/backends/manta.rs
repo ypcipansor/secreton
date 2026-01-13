@@ -4,6 +4,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use reqwest::Client;
+use chrono::Utc;
+use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, sha2::Sha256};
+use rsa::signature::{Signer, SignatureEncoding};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::{
     StorageBackend, StorageError, SecretEntry, StorageResult,
@@ -17,20 +21,46 @@ pub struct MantaConfig {
     pub account: String,
     pub key_path: String,
     pub timeout: u64,
+    // Added for manual auth
+    pub key_id: Option<String>, // fingerprint
+    pub private_key_pem: Option<String>,
 }
 
 pub struct MantaStorage {
     config: MantaConfig,
     client: Client,
+    key: Option<RsaPrivateKey>,
 }
 
 impl MantaStorage {
     pub fn new(config: MantaConfig) -> Self {
-        Self { config, client: Client::new() }
+        let key = if let Some(pem) = &config.private_key_pem {
+            RsaPrivateKey::from_pkcs8_pem(pem).ok()
+        } else {
+            None
+        };
+        Self { config, client: Client::new(), key }
     }
 
     fn get_url(&self, path: &str) -> String {
         format!("{}/{}/stor/{}", self.config.url, self.config.account, path)
+    }
+
+    fn sign_request(&self, _verb: &str, _url: &str) -> StorageResult<String> {
+        // Manta HTTP Signature:
+        // Signature keyId="/:login/keys/:fingerprint",algorithm="rsa-sha256",headers="date",signature="..."
+
+        let key = self.key.as_ref().ok_or(StorageError::ConfigurationError { message: "Missing private key for Manta".to_string() })?;
+        let now = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+        let signing_string = format!("date: {}", now);
+        let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new(key.clone());
+        let signature = signing_key.sign(signing_string.as_bytes());
+        let signature_b64 = BASE64.encode(signature.to_bytes());
+
+        let key_id = format!("/{}/keys/{}", self.config.account, self.config.key_id.as_deref().unwrap_or("default"));
+
+        Ok(format!("keyId=\"{}\",algorithm=\"rsa-sha256\",headers=\"date\",signature=\"{}\"", key_id, signature_b64))
     }
 }
 
@@ -39,8 +69,17 @@ impl StorageBackend for MantaStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let url = self.get_url(&entry.path);
         let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
-        // Manta requires http-signature auth usually
-        let res = self.client.put(&url).body(data).send().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+        let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let auth = self.sign_request("PUT", &url)?;
+
+        let res = self.client.put(&url)
+            .header("Date", date)
+            .header("Authorization", format!("Signature {}", auth))
+            .body(data)
+            .send()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+
         if !res.status().is_success() { return Err(StorageError::QueryFailed { message: res.status().to_string() }); }
         Ok(())
     }
@@ -51,7 +90,16 @@ impl StorageBackend for MantaStorage {
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let url = self.get_url(path);
-        let res = self.client.get(&url).send().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+        let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let auth = self.sign_request("GET", &url)?;
+
+        let res = self.client.get(&url)
+            .header("Date", date)
+            .header("Authorization", format!("Signature {}", auth))
+            .send()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+
         if res.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
         if !res.status().is_success() { return Err(StorageError::QueryFailed { message: res.status().to_string() }); }
         let bytes = res.bytes().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
@@ -69,7 +117,15 @@ impl StorageBackend for MantaStorage {
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
         let url = self.get_url(path);
-        let res = self.client.delete(&url).send().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+        let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let auth = self.sign_request("DELETE", &url)?;
+
+        let res = self.client.delete(&url)
+            .header("Date", date)
+            .header("Authorization", format!("Signature {}", auth))
+            .send()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
         Ok(res.status().is_success())
     }
 
