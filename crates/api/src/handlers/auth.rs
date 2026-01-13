@@ -155,6 +155,11 @@ mod tests {
 
     async fn create_test_server() -> TestServer {
         let mut config = ApiConfig::default();
+        // Explicitly set JWT secret to avoid panic in ApiServiceContainer::new
+        config.auth.jwt.secret = Some("test-jwt-secret-for-integration-testing".to_string());
+        config.auth.jwt.issuer = "secreton-test".to_string();
+        config.auth.jwt.audience = "secreton-test-api".to_string();
+
         config.auth.oauth2 = Some(crate::config::OAuth2Config {
             providers: vec![crate::config::OAuth2Provider {
                 name: "github".to_string(),
@@ -173,13 +178,20 @@ mod tests {
                 .expect("Failed to create services"),
         );
 
+        // Manually create the test user since in-memory storage is empty on start
+        let _ = services.auth.create_user(
+            "alice",
+            "alice@example.com",
+            "password123",
+            vec!["user".to_string()]
+        ).await;
+
         let app = create_routes().with_state(services);
         use std::net::SocketAddr;
         TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to create test server")
     }
 
     #[tokio::test]
-    #[ignore = "Requires userpass auth method to be registered in UnifiedAuthService fixture"]
     async fn test_login_endpoint_returns_tokens() {
         let server = create_test_server().await;
         let request = LoginRequest {
