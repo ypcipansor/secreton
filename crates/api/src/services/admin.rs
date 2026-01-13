@@ -101,6 +101,8 @@ pub struct CreateUserRequest {
     pub full_name: Option<String>,
     pub enabled: Option<bool>,
     pub roles: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
     pub metadata: std::collections::HashMap<String, String>,
 }
 
@@ -1329,31 +1331,29 @@ impl AdminService {
 
     /// Create a new user
     pub async fn create_user(&self, request: CreateUserRequest) -> Result<UserInfo, AdminError> {
-        // Check if user already exists
-        let _existing_path = format!("{}{}", USER_STORAGE_PREFIX, uuid::Uuid::new_v4());
-        // Actually check by username - this is a simplified check
-        // In production, you'd want a unique constraint on username
+        // Use auth service to create user (handles password hashing and storage)
+        let user = self.auth.create_user(
+            &request.username,
+            &request.email,
+            &request.password,
+            request.roles,
+            request.permissions,
+        ).await.map_err(AdminError::Auth)?;
 
-        let user = UserInfo {
-            id: uuid::Uuid::new_v4().to_string(),
-            username: request.username,
-            email: request.email,
-            full_name: request.full_name,
-            enabled: request.enabled.unwrap_or(true),
-            roles: request.roles,
-            permissions: vec![], // Will be calculated from roles
-            last_login: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            metadata: HashMap::new(),
-        };
-
-        let entry = self.user_info_to_secreton_entry(&user).await?;
-        self.storage.store(&entry)
-            .await
-            .map_err(AdminError::Storage)?;
-
-        Ok(user)
+        // Map User to UserInfo
+        Ok(UserInfo {
+            id: user.id,
+            username: user.username,
+            email: user.email.unwrap_or_default(),
+            full_name: user.full_name,
+            enabled: user.enabled,
+            roles: user.roles,
+            permissions: user.permissions,
+            last_login: user.last_login,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+            metadata: user.metadata,
+        })
     }
 
     /// Update an existing user

@@ -169,6 +169,7 @@ mod tests {
             display_name: Some("Mock User".to_string()),
             full_name: Some("Mock User".to_string()),
             roles: vec!["admin".to_string()],
+            permissions: vec![],
             policies: vec!["default".to_string()],
             metadata: std::collections::HashMap::new(),
             created_at: chrono::Utc::now(),
