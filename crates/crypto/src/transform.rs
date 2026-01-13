@@ -126,9 +126,9 @@ impl TransformEngine {
             .ok_or_else(|| CryptoError::InvalidParameter(format!("Transform '{}' not found", transform_name)))?;
 
         match &config.transform_type {
-            TransformType::Fpe => self.format_preserving_encrypt(data, &config).await,
-            TransformType::Tokenization => self.tokenize(data, transform_name, &config).await,
-            TransformType::Masking => self.mask_data(data, &config).await,
+            TransformType::Fpe => self.format_preserving_encrypt(data, config).await,
+            TransformType::Tokenization => self.tokenize(data, transform_name, config).await,
+            TransformType::Masking => self.mask_data(data, config).await,
             TransformType::CreditCardTokenization => self.tokenize_credit_card(data, transform_name).await,
             TransformType::SsnTokenization => self.tokenize_ssn(data, transform_name).await,
         }
@@ -158,7 +158,7 @@ impl TransformEngine {
         }
 
         match &config.transform_type {
-            TransformType::Fpe => self.format_preserving_decrypt(transformed_data, &config).await,
+            TransformType::Fpe => self.format_preserving_decrypt(transformed_data, config).await,
             TransformType::Tokenization => self.detokenize(transformed_data, transform_name).await,
             TransformType::Masking => Err(CryptoError::InvalidParameter("Masking is not reversible".to_string())),
             TransformType::CreditCardTokenization => self.detokenize(transformed_data, transform_name).await,
@@ -386,9 +386,11 @@ impl TransformEngine {
             return Err(CryptoError::InvalidParameter("Invalid credit card number length".to_string()));
         }
 
-        let mut config = TransformConfig::default();
-        config.transform_type = TransformType::CreditCardTokenization;
-        config.token_format = Some("CC_TKN_XXXX".to_string());
+        let config = TransformConfig {
+            transform_type: TransformType::CreditCardTokenization,
+            token_format: Some("CC_TKN_XXXX".to_string()),
+            ..Default::default()
+        };
 
         self.tokenize(data, transform_name, &config).await
     }
@@ -404,9 +406,11 @@ impl TransformEngine {
             return Err(CryptoError::InvalidParameter("Invalid SSN format (use 000-00-0000)".to_string()));
         }
 
-        let mut config = TransformConfig::default();
-        config.transform_type = TransformType::SsnTokenization;
-        config.token_format = Some("SSN_TKN_XXXX".to_string());
+        let config = TransformConfig {
+            transform_type: TransformType::SsnTokenization,
+            token_format: Some("SSN_TKN_XXXX".to_string()),
+            ..Default::default()
+        };
 
         self.tokenize(data, transform_name, &config).await
     }

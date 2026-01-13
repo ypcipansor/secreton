@@ -1117,8 +1117,6 @@ mod tests {
             enabled: true,
             is_active: true,
             is_superuser: false,
-            failed_login_attempts: 0,
-            locked_until: None,
         }
     }
 
@@ -1266,8 +1264,6 @@ mod tests {
             failed_login_attempts: 0,
             locked_until: None,
             metadata: HashMap::new(),
-            failed_login_attempts: 0,
-            locked_until: None,
         };
 
         let result = service.create_key("test_key", "aes256-gcm", &user).await;
@@ -1342,8 +1338,6 @@ mod tests {
             failed_login_attempts: 0,
             locked_until: None,
             metadata: HashMap::new(),
-            failed_login_attempts: 0,
-            locked_until: None,
         };
 
         let result = service.create_key("test_key_allowed", "aes256-gcm", &user).await;
@@ -1384,8 +1378,6 @@ mod list_secrets_tests {
             failed_login_attempts: 0,
             locked_until: None,
             metadata: HashMap::new(),
-            failed_login_attempts: 0,
-            locked_until: None,
         }
     }
 

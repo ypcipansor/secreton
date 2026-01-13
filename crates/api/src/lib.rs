@@ -390,10 +390,27 @@ impl SecurityAPI {
         storage: Arc<dyn StorageBackend>,
         auth: Arc<crate::services::auth::AuthenticationService>,
         audit: Arc<crate::services::audit::AuditLogger>,
+        seal: Arc<crate::services::seal::SealService>,
+        secreton: Arc<crate::services::secret::SecretService>,
     ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let storage_filter = warp::any().map(move || storage.clone());
-        let auth_filter = warp::any().map(move || auth.clone());
+        let auth_clone = auth.clone();
+        let auth_filter = warp::any().map(move || auth_clone.clone());
         let audit_filter = warp::any().map(move || audit.clone());
+        let seal_filter = warp::any().map(move || seal.clone());
+        let secreton_filter = warp::any().map(move || secreton.clone());
+
+        // Auth filter
+        let auth_service = auth.clone();
+        let with_user = warp::header::header("authorization")
+            .map(move |auth_header: String| (auth_header, auth_service.clone()))
+            .and_then(|(auth_header, auth_service): (String, Arc<crate::services::auth::AuthenticationService>)| async move {
+                let token = auth_header.strip_prefix("Bearer ").unwrap_or(&auth_header);
+                match auth_service.validate_token(token).await {
+                    Ok(user) => Ok(user),
+                    Err(_) => Err(warp::reject::custom(ApiError::Authentication("Invalid token".to_string()))),
+                }
+            });
 
         let health = warp::path("health")
             .and(warp::get())
@@ -403,6 +420,52 @@ impl SecurityAPI {
             .and(warp::path("status"))
             .and(warp::get())
             .and_then(security_status_handler);
+
+        let sys_init = warp::path("sys")
+            .and(warp::path("init"))
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(seal_filter.clone())
+            .and_then(handle_sys_init);
+
+        let sys_unseal = warp::path("sys")
+            .and(warp::path("unseal"))
+            .and(warp::post())
+            .and(warp::body::json())
+            .and(seal_filter.clone())
+            .and_then(handle_sys_unseal);
+
+        let sys_seal_status = warp::path("sys")
+            .and(warp::path("seal-status"))
+            .and(warp::get())
+            .and(seal_filter.clone())
+            .and_then(handle_sys_seal_status);
+
+        // Secret routes
+        let secret_get = warp::path("secrets")
+            .and(warp::path("data"))
+            .and(warp::path::tail())
+            .and(warp::get())
+            .and(with_user.clone())
+            .and(secreton_filter.clone())
+            .and_then(handle_secret_get);
+
+        let secret_put = warp::path("secrets")
+            .and(warp::path("data"))
+            .and(warp::path::tail())
+            .and(warp::post())
+            .and(with_user.clone())
+            .and(warp::body::json())
+            .and(secreton_filter.clone())
+            .and_then(handle_secret_put);
+
+        let secret_delete = warp::path("secrets")
+            .and(warp::path("data"))
+            .and(warp::path::tail())
+            .and(warp::delete())
+            .and(with_user.clone())
+            .and(secreton_filter.clone())
+            .and_then(handle_secret_delete);
 
         let audit_events = warp::path("audit")
             .and(warp::path("events"))
@@ -453,6 +516,12 @@ impl SecurityAPI {
 
         health
             .or(security_status)
+            .or(sys_init)
+            .or(sys_unseal)
+            .or(sys_seal_status)
+            .or(secret_get)
+            .or(secret_put)
+            .or(secret_delete)
             .or(audit_events)
             .or(authenticate)
             .or(hsm_operations)
@@ -461,6 +530,87 @@ impl SecurityAPI {
             .or(config_post)
             .or(config_get)
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SecretPutRequest {
+    data: HashMap<String, String>,
+}
+
+async fn handle_secret_get(
+    path: warp::filters::path::Tail,
+    user: secreton_auth::User,
+    secreton: Arc<crate::services::secret::SecretService>
+) -> Result<impl Reply, Rejection> {
+    let path_str = path.as_str();
+    let secret = secreton.get_secret(path_str, &user).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Wrap in ApiResponse
+    // We wrap SecretData in another "data" field to match existing structure if needed,
+    // or just return SecretData.
+    // SecretData has { path, data: map, ... }
+    Ok(warp::reply::json(&ApiResponse::success(secret)))
+}
+
+async fn handle_secret_put(
+    path: warp::filters::path::Tail,
+    user: secreton_auth::User,
+    payload: SecretPutRequest,
+    secreton: Arc<crate::services::secret::SecretService>
+) -> Result<impl Reply, Rejection> {
+    let path_str = path.as_str();
+    let secret = secreton.put_secret(path_str, payload.data, &user).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(warp::reply::json(&ApiResponse::success(secret)))
+}
+
+async fn handle_secret_delete(
+    path: warp::filters::path::Tail,
+    user: secreton_auth::User,
+    secreton: Arc<crate::services::secret::SecretService>
+) -> Result<impl Reply, Rejection> {
+    let path_str = path.as_str();
+    secreton.delete_secret(path_str, &user).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(warp::reply::json(&ApiResponse::success("Deleted")))
+}
+
+#[derive(Debug, Deserialize)]
+struct SysInitRequest {
+    shares: u8,
+    threshold: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct SysUnsealRequest {
+    key: String,
+}
+
+async fn handle_sys_init(
+    req: SysInitRequest,
+    seal: Arc<crate::services::seal::SealService>
+) -> Result<impl Reply, Rejection> {
+    let result = seal.init(req.shares, req.threshold).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(warp::reply::json(&ApiResponse::success(result)))
+}
+
+async fn handle_sys_unseal(
+    req: SysUnsealRequest,
+    seal: Arc<crate::services::seal::SealService>
+) -> Result<impl Reply, Rejection> {
+    let result = seal.unseal(&req.key).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(warp::reply::json(&ApiResponse::success(result)))
+}
+
+async fn handle_sys_seal_status(
+    seal: Arc<crate::services::seal::SealService>
+) -> Result<impl Reply, Rejection> {
+    let result = seal.get_status().await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(warp::reply::json(&ApiResponse::success(result)))
 }
 
 /// Health check handler
@@ -718,13 +868,35 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     // Initialize required services for auth and audit
     let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
     let auth_config = crate::config::AuthConfig::default();
-    let auth = Arc::new(crate::services::auth::AuthenticationService::new(storage.clone(), crypto, &auth_config).await.unwrap());
+    let auth = Arc::new(crate::services::auth::AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await.unwrap());
     let audit = Arc::new(crate::services::audit::AuditLogger::new(storage.clone()).await.unwrap());
+
+    let seal = Arc::new(crate::services::seal::SealService::new(
+        storage.clone(),
+        crypto.clone(),
+        "dev-secret".to_string(),
+        "secreton".to_string(),
+        "secreton-api".to_string()
+    ));
+
+    // Initialize Secret Service components
+    let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+    let policy_service = Arc::new(secreton_auth::PolicyService::new());
+    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()));
+
+    let secreton = Arc::new(crate::services::secret::SecretService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+        identity,
+        policy_service,
+        performance
+    ).await.unwrap());
 
     // Inject storage, auth and audit into routes
     // For start_security_server, we just use the mock storage since this function
     // doesn't accept storage configuration
-    let routes_with_storage = SecurityAPI::routes(storage, auth, audit)
+    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton)
         .with(
             warp::cors()
                 .allow_any_origin()
