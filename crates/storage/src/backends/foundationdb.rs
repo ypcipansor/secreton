@@ -1,10 +1,7 @@
 //! FoundationDB storage backend for Secreton
-//!
-//! This module provides a FoundationDB-based storage backend implementation.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
@@ -15,52 +12,17 @@ use crate::{
 /// FoundationDB storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FoundationDBConfig {
-    /// FoundationDB cluster file path
-    pub cluster_file: String,
-    /// Database name
-    pub database: String,
-    /// Connection timeout in seconds
-    pub connection_timeout: u64,
-    /// Transaction timeout in seconds
-    pub transaction_timeout: u64,
-    /// Maximum retry attempts
-    pub max_retries: u32,
-    /// TLS configuration
-    pub tls: Option<FoundationDBTlsConfig>,
+    pub cluster_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FoundationDBTlsConfig {
-    /// Enable TLS
-    pub enabled: bool,
-    /// CA certificate file path
-    pub ca_file: Option<String>,
-    /// Client certificate file path
-    pub cert_file: Option<String>,
-    /// Client key file path
-    pub key_file: Option<String>,
-    /// Skip certificate verification (insecure)
-    pub skip_verify: bool,
-}
-
-/// FoundationDB storage backend
 pub struct FoundationDBStorage {
     #[allow(dead_code)]
     config: FoundationDBConfig,
-    #[allow(dead_code)]
-    client: Option<Arc<FoundationDBClient>>,
 }
 
-/// FoundationDB client wrapper
-struct FoundationDBClient;
-
 impl FoundationDBStorage {
-    /// Create a new FoundationDB storage backend
     pub fn new(config: FoundationDBConfig) -> Self {
-        Self {
-            config,
-            client: None,
-        }
+        Self { config }
     }
 }
 

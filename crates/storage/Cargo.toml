@@ -39,6 +39,17 @@ mongodb.workspace = true
 tokio-postgres.workspace = true
 deadpool-postgres.workspace = true
 redis.workspace = true
+couch_rs = "0.12"
+tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "rustls", "tds73"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+zookeeper-client = "0.7"
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+time = "0.3"
+rsa = "0.9"
+pkcs8 = "0.10"
+spki = "0.7"
 # SQLx temporarily disabled due to RSA vulnerability in MySQL backend
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 # mysql.workspace = true
