@@ -536,7 +536,9 @@ pub async fn login(
             };
 
             // Create and store session
-            let session_id = Uuid::new_v4().to_string();
+            // Use JTI from token as session ID to link them
+            let session_id = extract_jti_from_token(&access_token, &state)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
 
             // Create Session from fields
             let now = chrono::Utc::now();
@@ -599,18 +601,7 @@ pub async fn logout(
         .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
 
     // Extract session ID from token for accurate auditing
-    let session_id = {
-        use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
-        let decoding_key = DecodingKey::from_secret(state.config.auth.jwt.secret.as_ref().expect("JWT secret must be configured").as_bytes());
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.set_issuer(&[&state.config.auth.jwt.issuer]);
-        validation.set_audience(&[&state.config.auth.jwt.audience]);
-
-        match decode::<Claims>(token, &decoding_key, &validation) {
-            Ok(token_data) => token_data.claims.jti,
-            Err(_) => "unknown".to_string(), // Fallback if token decoding fails
-        }
-    };
+    let session_id = extract_jti_from_token(token, &state).unwrap_or_else(|| "unknown".to_string());
 
     // Invalidate the token by adding to blacklist
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(24); // Blacklist for 24 hours
@@ -1120,6 +1111,9 @@ pub async fn list_sessions(
     let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
+    // Extract JTI from current token to identify current session
+    let current_jti = extract_jti_from_token(token, &state);
+
     // Get all sessions for the user
     let sessions = {
         let sessions_store = SESSION_STORE.read().await;
@@ -1130,16 +1124,15 @@ pub async fn list_sessions(
             .collect::<Vec<_>>()
     };
 
-    // Mark the current session (based on some criteria, e.g., recent access)
+    // Mark the current session based on JTI match
     let sessions_info: Vec<SessionInfo> = sessions.into_iter().map(|session| {
-        let last_accessed = session.last_accessed;
-        let is_current = last_accessed > chrono::Utc::now() - chrono::Duration::minutes(5);
+        let is_current = current_jti.as_ref().map(|jti| jti == &session.id).unwrap_or(false);
         SessionInfo {
              id: session.id,
              user_id: session.user_id,
              ip_address: session.ip_address,
              user_agent: session.user_agent,
-             last_accessed,
+             last_accessed: session.last_accessed,
              created_at: session.created_at,
              expires_at: session.expires_at,
              is_current,
@@ -1279,4 +1272,18 @@ fn extract_user_agent(headers: &HeaderMap) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string()
+}
+
+/// Extract JTI from JWT token
+fn extract_jti_from_token(token: &str, state: &AppState) -> Option<String> {
+    use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+    let secret = state.config.auth.jwt.secret.as_ref()?;
+    let decoding_key = DecodingKey::from_secret(secret.as_bytes());
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_issuer(&[&state.config.auth.jwt.issuer]);
+    validation.set_audience(&[&state.config.auth.jwt.audience]);
+
+    decode::<Claims>(token, &decoding_key, &validation)
+        .map(|data| data.claims.jti)
+        .ok()
 }
