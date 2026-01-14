@@ -288,16 +288,13 @@ impl AuthMethodImpl for AwsAuthMethod {
                 };
 
                 Ok(AuthResult {
-                    authenticated: true,
+                    success: true,
                     user_info: Some(user_info),
                     token: None,
+                    refresh_token: None,
                     mfa_required: false,
                     policies: aws_identity.policies.clone(),
-                    lease_duration: None,
-                    renewable: Some(true),
                     metadata: HashMap::new(),
-                    accessor: None,
-                    mfa_methods: Vec::new(),
                 })
             }
             _ => Err(SecretonError::InvalidCredentials(

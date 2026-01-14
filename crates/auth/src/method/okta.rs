@@ -288,6 +288,7 @@ impl AuthMethodImpl for OktaAuthMethod {
                     metadata: HashMap::new(),
                     mfa_required: false,
                     token: None,
+                    refresh_token: None,
                 })
             }
             _ => Err(SecretonError::InvalidCredentials),

@@ -222,6 +222,7 @@ impl AuthMethodImpl for LdapAuthMethod {
                     success: true,
                     user_info: Some(user_info),
                     token: None,
+                    refresh_token: None,
                     mfa_required: false,
                     policies: vec![], // Policies would be determined by groups
                     metadata: HashMap::new(),

@@ -181,7 +181,17 @@ impl AuthenticationService {
         let auth_service = Arc::new(UnifiedAuthService::new());
 
         // Register default authentication methods
-        let userpass_method = Arc::new(UserPassAuthMethod::new());
+        let mut userpass_method_impl = UserPassAuthMethod::new();
+        // Initialize/Enable the method
+        // Manually enable as we are skipping the full init flow for built-in method
+        use secreton_auth::service::AuthMethodImpl;
+        let _ = userpass_method_impl.init(&secreton_auth::model::AuthMethod {
+            method_type: secreton_auth::model::AuthMethodType::UserPass,
+            enabled: true,
+            config: HashMap::new(),
+        }).await;
+
+        let userpass_method = Arc::new(userpass_method_impl);
         auth_service.register_method("userpass".to_string(), userpass_method.clone()).await;
 
         // Load existing users from storage
@@ -748,6 +758,7 @@ impl AuthenticationService {
         Ok(secreton_core::AuthResult {
             success: true,
             token: Some(token_pair.access_token),
+            refresh_token: Some(token_pair.refresh_token),
             user_info: result.user_info,
             policies,
             metadata: std::collections::HashMap::new(),

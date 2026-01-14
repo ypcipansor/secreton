@@ -84,16 +84,13 @@ impl AuthMethodImpl for TokenAuthMethod {
                     };
 
                     Ok(AuthResult {
-                        authenticated: true,
+                        success: true,
                         user_info: Some(user_info),
                         token: Some(token.to_string()),
+                        refresh_token: None,
                         mfa_required: false,
                         policies: token_info.policies.clone(),
-                        lease_duration: token_info.lease_duration.map(|d| d as i64),
-                        renewable: Some(token_info.renewable),
-                        accessor: None,
                         metadata: HashMap::new(),
-                        mfa_methods: vec![],
                     })
                 } else {
                     Err(SecretonError::InvalidCredentials("Invalid token".to_string()))
