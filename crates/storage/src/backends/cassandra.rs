@@ -7,6 +7,7 @@ use crate::{
     HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
     StorageStats, StorageTransaction,
 };
+use secreton_common::models::oauth_state::OAuthState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CassandraConfig {
@@ -240,6 +241,18 @@ impl StorageBackend for CassandraStorage {
     async fn migrate(&self) -> StorageResult<()> {
         // Cassandra migrations would be implemented here
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "Cassandra".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "Cassandra".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        Ok(0)
     }
 }
 

@@ -15,7 +15,7 @@ use crate::extractors::AuthenticatedUser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use secreton_core::models::oauth_state::OAuthState;
+use secreton_common::models::oauth_state::OAuthState;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -61,7 +61,7 @@ use crate::{
 use crate::services::audit::SecurityEventType;
 
 // Import Claims from auth service for JWT decoding
-use crate::services::auth::{Claims, AuthError};
+use crate::services::auth::Claims;
 
 /// Create authentication routes
 pub fn create_routes() -> Router<AppState> {

@@ -5,13 +5,14 @@ import sys
 import os
 
 BASE_URL = "http://localhost:8080"
-API_PREFIX = BASE_URL
+API_PREFIX = f"{BASE_URL}/api/v1"
 
 def wait_for_server():
     print("Waiting for server to start...")
     for _ in range(300):
         try:
-            resp = requests.get(f"{API_PREFIX}/health")
+            # Check /health at root
+            resp = requests.get(f"{BASE_URL}/health")
             if resp.status_code == 200:
                 print("Server is up!")
                 return True

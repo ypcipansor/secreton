@@ -849,7 +849,7 @@ pub async fn rotate_key(
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Rotate key via secreton service
-    let old_key_id = key_id.clone();
+    let _old_key_id = key_id.clone();
     let key_info: secret::KeyInfo = state.secreton.rotate_key(&key_id, &user).await
         .map_err(|e| match e {
             crate::services::secret::SecretError::KeyNotFound { .. } => crate::ApiError::NotFound(format!("Key not found: {}", key_id)),
@@ -1366,7 +1366,7 @@ pub struct RestoreRequest {
 }
 
 pub async fn create_backup(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<BackupInfo>>> {
 
@@ -1379,7 +1379,7 @@ pub async fn create_backup(
 }
 
 pub async fn list_backups(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ApiResponse<Vec<BackupInfo>>>> {
     // Extract and validate token
@@ -1399,7 +1399,7 @@ pub async fn list_backups(
 }
 
 pub async fn get_backup(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     headers: HeaderMap,
     Path(_backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<BackupInfo>>> {
@@ -1420,7 +1420,7 @@ pub async fn get_backup(
 }
 
 pub async fn restore_backup(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Path(_backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {

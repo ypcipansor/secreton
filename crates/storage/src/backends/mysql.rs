@@ -5,6 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use mysql_async::prelude::*;
+use secreton_common::models::oauth_state::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -697,6 +698,18 @@ impl StorageBackend for MySQLStorage {
     async fn migrate(&self) -> StorageResult<()> {
         // MySQL migrations would be implemented here
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "MySQL".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "MySQL".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        Ok(0)
     }
 }
 

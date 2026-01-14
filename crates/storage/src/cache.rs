@@ -2,6 +2,7 @@
 
 use crate::{SecretEntry, StorageResult};
 use async_trait::async_trait;
+use secreton_common::models::oauth_state::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
@@ -404,6 +405,18 @@ where
 
     async fn migrate(&self) -> StorageResult<()> {
         self.storage.migrate().await
+    }
+
+    async fn store_oauth_state(&self, state: &OAuthState) -> StorageResult<()> {
+        self.storage.store_oauth_state(state).await
+    }
+
+    async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>> {
+        self.storage.get_oauth_state(state).await
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        self.storage.delete_expired_oauth_states().await
     }
 }
 

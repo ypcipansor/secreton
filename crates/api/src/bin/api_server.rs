@@ -161,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🚀 Servers starting...");
 
     // Run both servers concurrently
-    let (http_res, grpc_res) = tokio::join!(http_server, grpc_server);
+    let (_http_res, grpc_res) = tokio::join!(http_server, grpc_server);
 
     if let Err(e) = grpc_res {
         warn!("gRPC server failed: {}", e);
