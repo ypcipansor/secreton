@@ -92,7 +92,7 @@ pub struct RegistrationChallenge {
 }
 
 /// WebAuthn registration response from client
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationResponse {
     /// Challenge ID
     pub challenge_id: Uuid,

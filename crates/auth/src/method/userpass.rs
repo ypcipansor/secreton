@@ -35,6 +35,7 @@ impl UserPassAuthMethod {
         id: String,
         groups: Vec<String>,
         policies: Vec<String>,
+        permissions: Vec<String>,
     ) {
         let user_entry = UserEntry {
             username: username.to_string(),
@@ -43,7 +44,7 @@ impl UserPassAuthMethod {
             groups,
             policies,
             roles: vec![], // Added roles
-            permissions: vec![], // Added permissions
+            permissions,
             metadata: HashMap::new(),
         };
 
@@ -59,6 +60,7 @@ impl UserPassAuthMethod {
         id: String,
         groups: Vec<String>,
         policies: Vec<String>,
+        permissions: Vec<String>,
     ) -> AuthMethodResult<String> {
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
@@ -67,7 +69,7 @@ impl UserPassAuthMethod {
             .map_err(|_| SecretonError::Internal { message: "Password hashing failed".to_string() })?
             .to_string();
 
-        self.add_user(username, password_hash.clone(), id, groups, policies).await;
+        self.add_user(username, password_hash.clone(), id, groups, policies, permissions).await;
         Ok(password_hash)
     }
 

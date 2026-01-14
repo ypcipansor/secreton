@@ -1,10 +1,7 @@
 //! Spanner storage backend for Secreton
-//!
-//! This module provides a Spanner-based storage backend implementation.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
@@ -18,21 +15,17 @@ pub struct SpannerConfig {
     pub project_id: String,
     pub instance_id: String,
     pub database_id: String,
-    pub max_sessions: u32,
+    pub credentials_file: Option<String>,
 }
 
 pub struct SpannerStorage {
     #[allow(dead_code)]
     config: SpannerConfig,
-    #[allow(dead_code)]
-    client: Option<Arc<SpannerClient>>,
 }
-
-struct SpannerClient;
 
 impl SpannerStorage {
     pub fn new(config: SpannerConfig) -> Self {
-        Self { config, client: None }
+        Self { config }
     }
 }
 

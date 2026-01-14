@@ -447,6 +447,7 @@ pub async fn create_user(
         full_name: request.full_name,
         enabled: request.enabled,
         roles: request.roles,
+        permissions: request.permissions,
         metadata: HashMap::new(),
     };
 
