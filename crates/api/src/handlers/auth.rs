@@ -61,7 +61,7 @@ use crate::{
 use crate::services::audit::SecurityEventType;
 
 // Import Claims from auth service for JWT decoding
-use crate::services::auth::Claims;
+use crate::services::auth::{Claims, AuthError};
 
 /// Create authentication routes
 pub fn create_routes() -> Router<AppState> {
@@ -115,13 +115,19 @@ mod tests {
                 .expect("Failed to create services"),
         );
 
-        // Manually create the test user since in-memory storage is empty on start
-        let _ = services.auth.create_user(
+        // Register test user "alice" for login tests
+        // We handle errors explicitly to ensure the test environment is correctly set up.
+        // We ignore UserAlreadyExists as it allows the server to be reused or idempotent setup.
+        match services.auth.register_user(
             "alice",
-            "alice@example.com",
             "password123",
+            Some("alice@example.com".to_string()),
             vec!["user".to_string()]
-        ).await;
+        ).await {
+            Ok(_) => {},
+            Err(AuthError::UserAlreadyExists) => {},
+            Err(e) => panic!("Failed to setup test user: {}", e),
+        }
 
         let app = create_routes().with_state(services);
         use std::net::SocketAddr;
@@ -1138,13 +1144,13 @@ pub async fn oauth_login(
         let provider_config = oauth2_config.providers.iter()
             .find(|p| p.name.to_lowercase() == provider.to_lowercase())
             .ok_or_else(|| crate::ApiError::BadRequest(format!("OAuth provider '{}' not configured", provider)))?;
-        
+
         // Build redirect URI
         let redirect_uri = format!("{}/{}/callback", oauth2_config.redirect_url, provider);
-        
+
         // Build scopes string
         let scopes = oauth2_config.scopes.join("%20");
-        
+
         // Build authorization URL based on provider type or use config URL
         if provider_config.auth_url.is_empty() {
             // Use well-known URLs for common providers
