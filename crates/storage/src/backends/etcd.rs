@@ -3,6 +3,7 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
+use secreton_common::models::oauth_state::OAuthState;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -537,6 +538,18 @@ impl StorageBackend for EtcdStorage {
     async fn migrate(&self) -> StorageResult<()> {
         // etcd doesn't require migrations
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "Etcd".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "Etcd".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        Ok(0)
     }
 }
 

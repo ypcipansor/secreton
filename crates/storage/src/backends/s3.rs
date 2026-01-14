@@ -5,6 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_types::region::Region;
+use secreton_common::models::oauth_state::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -623,6 +624,18 @@ impl StorageBackend for S3Storage {
     async fn migrate(&self) -> StorageResult<()> {
         // S3 doesn't require migrations
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "S3".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "S3".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        Ok(0)
     }
 }
 

@@ -15,7 +15,7 @@ use crate::extractors::AuthenticatedUser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use secreton_core::models::oauth_state::OAuthState;
+use secreton_common::models::oauth_state::OAuthState;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 

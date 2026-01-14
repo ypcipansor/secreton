@@ -5,6 +5,7 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
+use secreton_common::models::oauth_state::OAuthState;
 use chrono::Utc;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
 use std::collections::HashMap;
@@ -328,6 +329,18 @@ impl StorageBackend for RedisBackend {
 
     async fn delete_expired(&self, _path_prefix: Option<String>) -> StorageResult<u64> {
         // Redis handles expiration automatically via TTL
+        Ok(0)
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "Redis".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "Redis".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
         Ok(0)
     }
 }

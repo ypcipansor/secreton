@@ -30,8 +30,8 @@ pub use backends::{S3Storage, S3StorageConfig};
 // Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
-// Import from core
-use secreton_core::models::oauth_state::OAuthState;
+// Import from common
+use secreton_common::models::oauth_state::OAuthState;
 
 /// Encryption metadata for secreton entries
 #[derive(Debug, Clone, Serialize, Deserialize)]

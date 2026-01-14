@@ -4,7 +4,7 @@ use crate::{
     HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
     StorageResult, StorageStats, StorageTransaction,
 };
-use secreton_core::models::oauth_state::OAuthState;
+use secreton_common::models::oauth_state::OAuthState;
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
 use std::sync::Arc;

@@ -448,7 +448,8 @@ impl SecurityAPI {
             .and_then(handle_sys_seal_status);
 
         // Secret routes
-        let secret_get = warp::path("secrets")
+        let secret_get = api_v1.clone()
+            .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
             .and(warp::get())
@@ -456,7 +457,8 @@ impl SecurityAPI {
             .and(secreton_filter.clone())
             .and_then(handle_secret_get);
 
-        let secret_put = warp::path("secrets")
+        let secret_put = api_v1.clone()
+            .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
             .and(warp::post())
@@ -465,7 +467,8 @@ impl SecurityAPI {
             .and(secreton_filter.clone())
             .and_then(handle_secret_put);
 
-        let secret_delete = warp::path("secrets")
+        let secret_delete = api_v1.clone()
+            .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
             .and(warp::delete())

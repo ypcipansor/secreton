@@ -13,6 +13,7 @@ use crate::{
     StorageBackend, StorageError, SecretEntry, StorageResult,
     StorageTransaction, HealthStatus, StorageStats, QueryParams
 };
+use secreton_common::models::oauth_state::OAuthState;
 
 /// Manta storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,5 +156,17 @@ impl StorageBackend for MantaStorage {
 
     async fn migrate(&self) -> StorageResult<()> {
         Ok(())
+    }
+
+    async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
+        Err(StorageError::BackendError { backend: "Manta".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
+        Err(StorageError::BackendError { backend: "Manta".to_string(), message: "Not implemented".to_string() })
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        Ok(0)
     }
 }
