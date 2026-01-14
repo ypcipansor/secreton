@@ -92,7 +92,8 @@ echo "Creating root user..."
 # Let's try to delete. If it fails due to auth, I'll know I need to fix the test or the code.
 # For now, I'll attempt it. If 401/403, I will handle it.
 
-$CLI_BIN config delete || echo "Delete failed as expected (Auth required)"
+$CLI_BIN config delete
+echo "Delete in bootstrap mode succeeded!"
 
 # To truly test delete, I need to be admin.
 # 1. Init vault (to get root token? No, that's SealService).

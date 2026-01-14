@@ -201,7 +201,8 @@ impl AuthenticationService {
                         user.password_hash.clone(),
                         user.id.clone(),
                         user.roles.clone(),
-                        user.policies.clone()
+                        user.policies.clone(),
+                        user.permissions.clone(),
                     ).await;
                 }
             }
@@ -317,6 +318,7 @@ impl AuthenticationService {
                 is_superuser: false,
                 disabled: false,
                 roles: user_info.roles.clone(),
+                permissions: vec![],
                 policies: vec!["default".to_string()], // Default policies as UserInfo lacks them
                 enabled: true,
                 mfa_enabled: false,
@@ -439,6 +441,7 @@ impl AuthenticationService {
             is_active: true,
             is_superuser: false,
             roles: claims.claims.roles.clone(),
+            permissions: vec![],
             policies: vec!["default".to_string()],
             enabled: true,
             disabled: false,
@@ -493,6 +496,7 @@ impl AuthenticationService {
             is_active: true,
             is_superuser: false,
             roles: claims.claims.roles.clone(),
+            permissions: vec![],
             policies: vec!["default".to_string()],
             enabled: true,
             mfa_enabled: false,
@@ -521,6 +525,7 @@ impl AuthenticationService {
         password: &str,
         email: Option<String>,
         roles: Vec<String>,
+        permissions: Vec<String>,
     ) -> Result<User, AuthError> {
         // Check if user exists
         let path = format!("{}{}", USER_STORAGE_PREFIX, username);
@@ -537,6 +542,7 @@ impl AuthenticationService {
             user_id.clone(),
             roles.clone(),
             vec!["default".to_string()],
+            permissions.clone(),
         ).await.map_err(|_| AuthError::Internal(anyhow::anyhow!("Failed to create user in auth method")))?;
 
         let user = User {
@@ -548,6 +554,7 @@ impl AuthenticationService {
             is_active: true,
             is_superuser: roles.contains(&"admin".to_string()) || roles.contains(&"root".to_string()),
             roles,
+            permissions,
             policies: vec!["default".to_string()],
             enabled: true,
             disabled: false,
@@ -590,8 +597,9 @@ impl AuthenticationService {
         email: &str,
         password: &str,
         roles: Vec<String>,
+        permissions: Vec<String>,
     ) -> Result<User, AuthError> {
-        self.register_user(username, password, Some(email.to_string()), roles).await
+        self.register_user(username, password, Some(email.to_string()), roles, permissions).await
     }
 
     /// Check if user has permission (simplified)
@@ -762,6 +770,7 @@ impl AuthenticationService {
             is_active: true,
             is_superuser: false,
             roles: vec!["user".to_string()],
+            permissions: vec![],
             policies: vec!["default".to_string()],
             enabled: true,
             mfa_enabled: false,

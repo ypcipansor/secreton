@@ -30,6 +30,9 @@ pub use backends::{S3Storage, S3StorageConfig};
 // Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
+// Import from core
+use secreton_core::models::oauth_state::OAuthState;
+
 /// Encryption metadata for secreton entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionMetadata {
@@ -354,6 +357,15 @@ pub trait StorageBackend: Send + Sync {
     async fn delete_secret(&self, path: &str) -> StorageResult<bool> {
         self.delete_by_path(path).await
     }
+
+    /// Store OAuth state.
+    async fn store_oauth_state(&self, state: &OAuthState) -> StorageResult<()>;
+
+    /// Retrieve and consume OAuth state.
+    async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>>;
+
+    /// Delete expired OAuth states.
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64>;
 }
 
 /// Transaction interface for atomic operations
@@ -450,6 +462,7 @@ impl Default for PoolSettings {
 pub struct MockStorageBackend {
     data: Arc<std::sync::RwLock<HashMap<String, SecretEntry>>>,
     id_index: Arc<std::sync::RwLock<HashMap<Uuid, String>>>,
+    oauth_states: Arc<std::sync::RwLock<HashMap<String, OAuthState>>>,
 }
 
 impl Default for MockStorageBackend {
@@ -463,6 +476,7 @@ impl MockStorageBackend {
         Self {
             data: Arc::new(std::sync::RwLock::new(HashMap::new())),
             id_index: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            oauth_states: Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }
 }
@@ -649,6 +663,37 @@ impl StorageBackend for MockStorageBackend {
         }
 
         Ok(deleted_count)
+    }
+
+    async fn store_oauth_state(&self, state: &OAuthState) -> StorageResult<()> {
+        let mut states = self.oauth_states.write().unwrap();
+        states.insert(state.state.clone(), state.clone());
+        Ok(())
+    }
+
+    async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>> {
+        let mut states = self.oauth_states.write().unwrap();
+        if let Some(oauth_state) = states.get(state) {
+            if oauth_state.expires_at < Utc::now() {
+                states.remove(state);
+                return Ok(None);
+            }
+        }
+        Ok(states.remove(state))
+    }
+
+    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+        let mut states = self.oauth_states.write().unwrap();
+        let mut count = 0;
+        states.retain(|_, state| {
+            if state.expires_at < Utc::now() {
+                count += 1;
+                false
+            } else {
+                true
+            }
+        });
+        Ok(count)
     }
 }
 

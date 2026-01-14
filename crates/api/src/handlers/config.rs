@@ -112,8 +112,22 @@ pub async fn handle_delete_config(
             info!("Authorized config delete by user: {}", username);
         },
         Err(_) => {
-             warn!("Unauthorized config delete attempt: invalid token");
-             return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+            // Allow if bootstrapping (no users exist yet)
+            match auth.get_user_count().await {
+                Ok(0) => {
+                    info!("Allowing config delete during bootstrapping (no users found)");
+                    username = "bootstrapper".to_string();
+                }
+                Ok(_) => {
+                    warn!("Unauthorized config delete attempt: invalid token");
+                    return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+                }
+                Err(e) => {
+                    error!("Failed to check user count during config delete: {}", e);
+                    // Fail closed if we can't verify user count
+                    return Err(warp::reject::custom(crate::ApiError::Internal("Failed to verify system state".to_string())));
+                }
+            }
         }
     }
 

@@ -38,7 +38,6 @@ pub enum StorageBackendType {
     Cassandra,
     /// MongoDB storage
     MongoDB,
-    // Commented out backends that need implementation fixes
     /// Aerospike storage
     Aerospike,
     /// AliCloud OSS storage
@@ -363,7 +362,7 @@ impl StorageFactory {
                           message: "CouchDB configuration is required".to_string(),
                       }
                   })?;
-                  let backend = CouchDBStorage::new(config);
+                  let backend = CouchDBStorage::new(config).await?;
                   Ok(Arc::new(backend))
               }
               StorageBackendType::FoundationDB => {
@@ -426,7 +425,7 @@ impl StorageFactory {
                           message: "ZooKeeper configuration is required".to_string(),
                       }
                   })?;
-                  let backend = ZooKeeperStorage::new(config);
+                  let backend = ZooKeeperStorage::new(config).await?;
                   Ok(Arc::new(backend))
               }
         }
