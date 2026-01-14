@@ -61,7 +61,7 @@ use crate::{
 use crate::services::audit::SecurityEventType;
 
 // Import Claims from auth service for JWT decoding
-use crate::services::auth::{Claims, AuthError};
+use crate::services::auth::Claims;
 
 /// Create authentication routes
 pub fn create_routes() -> Router<AppState> {
