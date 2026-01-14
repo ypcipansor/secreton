@@ -178,6 +178,7 @@ impl AuthService {
                 &user.roles,
                 &user.policies,
                 false, // MFA not required for now
+                None,  // No explicit JTI provided
             )
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token creation failed: {}", e),
@@ -190,7 +191,7 @@ impl AuthService {
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, SecretonError> {
         let token_pair = self
             .token_service
-            .refresh_access_token(refresh_token)
+            .refresh_access_token(refresh_token, None)
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token refresh failed: {}", e),
             })?;
