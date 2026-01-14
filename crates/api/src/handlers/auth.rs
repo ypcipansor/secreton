@@ -448,6 +448,8 @@ pub struct CreateUserRequest {
     pub password: String,
     pub email: Option<String>,
     pub roles: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
 }
 
 /// OAuth provider configuration
@@ -1412,7 +1414,8 @@ pub async fn create_user(
         &request.username,
         &request.password,
         request.email,
-        request.roles
+        request.roles,
+        request.permissions,
     ).await.map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Return info
@@ -1422,7 +1425,7 @@ pub async fn create_user(
         email: user.email,
         display_name: user.display_name,
         roles: user.roles,
-        permissions: vec![],
+        permissions: user.permissions,
         metadata: user.metadata,
         last_login: user.last_login,
     };

@@ -284,6 +284,8 @@ pub struct User {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub roles: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
     pub policies: Vec<String>,
     pub metadata: HashMap<String, String>,
     pub created_at: DateTime<Utc>,
