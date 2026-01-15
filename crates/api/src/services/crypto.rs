@@ -156,8 +156,15 @@ impl CryptoService {
         let rotation_interval = std::time::Duration::from_secs(30 * 24 * 60 * 60);
         let key_manager = Arc::new(KeyManager::new(key_storage, rotation_interval));
 
-        // Note: We don't initialize keys here anymore because we might be sealed.
-        // The first operation after unseal will trigger key gen if needed.
+        // If we auto-unsealed, ensure we have an active key
+        if root_key_store.read().await.is_some() {
+            if key_manager.get_active_key().await.is_err() {
+                tracing::info!("No active system key found after auto-unseal. Generating new one.");
+                if let Err(e) = key_manager.rotate_keys().await {
+                    tracing::error!("Failed to initialize system key after auto-unseal: {}", e);
+                }
+            }
+        }
 
         Ok(Self {
             key_manager,

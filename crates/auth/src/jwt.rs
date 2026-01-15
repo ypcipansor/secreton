@@ -200,6 +200,7 @@ impl JwtTokenService {
         roles: &[String],
         policies: &[String],
         mfa_required: bool,
+        jti: Option<String>,
     ) -> Result<String, JwtError> {
         let now = Utc::now();
         let iat = now.timestamp() as usize;
@@ -217,7 +218,7 @@ impl JwtTokenService {
                 exp,
                 iss: self.config.issuer.clone(),
                 aud: self.config.audience.clone(),
-                jti: Uuid::new_v4().to_string(),
+                jti: jti.unwrap_or_else(|| Uuid::new_v4().to_string()),
             },
             token_type: "access".to_string(),
         };
@@ -259,9 +260,10 @@ impl JwtTokenService {
         roles: &[String],
         policies: &[String],
         mfa_required: bool,
+        jti: Option<String>,
     ) -> Result<TokenPair, JwtError> {
         let access_token =
-            self.create_access_token(user_id, username, email, roles, policies, mfa_required)?;
+            self.create_access_token(user_id, username, email, roles, policies, mfa_required, jti)?;
         let refresh_token = self.create_refresh_token(user_id, username)?;
 
         Ok(TokenPair {
@@ -322,7 +324,11 @@ impl JwtTokenService {
     }
 
     /// Refresh access token using refresh token
-    pub fn refresh_access_token(&self, refresh_token: &str) -> Result<TokenPair, JwtError> {
+    pub fn refresh_access_token(
+        &self,
+        refresh_token: &str,
+        jti: Option<String>,
+    ) -> Result<TokenPair, JwtError> {
         let refresh_claims = self.validate_refresh_token(refresh_token)?;
 
         // Create new token pair with same user info
@@ -333,6 +339,7 @@ impl JwtTokenService {
             &[],   // Roles not stored in refresh token (should be fetched from user data)
             &[],   // Policies not stored in refresh token (should be fetched from user data)
             false, // MFA status should be checked separately
+            jti,
         )
     }
 }

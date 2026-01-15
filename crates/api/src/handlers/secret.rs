@@ -1379,7 +1379,7 @@ pub async fn create_backup(
 }
 
 pub async fn list_backups(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ApiResponse<Vec<BackupInfo>>>> {
     // Extract and validate token
@@ -1399,7 +1399,7 @@ pub async fn list_backups(
 }
 
 pub async fn get_backup(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
     Path(_backup_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<BackupInfo>>> {

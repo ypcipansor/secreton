@@ -14,29 +14,8 @@ use crate::extractors::AuthenticatedUser;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use secreton_common::models::oauth_state::OAuthState;
-use tokio::sync::RwLock;
 use uuid::Uuid;
-
-// Session storage
-pub type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
-
-lazy_static::lazy_static! {
-    static ref SESSION_STORE: SessionStore = Arc::new(RwLock::new(HashMap::new()));
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub id: String,
-    pub user_id: String,
-    pub ip_address: String,
-    pub user_agent: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub last_accessed: chrono::DateTime<chrono::Utc>,
-    pub expires_at: chrono::DateTime<chrono::Utc>,
-    pub metadata: HashMap<String, String>,
-}
 
 #[derive(Debug, Serialize)]
 pub struct SessionInfo {
@@ -57,6 +36,7 @@ use secreton_auth::{LoginRequest, RefreshTokenRequest, UserInfo, MfaService};
 use crate::{
     handlers::AppState,
     ApiResponse, ApiResult,
+    services::auth::AuthError,
 };
 use crate::services::audit::SecurityEventType;
 
@@ -90,7 +70,12 @@ mod tests {
     use axum_test::TestServer;
     use std::sync::Arc;
 
-    async fn create_test_server() -> TestServer {
+    async fn create_test_server() -> (TestServer, Arc<ApiServiceContainer>) {
+        // Set root key for crypto service auto-unseal
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
+
         let mut config = ApiConfig::default();
         // Configure JWT secret for tests to avoid panic
         config.auth.jwt.secret = Some("default-secret-change-in-production".to_string());
@@ -116,27 +101,29 @@ mod tests {
         );
 
         // Register test user "alice" for login tests
-        // We handle errors explicitly to ensure the test environment is correctly set up.
-        // We ignore UserAlreadyExists as it allows the server to be reused or idempotent setup.
         match services.auth.register_user(
             "alice",
             "password123",
             Some("alice@example.com".to_string()),
-            vec!["user".to_string()]
+            vec!["user".to_string()],
+            vec![] // permissions
         ).await {
             Ok(_) => {},
             Err(AuthError::UserAlreadyExists) => {},
             Err(e) => panic!("Failed to setup test user: {}", e),
         }
 
-        let app = create_routes().with_state(services);
+        let app = create_routes().with_state(services.clone());
         use std::net::SocketAddr;
-        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to create test server")
+        (
+            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to create test server"),
+            services
+        )
     }
 
     #[tokio::test]
     async fn test_login_endpoint_returns_tokens() {
-        let server = create_test_server().await;
+        let (server, _) = create_test_server().await;
         let request = LoginRequest {
             username: "alice".to_string(),
             password: "password123".to_string(),
@@ -157,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mfa_setup_requires_auth() {
-        let server = create_test_server().await;
+        let (server, _) = create_test_server().await;
 
         // Generate a valid token for testing
         let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
@@ -189,9 +176,21 @@ mod tests {
             aud: "secreton-api".to_string(),
         };
 
+        #[derive(Serialize)]
+        struct TestToken {
+            #[serde(flatten)]
+            claims: crate::services::auth::Claims,
+            token_type: String,
+        }
+
+        let token_claims = TestToken {
+            claims: claims.clone(),
+            token_type: "access".to_string(),
+        };
+
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
-            &claims,
+            &token_claims,
             &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
         ).expect("Failed to create token");
 
@@ -225,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_oauth_login_returns_authorization_url() {
-        let server = create_test_server().await;
+        let (server, _) = create_test_server().await;
         let response = server.get("/oauth/github").await;
         response.assert_status_ok();
 
@@ -238,27 +237,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_mfa_setup_sms() {
-        let server = create_test_server().await;
+        let (server, services) = create_test_server().await;
 
-        // Generate valid token
-        let secret = "default-secret-change-in-production";
-        let claims = crate::services::auth::Claims {
-            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+        let user = secreton_auth::User {
+            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: None,
             roles: vec![],
-            iat: chrono::Utc::now().timestamp() as usize,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            jti: "unique".to_string(),
-            iss: "secreton".to_string(),
-            aud: "secreton-api".to_string(),
+            permissions: vec![],
+            policies: vec![],
+            metadata: std::collections::HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            disabled: false,
+            password_hash: "".to_string(),
+            full_name: None,
+            is_active: true,
+            is_superuser: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            failed_login_attempts: 0,
+            locked_until: None,
         };
 
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
-        ).expect("Failed to create token");
+        // Use service to generate token (this ensures valid JWT and session creation)
+        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "sms".to_string(),
@@ -282,27 +288,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_mfa_setup_email() {
-        let server = create_test_server().await;
+        let (server, services) = create_test_server().await;
 
-        // Generate valid token
-        let secret = "default-secret-change-in-production";
-        let claims = crate::services::auth::Claims {
-            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+        let user = secreton_auth::User {
+            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: None,
             roles: vec![],
-            iat: chrono::Utc::now().timestamp() as usize,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            jti: "unique".to_string(),
-            iss: "secreton".to_string(),
-            aud: "secreton-api".to_string(),
+            permissions: vec![],
+            policies: vec![],
+            metadata: std::collections::HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            disabled: false,
+            password_hash: "".to_string(),
+            full_name: None,
+            is_active: true,
+            is_superuser: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            failed_login_attempts: 0,
+            locked_until: None,
         };
 
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
-        ).expect("Failed to create token");
+        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "email".to_string(),
@@ -326,27 +338,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_mfa_setup_webauthn() {
-        let server = create_test_server().await;
+        let (server, services) = create_test_server().await;
 
-        // Generate valid token
-        let secret = "default-secret-change-in-production";
-        let claims = crate::services::auth::Claims {
-            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+        let user = secreton_auth::User {
+            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: None,
             roles: vec![],
-            iat: chrono::Utc::now().timestamp() as usize,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            jti: "unique".to_string(),
-            iss: "secreton".to_string(),
-            aud: "secreton-api".to_string(),
+            permissions: vec![],
+            policies: vec![],
+            metadata: std::collections::HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            disabled: false,
+            password_hash: "".to_string(),
+            full_name: None,
+            is_active: true,
+            is_superuser: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            failed_login_attempts: 0,
+            locked_until: None,
         };
 
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
-        ).expect("Failed to create token");
+        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "webauthn".to_string(),
@@ -619,8 +637,8 @@ pub async fn login(
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Extract client information from headers
-    let ip_address = extract_client_ip(&headers);
-    let user_agent = extract_user_agent(&headers);
+    let _ip_address = extract_client_ip(&headers);
+    let _user_agent = extract_user_agent(&headers);
 
     // Authenticate user
     let login_request = secreton_auth::model::LoginRequest {
@@ -656,30 +674,6 @@ pub async fn login(
                 },
                 mfa_required: auth_token.mfa_required,
             };
-
-            // Create and store session
-            // Use JTI from token as session ID to link them
-            let session_id = extract_jti_from_token(&access_token, &state)
-                .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-            // Create Session from fields
-            let now = chrono::Utc::now();
-            let session = crate::handlers::auth::Session {
-                id: session_id.clone(),
-                user_id: response.user.id.clone().unwrap_or_default(),
-                ip_address: ip_address.clone(),
-                user_agent: user_agent.clone(),
-                created_at: now,
-                last_accessed: now,
-                expires_at: now + chrono::Duration::hours(24),
-                metadata: HashMap::new(),
-            };
-
-            // Store session
-            {
-                let mut sessions = SESSION_STORE.write().await;
-                sessions.insert(session_id.clone(), session);
-            }
 
             // Audit: authentication success
             let _ = state
@@ -725,15 +719,13 @@ pub async fn logout(
     // Extract session ID from token for accurate auditing
     let session_id = extract_jti_from_token(token, &state).unwrap_or_else(|| "unknown".to_string());
 
-    // Invalidate the token by adding to blacklist
-    let expires_at = chrono::Utc::now() + chrono::Duration::hours(24); // Blacklist for 24 hours
-    state.auth.revoke_token(token.to_string(), expires_at).await;
-
-    // Remove all sessions for this user (or find session by token)
-    // For now, we remove all sessions as logout typically invalidates all
-    {
-        let mut sessions_store = SESSION_STORE.write().await;
-        sessions_store.retain(|_, session| session.user_id != user.id);
+    // Revoke the current session
+    if session_id != "unknown" {
+        let _ = state.auth.revoke_user_session(&session_id, &user.id).await;
+    } else {
+        // Fallback: revoke the token only if session ID unknown (shouldn't happen with valid token)
+        let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
+        state.auth.revoke_token(token.to_string(), expires_at).await;
     }
 
     let data = serde_json::json!({
@@ -1323,15 +1315,9 @@ pub async fn list_sessions(
     // Extract JTI from current token to identify current session
     let current_jti = extract_jti_from_token(token, &state);
 
-    // Get all sessions for the user
-    let sessions = {
-        let sessions_store = SESSION_STORE.read().await;
-        sessions_store
-            .values()
-            .filter(|session| session.user_id == user.id && session.expires_at > chrono::Utc::now())
-            .cloned()
-            .collect::<Vec<_>>()
-    };
+    // Get all sessions for the user from backend storage
+    let sessions = state.auth.list_user_sessions(&user.id).await
+        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Mark the current session based on JTI match
     let sessions_info: Vec<SessionInfo> = sessions.into_iter().map(|session| {
@@ -1345,7 +1331,7 @@ pub async fn list_sessions(
              created_at: session.created_at,
              expires_at: session.expires_at,
              is_current,
-             metadata: session.metadata,
+             metadata: HashMap::new(), // Service Session currently doesn't export metadata publicly, using empty
         }
     }).collect();
 
@@ -1369,28 +1355,12 @@ pub async fn revoke_session(
     let user = state.auth.validate_token(token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
-    // Validate that session_id belongs to the current user and remove it
-    let session_removed = {
-        let mut sessions_store = SESSION_STORE.write().await;
-        if let Some(session) = sessions_store.get(&session_id) {
-            if session.user_id == user.id {
-                sessions_store.remove(&session_id);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-
-    if !session_removed {
-        return Err(crate::ApiError::NotFound("Session not found or access denied".to_string()));
-    }
-
-    // Invalidate associated tokens by adding to blacklist
-    let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
-    state.auth.revoke_token(token.to_string(), expires_at).await;
+    // Revoke the session via service
+    state.auth.revoke_user_session(&session_id, &user.id).await
+        .map_err(|e| match e {
+            AuthError::PermissionDenied => crate::ApiError::Authorization("Access denied".to_string()),
+            _ => crate::ApiError::NotFound("Session not found".to_string()),
+        })?;
 
     let data = serde_json::json!({
         "message": "Session successfully revoked",

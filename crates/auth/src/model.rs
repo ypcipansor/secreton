@@ -305,3 +305,25 @@ pub struct User {
     #[serde(default)]
     pub locked_until: Option<DateTime<Utc>>,
 }
+
+impl User {
+    /// Check if the user is a superuser (Root)
+    pub fn is_root(&self) -> bool {
+        self.is_superuser || self.roles.contains(&"root".to_string())
+    }
+
+    /// Check if the user is an administrator
+    pub fn is_admin(&self) -> bool {
+        self.is_root() || self.roles.contains(&"admin".to_string())
+    }
+
+    /// Check if the user is a privileged user (Admin or Root)
+    pub fn is_privileged(&self) -> bool {
+        self.is_admin()
+    }
+
+    /// Check if the user has a specific role
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
+    }
+}

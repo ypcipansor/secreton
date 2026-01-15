@@ -103,6 +103,7 @@ mod tests {
             enabled: true,
             is_active: true,
             is_superuser: true,
+            permissions: vec![],
         };
         // Simplified: Direct storage injection would be better if we knew the schema, 
         // but assuming we can't easily access storage internal map. 
