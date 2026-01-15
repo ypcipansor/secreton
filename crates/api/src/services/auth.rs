@@ -30,7 +30,7 @@ pub struct ApiLoginRequest {
 }
 
 /// JWT Claims structure
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     /// Subject (user ID)
     pub sub: String,
@@ -520,7 +520,7 @@ impl AuthenticationService {
         };
 
         let session_data = serde_json::to_vec(&session)
-            .map_err(|e| secreton_errors::SecretonError::Internal { message: format!("Failed to serialize session: {}", e) })?;
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e)))?;
 
         let entry = SecretEntry::new(
             format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
@@ -692,6 +692,62 @@ impl AuthenticationService {
             .map_err(AuthError::Storage)?;
 
         Ok(count)
+    }
+
+    /// List sessions for a specific user
+    pub async fn list_user_sessions(&self, user_id: &str) -> Result<Vec<Session>, AuthError> {
+        // We scan all sessions and filter by user_id
+        // In a real DB we would index this or use a secondary index
+        let params = QueryParams {
+            path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
+            include_expired: false,
+            ..Default::default()
+        };
+
+        let entries = self.storage.list(&params).await
+            .map_err(AuthError::Storage)?;
+
+        let mut sessions = Vec::new();
+        for entry in entries {
+            if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+                if session.user_id == user_id {
+                    sessions.push(session);
+                }
+            } else if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+                 // Fallback? encrypted_data is actually plaintext in current impl since no crypto used for sessions yet
+                 if session.user_id == user_id {
+                    sessions.push(session);
+                }
+            }
+        }
+
+        Ok(sessions)
+    }
+
+    /// Revoke a specific user session
+    pub async fn revoke_user_session(&self, session_id: &str, user_id: &str) -> Result<(), AuthError> {
+        let path = format!("{}{}", SESSION_STORAGE_PREFIX, session_id);
+
+        // Verify ownership
+        if let Some(entry) = self.storage.get_by_path(&path).await.map_err(AuthError::Storage)? {
+             if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+                 if session.user_id != user_id {
+                     return Err(AuthError::PermissionDenied);
+                 }
+                 // Revoke the token associated with this session
+                 self.revoke_token(session.token, session.expires_at).await;
+             }
+        } else {
+            return Err(AuthError::Storage(secreton_storage::StorageError::NotFound {
+                resource_type: "session".to_string(),
+                id: session_id.to_string()
+            }));
+        }
+
+        self.storage.delete_by_path(&path).await
+            .map_err(AuthError::Storage)?;
+
+        Ok(())
     }
 
     /// Cleanup expired sessions
