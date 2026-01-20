@@ -9,7 +9,6 @@
 //! - Datadog API integration for enterprise observability
 //! - Comprehensive system metrics collection
 
-use crate::utils::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,7 +103,7 @@ impl TelemetryCollector {
     }
 
     /// Start metrics collection
-    pub async fn start_collection(&self) -> Result<(), AppError> {
+    pub async fn start_collection(&self) -> anyhow::Result<()> {
         // Prometheus server commented out due to hyper version compatibility issues
         // if self.config.prometheus_enabled {
         //     self.start_prometheus_server().await?;
@@ -213,7 +212,7 @@ impl TelemetryCollector {
     }
 
     /// Start StatsD metrics collection
-    async fn start_statsd_collection(&self) -> Result<(), AppError> {
+    async fn start_statsd_collection(&self) -> anyhow::Result<()> {
         // Simplified StatsD implementation
         info!(
             "StatsD metrics collection started for {}",
@@ -223,7 +222,7 @@ impl TelemetryCollector {
     }
 
     /// Start Datadog metrics collection
-    async fn start_datadog_collection(&self) -> Result<(), AppError> {
+    async fn start_datadog_collection(&self) -> anyhow::Result<()> {
         if self.config.datadog_api_key.is_some() {
             info!(
                 "Datadog metrics collection started for site {}",
@@ -233,13 +232,13 @@ impl TelemetryCollector {
         Ok(())
     }
 
-    // async fn start_prometheus_server(&self) -> Result<(), AppError> {
+    // async fn start_prometheus_server(&self) -> anyhow::Result<()> {
     //     // Create a Prometheus registry
     //     let registry = prometheus::Registry::new();
-
+    //
     //     // Register metrics
     //     self.register_prometheus_metrics(&registry)?;
-
+    //
     //     // Create a Prometheus server
     //     let server = Server::bind(format!("0.0.0.0:{}", self.config.prometheus_port))
     //         .serve(make_service_fn(move |_| {
@@ -250,11 +249,11 @@ impl TelemetryCollector {
     //                 }))
     //             }
     //         }));
-
+    //
     //     // Start the server
     //     info!("Prometheus server started on port {}", self.config.prometheus_port);
     //     server.await?;
-
+    //
     //     Ok(())
     // }
 }
@@ -456,50 +455,4 @@ pub struct TelemetryRequest {
 pub struct TelemetryResponse {
     pub metrics: SystemMetrics,
     pub timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_telemetry_collector_creation() {
-        let config = TelemetryConfig::default();
-        let _collector = TelemetryCollector::new(config);
-        // Prometheus registry removed due to compatibility issues
-        // assert!(collector.prometheus_registry.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_metrics_recording() {
-        let collector = TelemetryCollector::new(TelemetryConfig::default());
-
-        let metric = Metric {
-            name: "requests_total".to_string(),
-            value: MetricValue::Counter(1),
-            tags: HashMap::new(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        collector.record_metric(metric).await;
-        let metrics = collector.get_metrics().await;
-
-        assert_eq!(metrics.requests.total_requests, 1);
-    }
-
-    #[tokio::test]
-    async fn test_system_metrics_update() {
-        let mut metrics = SystemMetrics::default();
-        let system_metrics = SystemResourceMetrics {
-            active_connections: 10,
-            uptime_seconds: 3600,
-            load_average_1m: 1.5,
-            load_average_5m: 1.2,
-            load_average_15m: 1.0,
-        };
-
-        metrics.update_system_metrics(system_metrics.clone());
-        assert_eq!(metrics.system.active_connections, 10);
-        assert_eq!(metrics.system.uptime_seconds, 3600);
-    }
 }

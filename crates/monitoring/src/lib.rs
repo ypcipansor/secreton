@@ -29,6 +29,8 @@ use tokio::sync::mpsc;
 use secreton_common::{Service, ServiceHealth, ServiceResult};
 use secreton_config::AlertingConfig;
 
+pub mod telemetry;
+
 /// Alert severity levels
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AlertSeverity {

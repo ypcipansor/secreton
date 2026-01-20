@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 
 [dependencies]
-secreton-core.workspace = true
+secreton-common.workspace = true
 secreton-crypto.workspace = true
 secreton-auth.workspace = true
 serde.workspace = true

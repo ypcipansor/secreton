@@ -31,6 +31,7 @@ pub mod engine;
 pub mod error;
 pub mod model;
 pub mod service;
+pub mod storage;
 
 pub use backend::{
     AwsBackend, MongodbBackend, MysqlBackend, OciBackend, PostgresBackend, SecretBackend,
@@ -42,3 +43,4 @@ pub use engine::{
 pub use error::*;
 pub use model::*;
 pub use service::*;
+pub use storage::*;

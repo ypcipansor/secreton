@@ -24,6 +24,10 @@ async-trait.workspace = true
 tokio.workspace = true
 futures.workspace = true
 
+# Metrics
+sysinfo.workspace = true
+prometheus.workspace = true
+
 # HTTP client for webhooks
 reqwest.workspace = true
 

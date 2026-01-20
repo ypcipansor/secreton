@@ -47,6 +47,7 @@ pub mod jwt;
 pub mod method;
 pub mod mfa;
 pub mod model;
+pub mod password;
 pub mod policies;
 pub mod revocation;
 pub mod service;

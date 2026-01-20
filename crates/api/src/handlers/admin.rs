@@ -592,8 +592,8 @@ pub async fn get_system_metrics(
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Use shared telemetry collector if available
-    let (memory, cpu, disk, network, uptime) = if let Some(telemetry) = Option::<secreton_core::telemetry::TelemetryCollector>::None { // Stubbed due to compilation issue
-        let m: secreton_core::telemetry::SystemMetrics = telemetry.get_metrics().await;
+    let (memory, cpu, disk, network, uptime) = if let Some(telemetry) = Option::<secreton_monitoring::telemetry::TelemetryCollector>::None { // Stubbed due to compilation issue
+        let m: secreton_monitoring::telemetry::SystemMetrics = telemetry.get_metrics().await;
 
         let mem = MemoryMetrics {
             total: m.performance.total_memory_bytes,

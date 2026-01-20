@@ -12,7 +12,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-secreton-core.workspace = true
+secreton-common.workspace = true
 secreton-config.workspace = true
 secreton-errors.workspace = true
 serde.workspace = true

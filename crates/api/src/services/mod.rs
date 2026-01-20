@@ -11,7 +11,7 @@ pub mod config;
 use std::sync::Arc;
 use anyhow::Result;
 use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
-use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
+use secreton_monitoring::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
 pub mod audit;
 pub mod crypto;

@@ -796,7 +796,7 @@ pub async fn verify_token(
     Json(request): Json<VerifyTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
     // Validate token and get user information
-    let user: secreton_core::User = state.auth.validate_token(&request.token).await
+    let user: secreton_auth::User = state.auth.validate_token(&request.token).await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     let user_info = UserInfo {

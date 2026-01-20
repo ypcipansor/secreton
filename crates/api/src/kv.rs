@@ -10,7 +10,7 @@ use axum::{
     response::Json,
     routing::{delete, get, post},
 };
-use secreton_core::storage::secret::SecretStorage;
+use secreton_secrets::storage::SecretStorage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

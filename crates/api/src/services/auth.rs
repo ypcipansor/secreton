@@ -14,8 +14,7 @@ use serde_json;
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
 use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel, QueryParams};
-use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod};
-use secreton_core::User;
+use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod, User, AuthResult};
 use thiserror::Error;
 use crate::ApiResult;
 
@@ -851,7 +850,7 @@ impl AuthenticationService {
     }
 
     /// Authenticate user
-    pub async fn authenticate(&self, credentials: crate::services::auth::LoginRequest) -> Result<secreton_core::AuthResult, AuthError> {
+    pub async fn authenticate(&self, credentials: crate::services::auth::LoginRequest) -> Result<AuthResult, AuthError> {
         let request = secreton_auth::LoginRequest {
             username: credentials.username,
             password: credentials.password,
@@ -921,7 +920,7 @@ impl AuthenticationService {
 
         self.storage.store(&entry).await.map_err(AuthError::Storage)?;
 
-        Ok(secreton_core::AuthResult {
+        Ok(AuthResult {
             success: true,
             token: Some(token_pair.access_token),
             refresh_token: Some(token_pair.refresh_token),

@@ -62,7 +62,7 @@ utoipa-swagger-ui.workspace = true
 tonic = { workspace = true, features = ["transport", "codegen"] }
 
 # Internal crates
-secreton-core = { path = "../core" }
+secreton-monitoring = { path = "../monitoring" }
 secreton-storage = { path = "../storage" }
 secreton-crypto = { path = "../crypto" }
 secreton-errors = { path = "../errors" }
@@ -73,6 +73,7 @@ secreton-auth = { path = "../auth" }
 secreton-config = { path = "../config" }
 secreton-performance = { path = "../performance" }
 secreton-grpc = { path = "../grpc" }
+secreton-secrets = { path = "../secrets" }
 
 # Metrics
 prometheus.workspace = true

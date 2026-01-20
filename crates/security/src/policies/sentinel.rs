@@ -40,6 +40,14 @@ pub enum EnforcementLevel {
 /// Sentinel policy
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SentinelPolicy {
+    /// Policy ID
+    #[serde(default)]
+    pub id: i64,
+
+    /// Namespace
+    #[serde(default)]
+    pub namespace: String,
+
     /// Policy name
     pub name: String,
 
@@ -49,11 +57,23 @@ pub struct SentinelPolicy {
     /// Enforcement level
     pub enforcement_level: EnforcementLevel,
 
+    /// Policy type (egp, rgp, wasm, etc.)
+    #[serde(default)]
+    pub policy_type: String,
+
     /// Policy code (simple rule language)
     pub policy_code: String,
 
     /// Description
     pub description: Option<String>,
+
+    /// EGP flag
+    #[serde(default)]
+    pub egp: bool,
+
+    /// RGP flag
+    #[serde(default)]
+    pub rgp: bool,
 
     /// Created timestamp
     pub created_at: DateTime<Utc>,

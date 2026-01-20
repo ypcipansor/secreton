@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Core dependencies
-secreton-core = { path = "../core" }
+secreton-common = { path = "../common" }
 secreton-monitoring = { path = "../monitoring" }
 secreton-errors = { path = "../errors" }
 secreton-config = { path = "../config" }

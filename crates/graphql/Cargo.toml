@@ -16,7 +16,6 @@ rust-version.workspace = true
 secreton-common.workspace = true
 secreton-errors.workspace = true
 secreton-config.workspace = true
-secreton-core.workspace = true
 secreton-auth.workspace = true
 secreton-security.workspace = true
 secreton-secrets.workspace = true

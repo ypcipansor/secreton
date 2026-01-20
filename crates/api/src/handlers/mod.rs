@@ -29,7 +29,7 @@ use tower_http::{
 use crate::middleware::{auth::AuthMiddleware, seal::SealMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
 use crate::{ApiResponse, ApiResult};
 use axum::middleware::{self};
-use secreton_config::ApiConfig;
+use crate::config::ApiConfig;
 use crate::services::ApiServiceContainer;
 
 /// Application state shared across handlers
