@@ -1,4 +1,7 @@
-use crate::{AppError, auth::auth_impl::AuthService, utils::config::Config, storage::{PostgresStorage, StorageBackend}};
+use crate::{legacy_config::Config, services::auth::AuthenticationService as AuthService, telemetry::{TelemetryCollector, TelemetryConfig}};
+use secreton_storage::{PostgresBackend, StorageBackend};
+// use crate::AppError; // Use standard error
+use secreton_errors::{SecretonError as AppError};
 use axum::{
     Router,
     body::Body,
@@ -17,9 +20,8 @@ use tracing::info;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    pub external_audit_devices:
-        std::sync::Arc<Vec<Box<dyn crate::services::audit::ExternalAuditDevice>>>,
     pub auth_service: AuthService,
+    pub telemetry: Arc<TelemetryCollector>,
 }
 
 pub struct Server {
@@ -37,7 +39,7 @@ impl Server {
 
         // Initialize storage backend
         let storage: Option<Arc<dyn StorageBackend + Send + Sync>> = if self.config.database_url.starts_with("postgres") {
-             match PostgresStorage::from_url(&self.config.database_url).await {
+             match PostgresBackend::new(&self.config.database_url).await {
                 Ok(s) => Some(Arc::new(s)),
                 Err(e) => {
                     tracing::warn!("Failed to connect to Postgres: {}. Falling back to memory auth.", e);
@@ -50,22 +52,32 @@ impl Server {
         };
 
         // Create auth service
-        let token_config = secreton_auth::TokenConfig {
-            jwt_secret: self.config.auth.jwt_secret.clone(),
-            jwt_refresh_secret: self.config.auth.refresh_secret.clone(),
-            access_token_duration: chrono::Duration::hours(1),
-            refresh_token_duration: chrono::Duration::days(7),
-            issuer: "secreton".to_string(),
-            audience: "secreton-api".to_string(),
-        };
-        let jwt_token_service = secreton_auth::JwtTokenService::new(token_config.clone());
-        let auth_service = AuthService::new(jwt_token_service, token_config, storage);
+        // Initialize crypto service (needed for auth)
+        // Assume storage is available (enforced by earlier check logic or we fail here)
+        let storage_backend = storage.ok_or_else(|| anyhow::anyhow!("Storage backend initialization failed"))?;
+
+        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage_backend.clone()).await.map_err(|e| anyhow::anyhow!(e))?);
+
+        // Convert legacy config to new AuthConfig
+        let mut auth_config = crate::config::AuthConfig::default();
+        if let Some(s) = &self.config.auth.jwt_secret {
+            auth_config.jwt.secret = Some(s.clone());
+        }
+
+        let auth_service = AuthService::new(storage_backend, crypto, &auth_config).await.map_err(|e| anyhow::anyhow!(e))?;
+
+        // Initialize telemetry
+        let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
+        // Start collection in background
+        if let Err(e) = telemetry.start_collection().await {
+            tracing::warn!("Failed to start telemetry collection: {:?}", e);
+        }
 
         // Create application state
         let state = Arc::new(AppState {
             config: self.config.clone(),
-            external_audit_devices: std::sync::Arc::new(vec![]),
             auth_service,
+            telemetry,
         });
 
         // Create the application router
@@ -110,17 +122,17 @@ impl Server {
             // Health check endpoint (public)
             .route("/health", get(|| async { "OK" }))
             // Auth routes (public)
-            .route("/v1/auth/login", post(crate::auth::login))
-            .route("/v1/auth/refresh", post(crate::auth::refresh_token))
+            // .route("/v1/auth/login", post(crate::handlers::auth::login)) // Assuming handlers will be refactored
+            // .route("/v1/auth/refresh", post(crate::handlers::auth::refresh_token))
             // Protected routes
-            .route("/v1/auth/logout", post(crate::auth::logout))
-            .route("/v1/auth/me", get(crate::auth::me))
-            .route(
-                "/v1/auth/change-password",
-                post(crate::auth::change_password),
-            )
-            .route("/v1/auth/register", post(crate::auth::register_user))
-            .route("/v1/auth/users", get(crate::auth::list_users))
+            // .route("/v1/auth/logout", post(crate::handlers::auth::logout))
+            // .route("/v1/auth/me", get(crate::handlers::auth::me))
+            // .route(
+            //     "/v1/auth/change-password",
+            //     post(crate::handlers::auth::change_password),
+            // )
+            // .route("/v1/auth/register", post(crate::handlers::auth::register_user))
+            // .route("/v1/auth/users", get(crate::handlers::auth::list_users))
             // Add more protected routes here
             // Apply auth middleware to protected routes
             // .layer(middleware::from_fn_with_state(
@@ -142,6 +154,7 @@ impl Server {
 
 // Helper function to extract the request body as a string
 pub async fn extract_body_string(req: Request<Body>) -> Result<String, AppError> {
-    let bytes = axum::body::to_bytes(req.into_body(), usize::MAX).await?;
+    let bytes = axum::body::to_bytes(req.into_body(), usize::MAX).await
+        .map_err(|e| AppError::Internal { message: e.to_string() })?;
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }

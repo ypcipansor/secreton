@@ -1,7 +1,7 @@
 //! Health monitoring module for the Secreton agent
 
 use crate::config::HealthConfig;
-use secreton_core::CoreResult;
+use secreton_errors::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -119,7 +119,7 @@ impl HealthChecker {
     pub async fn start(
         &self,
         mut shutdown: tokio::sync::broadcast::Receiver<()>,
-    ) -> CoreResult<()> {
+    ) -> secreton_errors::Result<()> {
         tracing::info!("Starting health checker");
 
         let check_interval = Duration::from_secs(self.config.check_interval_seconds);
@@ -142,7 +142,7 @@ impl HealthChecker {
     }
 
     /// Perform all health checks
-    async fn perform_health_checks(&self) -> CoreResult<()> {
+    async fn perform_health_checks(&self) -> secreton_errors::Result<()> {
         tracing::debug!("Performing health checks");
 
         // Perform basic health checks
@@ -154,7 +154,7 @@ impl HealthChecker {
     }
 
     /// Check memory usage
-    async fn check_memory_usage(&self) -> CoreResult<()> {
+    async fn check_memory_usage(&self) -> secreton_errors::Result<()> {
         let memory = sysinfo::System::new_all();
         let total_memory = memory.total_memory() as f64;
         let used_memory = memory.used_memory() as f64;
@@ -200,7 +200,7 @@ impl HealthChecker {
     }
 
     /// Check disk usage
-    async fn check_disk_usage(&self) -> CoreResult<()> {
+    async fn check_disk_usage(&self) -> secreton_errors::Result<()> {
         use sysinfo::Disks;
         let disks = Disks::new_with_refreshed_list();
 
@@ -255,7 +255,7 @@ impl HealthChecker {
     }
 
     /// Check network connectivity
-    async fn check_network_connectivity(&self) -> CoreResult<()> {
+    async fn check_network_connectivity(&self) -> secreton_errors::Result<()> {
         // Simple connectivity check to a reliable endpoint
         match self
             .http_client

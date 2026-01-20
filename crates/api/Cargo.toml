@@ -12,6 +12,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sysinfo = { workspace = true }
 # Core dependencies
 tokio.workspace = true
 serde.workspace = true

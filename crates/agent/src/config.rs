@@ -155,10 +155,10 @@ impl AgentConfig {
 
     /// Load configuration from file
     pub async fn load_from_file(path: &str) -> Result<Self, SecretonError> {
-        let content = std::fs::read_to_string(path).map_err(secreton_core::CoreError::Io)?;
+        let content = std::fs::read_to_string(path).map_err(secreton_errors::SecretonError::Io)?;
 
         let config: AgentConfig =
-            toml::from_str(&content).map_err(|e| secreton_core::CoreError::Configuration {
+            toml::from_str(&content).map_err(|e| secreton_errors::SecretonError::Configuration {
                 message: format!("Failed to parse config: {}", e),
             })?;
 

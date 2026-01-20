@@ -6,6 +6,6 @@ pub struct PluginCatalogEntry {
     pub version: String,
     pub checksum: String,
     pub artifact_path: String,
-    pub pinned: bool,
+    pub pinned: Option<bool>,
     pub metadata: Option<serde_json::Value>,
 }

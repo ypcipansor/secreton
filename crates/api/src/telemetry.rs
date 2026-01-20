@@ -9,7 +9,10 @@
 //! - Datadog API integration for enterprise observability
 //! - Comprehensive system metrics collection
 
-use crate::utils::error::AppError;
+use crate::legacy_config::Config; // Use legacy config temporarily
+// Note: AppError needs to be available. We might need to duplicate it or import it.
+// Assuming SecretonError for now as it's cleaner.
+use secreton_errors::{SecretonError as AppError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +20,7 @@ use std::time::Instant;
 use sysinfo::{Disks, Networks, System};
 use tokio::sync::RwLock;
 use tracing::info;
+use crate::metrics::{SystemMetrics, Metric, MetricValue, SystemResourceMetrics, PerformanceMetrics};
 
 /// Telemetry configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,164 +261,6 @@ impl TelemetryCollector {
 
     //     Ok(())
     // }
-}
-
-/// System metrics data structure
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SystemMetrics {
-    /// Request metrics
-    pub requests: RequestMetrics,
-    /// Performance metrics
-    pub performance: PerformanceMetrics,
-    /// System metrics
-    pub system: SystemResourceMetrics,
-    /// Security metrics
-    pub security: SecurityMetrics,
-    /// Custom metrics
-    pub custom: HashMap<String, MetricValue>,
-}
-
-/// Request metrics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RequestMetrics {
-    /// Total number of requests
-    pub total_requests: u64,
-    /// Successful requests
-    pub successful_requests: u64,
-    /// Failed requests
-    pub failed_requests: u64,
-    /// Average response time in milliseconds
-    pub average_response_time_ms: f64,
-    /// Requests per second
-    pub requests_per_second: f64,
-}
-
-/// Performance metrics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PerformanceMetrics {
-    /// CPU usage percentage
-    pub cpu_usage_percent: f32,
-    /// Memory usage in bytes
-    pub memory_usage_bytes: u64,
-    /// Total memory in bytes
-    pub total_memory_bytes: u64,
-    /// Disk usage in bytes
-    pub disk_usage_bytes: u64,
-    /// Total disk space in bytes
-    pub total_disk_bytes: u64,
-    /// Network I/O in bytes (deprecated, use rx/tx)
-    pub network_io_bytes: u64,
-    /// Network received bytes
-    pub network_rx_bytes: u64,
-    /// Network transmitted bytes
-    pub network_tx_bytes: u64,
-    /// Database connections
-    pub database_connections: u32,
-    /// Cache hit rate percentage
-    pub cache_hit_rate_percent: f32,
-}
-
-/// System resource metrics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SystemResourceMetrics {
-    /// Number of active connections
-    pub active_connections: u32,
-    /// System uptime in seconds
-    pub uptime_seconds: u64,
-    /// Load average (1 minute)
-    pub load_average_1m: f32,
-    /// Load average (5 minutes)
-    pub load_average_5m: f32,
-    /// Load average (15 minutes)
-    pub load_average_15m: f32,
-}
-
-/// Security metrics
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SecurityMetrics {
-    /// Failed authentication attempts
-    pub failed_auth_attempts: u64,
-    /// Successful authentication attempts
-    pub successful_auth_attempts: u64,
-    /// Active sessions
-    pub active_sessions: u32,
-    /// Security violations
-    pub security_violations: u64,
-    /// Keys rotated
-    pub keys_rotated: u64,
-    /// Audit events generated
-    pub audit_events: u64,
-}
-
-/// Metric value types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MetricValue {
-    /// Counter value
-    Counter(u64),
-    /// Gauge value
-    Gauge(f64),
-    /// Histogram value
-    Histogram(Vec<f64>),
-}
-
-/// Generic metric
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Metric {
-    /// Metric name
-    pub name: String,
-    /// Metric value
-    pub value: MetricValue,
-    /// Metric tags/labels
-    pub tags: HashMap<String, String>,
-    /// Timestamp
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-impl SystemMetrics {
-    /// Record a new metric
-    pub fn record(&mut self, metric: Metric) {
-        match metric.value {
-            MetricValue::Counter(value) => match metric.name.as_str() {
-                "requests_total" => self.requests.total_requests += value,
-                "requests_successful" => self.requests.successful_requests += value,
-                "requests_failed" => self.requests.failed_requests += value,
-                "failed_auth_attempts" => self.security.failed_auth_attempts += value,
-                "successful_auth_attempts" => self.security.successful_auth_attempts += value,
-                "security_violations" => self.security.security_violations += value,
-                "keys_rotated" => self.security.keys_rotated += value,
-                "audit_events" => self.security.audit_events += value,
-                _ => {
-                    self.custom.insert(metric.name, MetricValue::Counter(value));
-                }
-            },
-            MetricValue::Gauge(value) => match metric.name.as_str() {
-                "response_time_ms" => self.requests.average_response_time_ms = value,
-                "cpu_usage_percent" => self.performance.cpu_usage_percent = value as f32,
-                "memory_usage_bytes" => self.performance.memory_usage_bytes = value as u64,
-                "disk_usage_bytes" => self.performance.disk_usage_bytes = value as u64,
-                "network_io_bytes" => self.performance.network_io_bytes = value as u64,
-                "database_connections" => self.performance.database_connections = value as u32,
-                "cache_hit_rate_percent" => self.performance.cache_hit_rate_percent = value as f32,
-                "active_connections" => self.system.active_connections = value as u32,
-                "load_average_1m" => self.system.load_average_1m = value as f32,
-                "load_average_5m" => self.system.load_average_5m = value as f32,
-                "load_average_15m" => self.system.load_average_15m = value as f32,
-                "active_sessions" => self.security.active_sessions = value as u32,
-                _ => {
-                    self.custom.insert(metric.name, MetricValue::Gauge(value));
-                }
-            },
-            MetricValue::Histogram(values) => {
-                self.custom
-                    .insert(metric.name, MetricValue::Histogram(values));
-            }
-        }
-    }
-
-    /// Update system metrics
-    pub fn update_system_metrics(&mut self, system_metrics: SystemResourceMetrics) {
-        self.system = system_metrics;
-    }
 }
 
 /// Update Prometheus metrics from system metrics

@@ -5,7 +5,7 @@ members = [
     "crates/errors",
     "crates/config",
     "crates/performance",
-    "crates/core",
+    # "crates/core", # Deleted
     # "crates/token",  # Merged into auth crate
     "crates/monitoring",
     "crates/agent",
@@ -46,7 +46,7 @@ secreton-common = { path = "crates/common" }
 secreton-errors = { path = "crates/errors" }
 secreton-config = { path = "crates/config" }
 secreton-performance = { path = "crates/performance" }
-secreton-core = { path = "crates/core" }
+# secreton-core = { path = "crates/core" }
 # secreton-token = { path = "crates/token" }  # Merged into auth crate
 secreton-monitoring = { path = "crates/monitoring" }
 secreton-crypto = { path = "crates/crypto" }

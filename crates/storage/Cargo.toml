@@ -73,6 +73,7 @@ regex.workspace = true
 # Cryptography
 secreton-crypto = { path = "../crypto" }
 zeroize.workspace = true
+argon2.workspace = true
 
 # Random number generation
 rand.workspace = true
@@ -80,6 +81,8 @@ hex.workspace = true
 
 # Common utilities
 secreton-common.workspace = true
+secreton-auth = { path = "../auth" }
+secreton-errors = { path = "../errors" }
 # secreton-core = { path = "../core" }
 
 # Configuration

@@ -20,6 +20,11 @@ pub mod services;
 pub mod middleware;
 pub mod config;
 pub mod grpc;
+pub mod telemetry;
+pub mod metrics;
+pub mod server_core;
+pub mod legacy_config;
+
 pub type ApiResult<T> = Result<T, ApiError>;
 
 /// API Response wrapper

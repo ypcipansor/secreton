@@ -6,6 +6,7 @@
 //! for the Secreton security system.
 
 use chrono::{DateTime, Utc};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
@@ -32,8 +33,6 @@ pub use metrics::*;
 pub use security::*;
 pub use templating::*;
 
-use secreton_core::CoreError;
-use secreton_errors::SecretonError;
 
 pub struct SecretonAgent {
     config: AgentConfig,
@@ -156,10 +155,10 @@ impl SecretonAgent {
                 }
             }
 
-            Ok::<(), CoreError>(())
+            Ok::<(), SecretonError>(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Security service task failed: {}", e),
         })??;
 
@@ -181,7 +180,7 @@ impl SecretonAgent {
             Ok(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Auth service task failed: {}", e),
         })??;
 
@@ -203,7 +202,7 @@ impl SecretonAgent {
             Ok(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Template service task failed: {}", e),
         })??;
 
@@ -246,10 +245,10 @@ impl SecretonAgent {
                 }
             }
 
-            Ok::<(), CoreError>(())
+            Ok::<(), SecretonError>(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Metrics service task failed: {}", e),
         })??;
 

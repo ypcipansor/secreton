@@ -134,7 +134,7 @@ impl AuditFilters {
 
 impl AuditLogger {
     /// Get audit entries based on filters
-    pub async fn get_entries(&self, _filters: AuditFilters) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
+    pub async fn get_entries(&self, _filters: AuditFilters) -> Result<Vec<AuditEvent>> {
         // Placeholder
         Ok(vec![])
     }

@@ -20,7 +20,7 @@ use crate::services::secret;
 use crate::{ApiResponse, ApiResult};
 use crate::services::audit::{SecurityEventType, ExportFormat, AuditFilters};
 use secreton_crypto::EncryptedData;
-use secreton_storage::models::storage_models::AuditEntry;
+use secreton_security::policies::audit::AuditEvent as AuditEntry;
 use crate::extractors::AuthenticatedUser;
 
 /// Create secret operation routes

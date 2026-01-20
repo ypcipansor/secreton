@@ -1,14 +1,15 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SentinelPolicy {
-    pub id: i64,
+    pub id: Option<String>,
     pub namespace: String,
     pub name: String,
     pub version: u32,
-    pub policy_type: String, // "egp", "rgp", "wasm", "hcl"
+    pub policy_type: String,
     pub source_code: String,
-    pub egp: bool,
-    pub rgp: bool,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub egp: Option<bool>,
+    pub rgp: Option<bool>,
+    pub created_at: DateTime<Utc>,
 }

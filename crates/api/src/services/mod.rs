@@ -11,8 +11,8 @@ pub mod config;
 use std::sync::Arc;
 use anyhow::Result;
 use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
-use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
-use secreton_storage::{StorageBackend, StorageFactory};
+use crate::telemetry::{TelemetryCollector, TelemetryConfig};
+use secreton_storage::{PostgresBackend, StorageBackend, StorageBackendType};
 pub mod audit;
 pub mod crypto;
 pub mod seal;
@@ -69,7 +69,15 @@ impl ApiServiceContainer {
         let _registry = StandardServiceContainer::new();
         
         // Initialize storage backend
-        let storage = StorageFactory::create(config.storage.clone()).await?;
+        let storage: Arc<dyn StorageBackend + Send + Sync> = if let StorageBackendType::Postgres = config.storage.backend_type {
+             if let Some(pg_config) = &config.storage.postgres_config {
+                 Arc::new(PostgresBackend::new(&pg_config.connection_string).await.map_err(|e| anyhow::anyhow!(e))?)
+             } else {
+                 return Err(anyhow::anyhow!("Postgres config missing"));
+             }
+        } else {
+             return Err(anyhow::anyhow!("Only postgres backend is currently supported"));
+        };
 
         // Initialize crypto service
         let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
