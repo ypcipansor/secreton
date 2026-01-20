@@ -80,7 +80,6 @@ hex.workspace = true
 
 # Common utilities
 secreton-common.workspace = true
-# secreton-core = { path = "../core" }
 
 # Configuration
 toml.workspace = true

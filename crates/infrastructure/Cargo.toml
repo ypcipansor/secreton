@@ -43,5 +43,5 @@ opentelemetry.workspace = true
 deadpool-postgres.workspace = true
 
 # Workspace dependencies
-secreton-core.workspace = true
+secreton-common.workspace = true
 secreton-storage.workspace = true
