@@ -4,6 +4,7 @@ use leptos::prelude::*;
 pub enum ButtonVariant {
     #[default]
     Primary,
+    #[allow(dead_code)]
     Secondary,
     Danger,
     Outline,

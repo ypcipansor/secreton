@@ -62,7 +62,7 @@ where
     let status = response.status();
 
     if status == StatusCode::UNAUTHORIZED {
-        let _ = LocalStorage::delete("secreton_token");
+        LocalStorage::delete("secreton_token");
         // We could dispatch a custom event here if we wanted to notify the app immediately
         return Err(ApiError::Unauthorized("Session expired".to_string()));
     }
@@ -96,7 +96,7 @@ where
                 }
             }
         },
-        Err(e) => {
+        Err(_e) => {
             // Fallback: If parsing ApiResponse failed, maybe it's a raw error or legacy endpoint?
             // Or maybe the T structure didn't match.
             // Check if status implies error
@@ -132,6 +132,7 @@ where
     request(Method::POST, path, Some(body)).await
 }
 
+#[allow(dead_code)]
 pub async fn put<T, B>(path: &str, body: B) -> Result<T, ApiError>
 where
     T: for<'de> Deserialize<'de>,

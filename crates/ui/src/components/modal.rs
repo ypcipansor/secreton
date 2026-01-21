@@ -8,9 +8,6 @@ pub fn Modal(
     #[prop(optional, into)] title: String,
     children: ChildrenFn,
 ) -> impl IntoView {
-    let on_close_overlay = on_close.clone();
-    let on_close_btn = on_close.clone();
-
     view! {
         {move || if show.get() {
             view! {
@@ -20,7 +17,7 @@ pub fn Modal(
                         <div
                             class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
                             aria-hidden="true"
-                            on:click=move |_| on_close_overlay.run(())
+                            on:click=move |_| on_close.run(())
                         ></div>
 
                         <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">"&#8203;"</span>
@@ -42,7 +39,7 @@ pub fn Modal(
                             <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                                 <Button
                                     variant=ButtonVariant::Outline
-                                    on_click=Box::new(move |_| on_close_btn.run(()))
+                                    on_click=Box::new(move |_| on_close.run(()))
                                 >
                                     "Close"
                                 </Button>
