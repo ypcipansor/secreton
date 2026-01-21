@@ -10,12 +10,6 @@ use crate::components::card::Card;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct SecretData {
-    #[serde(flatten)]
-    fields: HashMap<String, serde_json::Value>,
-}
-
 #[derive(Clone, Debug)]
 struct KvRow {
     id: usize,
@@ -142,7 +136,7 @@ pub fn SecretsList() -> impl IntoView {
             });
 
             let url = format!("/secrets/data/{}", target_path);
-            if let Ok(_) = api::post::<serde_json::Value, _>(&url, payload).await {
+            if (api::post::<serde_json::Value, _>(&url, payload).await).is_ok() {
                 set_show_modal.set(false);
                 secret_resource.refetch();
 

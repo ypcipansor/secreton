@@ -63,7 +63,7 @@ pub fn provide_auth() {
                     },
                     Err(_) => {
                          // Token invalid or network error
-                         let _ = LocalStorage::delete("secreton_token");
+                         LocalStorage::delete("secreton_token");
                          state.update(|s| {
                             s.user = None;
                             s.token = None;
@@ -87,7 +87,7 @@ pub fn logout() {
     spawn_local(async move {
         // We try to call logout on backend, but even if it fails, we clear local state
         let _ = api::post::<serde_json::Value, _>("/auth/logout", ()).await;
-        let _ = LocalStorage::delete("secreton_token");
+        LocalStorage::delete("secreton_token");
         auth.update(|s| {
             s.user = None;
             s.token = None;

@@ -1,15 +1,11 @@
 use leptos::prelude::*;
-use leptos_router::components::{Router, Routes, Route, ParentRoute, Outlet};
+use leptos_router::{components::{Router, Routes, Route, ParentRoute, Outlet}, path};
 use leptos_router::hooks::use_navigate;
-use leptos_router::path;
 use crate::auth::{provide_auth, use_auth};
 use crate::pages::login::Login;
 use crate::pages::dashboard::Dashboard;
 use crate::pages::secrets::SecretsList;
-use crate::pages::roles::RolesList;
-use crate::pages::policy_definitions::PolicyDefinitions;
-use crate::pages::users::UsersList;
-use crate::pages::system::SystemManagement;
+use crate::pages::policies::PoliciesList;
 use crate::pages::audit::AuditLog;
 use crate::pages::not_found::NotFound;
 use crate::components::layout::Layout;
@@ -25,16 +21,10 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/login") view=Login />
                     <ParentRoute path=path!("/") view=ProtectedRoute>
                         <Route path=path!("") view=Dashboard />
-
                         <Route path=path!("secrets") view=SecretsList />
                         <Route path=path!("secrets/*path") view=SecretsList />
-
-                        <Route path=path!("roles") view=RolesList />
-                        <Route path=path!("policies") view=PolicyDefinitions />
-                        <Route path=path!("users") view=UsersList />
-
+                        <Route path=path!("policies") view=PoliciesList />
                         <Route path=path!("audit") view=AuditLog />
-                        <Route path=path!("system") view=SystemManagement />
                     </ParentRoute>
                 </Routes>
             </div>
@@ -72,6 +62,8 @@ fn ProtectedRoute() -> impl IntoView {
 }
 
 #[component]
+// Dummy redirect component since Redirect is likely not exported or works differently.
+// Actually leptos_router has Redirect.
 fn Redirect(path: &'static str) -> impl IntoView {
     let navigate = use_navigate();
     request_animation_frame(move || {

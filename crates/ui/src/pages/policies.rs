@@ -23,7 +23,7 @@ struct CreateRoleRequest {
 }
 
 #[component]
-pub fn RolesList() -> impl IntoView {
+pub fn PoliciesList() -> impl IntoView {
     // Fetch roles
     let roles_resource = LocalResource::new(
         move || async move {
@@ -76,8 +76,8 @@ pub fn RolesList() -> impl IntoView {
         <div class="space-y-6">
             <header class="flex justify-between items-center">
                 <div>
-                    <h1 class="text-3xl font-bold text-gray-900">"Roles"</h1>
-                    <p class="text-gray-500 text-sm mt-1">"Manage Role-Based Access Control (RBAC)"</p>
+                    <h1 class="text-3xl font-bold text-gray-900">"Policies & Roles"</h1>
+                    <p class="text-gray-500 text-sm mt-1">"Manage access control (RBAC)"</p>
                 </div>
                 <Button
                     variant=ButtonVariant::Primary
