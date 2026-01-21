@@ -1,27 +1,37 @@
 use leptos::prelude::*;
-use leptos_router::{hooks::use_params_map, components::A};
+use leptos_router::hooks::{use_params_map, use_navigate};
+use leptos_router::components::A;
 use leptos::task::spawn_local;
 use crate::api;
+use crate::components::button::{Button, ButtonVariant};
+use crate::components::input::Input;
+use crate::components::modal::Modal;
+use crate::components::card::Card;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SecretData {
+    #[serde(flatten)]
+    fields: HashMap<String, serde_json::Value>,
+}
 
 #[component]
 pub fn SecretsList() -> impl IntoView {
     let params = use_params_map();
+    let navigate = use_navigate();
 
     // Derived path from router
     let path = move || {
-        params.with(|p| p.get("path").cloned().unwrap_or_default())
+        params.with(|p| p.get("path").unwrap_or_default())
     };
 
-    // Fetch secret data using LocalResource
-    // LocalResource::new takes a fetcher. We capture path signal inside.
     let secret_resource = LocalResource::new(
         move || {
             let current_path = path();
             async move {
                 let url = if current_path.is_empty() {
-                    "/secrets/data".to_string() // Root list
+                    "/secrets/data/".to_string()
                 } else {
                     format!("/secrets/data/{}", current_path)
                 };
@@ -31,168 +41,149 @@ pub fn SecretsList() -> impl IntoView {
         },
     );
 
-    // Form state for creating/updating
-    let (key_input, set_key_input) = signal("".to_string());
-    let (val_input, set_val_input) = signal("".to_string());
-    let (is_editing, set_is_editing) = signal(false);
+    let (show_modal, set_show_modal) = signal(false);
+    let (edit_key, set_edit_key) = signal("".to_string());
+    let (edit_value, set_edit_value) = signal("".to_string());
+    let (new_secret_path, set_new_secret_path) = signal("".to_string());
 
-    let handle_save = move |_| {
+    let handle_save = move || {
         let current_path = path();
         spawn_local(async move {
+            let target_path = if current_path.is_empty() {
+                new_secret_path.get()
+            } else {
+                current_path.clone()
+            };
+
+            if target_path.is_empty() {
+                return;
+            }
+
             let mut map = HashMap::new();
-            map.insert(key_input.get(), val_input.get());
+            map.insert(edit_key.get(), edit_value.get());
 
             let payload = serde_json::json!({
                 "data": map
             });
 
-            // If it's a new secret or update
-            let url = format!("/secrets/data/{}", current_path);
-            let _ = api::post::<serde_json::Value, _>(&url, payload).await;
-            set_is_editing.set(false);
-            secret_resource.refetch();
+            let url = format!("/secrets/data/{}", target_path);
+            if let Ok(_) = api::post::<serde_json::Value, _>(&url, payload).await {
+                set_show_modal.set(false);
+                set_edit_key.set("".to_string());
+                set_edit_value.set("".to_string());
+                set_new_secret_path.set("".to_string());
+                secret_resource.refetch();
+
+                if current_path.is_empty() {
+                    navigate(&format!("/secrets/{}", target_path), Default::default());
+                }
+            }
         });
     };
 
-    let handle_delete = move |_| {
+    let handle_delete = move || {
         let current_path = path();
-        if !web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false) {
-            return;
-        }
+        if current_path.is_empty() { return; }
+
+        let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false);
+        if !confirm { return; }
 
         spawn_local(async move {
             let url = format!("/secrets/data/{}", current_path);
             let _ = api::delete::<serde_json::Value>(&url).await;
-             // Navigate up?
-             // For now just refetch (might return 404)
-             secret_resource.refetch();
+            navigate("/secrets", Default::default());
         });
     };
+
+    let handle_save_modal = handle_save.clone();
+    let handle_delete_btn = handle_delete.clone();
 
     view! {
         <div class="space-y-6">
             <header class="flex justify-between items-center">
-                <div>
+                <div class="flex flex-col">
                     <h1 class="text-3xl font-bold text-gray-900">"Secrets"</h1>
-                    <div class="flex items-center gap-2 text-sm text-gray-600 mt-1">
-                        <A href="/secrets" attr:class="hover:text-blue-600">"root"</A>
+                    <div class="flex items-center gap-1 text-sm text-gray-500 mt-1 font-mono bg-gray-100 px-2 py-1 rounded w-fit">
+                        <A href="/secrets" attr:class="hover:text-blue-600 hover:underline">"root"</A>
                         {move || {
                             let p = path();
-                            if p.is_empty() {
-                                view! {}.into_any()
-                            } else {
+                            if !p.is_empty() {
                                 view! {
                                     <span>"/"</span>
-                                    <span class="font-mono">{p}</span>
+                                    <span class="font-bold text-gray-800">{p}</span>
                                 }.into_any()
+                            } else {
+                                view! {}.into_any()
                             }
                         }}
                     </div>
                 </div>
                 <div class="flex gap-2">
-                    <button
-                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
-                        on:click=move |_| set_is_editing.set(true)
+                    <Button
+                        variant=ButtonVariant::Primary
+                        on_click=Box::new(move |_| set_show_modal.set(true))
                     >
-                        "Add/Update Secret"
-                    </button>
-                    <button
-                        class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition"
-                        disabled=move || path().is_empty()
-                        on:click=handle_delete
-                    >
-                        "Delete"
-                    </button>
+                        {move || if path().is_empty() { "Create Secret" } else { "Add Key/Value" }}
+                    </Button>
+                    <Show when=move || !path().is_empty()>
+                        {
+                            let handle_delete = handle_delete_btn.clone();
+                            view! {
+                                <Button
+                                    variant=ButtonVariant::Danger
+                                    on_click=Box::new(move |_| handle_delete())
+                                >
+                                    "Delete Secret"
+                                </Button>
+                            }
+                        }
+                    </Show>
                 </div>
             </header>
 
-            <Show when=move || is_editing.get()>
-                 <div class="p-6 bg-white rounded-lg border border-blue-200 shadow-sm mb-6 animate-fade-in">
-                    <h3 class="font-bold text-lg mb-4 text-gray-800">"Edit Secret"</h3>
-                    <div class="grid gap-4 mb-4 md:grid-cols-2">
-                        <div>
-                             <label class="block text-sm font-medium text-gray-700 mb-1">"Key"</label>
-                             <input type="text" placeholder="e.g. password" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                prop:value=key_input
-                                on:input=move |ev| set_key_input.set(event_target_value(&ev))
-                            />
-                        </div>
-                        <div>
-                             <label class="block text-sm font-medium text-gray-700 mb-1">"Value"</label>
-                             <input type="text" placeholder="Secret value" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                prop:value=val_input
-                                on:input=move |ev| set_val_input.set(event_target_value(&ev))
-                            />
-                        </div>
-                    </div>
-                    <div class="flex gap-3 justify-end">
-                         <button class="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition" on:click=move |_| set_is_editing.set(false)>"Cancel"</button>
-                         <button class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition" on:click=handle_save>"Save Changes"</button>
-                    </div>
-                 </div>
-            </Show>
-
-            <Suspense fallback=|| view! {
-                <div class="flex justify-center p-8">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                </div>
-            }>
+            <Suspense fallback=|| view! { <div class="flex justify-center p-12"><div class="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></div></div> }>
                 {move || {
                     secret_resource.get().map(|res| {
-                        match *res {
+                        match &*res {
                             Ok(data) => {
                                 match data {
                                     serde_json::Value::Object(map) => {
                                         if map.is_empty() {
-                                            view! { <div class="p-8 text-center text-gray-500 italic">"No data at this path."</div> }.into_any()
+                                             view! {
+                                                <Card>
+                                                    <div class="text-center py-8 text-gray-500">
+                                                        "No data found at this path. Create a secret to get started."
+                                                    </div>
+                                                </Card>
+                                             }.into_any()
                                         } else {
-                                            // Eagerly convert to owned data to satisfy static view requirements
-                                            let items: Vec<(String, String, String)> = map.iter().map(|(k, v)| {
-                                                (
-                                                    k.clone(),
-                                                    if v.is_object() { "[Object]".to_string() } else { v.as_str().unwrap_or("...").to_string() },
-                                                    v.to_string()
-                                                )
-                                            }).collect();
-
                                             view! {
-                                                <div class="bg-white rounded-lg shadow overflow-hidden border border-gray-100">
-                                                    <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                                                        <h3 class="font-medium text-gray-700">"Data Content"</h3>
-                                                        <span class="text-xs text-gray-400">"Key-Value View"</span>
-                                                    </div>
-                                                    <div class="divide-y divide-gray-100">
-                                                        {items.into_iter().map(|(k, val_str, title_str)| {
-                                                            view! {
-                                                                <div class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors group">
-                                                                    <span class="font-medium text-gray-700 font-mono text-sm">{k}</span>
-                                                                    <div class="flex items-center gap-3">
-                                                                        <span class="font-mono text-sm text-gray-600 truncate max-w-md bg-gray-100 px-2 py-1 rounded" title=title_str>
-                                                                            {val_str}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                            }
-                                                        }).collect_view()}
-                                                    </div>
+                                                <div class="grid gap-4">
+                                                    {map.iter().map(|(k, v)| {
+                                                        let val_str = if v.is_string() { v.as_str().unwrap().to_string() } else { v.to_string() };
+                                                        view! {
+                                                            <div class="bg-white p-4 rounded shadow-sm border border-gray-200 flex justify-between items-center hover:bg-gray-50 transition">
+                                                                <div class="font-mono text-sm font-medium text-gray-700">{k.clone()}</div>
+                                                                <div class="font-mono text-sm bg-gray-100 px-2 py-1 rounded text-gray-800 select-all">{val_str}</div>
+                                                            </div>
+                                                        }
+                                                    }).collect_view()}
                                                 </div>
                                             }.into_any()
                                         }
                                     },
-                                    _ => {
-                                        let s = data.to_string();
-                                        view! { <div class="p-4 text-gray-600">{s}</div> }.into_any()
-                                    }
+                                    _ => view! {
+                                        <Card>
+                                            <div class="p-4 font-mono text-sm whitespace-pre-wrap">{data.to_string()}</div>
+                                        </Card>
+                                    }.into_any()
                                 }
                             },
                             Err(e) => {
-                                let error_msg = e.to_string();
                                 view! {
-                                    <div class="p-8 text-center text-gray-500 bg-white rounded-lg border-2 border-dashed border-gray-200">
-                                        <div class="text-4xl mb-2">"🔒"</div>
-                                        <p class="font-medium text-gray-900">"No secret found"</p>
-                                        <p class="text-sm text-gray-500 mt-1">"Create a new secret here or check permissions."</p>
-                                        <p class="text-xs text-red-400 mt-4 font-mono bg-red-50 p-2 rounded inline-block">{error_msg} </p>
+                                    <div class="p-8 text-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                                        <p class="text-gray-500">"No secret found at this path."</p>
+                                        <p class="text-xs text-gray-400 mt-2">{e.to_string()}</p>
                                     </div>
                                 }.into_any()
                             }
@@ -200,6 +191,53 @@ pub fn SecretsList() -> impl IntoView {
                     })
                 }}
             </Suspense>
+
+            <Modal
+                show=show_modal
+                on_close=move || set_show_modal.set(false)
+                title=if path().is_empty() { "Create New Secret".to_string() } else { "Add Key-Value Pair".to_string() }
+            >
+                {
+                    let handle_save = handle_save_modal.clone();
+                    view! {
+                        <div class="space-y-4">
+                            <Show when=move || path().is_empty()>
+                                 <Input
+                                    label="Path (e.g. my-app/config)".to_string()
+                                    placeholder="path/to/secret".to_string()
+                                    value=new_secret_path
+                                    on_input=Box::new(move |v| set_new_secret_path.set(v))
+                                />
+                            </Show>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <Input
+                                    label="Key".to_string()
+                                    placeholder="API_KEY".to_string()
+                                    value=edit_key
+                                    on_input=Box::new(move |v| set_edit_key.set(v))
+                                />
+                                <Input
+                                    label="Value".to_string()
+                                    placeholder="secret-value-123".to_string()
+                                    value=edit_value
+                                    type_="password".to_string()
+                                    on_input=Box::new(move |v| set_edit_value.set(v))
+                                />
+                            </div>
+
+                            <div class="flex justify-end pt-4">
+                                <Button
+                                    variant=ButtonVariant::Primary
+                                    on_click=Box::new(move |_| handle_save())
+                                >
+                                    "Save Secret"
+                                </Button>
+                            </div>
+                        </div>
+                    }
+                }
+            </Modal>
         </div>
     }
 }

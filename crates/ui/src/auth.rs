@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use gloo_storage::{LocalStorage, Storage};
 use crate::api;
 use leptos::task::spawn_local;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserInfo {
@@ -11,6 +12,10 @@ pub struct UserInfo {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub roles: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +52,7 @@ pub fn provide_auth() {
                     token: String,
                 }
 
+                // Call /auth/verify endpoint
                 match api::post::<UserInfo, _>("/auth/verify", VerifyRequest { token: token.clone() }).await {
                     Ok(user) => {
                          state.update(|s| {
@@ -56,9 +62,13 @@ pub fn provide_auth() {
                         });
                     },
                     Err(_) => {
-                         // Token invalid
+                         // Token invalid or network error
                          let _ = LocalStorage::delete("secreton_token");
-                         state.update(|s| s.loading = false);
+                         state.update(|s| {
+                            s.user = None;
+                            s.token = None;
+                            s.loading = false;
+                         });
                     }
                 }
             } else {
@@ -75,11 +85,14 @@ pub fn use_auth() -> RwSignal<AuthState> {
 pub fn logout() {
     let auth = use_auth();
     spawn_local(async move {
+        // We try to call logout on backend, but even if it fails, we clear local state
         let _ = api::post::<serde_json::Value, _>("/auth/logout", ()).await;
         let _ = LocalStorage::delete("secreton_token");
         auth.update(|s| {
             s.user = None;
             s.token = None;
         });
+
+        // Redirect to login is handled by ProtectedRoute or the user clicking logout
     });
 }
