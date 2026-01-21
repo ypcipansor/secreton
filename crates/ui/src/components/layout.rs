@@ -73,7 +73,7 @@ pub fn Layout(children: Children) -> impl IntoView {
 
     // Effect to redirect if uninitialized or sealed (optional, or just show warning)
     Effect::new(move |_| {
-        if let Some(Ok(health)) = health_resource.get().as_deref() {
+        if let Some(Ok(health)) = health_resource.get() {
              if !health.initialized {
                  // Maybe redirect to init? For now just show warning.
              }
@@ -98,7 +98,8 @@ pub fn Layout(children: Children) -> impl IntoView {
                 <div class="px-4 pt-4">
                     <Suspense fallback=|| view! { <div class="h-8 bg-gray-800 rounded animate-pulse"></div> }>
                         {move || {
-                            health_resource.get().map(|res| {
+                            let navigate = navigate.clone();
+                            health_resource.get().map(move |res| {
                                 match res {
                                     Ok(health) => {
                                         let (color, text, icon) = if !health.initialized {

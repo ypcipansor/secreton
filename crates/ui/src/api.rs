@@ -96,7 +96,7 @@ where
                 }
             }
         },
-        Err(e) => {
+        Err(_e) => {
             // Fallback: If parsing ApiResponse failed, maybe it's a raw error or legacy endpoint?
             // Or maybe the T structure didn't match.
             // Check if status implies error

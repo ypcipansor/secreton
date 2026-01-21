@@ -98,7 +98,7 @@ pub fn SecretsList() -> impl IntoView {
 
     // Open Modal for Edit (Existing)
     let open_edit = move |_| {
-        if let Some(Ok(serde_json::Value::Object(map))) = secret_resource.get().as_deref() {
+        if let Some(Ok(serde_json::Value::Object(map))) = secret_resource.get() {
              let mut rows = Vec::new();
              let mut id = 0;
              for (k, v) in map {
@@ -196,12 +196,17 @@ pub fn SecretsList() -> impl IntoView {
                         </Button>
                     </Show>
                     <Show when=move || !path().is_empty()>
-                         <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
-                            "Edit Secret"
-                        </Button>
-                        <Button variant=ButtonVariant::Danger on_click=Box::new(move |_| handle_delete())>
-                            "Delete Secret"
-                        </Button>
+                        {
+                            let handle_delete = handle_delete.clone();
+                            view! {
+                                <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
+                                    "Edit Secret"
+                                </Button>
+                                <Button variant=ButtonVariant::Danger on_click=Box::new(move |_| handle_delete())>
+                                    "Delete Secret"
+                                </Button>
+                            }
+                        }
                     </Show>
                 </div>
             </header>
@@ -275,68 +280,73 @@ pub fn SecretsList() -> impl IntoView {
                 on_close=move || set_show_modal.set(false)
                 title=if path().is_empty() { "Create New Secret".to_string() } else { format!("Edit Secret: {}", path()) }
             >
-                <div class="space-y-4 max-h-[70vh] flex flex-col">
-                     <Show when=move || path().is_empty()>
-                         <Input
-                            label="Path (e.g. my-app/config)".to_string()
-                            placeholder="path/to/secret".to_string()
-                            value=new_secret_path
-                            on_input=Box::new(move |v| set_new_secret_path.set(v))
-                        />
-                        <hr class="border-gray-200"/>
-                    </Show>
+                {
+                    let handle_save = handle_save.clone();
+                    view! {
+                        <div class="space-y-4 max-h-[70vh] flex flex-col">
+                             <Show when=move || path().is_empty()>
+                                 <Input
+                                    label="Path (e.g. my-app/config)".to_string()
+                                    placeholder="path/to/secret".to_string()
+                                    value=new_secret_path
+                                    on_input=Box::new(move |v| set_new_secret_path.set(v))
+                                />
+                                <hr class="border-gray-200"/>
+                            </Show>
 
-                    <div class="flex-1 overflow-y-auto pr-2 space-y-3">
-                         <div class="flex justify-between items-center mb-2">
-                             <h4 class="text-sm font-bold text-gray-700 uppercase tracking-wide">"Key-Value Pairs"</h4>
-                             <button class="text-xs text-blue-600 hover:text-blue-800 font-medium" on:click=move |_| add_row() >
-                                "+ Add Row"
-                             </button>
-                         </div>
+                            <div class="flex-1 overflow-y-auto pr-2 space-y-3">
+                                 <div class="flex justify-between items-center mb-2">
+                                     <h4 class="text-sm font-bold text-gray-700 uppercase tracking-wide">"Key-Value Pairs"</h4>
+                                     <button class="text-xs text-blue-600 hover:text-blue-800 font-medium" on:click=move |_| add_row() >
+                                        "+ Add Row"
+                                     </button>
+                                 </div>
 
-                         {move || kv_rows.get().into_iter().map(|row| {
-                             let id = row.id;
-                             view! {
-                                <div class="flex gap-2 items-start bg-gray-50 p-2 rounded border border-gray-200">
-                                    <div class="flex-1">
-                                        <input
-                                            type="text"
-                                            class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono"
-                                            placeholder="Key"
-                                            value=row.key
-                                            on:input=move |ev| update_row_key(id, event_target_value(&ev))
-                                        />
-                                    </div>
-                                    <div class="flex-1">
-                                        <input
-                                            type="text"
-                                            class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono"
-                                            placeholder="Value"
-                                            value=row.value
-                                            on:input=move |ev| update_row_value(id, event_target_value(&ev))
-                                        />
-                                    </div>
-                                    <button
-                                        class="text-red-500 hover:text-red-700 px-1 mt-1.5"
-                                        title="Remove"
-                                        on:click=move |_| remove_row(id)
-                                    >
-                                        "✕"
-                                    </button>
-                                </div>
-                             }
-                         }).collect_view()}
-                    </div>
+                                 {move || kv_rows.get().into_iter().map(|row| {
+                                     let id = row.id;
+                                     view! {
+                                        <div class="flex gap-2 items-start bg-gray-50 p-2 rounded border border-gray-200">
+                                            <div class="flex-1">
+                                                <input
+                                                    type="text"
+                                                    class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono"
+                                                    placeholder="Key"
+                                                    value=row.key
+                                                    on:input=move |ev| update_row_key(id, event_target_value(&ev))
+                                                />
+                                            </div>
+                                            <div class="flex-1">
+                                                <input
+                                                    type="text"
+                                                    class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono"
+                                                    placeholder="Value"
+                                                    value=row.value
+                                                    on:input=move |ev| update_row_value(id, event_target_value(&ev))
+                                                />
+                                            </div>
+                                            <button
+                                                class="text-red-500 hover:text-red-700 px-1 mt-1.5"
+                                                title="Remove"
+                                                on:click=move |_| remove_row(id)
+                                            >
+                                                "✕"
+                                            </button>
+                                        </div>
+                                     }
+                                 }).collect_view()}
+                            </div>
 
-                    <div class="flex justify-end pt-4 border-t border-gray-100">
-                        <Button
-                            variant=ButtonVariant::Primary
-                            on_click=Box::new(move |_| handle_save())
-                        >
-                            "Save Secret"
-                        </Button>
-                    </div>
-                </div>
+                            <div class="flex justify-end pt-4 border-t border-gray-100">
+                                <Button
+                                    variant=ButtonVariant::Primary
+                                    on_click=Box::new(move |_| handle_save())
+                                >
+                                    "Save Secret"
+                                </Button>
+                            </div>
+                        </div>
+                    }
+                }
             </Modal>
         </div>
     }

@@ -6,7 +6,6 @@ use crate::components::input::Input;
 use crate::components::card::Card;
 use crate::components::modal::Modal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PolicyResponse {
