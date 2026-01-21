@@ -3,7 +3,7 @@ mod auth;
 mod app;
 mod pages;
 
-use leptos::*;
+use leptos::prelude::*;
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());

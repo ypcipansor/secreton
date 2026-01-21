@@ -1,7 +1,7 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::components::{Router, Routes, Route, A, Outlet};
+use leptos_router::hooks::use_navigate;
 use crate::auth::{provide_auth, use_auth};
-
 use crate::pages::login::Login;
 use crate::pages::dashboard::Dashboard;
 use crate::pages::secrets::SecretsList;
@@ -62,6 +62,18 @@ fn ProtectedRoute() -> impl IntoView {
 }
 
 #[component]
+// Dummy redirect component since Redirect is likely not exported or works differently.
+// Actually leptos_router has Redirect.
+fn Redirect(path: &'static str) -> impl IntoView {
+    let navigate = use_navigate();
+    request_animation_frame(move || {
+        navigate(path, Default::default());
+    });
+    view! { }
+}
+
+
+#[component]
 fn Layout(children: Children) -> impl IntoView {
     let auth_state = use_auth();
 
@@ -74,24 +86,24 @@ fn Layout(children: Children) -> impl IntoView {
             // Sidebar
             <aside class="w-64 bg-gray-900 text-white flex-shrink-0 hidden md:flex flex-col">
                 <div class="p-4 border-b border-gray-800 flex items-center gap-2">
-                    <img src="/logo.png" class="w-8 h-8" alt="Secreton" onError="this.style.display='none'"/>
+                    // <img src="/logo.png" class="w-8 h-8" alt="Secreton" onError="this.style.display='none'"/>
                     <span class="text-xl font-bold tracking-wider">"SECRETON"</span>
                 </div>
 
                 <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
-                    <A href="/" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
+                    <A href="/" attr:class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
                         // Icon placeholder (Home)
                         <span>"Dashboard"</span>
                     </A>
-                    <A href="/secrets" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
+                    <A href="/secrets" attr:class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
                         // Icon placeholder (Lock)
                         <span>"Secrets"</span>
                     </A>
-                    <A href="/policies" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
+                    <A href="/policies" attr:class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
                         // Icon placeholder (Shield)
                         <span>"Policies"</span>
                     </A>
-                    <A href="/audit" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
+                    <A href="/audit" attr:class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors" active_class="bg-gray-800 text-white">
                         // Icon placeholder (List)
                         <span>"Audit"</span>
                     </A>

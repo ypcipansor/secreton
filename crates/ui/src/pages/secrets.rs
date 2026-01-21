@@ -1,5 +1,6 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::{hooks::use_params_map, components::A};
+use leptos::task::spawn_local;
 use crate::api;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,24 +14,27 @@ pub fn SecretsList() -> impl IntoView {
         params.with(|p| p.get("path").cloned().unwrap_or_default())
     };
 
-    // Fetch secret data
-    let secret_resource = create_resource(
-        path,
-        |current_path| async move {
-            let url = if current_path.is_empty() {
-                "/secrets/data".to_string() // Root list? Or just /secrets/data/
-            } else {
-                format!("/secrets/data/{}", current_path)
-            };
+    // Fetch secret data using LocalResource
+    // LocalResource::new takes a fetcher. We capture path signal inside.
+    let secret_resource = LocalResource::new(
+        move || {
+            let current_path = path();
+            async move {
+                let url = if current_path.is_empty() {
+                    "/secrets/data".to_string() // Root list
+                } else {
+                    format!("/secrets/data/{}", current_path)
+                };
 
-            api::get::<serde_json::Value>(&url).await
+                api::get::<serde_json::Value>(&url).await
+            }
         },
     );
 
     // Form state for creating/updating
-    let (key_input, set_key_input) = create_signal("".to_string());
-    let (val_input, set_val_input) = create_signal("".to_string());
-    let (is_editing, set_is_editing) = create_signal(false);
+    let (key_input, set_key_input) = signal("".to_string());
+    let (val_input, set_val_input) = signal("".to_string());
+    let (is_editing, set_is_editing) = signal(false);
 
     let handle_save = move |_| {
         let current_path = path();
@@ -71,16 +75,16 @@ pub fn SecretsList() -> impl IntoView {
                 <div>
                     <h1 class="text-3xl font-bold text-gray-900">"Secrets"</h1>
                     <div class="flex items-center gap-2 text-sm text-gray-600 mt-1">
-                        <A href="/secrets" class="hover:text-blue-600">"root"</A>
+                        <A href="/secrets" attr:class="hover:text-blue-600">"root"</A>
                         {move || {
                             let p = path();
                             if p.is_empty() {
-                                view! {}.into_view()
+                                view! {}.into_any()
                             } else {
                                 view! {
                                     <span>"/"</span>
                                     <span class="font-mono">{p}</span>
-                                }.into_view()
+                                }.into_any()
                             }
                         }}
                     </div>
@@ -135,13 +139,22 @@ pub fn SecretsList() -> impl IntoView {
             }>
                 {move || {
                     secret_resource.get().map(|res| {
-                        match res {
+                        match *res {
                             Ok(data) => {
                                 match data {
                                     serde_json::Value::Object(map) => {
                                         if map.is_empty() {
-                                            view! { <div class="p-8 text-center text-gray-500 italic">"No data at this path."</div> }.into_view()
+                                            view! { <div class="p-8 text-center text-gray-500 italic">"No data at this path."</div> }.into_any()
                                         } else {
+                                            // Eagerly convert to owned data to satisfy static view requirements
+                                            let items: Vec<(String, String, String)> = map.iter().map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    if v.is_object() { "[Object]".to_string() } else { v.as_str().unwrap_or("...").to_string() },
+                                                    v.to_string()
+                                                )
+                                            }).collect();
+
                                             view! {
                                                 <div class="bg-white rounded-lg shadow overflow-hidden border border-gray-100">
                                                     <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
@@ -149,11 +162,7 @@ pub fn SecretsList() -> impl IntoView {
                                                         <span class="text-xs text-gray-400">"Key-Value View"</span>
                                                     </div>
                                                     <div class="divide-y divide-gray-100">
-                                                        {map.iter().map(|(k, v)| {
-                                                            let val_str = if v.is_object() { "[Object]".to_string() } else { v.as_str().unwrap_or("...").to_string() };
-                                                            // Clone k and val_str to own them in the view
-                                                            let k = k.clone();
-                                                            let title_str = v.to_string();
+                                                        {items.into_iter().map(|(k, val_str, title_str)| {
                                                             view! {
                                                                 <div class="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors group">
                                                                     <span class="font-medium text-gray-700 font-mono text-sm">{k}</span>
@@ -167,24 +176,25 @@ pub fn SecretsList() -> impl IntoView {
                                                         }).collect_view()}
                                                     </div>
                                                 </div>
-                                            }.into_view()
+                                            }.into_any()
                                         }
                                     },
                                     _ => {
                                         let s = data.to_string();
-                                        view! { <div class="p-4 text-gray-600">{s}</div> }.into_view()
+                                        view! { <div class="p-4 text-gray-600">{s}</div> }.into_any()
                                     }
                                 }
                             },
                             Err(e) => {
+                                let error_msg = e.to_string();
                                 view! {
                                     <div class="p-8 text-center text-gray-500 bg-white rounded-lg border-2 border-dashed border-gray-200">
                                         <div class="text-4xl mb-2">"🔒"</div>
                                         <p class="font-medium text-gray-900">"No secret found"</p>
                                         <p class="text-sm text-gray-500 mt-1">"Create a new secret here or check permissions."</p>
-                                        <p class="text-xs text-red-400 mt-4 font-mono bg-red-50 p-2 rounded inline-block">{e.to_string()}</p>
+                                        <p class="text-xs text-red-400 mt-4 font-mono bg-red-50 p-2 rounded inline-block">{error_msg} </p>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             }
                         }
                     })

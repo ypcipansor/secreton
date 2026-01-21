@@ -1,9 +1,10 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::hooks::use_navigate;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use crate::api;
 use crate::auth::use_auth;
+use leptos::task::spawn_local;
 
 #[derive(Serialize)]
 struct LoginRequest {
@@ -25,21 +26,21 @@ pub fn Login() -> impl IntoView {
     let auth = use_auth();
     let navigate = use_navigate();
 
-    let (username, set_username) = create_signal("".to_string());
-    let (password, set_password) = create_signal("".to_string());
-    let (error, set_error) = create_signal(Option::<String>::None);
-    let (loading, set_loading) = create_signal(false);
+    let (username, set_username) = signal("".to_string());
+    let (password, set_password) = signal("".to_string());
+    let (error, set_error) = signal(Option::<String>::None);
+    let (loading, set_loading) = signal(false);
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         set_loading.set(true);
         set_error.set(None);
 
-        let navigate = navigate.clone();
+        let navigate = navigate.clone(); // Clone for async block if needed, though use_navigate returns copy-able type usually
         spawn_local(async move {
             let req = LoginRequest {
-                username: username.get(),
-                password: password.get(),
+                username: username.get_untracked(),
+                password: password.get_untracked(),
                 mfa_code: None, // TODO: MFA support
                 remember_me: Some(true),
             };

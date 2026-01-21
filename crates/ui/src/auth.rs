@@ -1,7 +1,8 @@
-use leptos::*;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use gloo_storage::{LocalStorage, Storage};
 use crate::api;
+use leptos::task::spawn_local;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserInfo {
@@ -33,21 +34,14 @@ impl Default for AuthState {
 pub struct AuthContext(pub RwSignal<AuthState>);
 
 pub fn provide_auth() {
-    let state = create_rw_signal(AuthState::default());
+    let state = RwSignal::new(AuthState::default());
     provide_context(AuthContext(state));
 
     // Initialize auth
-    create_effect(move |_| {
+    Effect::new(move |_| {
         spawn_local(async move {
             if let Ok(token) = LocalStorage::get::<String>("secreton_token") {
-                // Verify token by fetching user info or verifying endpoint
-                // Assuming /verify or /auth/user endpoint exists.
-                // Based on `handlers/auth.rs`, there is `/verify`.
-
-                // Let's create a temporary struct for verification request if needed,
-                // but usually verify endpoint just takes token.
-                // Looking at `handlers/auth.rs`: `verify_token` takes `VerifyTokenRequest { token: String }`.
-
+                // Verify token
                 #[derive(Serialize)]
                 struct VerifyRequest {
                     token: String,
