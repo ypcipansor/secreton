@@ -7,7 +7,6 @@ use crate::components::button::{Button, ButtonVariant};
 use crate::components::input::Input;
 use crate::components::modal::Modal;
 use crate::components::card::Card;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
