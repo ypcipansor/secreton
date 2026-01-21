@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use leptos_router::{components::{Router, Routes, Route, Outlet}, path};
+use leptos_router::{components::{Router, Routes, Route, ParentRoute, Outlet}, path};
 use leptos_router::hooks::use_navigate;
 use crate::auth::{provide_auth, use_auth};
 use crate::pages::login::Login;
@@ -19,13 +19,13 @@ pub fn App() -> impl IntoView {
             <div class="min-h-screen bg-gray-50 text-gray-900 font-sans">
                 <Routes fallback=|| view! { <NotFound /> }>
                     <Route path=path!("/login") view=Login />
-                    <Route path=path!("/") view=ProtectedRoute>
+                    <ParentRoute path=path!("/") view=ProtectedRoute>
                         <Route path=path!("") view=Dashboard />
                         <Route path=path!("secrets") view=SecretsList />
-                        // <Route path=path!("secrets/*path") view=SecretsList />
+                        <Route path=path!("secrets/*path") view=SecretsList />
                         <Route path=path!("policies") view=PoliciesList />
                         <Route path=path!("audit") view=AuditLog />
-                    </Route>
+                    </ParentRoute>
                 </Routes>
             </div>
         </Router>

@@ -39,7 +39,7 @@ pub fn AuditLog() -> impl IntoView {
             <Suspense fallback=|| view! { <div>"Loading audit logs..."</div> }>
                 {move || {
                     audit_resource.get().map(|res| {
-                        match &*res {
+                        match res {
                             Ok(data) => view! {
                                 <div class="bg-white rounded-lg shadow overflow-hidden">
                                     <table class="min-w-full divide-y divide-gray-200">

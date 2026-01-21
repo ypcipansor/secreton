@@ -46,8 +46,10 @@ pub fn SecretsList() -> impl IntoView {
     let (edit_value, set_edit_value) = signal("".to_string());
     let (new_secret_path, set_new_secret_path) = signal("".to_string());
 
+    let navigate_save = navigate.clone();
     let handle_save = move || {
         let current_path = path();
+        let navigate = navigate_save.clone();
         spawn_local(async move {
             let target_path = if current_path.is_empty() {
                 new_secret_path.get()
@@ -81,6 +83,7 @@ pub fn SecretsList() -> impl IntoView {
         });
     };
 
+    let navigate_delete = navigate.clone();
     let handle_delete = move || {
         let current_path = path();
         if current_path.is_empty() { return; }
@@ -88,6 +91,7 @@ pub fn SecretsList() -> impl IntoView {
         let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false);
         if !confirm { return; }
 
+        let navigate = navigate_delete.clone();
         spawn_local(async move {
             let url = format!("/secrets/data/{}", current_path);
             let _ = api::delete::<serde_json::Value>(&url).await;
@@ -144,8 +148,9 @@ pub fn SecretsList() -> impl IntoView {
             <Suspense fallback=|| view! { <div class="flex justify-center p-12"><div class="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></div></div> }>
                 {move || {
                     secret_resource.get().map(|res| {
-                        match &*res {
+                        match res {
                             Ok(data) => {
+                                let data = data.clone();
                                 match data {
                                     serde_json::Value::Object(map) => {
                                         if map.is_empty() {
@@ -180,10 +185,11 @@ pub fn SecretsList() -> impl IntoView {
                                 }
                             },
                             Err(e) => {
+                                let error_msg = e.to_string();
                                 view! {
                                     <div class="p-8 text-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
                                         <p class="text-gray-500">"No secret found at this path."</p>
-                                        <p class="text-xs text-gray-400 mt-2">{e.to_string()}</p>
+                                        <p class="text-xs text-gray-400 mt-2">{error_msg}</p>
                                     </div>
                                 }.into_any()
                             }

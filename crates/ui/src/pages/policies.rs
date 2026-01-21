@@ -90,7 +90,7 @@ pub fn PoliciesList() -> impl IntoView {
             <Suspense fallback=|| view! { <div class="text-center p-8">"Loading roles..."</div> }>
                 {move || {
                     roles_resource.get().map(|res| {
-                        match &*res {
+                        match res {
                             Ok(roles) => {
                                 let roles = roles.clone();
                                 if roles.is_empty() {

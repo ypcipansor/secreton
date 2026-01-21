@@ -1,23 +1,43 @@
 use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
+use leptos_router::hooks::{use_navigate, use_location};
 use crate::auth::use_auth;
 
 #[component]
 fn Link(
     #[prop(into)] href: String,
     #[prop(optional, into)] class: String,
+    #[prop(optional, into)] active_class: String,
     children: Children,
 ) -> impl IntoView {
     let navigate = use_navigate();
+    let location = use_location();
     let href_clone = href.clone();
+    let href_for_click = href.clone();
+
+    let is_active = move || {
+        let path = location.pathname.get();
+        if href == "/" {
+            path == "/"
+        } else {
+            path.starts_with(&href)
+        }
+    };
+
+    let computed_class = move || {
+        if is_active() && !active_class.is_empty() {
+            format!("{} {}", class, active_class)
+        } else {
+            class.clone()
+        }
+    };
 
     let on_click = move |ev: leptos::ev::MouseEvent| {
         ev.prevent_default();
-        navigate(&href_clone, Default::default());
+        navigate(&href_for_click, Default::default());
     };
 
     view! {
-        <a href=href class=class on:click=on_click>
+        <a href=href_clone class=computed_class on:click=on_click>
             {children()}
         </a>
     }
@@ -45,19 +65,35 @@ pub fn Layout(children: Children) -> impl IntoView {
                 </div>
 
                 <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
-                    <Link href="/" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors">
+                    <Link
+                        href="/"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
                         <span class="text-lg">"📊"</span>
                         <span>"Dashboard"</span>
                     </Link>
-                    <Link href="/secrets" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors">
+                    <Link
+                        href="/secrets"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
                         <span class="text-lg">"🔒"</span>
                         <span>"Secrets"</span>
                     </Link>
-                    <Link href="/policies" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors">
+                    <Link
+                        href="/policies"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
                         <span class="text-lg">"🛡️"</span>
                         <span>"Policies"</span>
                     </Link>
-                    <Link href="/audit" class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors">
+                    <Link
+                        href="/audit"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
                         <span class="text-lg">"📜"</span>
                         <span>"Audit"</span>
                     </Link>

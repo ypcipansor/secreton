@@ -65,7 +65,7 @@ pub fn Dashboard() -> impl IntoView {
                     <Suspense fallback=|| view! { <div class="animate-pulse h-8 bg-gray-200 rounded"></div> }>
                         {move || {
                             health_resource.get().map(|res| {
-                                match &*res {
+                                match res {
                                     Ok(health) => view! {
                                         <div class="flex flex-col gap-2">
                                             <div class="flex items-center gap-2">
@@ -87,7 +87,7 @@ pub fn Dashboard() -> impl IntoView {
                      <Suspense fallback=|| view! { <div class="animate-pulse h-8 bg-gray-200 rounded"></div> }>
                         {move || {
                             seal_resource.get().map(|res| {
-                                match &*res {
+                                match res {
                                     Ok(status) => view! {
                                         <div class="flex flex-col gap-2">
                                             <div class="flex items-center gap-2">
@@ -115,7 +115,7 @@ pub fn Dashboard() -> impl IntoView {
                     <Suspense fallback=|| view! { <div class="animate-pulse h-8 bg-gray-200 rounded"></div> }>
                         {move || {
                             metrics_resource.get().map(|res| {
-                                match &*res {
+                                match res {
                                     Ok(m) => {
                                         let count = m.secreton.clone().map(|s| s.active_sessions).unwrap_or(0);
                                         view! {
@@ -136,7 +136,7 @@ pub fn Dashboard() -> impl IntoView {
                     <Suspense fallback=|| view! { <div class="animate-pulse h-8 bg-gray-200 rounded"></div> }>
                         {move || {
                             metrics_resource.get().map(|res| {
-                                match &*res {
+                                match res {
                                     Ok(m) => {
                                         let count = m.secreton.clone().map(|s| s.total_secrets).unwrap_or(0);
                                         view! {
