@@ -1,6 +1,9 @@
-pub mod login;
-pub mod dashboard;
-pub mod secrets;
-pub mod policies;
 pub mod audit;
+pub mod dashboard;
+pub mod login;
 pub mod not_found;
+pub mod roles;
+pub mod secrets;
+pub mod system;
+pub mod policy_definitions;
+pub mod users;
