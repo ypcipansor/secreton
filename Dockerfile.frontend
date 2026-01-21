@@ -1,0 +1,47 @@
+# Stage 1: Build Frontend
+FROM rust:1.90-slim as builder
+
+# Install build dependencies and tools
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Trunk
+# We use a precompiled binary for speed if possible, or cargo install
+RUN cargo install trunk
+
+# Add WASM target
+RUN rustup target add wasm32-unknown-unknown
+
+# Set working directory
+WORKDIR /app
+
+# Copy Cargo files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build the frontend
+WORKDIR /app/crates/ui
+RUN trunk build --release
+
+# Stage 2: Serve with Nginx
+FROM nginx:alpine
+
+# Remove default nginx static assets
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy built assets from builder stage
+COPY --from=builder /app/crates/ui/dist /usr/share/nginx/html
+
+# Copy custom Nginx configuration
+# We assume the context of the build includes the nginx folder
+COPY nginx/nginx.conf /etc/nginx/nginx.conf
+
+# Expose port 80
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]
