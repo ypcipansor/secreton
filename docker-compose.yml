@@ -1,26 +1,26 @@
 version: '3.8'
 
 services:
-  secreton:
+  secreton-backend:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: secreton-server
+      dockerfile: Dockerfile.backend
+    container_name: secreton-backend
     ports:
       - "8080:8080"
       - "8443:8443"
       - "9090:9090"
     environment:
-      - RUST_LOG=debug
+      - RUST_LOG=info
       - SECRETON_SERVER__HOST=0.0.0.0
       - SECRETON_SERVER__PORT=8080
-      - SECRETON_SERVER__LOG_LEVEL=debug
+      - SECRETON_SERVER__LOG_LEVEL=info
       - SECRETON_SERVER__STORAGE_PATH=/app/data
-      - SECRETON_DATABASE__URL=sqlite:/app/data/secreton.db
+      - SECRETON_DATABASE__URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - SECRETON_DATABASE__MAX_CONNECTIONS=10
       - SECRETON_AUTH__TOKEN_TTL=3600
       - SECRETON_AUTH__REFRESH_TOKEN_TTL=2592000
-      - SECRETON_AUTH__JWT_SECRET=super-secret-jwt-key-change-in-production
+      - SECRETON_AUTH__JWT_SECRET=${SECRETON_JWT_SECRET}
       - REDIS_URL=redis://redis:6379
     volumes:
       - secreton_data:/app/data
@@ -37,6 +37,28 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  secreton-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: secreton-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - secreton-backend
+    networks:
+      - secreton-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -56,27 +78,11 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=secreton
-      - POSTGRES_USER=secreton
-      - POSTGRES_PASSWORD=secreton-password
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - secreton-network
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    container_name: secreton-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/ssl:/etc/nginx/ssl
-    depends_on:
-      - secreton
     networks:
       - secreton-network
     restart: unless-stopped
@@ -104,7 +110,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards

@@ -5,7 +5,7 @@ use warp::Filter;
 use secreton_api::config::ApiConfig;
 use secreton_api::services::config::ConfigService;
 use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType};
-use secreton_storage::factory::FileBackendConfig;
+use secreton_storage::factory::{FileBackendConfig, PostgresBackendConfig, RedisBackendConfig};
 
 // Use the existing security API from lib.rs
 use secreton_api::{SecurityAPI, handle_rejection};
@@ -35,7 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_startup_banner();
 
     // Get port from environment or default to 8080
-    let http_port = env::var("PORT")
+    let http_port = env::var("SECRETON_SERVER__PORT")
+        .or_else(|_| env::var("PORT"))
         .unwrap_or_else(|_| "8080".to_string())
         .parse::<u16>()
         .expect("PORT must be a valid port number");
@@ -45,25 +46,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse::<u16>()
         .expect("GRPC_PORT must be a valid port number");
 
+    let host = env::var("SECRETON_SERVER__HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+
     info!("Starting Secreton Security API server");
-    info!("HTTP Port: {}", http_port);
+    info!("HTTP Address: {}:{}", host, http_port);
     info!("gRPC Port: {}", grpc_port);
 
     // Initialize Storage
-    // This part effectively replaces .env dependency for core configuration
-    // We bootstrap a storage connection here.
-    let storage_config = StorageFactoryConfig {
-        backend_type: if let Ok(_path) = env::var("SECRETON_STORAGE_FILE_PATH") {
-            StorageBackendType::File
+    // Prioritize Database URL, then File Path, then Memory
+    let (backend_type, file_config, postgres_config, redis_config) =
+        if let Ok(db_url) = env::var("SECRETON_DATABASE__URL") {
+            info!("Configuring PostgreSQL storage backend");
+            (
+                StorageBackendType::PostgreSQL,
+                None,
+                Some(PostgresBackendConfig { connection_string: db_url }),
+                None
+            )
+        } else if let Ok(redis_url) = env::var("REDIS_URL") {
+             // Note: Usually Redis is cache, but if explicitly set as primary storage...
+             info!("Configuring Redis storage backend");
+             (
+                 StorageBackendType::Redis,
+                 None,
+                 None,
+                 Some(RedisBackendConfig { url: redis_url })
+             )
+        } else if let Ok(path) = env::var("SECRETON_STORAGE_FILE_PATH") {
+            info!("Configuring File storage backend at {}", path);
+            (
+                StorageBackendType::File,
+                Some(FileBackendConfig { base_path: path }),
+                None,
+                None
+            )
         } else {
-             StorageBackendType::Memory
-        },
-        file_config: env::var("SECRETON_STORAGE_FILE_PATH").ok().map(|p| FileBackendConfig { base_path: p }),
+            info!("Configuring In-Memory storage backend (Warning: Data will be lost on restart)");
+            (StorageBackendType::Memory, None, None, None)
+        };
+
+    let storage_config = StorageFactoryConfig {
+        backend_type,
+        file_config,
+        postgres_config,
+        redis_config,
         ..Default::default()
     };
 
     let storage = StorageFactory::create(storage_config).await?;
-    info!("Storage backend initialized");
+    info!("Storage backend initialized successfully");
 
     // Load Configuration from Storage
     let mut api_config = match ConfigService::load_config(storage.as_ref()).await {
@@ -92,7 +123,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Use JWT configuration from stored config
-    // We unwrap here safely because we just ensured it is Some
     let jwt_secret = api_config.auth.jwt.secret.clone().unwrap_or_else(|| "fallback-secret-should-not-happen".to_string());
     let jwt_issuer = api_config.auth.jwt.issuer.clone();
     let jwt_audience = api_config.auth.jwt.audience.clone();
@@ -148,7 +178,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   POST /auth/login - User authentication");
 
     // Spawn HTTP Server
-    let http_server = warp::serve(routes).run(([127, 0, 0, 1], http_port));
+    let host_ip: std::net::IpAddr = host.parse().expect("Invalid host address");
+    let http_server = warp::serve(routes).run((host_ip, http_port));
 
     // Setup gRPC Server
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
