@@ -352,8 +352,8 @@ impl AuthenticationService {
 
         if should_persist {
              // Update user in storage
-             if let Ok(user_data) = serde_json::to_vec(&user) {
-                if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+             if let Ok(user_data) = serde_json::to_vec(&user)
+                && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
                     let entry = if let Some(mut e) = user_entry {
                         e.encrypted_data = encrypted;
                         e
@@ -367,7 +367,6 @@ impl AuthenticationService {
                         )
                     };
                     let _ = self.storage.store(&entry).await;
-                }
             }
         }
 

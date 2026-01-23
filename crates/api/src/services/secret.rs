@@ -924,7 +924,7 @@ impl SecretService {
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
         let key_entry = self.storage.get_by_path(&key_data_path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data
@@ -988,7 +988,7 @@ impl SecretService {
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
         let key_entry = self.storage.get_by_path(&key_data_path).await
-            .map_err(|e| SecretError::Storage(e))?
+            .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
 
         // Decrypt the stored key data

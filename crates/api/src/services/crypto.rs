@@ -157,13 +157,12 @@ impl CryptoService {
         let key_manager = Arc::new(KeyManager::new(key_storage, rotation_interval));
 
         // If we auto-unsealed, ensure we have an active key
-        if root_key_store.read().await.is_some() {
-            if key_manager.get_active_key().await.is_err() {
+        if root_key_store.read().await.is_some()
+            && key_manager.get_active_key().await.is_err() {
                 tracing::info!("No active system key found after auto-unseal. Generating new one.");
                 if let Err(e) = key_manager.rotate_keys().await {
                     tracing::error!("Failed to initialize system key after auto-unseal: {}", e);
                 }
-            }
         }
 
         Ok(Self {

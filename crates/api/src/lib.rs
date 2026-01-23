@@ -424,7 +424,7 @@ impl SecurityAPI {
 
         let api_v1 = warp::path("api").and(warp::path("v1"));
 
-        let sys_init = api_v1.clone()
+        let sys_init = api_v1
             .and(warp::path("sys"))
             .and(warp::path("init"))
             .and(warp::post())
@@ -432,7 +432,7 @@ impl SecurityAPI {
             .and(seal_filter.clone())
             .and_then(handle_sys_init);
 
-        let sys_unseal = api_v1.clone()
+        let sys_unseal = api_v1
             .and(warp::path("sys"))
             .and(warp::path("unseal"))
             .and(warp::post())
@@ -440,7 +440,7 @@ impl SecurityAPI {
             .and(seal_filter.clone())
             .and_then(handle_sys_unseal);
 
-        let sys_seal_status = api_v1.clone()
+        let sys_seal_status = api_v1
             .and(warp::path("sys"))
             .and(warp::path("seal-status"))
             .and(warp::get())
@@ -448,7 +448,7 @@ impl SecurityAPI {
             .and_then(handle_sys_seal_status);
 
         // Secret routes
-        let secret_get = api_v1.clone()
+        let secret_get = api_v1
             .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
@@ -457,7 +457,7 @@ impl SecurityAPI {
             .and(secreton_filter.clone())
             .and_then(handle_secret_get);
 
-        let secret_put = api_v1.clone()
+        let secret_put = api_v1
             .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
@@ -467,7 +467,7 @@ impl SecurityAPI {
             .and(secreton_filter.clone())
             .and_then(handle_secret_put);
 
-        let secret_delete = api_v1.clone()
+        let secret_delete = api_v1
             .and(warp::path("secrets"))
             .and(warp::path("data"))
             .and(warp::path::tail())
@@ -513,28 +513,28 @@ impl SecurityAPI {
                     .or(admin)
             });
 
-        let config_post = api_v1.clone()
+        let config_post = api_v1
             .and(warp::path("sys"))
             .and(warp::path("config"))
             .and(warp::post())
-            .and(auth_token.clone())
+            .and(auth_token)
             .and(warp::body::json())
             .and(storage_filter.clone())
             .and(auth_filter.clone())
             .and(audit_filter.clone())
             .and_then(crate::handlers::config::handle_post_config);
 
-        let config_delete = api_v1.clone()
+        let config_delete = api_v1
             .and(warp::path("sys"))
             .and(warp::path("config"))
             .and(warp::delete())
-            .and(auth_token.clone())
+            .and(auth_token)
             .and(storage_filter.clone())
             .and(auth_filter.clone())
             .and(audit_filter.clone())
             .and_then(crate::handlers::config::handle_delete_config);
 
-        let config_get = api_v1.clone()
+        let config_get = api_v1
             .and(warp::path("sys"))
             .and(warp::path("config"))
             .and(warp::get())
