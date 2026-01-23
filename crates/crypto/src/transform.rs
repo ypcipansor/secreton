@@ -196,7 +196,7 @@ impl TransformEngine {
         // Pad to block size (16 bytes)
         let block_size = 16;
         let mut padded_input = input_nums.clone();
-        while padded_input.len() % block_size != 0 {
+        while !padded_input.len().is_multiple_of(block_size) {
             padded_input.push(0);
         }
 
@@ -254,7 +254,7 @@ impl TransformEngine {
         // Pad to block size
         let block_size = 16;
         let mut padded_input = input_nums.clone();
-        while padded_input.len() % block_size != 0 {
+        while !padded_input.len().is_multiple_of(block_size) {
             padded_input.push(0);
         }
 

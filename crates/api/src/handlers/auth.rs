@@ -1418,27 +1418,24 @@ pub async fn create_user(
 /// Extract client IP address from request headers
 fn extract_client_ip(headers: &HeaderMap) -> String {
     // Try X-Forwarded-For first (for proxies/load balancers)
-    if let Some(x_forwarded_for) = headers.get("x-forwarded-for") {
-        if let Ok(value) = x_forwarded_for.to_str() {
+    if let Some(x_forwarded_for) = headers.get("x-forwarded-for")
+        && let Ok(value) = x_forwarded_for.to_str() {
             // X-Forwarded-For can contain multiple IPs, take the first one
             if let Some(first_ip) = value.split(',').next() {
                 return first_ip.trim().to_string();
             }
-        }
     }
 
     // Try X-Real-IP (for nginx)
-    if let Some(x_real_ip) = headers.get("x-real-ip") {
-        if let Ok(value) = x_real_ip.to_str() {
+    if let Some(x_real_ip) = headers.get("x-real-ip")
+        && let Ok(value) = x_real_ip.to_str() {
             return value.to_string();
-        }
     }
 
     // Try X-Client-IP (for some proxies)
-    if let Some(x_client_ip) = headers.get("x-client-ip") {
-        if let Ok(value) = x_client_ip.to_str() {
+    if let Some(x_client_ip) = headers.get("x-client-ip")
+        && let Ok(value) = x_client_ip.to_str() {
             return value.to_string();
-        }
     }
 
     // Fallback to unknown
