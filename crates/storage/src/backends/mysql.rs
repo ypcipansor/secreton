@@ -405,19 +405,49 @@ impl MySQLStorage {
         format!("DELETE FROM `{}` WHERE id = ?", table_name)
     }
 
-    /// Build MySQL query for listing entries with prefix
-    fn build_list_query(table_name: &str, prefix: &str) -> String {
-        if prefix.is_empty() {
-            format!(
-                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` ORDER BY path",
-                table_name
-            )
-        } else {
-            format!(
-                "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE path LIKE ? ORDER BY path",
-                table_name
-            )
+    /// Build MySQL query for listing entries with filters
+    fn build_list_query(
+        table_name: &str,
+        params: &QueryParams,
+    ) -> (String, Vec<mysql_async::Value>) {
+        let mut query = format!(
+            "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}`",
+            table_name
+        );
+        let mut where_clauses = Vec::new();
+        let mut values: Vec<mysql_async::Value> = Vec::new();
+
+        if let Some(prefix) = &params.path_prefix {
+            if !prefix.is_empty() {
+                where_clauses.push("path LIKE ?");
+                values.push(mysql_async::Value::from(format!("{}%", prefix)));
+            }
         }
+
+        if let Some(owner_id) = params.owner_id {
+            where_clauses.push("owner_id = ?");
+            values.push(mysql_async::Value::from(owner_id.to_string()));
+        }
+
+        if !params.include_expired {
+            // entry.is_expired() checks if expires_at is some and <= now.
+            // So we want (expires_at IS NULL OR expires_at > NOW())
+            where_clauses.push("(expires_at IS NULL OR expires_at > NOW())");
+        }
+
+        if !where_clauses.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&where_clauses.join(" AND "));
+        }
+
+        query.push_str(" ORDER BY path");
+
+        if let Some(limit) = params.limit {
+            query.push_str(" LIMIT ?");
+            values.push(mysql_async::Value::from(limit));
+        }
+
+        (query, values)
     }
 }
 
@@ -570,30 +600,15 @@ impl StorageBackend for MySQLStorage {
                 message: format!("Failed to get connection: {}", e),
             })?;
 
-        let query = MySQLStorage::build_list_query(
-            &self.config.table_name,
-            params.path_prefix.as_deref().unwrap_or(""),
-        );
+        let (query, values) = MySQLStorage::build_list_query(&self.config.table_name, params);
 
-        let rows: Vec<mysql_async::Row> = if params.path_prefix.as_deref().unwrap_or("").is_empty()
-        {
-            conn.exec(&query, ())
-                .await
-                .map_err(|e| StorageError::BackendError {
-                    backend: "mysql".to_string(),
-                    message: format!("Failed to list entries: {}", e),
-                })?
-        } else {
-            conn.exec(
-                &query,
-                (format!("{}%", params.path_prefix.as_deref().unwrap_or("")),),
-            )
+        let rows: Vec<mysql_async::Row> = conn
+            .exec(&query, values)
             .await
             .map_err(|e| StorageError::BackendError {
                 backend: "mysql".to_string(),
                 message: format!("Failed to list entries: {}", e),
-            })?
-        };
+            })?;
 
         let mut entries = Vec::new();
         for row in rows {
@@ -601,26 +616,7 @@ impl StorageBackend for MySQLStorage {
             entries.push(entry);
         }
 
-        // Apply filters
-        let mut filtered_entries = Vec::new();
-        for entry in entries {
-            if let Some(owner_id) = params.owner_id
-                && entry.owner_id != owner_id
-            {
-                continue;
-            }
-            if !params.include_expired && entry.is_expired() {
-                continue;
-            }
-            filtered_entries.push(entry);
-        }
-
-        // Apply limit
-        if let Some(limit) = params.limit {
-            filtered_entries.truncate(limit as usize);
-        }
-
-        Ok(filtered_entries)
+        Ok(entries)
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
@@ -868,5 +864,63 @@ mod tests {
         assert!(query.contains("SELECT"));
         assert!(query.contains("FROM `secreton_kv_store`"));
         assert!(query.contains("WHERE path = ?"));
+    }
+
+    #[test]
+    fn test_build_list_query_filters() {
+        let owner = Uuid::new_v4();
+        let params = QueryParams::new()
+            .with_path_prefix("apps/".to_string())
+            .with_owner(owner)
+            .with_limit(50);
+        // include_expired is false by default in QueryParams::default/new
+
+        let (query, values) = MySQLStorage::build_list_query("secreton_kv_store", &params);
+
+        assert!(query.contains("SELECT"));
+        assert!(query.contains("FROM `secreton_kv_store`"));
+        assert!(query.contains("WHERE"));
+
+        // Verify filters are in the query
+        assert!(query.contains("path LIKE ?"));
+        assert!(query.contains("owner_id = ?"));
+        assert!(query.contains("(expires_at IS NULL OR expires_at > NOW())"));
+        assert!(query.contains("LIMIT ?"));
+
+        // Verify values
+        // Order of addition: prefix, owner_id, limit
+        // 1. prefix
+        // 2. owner_id
+        // 3. limit
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[0], mysql_async::Value::from("apps/%"));
+        assert_eq!(values[1], mysql_async::Value::from(owner.to_string()));
+        assert_eq!(values[2], mysql_async::Value::from(50u32));
+    }
+
+    #[test]
+    fn test_build_list_query_no_filters() {
+        let params = QueryParams::new().with_path_prefix("".to_string());
+        // include_expired false by default
+
+        let (query, values) = MySQLStorage::build_list_query("secreton_kv_store", &params);
+
+        assert!(query.contains("WHERE")); // because of expiry check
+        assert!(query.contains("(expires_at IS NULL OR expires_at > NOW())"));
+        assert!(!query.contains("path LIKE"));
+        assert!(!query.contains("owner_id ="));
+
+        assert_eq!(values.len(), 0);
+    }
+
+    #[test]
+    fn test_build_list_query_include_expired() {
+        let mut params = QueryParams::new();
+        params.include_expired = true;
+
+        let (query, values) = MySQLStorage::build_list_query("secreton_kv_store", &params);
+
+        assert!(!query.contains("WHERE")); // No filters at all
+        assert_eq!(values.len(), 0);
     }
 }
