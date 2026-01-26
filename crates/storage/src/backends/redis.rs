@@ -85,6 +85,8 @@ impl StorageTransaction for RedisTransaction {
 
         // Get Redis connection from backend and execute all operations
         let mut conn = self.manager.lock().await;
+        let mut pipe = redis::pipe();
+        pipe.atomic();
 
         for op in self.operations {
             match op {
@@ -99,35 +101,27 @@ impl StorageTransaction for RedisTransaction {
                     if let Some(expires_at) = entry.expires_at {
                         let ttl = (expires_at - Utc::now()).num_seconds();
                         if ttl > 0 {
-                            conn.set_ex::<_, _, ()>(&key, &value, ttl as u64)
-                                .await
-                                .map_err(|e| StorageError::QueryFailed {
-                                    message: format!("Failed to store entry with TTL in transaction: {}", e),
-                                })?;
+                            pipe.set_ex(&key, value, ttl as u64);
                         } else {
                             // Already expired, ensure it is removed
-                            conn.del::<_, ()>(&key).await.map_err(|e| StorageError::QueryFailed {
-                                message: format!("Failed to delete expired entry in transaction: {}", e),
-                            })?;
+                            pipe.del(&key);
                         }
                     } else {
-                        conn.set::<_, _, ()>(&key, &value).await.map_err(|e| {
-                            StorageError::QueryFailed {
-                                message: format!("Failed to store entry in transaction: {}", e),
-                            }
-                        })?;
+                        pipe.set(&key, value);
                     }
                 }
                 RedisTransactionOp::Delete(id) => {
                     let key = format!("secreton:entry:{}", id);
-                    conn.del::<_, ()>(&key)
-                        .await
-                        .map_err(|e| StorageError::QueryFailed {
-                            message: format!("Failed to delete entry in transaction: {}", e),
-                        })?;
+                    pipe.del(&key);
                 }
             }
         }
+
+        pipe.query_async::<()>(&mut *conn)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to execute transaction pipeline: {}", e),
+            })?;
 
         self.committed = true;
         Ok(())
