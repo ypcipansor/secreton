@@ -33,6 +33,7 @@ pub struct DatabaseEngine {
 
 impl DatabaseEngine {
     // Default configuration to use before initialization
+    #[allow(dead_code)]
     fn default_config() -> DatabaseConfig {
         DatabaseConfig {
             plugin_name: "database".to_string(),
@@ -87,7 +88,8 @@ impl DatabaseEngine {
     }
 
     /// Initialize the backend based on configuration
-    async fn init_backend(&mut self) -> SecretResult<()> {
+    /// This is now synchronous to allow lazy initialization in enable()
+    fn init_backend(&mut self) -> SecretResult<()> {
         let db_type = self.detect_database_type(&self.config.connection_url)?;
 
         match db_type {
@@ -131,8 +133,13 @@ impl SecretEngine for DatabaseEngine {
              match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
                  Ok(cfg) => {
                      self.config = cfg;
-                     // Initialize backend unconditionally if config is present
-                     self.init_backend().await?;
+                     // Validate connection URL regardless of enabled state
+                     self.detect_database_type(&self.config.connection_url)?;
+
+                     // Initialize backend only if enabled to avoid wasteful resource allocation
+                     if config.enabled {
+                         self.init_backend()?;
+                     }
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
              }
@@ -263,9 +270,23 @@ impl SecretEngine for DatabaseEngine {
 
     fn enable(&mut self) {
         self.enabled = true;
+        // Lazily initialize backend if needed
+        if self.backend.is_none() && !self.config.connection_url.is_empty() {
+            if let Err(e) = self.init_backend() {
+                // Since enable() cannot return result, we log the error
+                // The backend will remain None, and subsequent calls will fail gracefully
+                eprintln!("Failed to initialize database backend during enable: {}", e);
+            }
+        }
     }
 
     fn disable(&mut self) {
         self.enabled = false;
+        // Optionally release backend resources?
+        // self.backend = None;
+        // Keeping it might be better for re-enable performance, but dropping it saves resources.
+        // Given the Bug 1 concern about "wasteful resource allocation", dropping it makes sense?
+        // But pooling libraries handle idle connections well.
+        // Let's keep it to avoid thrashing if toggled often.
     }
 }
