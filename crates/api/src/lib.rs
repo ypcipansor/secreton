@@ -393,8 +393,10 @@ impl SecurityAPI {
         audit: Arc<crate::services::audit::AuditLogger>,
         seal: Arc<crate::services::seal::SealService>,
         secreton: Arc<crate::services::secret::SecretService>,
+        backend_type: String,
     ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let storage_filter = warp::any().map(move || storage.clone());
+        let backend_type_filter = warp::any().map(move || backend_type.clone());
         let auth_clone = auth.clone();
         let auth_filter = warp::any().map(move || auth_clone.clone());
         let audit_filter = warp::any().map(move || audit.clone());
@@ -415,6 +417,8 @@ impl SecurityAPI {
 
         let health = warp::path("health")
             .and(warp::get())
+            .and(storage_filter.clone())
+            .and(backend_type_filter.clone())
             .and_then(health_handler);
 
         let security_status = warp::path("security")
@@ -642,16 +646,35 @@ async fn handle_sys_seal_status(
 }
 
 /// Health check handler
-async fn health_handler() -> Result<impl Reply, Rejection> {
-    let timestamp = Utc::now().to_rfc3339();
-    let response = ApiResponse::success(HashMap::from([
-        ("status", "healthy"),
-        ("version", "1.0.0"),
-        ("service", "secreton-security-api"),
-        ("timestamp", timestamp.as_str()),
-        ("uptime", "operational"),
-        ("components", "8"), // All security components
-    ]));
+async fn health_handler(
+    storage: Arc<dyn StorageBackend>,
+    backend_type: String,
+) -> Result<impl Reply, Rejection> {
+    let health_status = storage.health_check().await.unwrap_or(secreton_storage::HealthStatus {
+        is_healthy: false,
+        response_time_ms: 0.0,
+        connections_active: 0,
+        connections_idle: 0,
+        last_error: Some("Health check failed".to_string()),
+        uptime_seconds: 0,
+    });
+
+    let db_status = if health_status.is_healthy {
+        format!("{} (Healthy, {}ms)", backend_type, health_status.response_time_ms)
+    } else {
+        format!("{} (Unhealthy: {})", backend_type, health_status.last_error.unwrap_or_default())
+    };
+
+    let response = ApiResponse::success(HealthCheckResponse {
+        status: if health_status.is_healthy { "healthy".to_string() } else { "unhealthy".to_string() },
+        version: "2.0.1".to_string(),
+        uptime: health_status.uptime_seconds,
+        dependencies: HealthCheckDependencies {
+            database: db_status,
+            cache: "Local (Operational)".to_string(), // TODO: Check Redis if enabled
+            crypto: "RustCrypto (Operational)".to_string(),
+        },
+    });
 
     Ok(warp::reply::json(&response))
 }
@@ -924,7 +947,7 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     // Inject storage, auth and audit into routes
     // For start_security_server, we just use the mock storage since this function
     // doesn't accept storage configuration
-    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton)
+    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton, "Memory (Mock)".to_string())
         .with(
             warp::cors()
                 .allow_any_origin()

@@ -4,7 +4,7 @@ use tracing::{info, warn};
 use warp::Filter;
 use secreton_api::config::ApiConfig;
 use secreton_api::services::config::ConfigService;
-use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType};
+use secreton_storage::{StorageFactory, StorageFactoryConfig, StorageBackendType, MySQLStorageConfig};
 use secreton_storage::factory::{FileBackendConfig, PostgresBackendConfig, RedisBackendConfig};
 
 // Use the existing security API from lib.rs
@@ -54,15 +54,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize Storage
     // Prioritize Database URL, then File Path, then Memory
-    let (backend_type, file_config, postgres_config, redis_config) =
+    let (backend_type, file_config, postgres_config, redis_config, mysql_config, backend_type_str) =
         if let Ok(db_url) = env::var("SECRETON_DATABASE__URL") {
-            info!("Configuring PostgreSQL storage backend");
-            (
-                StorageBackendType::PostgreSQL,
-                None,
-                Some(PostgresBackendConfig { connection_string: db_url }),
-                None
-            )
+            let is_mysql = db_url.starts_with("mysql://") ||
+                           env::var("SECRETON_DATABASE_TYPE").unwrap_or_default().to_lowercase() == "mysql";
+
+            if is_mysql {
+                info!("Configuring MySQL storage backend");
+                (
+                    StorageBackendType::MySQL,
+                    None,
+                    None,
+                    None,
+                    Some(MySQLStorageConfig { connection_string: db_url, ..Default::default() }),
+                    "MySQL".to_string()
+                )
+            } else {
+                info!("Configuring PostgreSQL storage backend");
+                (
+                    StorageBackendType::PostgreSQL,
+                    None,
+                    Some(PostgresBackendConfig { connection_string: db_url }),
+                    None,
+                    None,
+                    "PostgreSQL".to_string()
+                )
+            }
+        } else if let Ok(mysql_url) = env::var("MYSQL_URL") {
+             info!("Configuring MySQL storage backend");
+             (
+                 StorageBackendType::MySQL,
+                 None,
+                 None,
+                 None,
+                 Some(MySQLStorageConfig { connection_string: mysql_url, ..Default::default() }),
+                 "MySQL".to_string()
+             )
         } else if let Ok(redis_url) = env::var("REDIS_URL") {
              // Note: Usually Redis is cache, but if explicitly set as primary storage...
              info!("Configuring Redis storage backend");
@@ -70,19 +97,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  StorageBackendType::Redis,
                  None,
                  None,
-                 Some(RedisBackendConfig { url: redis_url })
+                 Some(RedisBackendConfig { url: redis_url }),
+                 None,
+                 "Redis".to_string()
              )
         } else if let Ok(path) = env::var("SECRETON_STORAGE_FILE_PATH") {
             info!("Configuring File storage backend at {}", path);
             (
                 StorageBackendType::File,
-                Some(FileBackendConfig { base_path: path }),
+                Some(FileBackendConfig { base_path: path.clone() }),
                 None,
-                None
+                None,
+                None,
+                format!("File ({})", path)
             )
         } else {
             info!("Configuring In-Memory storage backend (Warning: Data will be lost on restart)");
-            (StorageBackendType::Memory, None, None, None)
+            (StorageBackendType::Memory, None, None, None, None, "Memory".to_string())
         };
 
     let storage_config = StorageFactoryConfig {
@@ -90,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         file_config,
         postgres_config,
         redis_config,
+        mysql_config,
         ..Default::default()
     };
 
@@ -160,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?);
 
     // Construct HTTP Routes
-    let routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone())
+    let routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
         .with(
             warp::cors()
                 .allow_any_origin()
