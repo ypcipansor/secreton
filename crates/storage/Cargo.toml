@@ -97,10 +97,14 @@ kube = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion.workspace = true
+criterion = { workspace = true, features = ["async_tokio"] }
 proptest.workspace = true
 tempfile.workspace = true
 
 [features]
 default = []
 kubernetes = ["kube", "k8s-openapi"]
+
+[[bench]]
+name = "postgres_benchmark"
+harness = false
