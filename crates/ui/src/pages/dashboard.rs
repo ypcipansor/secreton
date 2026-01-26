@@ -9,6 +9,15 @@ struct HealthResponse {
     version: String,
     #[serde(default)]
     sealed: bool,
+    #[serde(default)]
+    dependencies: Option<HealthCheckDependencies>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct HealthCheckDependencies {
+    pub database: String,
+    pub cache: String,
+    pub crypto: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -73,6 +82,20 @@ pub fn Dashboard() -> impl IntoView {
                                                 <span class="text-2xl font-bold text-gray-900 capitalize">{health.status.clone()}</span>
                                             </div>
                                             <p class="text-xs text-gray-500">"Version: " {health.version.clone()}</p>
+                                            {
+                                                if let Some(deps) = &health.dependencies {
+                                                    view! {
+                                                        <div class="mt-2 pt-2 border-t border-gray-100">
+                                                            <p class="text-xs text-gray-500 flex items-center gap-1">
+                                                                <span class="font-semibold">"Storage:"</span>
+                                                                {deps.database.clone()}
+                                                            </p>
+                                                        </div>
+                                                    }.into_any()
+                                                } else {
+                                                    view! { <span/> }.into_any()
+                                                }
+                                            }
                                         </div>
                                     }.into_any(),
                                     Err(_) => view! { <span class="text-red-500">"Unavailable"</span> }.into_any()

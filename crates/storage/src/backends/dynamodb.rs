@@ -392,8 +392,9 @@ impl DynamoDBStorage {
             .map(|sl| match sl {
                 0 => crate::SecurityLevel::Public,
                 1 => crate::SecurityLevel::Internal,
-                2 => crate::SecurityLevel::Secret,
-                3 => crate::SecurityLevel::TopSecret,
+                2 => crate::SecurityLevel::Confidential,
+                3 => crate::SecurityLevel::Secret,
+                4 => crate::SecurityLevel::TopSecret,
                 _ => crate::SecurityLevel::Secret,
             })
             .unwrap_or(crate::SecurityLevel::Secret);
