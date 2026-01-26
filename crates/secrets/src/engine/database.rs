@@ -4,6 +4,7 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -23,19 +24,50 @@ pub struct DatabaseRole {
     pub default_ttl: u64,
 }
 
+/// Database engine configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseEngineConfig {
+    pub connection_url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub database_name: Option<String>,
+    pub max_open_connections: Option<u32>,
+    pub max_idle_connections: Option<u32>,
+    pub connection_timeout: Option<u64>,
+    #[serde(default)]
+    pub verify_connection: bool,
+}
+
+impl Default for DatabaseEngineConfig {
+    fn default() -> Self {
+        Self {
+            connection_url: String::new(),
+            username: None,
+            password: None,
+            database_name: None,
+            max_open_connections: Some(10),
+            max_idle_connections: Some(5),
+            connection_timeout: Some(30),
+            verify_connection: true,
+        }
+    }
+}
+
 /// Database secret engine for dynamic credentials
 pub struct DatabaseEngine {
-    config: DatabaseConfig,
+    config: DatabaseEngineConfig,
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
+    backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
 }
 
 impl DatabaseEngine {
-    pub fn new(config: DatabaseConfig) -> Self {
+    pub fn new(config: DatabaseEngineConfig) -> Self {
         Self {
             config,
             enabled: false,
             roles: HashMap::new(),
+            backend: None,
         }
     }
 
@@ -46,29 +78,10 @@ impl DatabaseEngine {
             SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name))
         })?;
 
-        // Determine database type from connection URL
-        let db_type = self.detect_database_type(&self.config.connection_url)?;
-
-        // Create appropriate backend and generate credentials
-        match db_type {
-            DatabaseType::PostgreSQL => {
-                let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
-            DatabaseType::MySQL => {
-                let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
-            DatabaseType::MongoDB => {
-                let backend = crate::backend::database::mongodb::MongodbBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
+        if let Some(backend) = &self.backend {
+            backend.generate_credentials(role_name, &role.sql).await
+        } else {
+            Err(SecretError::InvalidConfiguration("Database backend not initialized".to_string()))
         }
     }
 
@@ -88,6 +101,31 @@ impl DatabaseEngine {
             )))
         }
     }
+
+    /// Initialize the backend based on configuration
+    async fn init_backend(&mut self) -> SecretResult<()> {
+        let db_type = self.detect_database_type(&self.config.connection_url)?;
+
+        match db_type {
+            DatabaseType::PostgreSQL => {
+                let backend = crate::backend::database::postgres::PostgresBackend::new(
+                    self.config.connection_url.clone(),
+                )?;
+                self.backend = Some(Box::new(backend));
+                Ok(())
+            }
+            DatabaseType::MySQL => {
+                let backend = crate::backend::database::mysql::MysqlBackend::new(
+                    self.config.connection_url.clone(),
+                )?;
+                self.backend = Some(Box::new(backend));
+                Ok(())
+            }
+            DatabaseType::MongoDB => {
+                Err(SecretError::NotImplemented("MongoDB backend not fully implemented".to_string()))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -97,9 +135,17 @@ impl SecretEngine for DatabaseEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(db_config) = config.config.get("database")
-            && let Ok(db_config) = serde_json::from_value(db_config.clone()) {
-            self.config = db_config;
+        if let Some(db_config) = config.config.get("database") {
+             match serde_json::from_value::<DatabaseEngineConfig>(db_config.clone()) {
+                 Ok(cfg) => {
+                     self.config = cfg;
+                     // Initialize backend
+                     if config.enabled {
+                         self.init_backend().await?;
+                     }
+                 },
+                 Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
+             }
         }
 
         self.enabled = config.enabled;

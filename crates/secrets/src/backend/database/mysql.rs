@@ -1,131 +1,129 @@
 //! MySQL database backend
 
+use crate::backend::database::DatabaseBackend;
 use crate::error::*;
+use async_trait::async_trait;
 use mysql_async::prelude::*;
+use rand::{distributions::Alphanumeric, Rng};
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// MySQL database backend
 pub struct MysqlBackend {
-    connection_string: String,
+    pool: mysql_async::Pool,
 }
 
 impl MysqlBackend {
-    pub fn new(connection_string: String) -> Self {
-        Self { connection_string }
-    }
-
-    /// Test connection to MySQL
-    pub async fn test_connection(&self) -> SecretResult<()> {
-        let opts = mysql_async::Opts::from_url(&self.connection_string).map_err(|e| {
+    pub fn new(connection_string: String) -> SecretResult<Self> {
+        let opts = mysql_async::Opts::from_url(&connection_string).map_err(|e| {
             SecretError::InvalidConfiguration(format!("Invalid MySQL connection string: {}", e))
         })?;
         let pool = mysql_async::Pool::new(opts);
-        let mut conn = pool.get_conn().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to connect to MySQL: {}", e))
-        })?;
-
-        // Test with a simple query
-        conn.query_drop("SELECT 1").await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("MySQL connection test failed: {}", e))
-        })?;
-
-        pool.disconnect().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to disconnect from MySQL: {}", e))
-        })?;
-
-        Ok(())
+        Ok(Self { pool })
     }
 
-    /// Create a database user with specified privileges
-    pub async fn create_user(
-        &self,
-        username: &str,
-        password: &str,
-        role_sql: &str,
-    ) -> SecretResult<()> {
-        let opts = mysql_async::Opts::from_url(&self.connection_string).map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Invalid MySQL connection string: {}", e))
-        })?;
-        let pool = mysql_async::Pool::new(opts);
-        let mut conn = pool.get_conn().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to connect to MySQL: {}", e))
-        })?;
-
-        // Create the user
-        let create_user_sql = format!(
-            "CREATE USER '{}'@'%' IDENTIFIED BY '{}'",
-            username, password
-        );
-        conn.query_drop(&create_user_sql).await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to create user: {}", e))
-        })?;
-
-        // Execute role SQL if provided
-        if !role_sql.is_empty() {
-            conn.query_drop(role_sql).await.map_err(|e| {
-                SecretError::InvalidConfiguration(format!("Failed to execute role SQL: {}", e))
-            })?;
-        }
-
-        pool.disconnect().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to disconnect from MySQL: {}", e))
-        })?;
-
-        Ok(())
-    }
-
-    /// Revoke database user
-    pub async fn revoke_user(&self, username: &str) -> SecretResult<()> {
-        let opts = mysql_async::Opts::from_url(&self.connection_string).map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Invalid MySQL connection string: {}", e))
-        })?;
-        let pool = mysql_async::Pool::new(opts);
-        let mut conn = pool.get_conn().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to connect to MySQL: {}", e))
-        })?;
-
-        // Drop the user
-        let drop_user_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
-        conn.query_drop(&drop_user_sql).await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to revoke user: {}", e))
-        })?;
-
-        pool.disconnect().await.map_err(|e| {
-            SecretError::InvalidConfiguration(format!("Failed to disconnect from MySQL: {}", e))
-        })?;
-
-        Ok(())
-    }
-
-    /// Generate dynamic credentials
-    pub async fn generate_credentials(
-        &self,
-        role_name: &str,
-        role_sql: &str,
-    ) -> SecretResult<HashMap<String, Value>> {
-        // Generate random credentials
-        use rand::{Rng, distributions::Alphanumeric};
-        let username: String = rand::thread_rng()
+    /// Generate a random username
+    fn generate_username(&self) -> String {
+        let suffix: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(16)
             .map(char::from)
             .collect();
+        format!("v_{}", suffix.to_lowercase())
+    }
 
-        let password: String = rand::thread_rng()
+    /// Generate a random password
+    fn generate_password(&self) -> String {
+        rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(32)
             .map(char::from)
-            .collect();
+            .collect()
+    }
+}
 
-        // Create the user in MySQL
-        self.create_user(&username, &password, role_sql).await?;
+#[async_trait]
+impl DatabaseBackend for MysqlBackend {
+    async fn generate_credentials(
+        &self,
+        role_name: &str,
+        role_sql: &str,
+    ) -> SecretResult<HashMap<String, Value>> {
+        let mut conn = self.pool.get_conn().await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to get connection to MySQL: {}", e))
+        })?;
 
-        let mut data = HashMap::new();
-        data.insert("username".to_string(), Value::String(username));
-        data.insert("password".to_string(), Value::String(password));
-        data.insert("role".to_string(), Value::String(role_name.to_string()));
+        let username = self.generate_username();
+        let password = self.generate_password();
 
-        Ok(data)
+        // 1. Create the user
+        // Note: MySQL requires 'username'@'host' format
+        let create_user_sql = format!(
+            "CREATE USER '{}'@'%' IDENTIFIED BY '{}'",
+            username, password
+        );
+
+        conn.query_drop(&create_user_sql).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to create user: {}", e))
+        })?;
+
+        // 2. Execute role SQL with template substitution
+        let sql = role_sql
+            .replace("{{username}}", &username)
+            .replace("{{password}}", &password)
+            .replace("{{name}}", &username);
+
+        // MySQL client doesn't support batch execution of multiple statements in one string easily
+        // unless MULTI_STATEMENTS option is enabled.
+        // Assuming role_sql might be single statement or we need to split it?
+        // For now, assume it's executable as is. If not, user should provide multiple statements via some delimiter?
+        // Usually `query_drop` executes one statement.
+        // Use `query_iter` might work if multiple results?
+        // Or we rely on client enabling multi-statements.
+
+        if let Err(e) = conn.query_drop(&sql).await {
+            // Cleanup
+            let _ = conn.query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+
+            return Err(SecretError::BackendOperationFailed(format!("Failed to execute role SQL: {}", e)));
+        }
+
+        let mut result = HashMap::new();
+        result.insert("username".to_string(), Value::String(username));
+        result.insert("password".to_string(), Value::String(password));
+        result.insert("role".to_string(), Value::String(role_name.to_string()));
+
+        Ok(result)
+    }
+
+    async fn test_connection(&self) -> SecretResult<()> {
+        let mut conn = self.pool.get_conn().await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to get connection to MySQL: {}", e))
+        })?;
+
+        conn.query_drop("SELECT 1").await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("MySQL connection test failed: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    async fn revoke_credentials(&self, username: &str) -> SecretResult<()> {
+        let mut conn = self.pool.get_conn().await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to get connection to MySQL: {}", e))
+        })?;
+
+        // Sanitize username
+        if !username.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(SecretError::InvalidOperation("Invalid username format".to_string()));
+        }
+
+        let drop_user_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
+
+        conn.query_drop(&drop_user_sql).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to revoke user: {}", e))
+        })?;
+
+        Ok(())
     }
 }
