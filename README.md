@@ -1,527 +1,372 @@
 # Secreton
 
-> **Advanced Security & Secrets Management System built in Rust**
+> **Security & Secrets Management System built in Rust**
 
 [![Rust CI](https://github.com/analisaperlengkapan/secreton/workflows/Rust%20CI/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/rust-ci.yml)
 [![CodeQL](https://github.com/analisaperlengkapan/secreton/workflows/CodeQL%20Analysis/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/codeql-analysis.yml)
-[![Security](https://github.com/analisaperlengkapan/secreton/workflows/Comprehensive%20Security%20Scan/badge.svg)](https://github.com/analisaperlengkapan/secreton/actions/workflows/security-comprehensive.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## Project Status
+## ⚠️ Project Status: Alpha / Early Development
 
-- Early-stage, pre-1.0 project.
-- Not yet recommended for production use.
-- Many advanced features described below are under active development or experimental.
+**Not Production Ready.** This is an actively developed, pre-1.0 project. The API, storage backends, and feature set are subject to breaking changes. Use only in development and testing environments.
 
-Secreton is a Rust-based secrets management platform. It is designed with security-first principles to provide secure storage, encryption, access control, and audit logging for sensitive data. Secreton aims for zero-trust and modern cloud-native features over time.
+**Current State:**
+- Core architecture and module structure in place
+- REST API with authentication/authorization working
+- Multiple storage backends available (PostgreSQL, Redis, Raft, File)
+- CLI tool functional
+- Many enterprise/advanced features are scaffolded with partial implementations
+- Test coverage exists but needs expansion
 
-## Key Features
+Secreton is a Rust-based secrets management platform designed with security-first principles. It aims to provide secure storage, encryption, access control, and audit logging for sensitive data.
 
-### Core Security
+## What's Implemented ✅
 
-- **Modern Cryptography**: Built on the RustCrypto suite with strong, audited primitives. Experimental post-quantum work is tracked in the repository but is not production-ready yet.
-- **Zero-Trust Architecture**: Every request requires authentication and authorization - no implicit trust
-- **Multi-Algorithm Encryption**: AES-256-GCM, ChaCha20-Poly1305, Ed25519, X25519
-- **Hardware Security Module (HSM)**: Integration support for hardware-backed key storage
-- **Memory Safety**: Built in Rust with automatic memory management and `zeroize` for sensitive data
+### Core Infrastructure
+- **REST API** (Axum): Full-featured HTTP server with handlers for auth, secrets, admin functions
+- **CLI Tool**: Command-line interface for managing secrets and configuration
+- **Sidecar Agent**: Auto-authentication and secret injection capabilities
+- **Modular Architecture**: 23 independent crates organized by domain (auth, storage, crypto, etc.)
+
+### Authentication Methods
+- **JWT/Token-based**: Bearer token authentication with TTL and refresh tokens
+- **OAuth 2.0 / OIDC**: Integrations scaffolded (Google, GitHub, Microsoft, Okta)
+- **LDAP/RADIUS**: Basic framework in place
+- **Multi-Factor Authentication (MFA)**: Structure for TOTP, push notifications, SMS (partial)
+- **Kubernetes Service Accounts**: Framework available
+- **Certificate-based**: X.509 support (partial)
+
+### Storage & Persistence
+- **PostgreSQL**: Fully supported (recommended)
+- **Redis**: Working backend with caching
+- **In-Memory/File**: For development and testing
+- **Raft Consensus**: Distributed consensus backend implemented
+- **Planned**: MongoDB, MySQL, SQLite, S3, DynamoDB, Consul, FoundationDB (scaffolded but not implemented)
+
+### Security Features
+- **Data Encryption**: AES-256-GCM, ChaCha20-Poly1305 (via RustCrypto)
+- **Key Management**: Ed25519, X25519 support
+- **RBAC**: Role-based access control with policy engine
+- **Audit Logging**: Security event tracking framework
+- **Secret Versioning**: Rollback capability (enterprise crate)
+- **Token Revocation**: Granular token/role revocation
+- **Memory Safety**: Rust + zeroize for sensitive data
 
 ### Secret Engines
+- **KV Secrets**: Versioned key-value storage with TTL
+- **PKI**: Certificate Authority framework (scaffolded, partial implementation)
+- **Database Secrets**: Dynamic credential generation (framework in place)
+- **Transit**: Encryption-as-a-Service (framework in place)
 
-#### Key-Value Secrets
-- Versioned secret storage with rollback capability
-- TTL (Time-To-Live) support for automatic secret expiration
-- Metadata and custom attributes
+### Observability
+- **Prometheus Metrics**: Metrics collection framework
+- **Tracing/Logging**: `tracing` crate integration
+- **Health Checks**: Endpoint available
+- **OpenTelemetry**: Support scaffolded
 
-#### PKI (Public Key Infrastructure)
-- Complete Certificate Authority (CA) functionality
-- Certificate generation, signing, and revocation
-- CRL (Certificate Revocation List) management
-- OCSP (Online Certificate Status Protocol) support
+## What Needs Work / Is Partial ⚠️
 
-#### Database Secrets
-- Dynamic database credential generation
-- Just-in-time access provisioning
-- Automatic credential rotation
-- Support for PostgreSQL, MySQL, MongoDB
+- **PKI Engine**: CA functionality exists but not fully operationalized
+- **Database Secrets**: Framework exists, backend implementations incomplete
+- **Transit Engine**: Basic structure, not fully tested
+- **Plugin System**: Architecture in place, not production-ready
+- **Performance Standby/Replication**: Framework exists, needs testing at scale
+- **Advanced MFA**: Push notifications, SMS scaffolded but limited
+- **Cloud Integrations**: AWS, Azure, GCP - frameworks only, no real implementations
+- **GraphQL API**: Basic structure, limited endpoint coverage
+- **gRPC API**: Defined but minimal implementations
+- **Web UI**: Leptos framework integrated but feature coverage limited
+- **Kubernetes Operator**: No CRD or published operator
 
-#### Transit Engine
-- Encryption-as-a-Service
-- Data encryption/decryption without storing data
-- Key derivation and rotation
-- Convergent encryption support
+## Architecture Overview
 
-### Authentication & Authorization
+Secreton is organized as a Rust workspace with domain-driven modules:
 
-#### Authentication Methods
-- **JWT Tokens**: Bearer token authentication with configurable TTL and refresh tokens
-- **OAuth 2.0 / OIDC**: Integration with Google, GitHub, Microsoft, Okta, and custom providers
-- **LDAP**: Active Directory and OpenLDAP integration
-- **RADIUS**: Network authentication protocol support
-- **Multi-Factor Authentication (MFA)**: TOTP, hardware tokens (U2F/FIDO2)
-- **Kubernetes**: Service account token authentication
+```
+crates/
+├── api/           - REST API server (Axum)
+├── agent/         - Sidecar for auto-auth and templating
+├── auth/          - Authentication methods & identity
+├── cli/           - Command-line interface
+├── common/        - Shared models and utilities
+├── config/        - Configuration management
+├── core/          - Core business logic
+├── crypto/        - Cryptographic operations (RustCrypto)
+├── enterprise/    - Enterprise features (versioning, replication)
+├── errors/        - Error types and handling
+├── infrastructure/- Infrastructure components (plugins, API gateway, performance standby)
+├── integrations/  - Third-party integrations
+├── monitoring/    - Metrics and observability
+├── performance/   - Performance optimizations
+├── replication/   - High availability and replication
+├── secrets/       - Secret engine interfaces
+├── secrets-database/ - Database secret engine
+├── secrets-pki/   - PKI secret engine
+├── security/      - Security policies and audit
+├── storage/       - Storage backend abstraction
+├── ui/            - Web UI (Leptos)
+├── graphql/       - GraphQL API layer
+└── grpc/          - gRPC service definitions
+```
 
-#### Authorization
-- **Role-Based Access Control (RBAC)**: Fine-grained permissions and policies
-- **Policy as Code**: Define access policies in declarative format
-- **Dynamic Secrets**: Generate credentials on-demand with automatic expiration
-- **Token Hierarchy**: Parent/child token relationships
-- **Granular Revocation**: Revoke individual tokens, roles, or entire auth chains
-
-### Infrastructure & Operations
-
-#### High Availability
-- **Data Replication**: Multi-node cluster with automatic failover
-- **Storage Backends**: PostgreSQL (recommended), Redis, MongoDB, SQLite
-- **Raft Consensus**: Distributed consensus for cluster coordination
-- **Backup & Restore**: Automated backup with point-in-time recovery
-
-#### Monitoring & Observability
-- **Prometheus Metrics**: Comprehensive metrics export
-- **OpenTelemetry**: Distributed tracing support
-- **Audit Logging**: Detailed security event logging for compliance
-- **Health Checks**: Deep health checks for all components
-- **Alert Integration**: PagerDuty, Slack, webhook notifications
-
-#### APIs & Integrations
-- **REST API**: Full-featured HTTP API with OpenAPI/Swagger documentation
-- **gRPC API**: High-performance RPC interface
-- **GraphQL**: Flexible query interface (optional)
-- **CLI Tool**: Command-line interface for all operations
-- **Agent**: Sidecar helper for auto-authentication and secret injection
-
-### Cloud & Platform Integrations
-
-- **AWS**: Building blocks for integrating with IAM/STS and Secrets Manager via the `integrations` crate (work in progress).
-- **Kubernetes**: Internal modules for operator-style integrations and storage backends; no published operator or CRDs yet.
-- **Docker**: The API server can be containerized using a custom Dockerfile; no official image is published yet.
-
-### Enterprise Features
-
-- **Compliance-Oriented Design**: Aims to make it easier to build systems that meet regulations such as FIPS 140-2, PCI DSS, SOX, HIPAA, and GDPR. There is no formal certification for Secreton itself yet.
-- **Secret Versioning**: Complete history with rollback
-- **Disaster Recovery**: Geo-redundant backups and recovery procedures
-- **Multi-Tenancy**: Namespace isolation for different teams/environments
-- **Performance**: High-throughput with connection pooling and caching
-- **Scalability**: Horizontal scaling for high-availability clusters
+**Total**: 417 Rust files across 23 crates, ~8,600 lines of code in lib.rs alone
 
 ## Prerequisites
 
 - **Rust**: 1.90+ (2024 edition)
-- **PostgreSQL**: 15+ (recommended for production)
-- **Operating System**: Linux, macOS, or Windows
-- **Memory**: Minimum 512MB RAM (2GB+ recommended for production)
-- **Storage**: SSD recommended for optimal performance
+- **PostgreSQL**: 15+ (recommended), or SQLite for development
+- **Operating System**: Linux (primary), macOS, or Windows (WSL2)
+- **Memory**: 512MB minimum, 2GB+ recommended
+- **Cargo**: Latest stable version
 
 ## Quick Start
 
-### Installation
-
-#### 1. Clone the Repository
+### 1. Clone and Build
 
 ```bash
 git clone https://github.com/analisaperlengkapan/secreton.git
 cd secreton
-```
-
-#### 2. Install Rust Toolchain
-
-```bash
-# Install Rust using rustup
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Update to latest stable
-rustup update stable
-
-# Add required components
-rustup component add rustfmt clippy
-```
-
-#### 3. Install System Dependencies
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libpq-dev pkg-config libssl-dev
-```
-
-**macOS:**
-```bash
-brew install postgresql openssl pkg-config
-```
-
-**Windows:**
-```powershell
-# Install Visual Studio Build Tools
-# Install PostgreSQL from https://www.postgresql.org/download/windows/
-```
-
-#### 4. Build the Project
-
-```bash
-# Development build
-cargo build --workspace
-
-# Release build (optimized)
 cargo build --workspace --release
-
-# Build specific component
-cargo build -p secreton-api --release
 ```
 
-### Configuration
+### 2. Start Database
 
-#### 1. Setup Environment
-
+**Using Docker (recommended for dev):**
 ```bash
-# Copy example environment file
-cp .env.example .env
-
-# Edit configuration
-nano .env
-```
-
-#### 2. Configure Database
-
-**Using Docker (Quick Setup):**
-```bash
-docker run --name secreton-db \
+docker run -d --name secreton-db \
   -e POSTGRES_USER=secreton_user \
-  -e POSTGRES_PASSWORD=your_secure_password \
+  -e POSTGRES_PASSWORD=secreton_pass \
   -e POSTGRES_DB=secreton_db \
   -p 5432:5432 \
-  -d postgres:15
+  postgres:15
 ```
 
-**Manual PostgreSQL Setup:**
-```sql
-CREATE DATABASE secreton_db;
-CREATE USER secreton_user WITH ENCRYPTED PASSWORD 'your_secure_password';
-GRANT ALL PRIVILEGES ON DATABASE secreton_db TO secreton_user;
+**Or use SQLite (simpler):**
+```bash
+export DATABASE_URL=sqlite:///./secreton.db
 ```
 
-#### 3. Initialize Secreton
+### 3. Run the API Server
 
 ```bash
-# Run database migrations
-cargo run -p secreton-api --bin migrate
-
-# Initialize the secreton
-cargo run -p secreton-api --bin init
+cargo run -p secreton-api --release --bin api_server
 ```
 
-### Running Secreton
+The API starts at `http://localhost:8080`.
 
-#### Start the API Server
+### 4. Basic Commands
 
 ```bash
-# Development mode
-cargo run -p secreton-api --bin api_server
+# Health check
+curl http://localhost:8080/health
 
-# Production mode
-./target/release/api_server
+# List endpoints (via OpenAPI)
+curl http://localhost:8080/api/openapi.json
+
+# Get config
+curl http://localhost:8080/admin/config
 ```
 
-The server will start on `http://localhost:8080` (default).
+## Development
 
-#### Start the Agent (Optional)
-
-```bash
-# Development mode
-cargo run -p secreton-agent
-
-# Production mode
-./target/release/secreton-agent
-```
-
-#### Using the CLI
-
-```bash
-# Set server address
-export SECRETON_ADDR=http://localhost:8080
-
-# Authenticate
-secreton-cli login -t <your-token>
-
-# Store a secret
-secreton-cli kv put secret/myapp/database password=supersecret
-
-# Retrieve a secret
-secreton-cli kv get secret/myapp/database
-
-# List secrets
-secreton-cli kv list secret/myapp/
-```
-
-## Documentation
-
-### Architecture
-
-Secreton is built as a modular Rust workspace with the following crates:
-
-```
-secreton/
-├── crates/
-│   ├── api/              # REST API server
-│   ├── agent/            # Sidecar agent for auto-auth
-│   ├── auth/             # Authentication methods
-│   ├── cli/              # Command-line interface
-│   ├── common/           # Shared utilities
-│   ├── config/           # Configuration management
-│   ├── core/             # Core business logic
-│   ├── crypto/           # Cryptography operations
-│   ├── enterprise/       # Enterprise features
-│   ├── errors/           # Error handling
-│   ├── infrastructure/   # Infrastructure integrations
-│   ├── integrations/     # Third-party integrations
-│   ├── monitoring/       # Metrics and observability
-│   ├── performance/      # Performance optimizations
-│   ├── replication/      # High availability
-│   ├── secrets/          # Secret engines
-│   ├── secrets-database/ # Database secret engine
-│   ├── secrets-pki/      # PKI secret engine
-│   ├── security/         # Security features
-│   ├── storage/          # Storage backends
-│   └── ui/               # Web UI (optional)
-└── tests/                # Integration tests
-```
-
-### API Documentation
-
-Once the server is running, access the interactive API documentation:
-
-- **Swagger UI**: http://localhost:8080/swagger-ui
-- **OpenAPI Spec**: http://localhost:8080/api-docs/openapi.json
-- **Health Check**: http://localhost:8080/health
-
-### Key Concepts
-
-#### Secrets
-Secrets are encrypted data stored in Secreton. Each secret has:
-- **Path**: Hierarchical location (e.g., `secret/myapp/database`)
-- **Data**: Key-value pairs
-- **Metadata**: Version, timestamps, custom attributes
-- **Policy**: Access control rules
-
-#### Tokens
-Tokens are credentials used to authenticate with Secreton:
-- **Root Token**: Initial superuser token (secure carefully!)
-- **Service Tokens**: For applications and services
-- **Batch Tokens**: High-performance, lightweight tokens
-- **TTL**: Configurable time-to-live
-
-#### Policies
-Policies define what actions a token can perform:
-```hcl
-# Example policy
-path "secret/myapp/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
-
-path "database/creds/readonly" {
-  capabilities = ["read"]
-}
-```
-
-#### Audit Logs
-All operations are logged for compliance and security:
-- Who performed the action
-- What action was performed
-- When it happened
-- Result (success/failure)
-
-## Testing
-
-### Run Tests
+### Running Tests
 
 ```bash
 # Run all tests
 cargo test --workspace --all-features
 
 # Run specific crate tests
-cargo test -p secreton-core
+cargo test -p secreton-api
+cargo test -p secreton-crypto
+cargo test -p secreton-storage
 
 # Run with output
-cargo test --workspace --all-features -- --nocapture
-
-# Run integration tests only
-cargo test --test '*'
+cargo test --workspace -- --nocapture
 ```
-
-### Code Coverage
-
-```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
-
-# Generate coverage report
-cargo tarpaulin --workspace --all-features --out Html
-
-# Open coverage report
-open tarpaulin-report.html
-```
-
-### Benchmarks
-
-```bash
-# Run benchmarks
-cargo bench --workspace
-
-# Run specific benchmark
-cargo bench -p secreton-crypto
-```
-
-## Development
 
 ### Code Quality
 
 ```bash
-# Format code
+# Format
 cargo fmt --all
 
-# Run linter
+# Lint
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Security audit
-cargo audit
-
-# Check for outdated dependencies
-cargo outdated
+# Check compilation
+cargo check --workspace --all-features
 ```
 
-### Development Workflow
+## Core Concepts
 
-```bash
-# Watch for changes and run tests
-cargo watch -x test
+### Secrets
+Encrypted data stored in Secreton with:
+- **Path**: Hierarchical namespace (e.g., `secret/db/password`)
+- **Data**: Key-value pairs (encrypted)
+- **Metadata**: Version, timestamps, owner, tags
+- **TTL**: Optional expiration time
 
-# Watch and run specific command
-cargo watch -x 'test -p secreton-api'
+### Tokens
+Credentials for authentication:
+- **Bearer Tokens**: JWT-based authentication
+- **Refresh Tokens**: Extend session without re-authentication
+- **Root Token**: Initial setup only (treat as root password)
+- **Scope**: Permissions defined by associated policies
 
-# Run with logging
-RUST_LOG=debug cargo run -p secreton-api
+### Policies
+Access control rules (similar to RBAC):
+```
+path "secret/app/*" {
+  capabilities = ["read", "list"]
+}
+path "secret/app/admin" {
+  capabilities = ["read", "write", "delete"]
+}
 ```
 
-## Docker
+### Audit Trail
+All operations logged with:
+- User/token that performed action
+- Operation type and path
+- Timestamp and result
+- Source IP and user agent
 
-### Build Docker
+## Known Limitations & Caveats
 
-Secreton does not currently ship an official Docker image or Dockerfile.
+### Features Not Yet Implemented
+- **PKI Engine**: Structure exists, Certificate generation/revocation incomplete
+- **Database Secrets**: Framework only, credential generation not fully wired
+- **Plugin System**: Sandboxing is mock implementation
+- **GraphQL API**: Limited endpoint coverage
+- **gRPC API**: Minimal implementation
+- **Web UI**: Basic Leptos integration, missing many features
+- **Cloud Backends**: S3, DynamoDB, Consul are declared but not implemented
+- **Kubernetes Operator**: No CRDs or published operator
+- **Formal Performance Tuning**: Not optimized for scale yet
+- **Post-Quantum Crypto**: Research phase only, not production-ready
 
-- To containerize the API server, you can build a release binary with `cargo build --workspace --release` and create your own Dockerfile that copies the binary into a minimal base image (e.g. `gcr.io/distroless/cc` or `debian:stable-slim`).
-- A reference Dockerfile and Compose setup may be added to this repository in the future.
+### Testing
+- Unit tests present in most crates
+- Integration tests exist but coverage is spotty
+- No formal security audit has been completed
+- No performance benchmarks established
 
-## Kubernetes
-
-### Overview
-
-Kubernetes support is **work in progress**.
-
-- There are internal modules for Kubernetes-related integrations (e.g. operator-style components and storage backends), but there is no published Helm chart or operator manifest yet.
-- For now, you can run Secreton in Kubernetes like any other Rust service: build a container image, create a `Deployment`/`StatefulSet`, and configure `DATABASE_URL` plus other environment variables from Secrets/ConfigMaps.
-- A first-class Helm chart and operator are part of the roadmap.
-
-## Security
-
-### Reporting Security Issues
-
-**DO NOT** open public issues for security vulnerabilities.
-
-Please report security issues privately by:
-
-- Opening a private security advisory in GitHub ("Security" tab → "Advisories"), or
-- Contacting the maintainer via the email listed in `Cargo.toml` (currently `zynqrs@gmail.com`).
-
-We will review reports and work on a fix as soon as reasonably possible.
-
-### Security Features
-
-- All secrets encrypted at rest (AES-256-GCM)
-- All secrets encrypted in transit (TLS 1.3)
-- Memory wiped after use (`zeroize` crate)
-- Constant-time operations for crypto
-- No third-party analytics or telemetry
-- Regular security audits
-
-### Best Practices
-
-1. **Use Strong Tokens**: Generate tokens with sufficient entropy
-2. **Rotate Regularly**: Implement automatic key and token rotation
-3. **Principle of Least Privilege**: Grant minimal required permissions
-4. **Enable Audit Logging**: Monitor all access and changes
-5. **Backup Regularly**: Automated backups with encryption
-6. **Use TLS**: Always use HTTPS in production
-7. **Secure Root Token**: Store root token in secure location (HSM)
-
-## Performance
-
-### Benchmarks
-
-Formal performance benchmarking is **not** done yet. Current focus is on correctness and security.
-
-Design considerations for future performance work include:
-
-- Connection pooling for database access.
-- In-memory caching for frequently accessed secrets.
-- Async I/O throughout the stack.
-- Minimizing unnecessary copies and allocations.
+### Documentation
+- Architecture documentation exists but may be outdated
+- API documentation is auto-generated via OpenAPI
+- Many features lack inline documentation
+- Examples and tutorials are minimal
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on:
-
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 - Development setup
-- Code style guidelines
+- Code standards (rustfmt, clippy)
 - Testing requirements
-- Pull request process
-- Code of conduct
+- PR process
+- Security reporting
+
+### Development Setup
+
+```bash
+# Clone repo
+git clone https://github.com/analisaperlengkapan/secreton.git
+cd secreton
+
+# Setup pre-commit checks (optional)
+cp scripts/pre-commit.sh .git/hooks/pre-commit
+
+# Build and test
+cargo build --workspace --all-features
+cargo test --workspace --all-features
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
+```
+
+### Build Targets
+
+```bash
+# All crates
+cargo build --workspace --release
+
+# Individual binaries
+cargo build -p secreton-api --release      # API server
+cargo build -p secreton-cli --release      # CLI tool  
+cargo build -p secreton-agent --release    # Sidecar agent
+```
+
+### Running in Docker
+
+```bash
+# Build release binary
+cargo build -p secreton-api --release
+
+# Create simple Dockerfile (example)
+docker build -t secreton-api:latest \
+  -f - \
+  --build-arg BINARY=target/release/api_server \
+  .
+
+# Run container
+docker run -d \
+  -p 8080:8080 \
+  -e DATABASE_URL=postgresql://user:pass@db:5432/secreton \
+  secreton-api:latest
+```
+
+## Security Policy
+
+### Reporting Vulnerabilities
+
+**DO NOT** open public GitHub issues for security issues.
+
+Please report privately:
+1. GitHub Security Advisory tab ("Report a vulnerability")
+2. Or email: security contact in Cargo.toml
+
+### Security Considerations
+
+- Secrets encrypted with AES-256-GCM at rest
+- TLS 1.3 for transit encryption
+- Sensitive data wiped from memory (`zeroize`)
+- Constant-time crypto operations
+- No telemetry or external calls
+- Audit logging enabled by default
+
+### Best Practices
+
+1. Secure root token with HSM or physical vault
+2. Rotate tokens and keys regularly
+3. Use least-privilege policies
+4. Monitor audit logs
+5. Use PostgreSQL with TLS in production
+6. Enable authentication on all endpoints
+7. Run API server behind reverse proxy with rate limiting
 
 ## License
 
-This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0 - See [LICENSE](LICENSE)
 
 ## Acknowledgments
 
 Built with:
-- **Rust** - Memory-safe systems programming language
-- **RustCrypto** - Pure Rust cryptography implementations
-- **Tokio** - Async runtime for Rust
+- **Rust** - Safety + performance
+- **RustCrypto** - Audited crypto primitives
+- **Tokio** - Async runtime
 - **Axum** - Web framework
-- **PostgreSQL** - Primary storage backend
+- **PostgreSQL** - Reliable storage
 
-Inspired by:
-- HashiCorp Secreton
-- AWS Secrets Manager
-- Google Secret Manager
+Inspired by HashiCorp Vault, AWS Secrets Manager, Google Secret Manager
 
-## Support
+## Support & Contact
 
-- **Documentation**: [`docs/`](https://github.com/analisaperlengkapan/secreton/tree/main/docs) directory in this repository (work in progress)
 - **Issues**: [GitHub Issues](https://github.com/analisaperlengkapan/secreton/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/analisaperlengkapan/secreton/discussions)
-- **Contact**: Use Issues/Discussions or the maintainer email listed in `Cargo.toml` for support and questions.
-
-## Roadmap
-
-### Version 0.2.0
-- [ ] Web UI dashboard
-- [ ] Advanced policy engine
-- [ ] FIPS 140-2 validation
-- [ ] Enhanced disaster recovery
-
-### Version 0.3.0
-- [ ] Multi-region replication
-- [ ] Advanced MFA options
-- [ ] Plugin system
-- [ ] Performance improvements
-
-### Version 1.0.0
-- [ ] Production-ready release
-- [ ] Complete documentation
-- [ ] Security audit
-- [ ] Enterprise support
+- **Documentation**: See [`docs/`](docs/) directory
+- **Contact**: Use GitHub Issues/Discussions or security contact in Cargo.toml
 
 ---
 
-**Made with ❤️ by the Secreton Team**
+**Status**: 🔧 Active Development | 🚀 Not Production Ready | 📝 Alpha Release
 
-⭐ Star us on GitHub if you find this project useful!
+Made with care in Rust 🦀
