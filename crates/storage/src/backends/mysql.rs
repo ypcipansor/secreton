@@ -142,11 +142,13 @@ impl StorageTransaction for MySQLTransaction {
         let mut cache_inserts = Vec::new();
         let mut cache_removals = Vec::new();
 
+        // Batch operations
+        let mut upsert_params = Vec::new();
+        let mut delete_ids = Vec::new();
+
         for op in &self.operations {
             match op {
                 MySQLOperation::Store(entry) | MySQLOperation::Update(entry) => {
-                    let query = MySQLStorage::build_upsert_query(&self.table_name);
-
                     let encryption_metadata_json =
                         serde_json::to_string(&entry.encryption_metadata).map_err(|e| {
                             StorageError::SerializationError {
@@ -171,56 +173,70 @@ impl StorageTransaction for MySQLTransaction {
                     let expires_at: Option<NaiveDateTime> =
                         entry.expires_at.map(|dt| dt.naive_utc());
 
-                    tx.exec_drop(
-                        &query,
-                        (
-                            &entry.id.to_string(),
-                            &entry.path,
-                            &entry.encrypted_data,
-                            &encryption_metadata_json,
-                            entry.security_level as u8,
-                            &metadata_json,
-                            &tags_json,
-                            entry.version,
-                            &entry.owner_id.to_string(),
-                            entry.created_at.naive_utc(),
-                            entry.updated_at.naive_utc(),
-                            &expires_at,
-                        ),
-                    )
-                    .await
-                    .map_err(|e| StorageError::BackendError {
-                        backend: "mysql".to_string(),
-                        message: format!("Failed to execute transaction operation: {}", e),
-                    })?;
+                    upsert_params.push((
+                        entry.id.to_string(),
+                        entry.path.clone(),
+                        entry.encrypted_data.clone(),
+                        encryption_metadata_json,
+                        entry.security_level as u8,
+                        metadata_json,
+                        tags_json,
+                        entry.version,
+                        entry.owner_id.to_string(),
+                        entry.created_at.naive_utc(),
+                        entry.updated_at.naive_utc(),
+                        expires_at,
+                    ));
 
                     cache_inserts.push(entry.clone());
                 }
                 MySQLOperation::Delete(id) => {
-                    // Try to get path for cache invalidation
-                    let select_query =
-                        format!("SELECT path FROM `{}` WHERE id = ?", self.table_name);
-                    let path: Option<String> = tx
-                        .exec_first(&select_query, (id.to_string(),))
-                        .await
-                        .map_err(|e| StorageError::BackendError {
-                            backend: "mysql".to_string(),
-                            message: format!("Failed to query path for deletion: {}", e),
-                        })?;
-
-                    if let Some(p) = path {
-                        let delete_query = MySQLStorage::build_delete_query_by_id(&self.table_name);
-                        tx.exec_drop(&delete_query, (id.to_string(),))
-                            .await
-                            .map_err(|e| StorageError::BackendError {
-                                backend: "mysql".to_string(),
-                                message: format!("Failed to execute delete operation: {}", e),
-                            })?;
-
-                        cache_removals.push(p);
-                    }
+                    delete_ids.push(id);
                 }
             }
+        }
+
+        // Execute batch upserts
+        if !upsert_params.is_empty() {
+            let query = MySQLStorage::build_upsert_query(&self.table_name);
+            tx.exec_batch(query, upsert_params)
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to execute batch upsert: {}", e),
+                })?;
+        }
+
+        // Execute batch deletes
+        if !delete_ids.is_empty() {
+            // 1. Get paths for cache invalidation
+            let select_query =
+                MySQLStorage::build_select_paths_query(&self.table_name, delete_ids.len());
+
+            let delete_id_params: Vec<mysql_async::Value> = delete_ids
+                .iter()
+                .map(|id| mysql_async::Value::from(id.to_string()))
+                .collect();
+
+            let paths: Vec<String> = tx
+                .exec(select_query, delete_id_params.clone())
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to query paths for deletion: {}", e),
+                })?;
+
+            cache_removals.extend(paths);
+
+            // 2. Delete entries
+            let delete_query =
+                MySQLStorage::build_delete_ids_query(&self.table_name, delete_ids.len());
+            tx.exec_drop(delete_query, delete_id_params)
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to execute batch delete: {}", e),
+                })?;
         }
 
         tx.commit()
@@ -400,11 +416,6 @@ impl MySQLStorage {
         format!("DELETE FROM `{}` WHERE path = ?", table_name)
     }
 
-    /// Build MySQL query for deleting entries by id
-    fn build_delete_query_by_id(table_name: &str) -> String {
-        format!("DELETE FROM `{}` WHERE id = ?", table_name)
-    }
-
     /// Build MySQL query for listing entries with filters
     fn build_list_query(
         table_name: &str,
@@ -448,6 +459,21 @@ impl MySQLStorage {
         }
 
         (query, values)
+    }
+
+    /// Build MySQL query for selecting paths by multiple IDs
+    fn build_select_paths_query(table_name: &str, num_ids: usize) -> String {
+        let placeholders = vec!["?"; num_ids].join(",");
+        format!(
+            "SELECT path FROM `{}` WHERE id IN ({})",
+            table_name, placeholders
+        )
+    }
+
+    /// Build MySQL query for deleting entries by multiple IDs
+    fn build_delete_ids_query(table_name: &str, num_ids: usize) -> String {
+        let placeholders = vec!["?"; num_ids].join(",");
+        format!("DELETE FROM `{}` WHERE id IN ({})", table_name, placeholders)
     }
 }
 
@@ -922,5 +948,18 @@ mod tests {
 
         assert!(!query.contains("WHERE")); // No filters at all
         assert_eq!(values.len(), 0);
+    }
+
+    #[test]
+    fn test_build_select_paths_query() {
+        let query = MySQLStorage::build_select_paths_query("table", 3);
+        assert!(query.contains("SELECT path FROM `table` WHERE id IN (?,?,?)"));
+    }
+
+    #[test]
+    fn test_build_delete_ids_query() {
+        let query = MySQLStorage::build_delete_ids_query("table", 2);
+        assert!(query.contains("DELETE FROM `table` WHERE id IN (?,?)"));
+
     }
 }
