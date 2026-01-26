@@ -539,10 +539,37 @@ impl StorageBackend for MySQLStorage {
         Ok(())
     }
 
-    async fn get_by_id(&self, _id: Uuid) -> StorageResult<Option<SecretEntry>> {
-        // For MySQL, we need to query by path first to find the entry
-        // This is a limitation of the current design
-        Ok(None)
+    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = format!(
+            "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}` WHERE id = ?",
+            self.config.table_name
+        );
+
+        let rows: Vec<mysql_async::Row> =
+            conn.exec(&query, (id.to_string(),))
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to query entry by id: {}", e),
+                })?;
+
+        if let Some(row) = rows.first() {
+            let entry = MySQLStorage::row_to_secreton_entry(row)?;
+            // Update cache since we have the full entry
+            let mut cache = self.cache.write().await;
+            cache.insert(entry.path.clone(), entry.clone());
+            Ok(Some(entry))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
@@ -586,10 +613,46 @@ impl StorageBackend for MySQLStorage {
         self.store(entry).await
     }
 
-    async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
-        // For MySQL, we need to find the path first
-        // This is a limitation of the current design
-        Ok(false)
+    async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        // First get the path to remove from cache
+        let select_query = format!("SELECT path FROM `{}` WHERE id = ?", self.config.table_name);
+        let rows: Vec<mysql_async::Row> = conn
+            .exec(&select_query, (id.to_string(),))
+            .await
+            .map_err(|e| StorageError::BackendError {
+                backend: "mysql".to_string(),
+                message: format!("Failed to query path for deletion: {}", e),
+            })?;
+
+        let path: Option<String> = rows.first().and_then(|row| row.get(0));
+
+        // Delete the entry
+        let delete_query = format!("DELETE FROM `{}` WHERE id = ?", self.config.table_name);
+        conn.exec_drop(&delete_query, (id.to_string(),))
+            .await
+            .map_err(|e| StorageError::BackendError {
+                backend: "mysql".to_string(),
+                message: format!("Failed to delete entry: {}", e),
+            })?;
+
+        let affected = conn.affected_rows() > 0;
+
+        if affected {
+            if let Some(p) = path {
+                let mut cache = self.cache.write().await;
+                cache.remove(&p);
+            }
+        }
+
+        Ok(affected)
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
@@ -794,8 +857,9 @@ impl MySQLStorage {
         let security_level = match security_level {
             0 => crate::SecurityLevel::Public,
             1 => crate::SecurityLevel::Internal,
-            2 => crate::SecurityLevel::Secret,
-            3 => crate::SecurityLevel::TopSecret,
+            2 => crate::SecurityLevel::Confidential,
+            3 => crate::SecurityLevel::Secret,
+            4 => crate::SecurityLevel::TopSecret,
             _ => crate::SecurityLevel::Secret,
         };
 

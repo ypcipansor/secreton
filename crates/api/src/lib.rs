@@ -428,6 +428,15 @@ impl SecurityAPI {
 
         let api_v1 = warp::path("api").and(warp::path("v1"));
 
+        // Alias for frontend compatibility (expects /api/v1/sys/health)
+        let health_alias = api_v1
+            .and(warp::path("sys"))
+            .and(warp::path("health"))
+            .and(warp::get())
+            .and(storage_filter.clone())
+            .and(backend_type_filter.clone())
+            .and_then(health_handler);
+
         let sys_init = api_v1
             .and(warp::path("sys"))
             .and(warp::path("init"))
@@ -546,6 +555,7 @@ impl SecurityAPI {
             .and_then(crate::handlers::config::handle_get_config);
 
         health
+            .or(health_alias)
             .or(security_status)
             .or(sys_init)
             .or(sys_unseal)
