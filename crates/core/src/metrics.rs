@@ -313,23 +313,21 @@ impl HealthMonitor {
     }
 
     pub async fn check_all(&self) -> Vec<HealthCheck> {
-        let mut results = Vec::new();
-
-        for check in &self.checks {
+        let futures = self.checks.iter().map(|check| async move {
             let start = Instant::now();
             let (status, message) = check.check().await;
             let response_time_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-            results.push(HealthCheck {
+            HealthCheck {
                 name: check.name().to_string(),
                 status,
                 message,
                 timestamp: Utc::now(),
                 response_time_ms,
-            });
-        }
+            }
+        });
 
-        results
+        futures::future::join_all(futures).await
     }
 
     pub async fn overall_status(&self) -> HealthStatus {
