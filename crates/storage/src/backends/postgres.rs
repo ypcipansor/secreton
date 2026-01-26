@@ -4,9 +4,10 @@ use crate::{
     HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
     StorageResult, StorageStats, StorageTransaction,
 };
-use secreton_common::models::oauth_state::OAuthState;
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
+use futures::future::try_join_all;
+use secreton_common::models::oauth_state::OAuthState;
 use std::sync::Arc;
 use tokio_postgres::{NoTls, Row};
 use uuid::Uuid;
@@ -855,9 +856,12 @@ impl StorageTransaction for PostgresTransaction {
                     message: format!("Failed to begin transaction: {}", e),
                 })?;
 
-        for op in &self.operations {
-            self.execute_operation(&transaction, op).await?;
-        }
+        let futures = self
+            .operations
+            .iter()
+            .map(|op| self.execute_operation(&transaction, op));
+
+        try_join_all(futures).await?;
 
         transaction
             .commit()
