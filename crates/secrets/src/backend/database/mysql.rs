@@ -73,19 +73,25 @@ impl DatabaseBackend for MysqlBackend {
             .replace("{{password}}", &password)
             .replace("{{name}}", &username);
 
-        // MySQL client doesn't support batch execution of multiple statements in one string easily
-        // unless MULTI_STATEMENTS option is enabled.
-        // Assuming role_sql might be single statement or we need to split it?
-        // For now, assume it's executable as is. If not, user should provide multiple statements via some delimiter?
-        // Usually `query_drop` executes one statement.
-        // Use `query_iter` might work if multiple results?
-        // Or we rely on client enabling multi-statements.
+        // Handle multiple statements by splitting on ';'
+        // This is a naive implementation but provides basic support for multi-statement SQL
+        // like GRANT x; FLUSH PRIVILEGES;
+        let statements: Vec<&str> = sql
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
 
-        if let Err(e) = conn.query_drop(&sql).await {
-            // Cleanup
-            let _ = conn.query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+        for statement in statements {
+            if let Err(e) = conn.query_drop(statement).await {
+                // Attempt cleanup if role execution fails
+                let _ = conn.query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
 
-            return Err(SecretError::BackendOperationFailed(format!("Failed to execute role SQL: {}", e)));
+                return Err(SecretError::BackendOperationFailed(format!(
+                    "Failed to execute role SQL statement '{}': {}",
+                    statement, e
+                )));
+            }
         }
 
         let mut result = HashMap::new();

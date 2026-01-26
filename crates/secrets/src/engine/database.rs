@@ -4,7 +4,6 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -24,45 +23,30 @@ pub struct DatabaseRole {
     pub default_ttl: u64,
 }
 
-/// Database engine configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseEngineConfig {
-    pub connection_url: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub database_name: Option<String>,
-    pub max_open_connections: Option<u32>,
-    pub max_idle_connections: Option<u32>,
-    pub connection_timeout: Option<u64>,
-    #[serde(default)]
-    pub verify_connection: bool,
-}
-
-impl Default for DatabaseEngineConfig {
-    fn default() -> Self {
-        Self {
-            connection_url: String::new(),
-            username: None,
-            password: None,
-            database_name: None,
-            max_open_connections: Some(10),
-            max_idle_connections: Some(5),
-            connection_timeout: Some(30),
-            verify_connection: true,
-        }
-    }
-}
-
 /// Database secret engine for dynamic credentials
 pub struct DatabaseEngine {
-    config: DatabaseEngineConfig,
+    config: DatabaseConfig,
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
 }
 
 impl DatabaseEngine {
-    pub fn new(config: DatabaseEngineConfig) -> Self {
+    // Default configuration to use before initialization
+    fn default_config() -> DatabaseConfig {
+        DatabaseConfig {
+            plugin_name: "database".to_string(),
+            connection_url: String::new(),
+            allowed_roles: Vec::new(),
+            username: None,
+            password: None,
+            max_open_connections: Some(10),
+            max_idle_connections: Some(5),
+            max_connection_lifetime: Some(30),
+        }
+    }
+
+    pub fn new(config: DatabaseConfig) -> Self {
         Self {
             config,
             enabled: false,
@@ -135,14 +119,20 @@ impl SecretEngine for DatabaseEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(db_config) = config.config.get("database") {
-             match serde_json::from_value::<DatabaseEngineConfig>(db_config.clone()) {
+        let db_config_value = config.config.get("database");
+
+        if config.enabled && db_config_value.is_none() {
+            return Err(SecretError::InvalidConfiguration(
+                "Database configuration missing for enabled engine".to_string()
+            ));
+        }
+
+        if let Some(db_config) = db_config_value {
+             match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
                  Ok(cfg) => {
                      self.config = cfg;
-                     // Initialize backend
-                     if config.enabled {
-                         self.init_backend().await?;
-                     }
+                     // Initialize backend unconditionally if config is present
+                     self.init_backend().await?;
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
              }
