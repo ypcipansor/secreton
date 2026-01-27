@@ -77,7 +77,7 @@ impl PostgresBackend {
     fn generate_username(&self) -> String {
         let suffix: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
-            .take(16)
+            .take(14)
             .map(char::from)
             .collect();
         format!("v_{}", suffix.to_lowercase())

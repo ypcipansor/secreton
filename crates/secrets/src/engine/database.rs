@@ -198,6 +198,16 @@ impl SecretEngine for DatabaseEngine {
 
         // Handle role creation
         if let Some(role_name) = path.strip_prefix("roles/") {
+            // Enforce allowed_roles if configured
+            if !self.config.allowed_roles.is_empty() {
+                if !self.config.allowed_roles.contains(&role_name.to_string()) {
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Role '{}' is not in the allowed_roles list",
+                        role_name
+                    )));
+                }
+            }
+
             let sql = data.get("sql").and_then(|v| v.as_str()).ok_or_else(|| {
                 SecretError::InvalidConfiguration("Missing SQL for role".to_string())
             })?;

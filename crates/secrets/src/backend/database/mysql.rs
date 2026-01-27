@@ -41,7 +41,7 @@ impl MysqlBackend {
     fn generate_username(&self) -> String {
         let suffix: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
-            .take(16)
+            .take(14)
             .map(char::from)
             .collect();
         format!("v_{}", suffix.to_lowercase())
@@ -54,6 +54,59 @@ impl MysqlBackend {
             .take(32)
             .map(char::from)
             .collect()
+    }
+
+    /// Split SQL statements by semicolon, respecting quotes
+    fn split_sql_statements(&self, sql: &str) -> Vec<String> {
+        let mut statements = Vec::new();
+        let mut current = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut escape = false;
+
+        for c in sql.chars() {
+            if escape {
+                current.push(c);
+                escape = false;
+                continue;
+            }
+
+            match c {
+                '\\' => {
+                    escape = true;
+                    current.push(c);
+                }
+                '\'' => {
+                    if !in_double_quote {
+                        in_single_quote = !in_single_quote;
+                    }
+                    current.push(c);
+                }
+                '"' => {
+                    if !in_single_quote {
+                        in_double_quote = !in_double_quote;
+                    }
+                    current.push(c);
+                }
+                ';' => {
+                    if !in_single_quote && !in_double_quote {
+                        if !current.trim().is_empty() {
+                            statements.push(current.trim().to_string());
+                        }
+                        current.clear();
+                    } else {
+                        current.push(c);
+                    }
+                }
+                _ => current.push(c),
+            }
+        }
+
+        if !current.trim().is_empty() {
+            statements.push(current.trim().to_string());
+        }
+
+        statements
     }
 }
 
@@ -88,17 +141,11 @@ impl DatabaseBackend for MysqlBackend {
             .replace("{{password}}", &password)
             .replace("{{name}}", &username);
 
-        // Handle multiple statements by splitting on ';'
-        // This is a naive implementation but provides basic support for multi-statement SQL
-        // like GRANT x; FLUSH PRIVILEGES;
-        let statements: Vec<&str> = sql
-            .split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect();
+        // Handle multiple statements with smarter splitting
+        let statements = self.split_sql_statements(&sql);
 
         for statement in statements {
-            if let Err(e) = conn.query_drop(statement).await {
+            if let Err(e) = conn.query_drop(&statement).await {
                 // Attempt cleanup if role execution fails
                 let _ = conn.query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
 
