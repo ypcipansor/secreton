@@ -28,47 +28,55 @@ pub struct DatabaseEngine {
     config: DatabaseConfig,
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
+    backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
 }
 
 impl DatabaseEngine {
+    // Default configuration to use before initialization
+    #[allow(dead_code)]
+    fn default_config() -> DatabaseConfig {
+        DatabaseConfig {
+            plugin_name: "database".to_string(),
+            connection_url: String::new(),
+            allowed_roles: Vec::new(),
+            username: None,
+            password: None,
+            max_open_connections: Some(10),
+            max_idle_connections: Some(5),
+            max_connection_lifetime: Some(30),
+        }
+    }
+
     pub fn new(config: DatabaseConfig) -> Self {
         Self {
             config,
             enabled: false,
             roles: HashMap::new(),
+            backend: None,
         }
     }
 
     /// Generate database credentials
     async fn generate_credentials(&self, role_name: &str) -> SecretResult<HashMap<String, Value>> {
+        // Enforce allowed_roles if configured
+        if !self.config.allowed_roles.is_empty() {
+            if !self.config.allowed_roles.contains(&role_name.to_string()) {
+                return Err(SecretError::InvalidConfiguration(format!(
+                    "Role '{}' is not in the allowed_roles list",
+                    role_name
+                )));
+            }
+        }
+
         // Get role configuration
         let role = self.roles.get(role_name).ok_or_else(|| {
             SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name))
         })?;
 
-        // Determine database type from connection URL
-        let db_type = self.detect_database_type(&self.config.connection_url)?;
-
-        // Create appropriate backend and generate credentials
-        match db_type {
-            DatabaseType::PostgreSQL => {
-                let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
-            DatabaseType::MySQL => {
-                let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
-            DatabaseType::MongoDB => {
-                let backend = crate::backend::database::mongodb::MongodbBackend::new(
-                    self.config.connection_url.clone(),
-                );
-                backend.generate_credentials(role_name, &role.sql).await
-            }
+        if let Some(backend) = &self.backend {
+            backend.generate_credentials(role_name, &role.sql).await
+        } else {
+            Err(SecretError::InvalidConfiguration("Database backend not initialized".to_string()))
         }
     }
 
@@ -88,6 +96,32 @@ impl DatabaseEngine {
             )))
         }
     }
+
+    /// Initialize the backend based on configuration
+    /// This is now synchronous to allow lazy initialization in enable()
+    fn init_backend(&mut self) -> SecretResult<()> {
+        let db_type = self.detect_database_type(&self.config.connection_url)?;
+
+        match db_type {
+            DatabaseType::PostgreSQL => {
+                let backend = crate::backend::database::postgres::PostgresBackend::new(
+                    self.config.clone(),
+                )?;
+                self.backend = Some(Box::new(backend));
+                Ok(())
+            }
+            DatabaseType::MySQL => {
+                let backend = crate::backend::database::mysql::MysqlBackend::new(
+                    self.config.clone(),
+                )?;
+                self.backend = Some(Box::new(backend));
+                Ok(())
+            }
+            DatabaseType::MongoDB => {
+                Err(SecretError::NotImplemented("MongoDB backend not fully implemented".to_string()))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -97,9 +131,28 @@ impl SecretEngine for DatabaseEngine {
     }
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
-        if let Some(db_config) = config.config.get("database")
-            && let Ok(db_config) = serde_json::from_value(db_config.clone()) {
-            self.config = db_config;
+        let db_config_value = config.config.get("database");
+
+        if config.enabled && db_config_value.is_none() {
+            return Err(SecretError::InvalidConfiguration(
+                "Database configuration missing for enabled engine".to_string()
+            ));
+        }
+
+        if let Some(db_config) = db_config_value {
+             match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
+                 Ok(cfg) => {
+                     self.config = cfg;
+                     // Validate connection URL regardless of enabled state
+                     self.detect_database_type(&self.config.connection_url)?;
+
+                     // Initialize backend only if enabled to avoid wasteful resource allocation
+                     if config.enabled {
+                         self.init_backend()?;
+                     }
+                 },
+                 Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
+             }
         }
 
         self.enabled = config.enabled;
@@ -145,6 +198,16 @@ impl SecretEngine for DatabaseEngine {
 
         // Handle role creation
         if let Some(role_name) = path.strip_prefix("roles/") {
+            // Enforce allowed_roles if configured
+            if !self.config.allowed_roles.is_empty() {
+                if !self.config.allowed_roles.contains(&role_name.to_string()) {
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Role '{}' is not in the allowed_roles list",
+                        role_name
+                    )));
+                }
+            }
+
             let sql = data.get("sql").and_then(|v| v.as_str()).ok_or_else(|| {
                 SecretError::InvalidConfiguration("Missing SQL for role".to_string())
             })?;
@@ -226,10 +289,34 @@ impl SecretEngine for DatabaseEngine {
     }
 
     fn enable(&mut self) {
-        self.enabled = true;
+        // Lazily initialize backend if needed before enabling
+        if self.backend.is_none() {
+            if !self.config.connection_url.is_empty() {
+                match self.init_backend() {
+                    Ok(_) => self.enabled = true,
+                    Err(e) => {
+                        // Log error and keep enabled = false
+                        eprintln!("Failed to initialize database backend during enable: {}", e);
+                        self.enabled = false;
+                    }
+                }
+            } else {
+                // No config, cannot enable
+                self.enabled = false;
+            }
+        } else {
+            // Backend already initialized
+            self.enabled = true;
+        }
     }
 
     fn disable(&mut self) {
         self.enabled = false;
+        // Optionally release backend resources?
+        // self.backend = None;
+        // Keeping it might be better for re-enable performance, but dropping it saves resources.
+        // Given the Bug 1 concern about "wasteful resource allocation", dropping it makes sense?
+        // But pooling libraries handle idle connections well.
+        // Let's keep it to avoid thrashing if toggled often.
     }
 }

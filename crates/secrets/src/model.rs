@@ -116,8 +116,10 @@ pub enum KeyType {
 /// Database engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
+    #[serde(default)]
     pub plugin_name: String,
     pub connection_url: String,
+    #[serde(default)]
     pub allowed_roles: Vec<String>,
     pub username: Option<String>,
     pub password: Option<String>,
