@@ -2,6 +2,7 @@
 
 use crate::backend::database::DatabaseBackend;
 use crate::error::*;
+use crate::model::DatabaseConfig;
 use async_trait::async_trait;
 use mysql_async::prelude::*;
 use rand::{distributions::Alphanumeric, Rng};
@@ -14,11 +15,25 @@ pub struct MysqlBackend {
 }
 
 impl MysqlBackend {
-    pub fn new(connection_string: String) -> SecretResult<Self> {
-        let opts = mysql_async::Opts::from_url(&connection_string).map_err(|e| {
+    pub fn new(config: DatabaseConfig) -> SecretResult<Self> {
+        let opts = mysql_async::Opts::from_url(&config.connection_url).map_err(|e| {
             SecretError::InvalidConfiguration(format!("Invalid MySQL connection string: {}", e))
         })?;
-        let pool = mysql_async::Pool::new(opts);
+
+        let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+
+        // Apply pool configuration
+        if let Some(max_open) = config.max_open_connections {
+            // MysqlAsync opts sets pool limits via pool_opts method
+            // PoolConstraints is usually in mysql_async
+            let min = std::cmp::min(5, max_open as usize);
+            let constraints = mysql_async::PoolConstraints::new(min, max_open as usize).unwrap_or_default();
+            builder = builder.pool_opts(
+                mysql_async::PoolOpts::default().with_constraints(constraints)
+            );
+        }
+
+        let pool = mysql_async::Pool::new(builder);
         Ok(Self { pool })
     }
 

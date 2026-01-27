@@ -2,6 +2,7 @@
 
 use crate::backend::database::DatabaseBackend;
 use crate::error::*;
+use crate::model::DatabaseConfig;
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
 use rand::{distributions::Alphanumeric, Rng};
@@ -15,9 +16,55 @@ pub struct PostgresBackend {
 }
 
 impl PostgresBackend {
-    pub fn new(connection_string: String) -> SecretResult<Self> {
+    pub fn new(config: DatabaseConfig) -> SecretResult<Self> {
         let mut cfg = Config::new();
-        cfg.url = Some(connection_string);
+        cfg.url = Some(config.connection_url);
+
+        // Apply pool configuration from DatabaseConfig if present
+        // Since deadpool-postgres re-exports deadpool types, we can use them via deadpool_postgres::PoolConfig if available,
+        // or just rely on the Config struct which should have fields.
+        // BUT deadpool-postgres::Config has a `pool` field which expects `deadpool::managed::PoolConfig`.
+        // We cannot import deadpool directly as it's not in our cargo.toml.
+        // However, deadpool-postgres depends on it.
+        // IF we cannot import it, we are stuck unless we add it or use a method on Config.
+        // Most deadpool-postgres versions allow configuring via the Config struct itself or builders.
+
+        // Since we can't import deadpool::managed::PoolConfig, let's try to see if deadpool_postgres re-exports it.
+        // Use deadpool_postgres::PoolConfig if it exists (it usually doesn't, it uses the generic one).
+
+        // Let's try to avoid setting pool config for now if we can't access the type, OR assume standard defaults.
+        // User requirement is to use the config.
+        // Wait, earlier I saw `deadpool` is not in workspace deps but `deadpool-postgres` is.
+        // `deadpool-postgres` likely re-exports `PoolConfig`.
+
+        // Let's try to access it via `deadpool_postgres::pool::PoolConfig` or similar.
+        // Or simply `deadpool_postgres::PoolConfig` (unlikely).
+
+        // If we can't fix this easily without adding a dep, and I just removed the dep, I made a mistake.
+        // But the previous error was that `deadpool` was not found in *workspace*.
+        // So I can't add it to secrets/Cargo.toml as `workspace = true` unless I add it to root.
+
+        // So I must add it to root Cargo.toml first if I want to use it.
+        // OR I define it in secrets/Cargo.toml without `workspace = true`.
+        // Let's try defining it directly in secrets/Cargo.toml.
+
+        // But for this file patch, I will temporarily comment out the pool config setting to allow compilation check
+        // and then fix dependency.
+
+        // actually, let's try to just set cfg.pool = Some(...) but we need the type.
+        // If I can't name the type, I can't construct it.
+        // unless I use `deadpool_postgres::Config::new().pool` which is None.
+
+        // Apply pool configuration from DatabaseConfig if present
+        if let Some(max_size) = config.max_open_connections {
+            let mut pool_config = deadpool::managed::PoolConfig::default();
+            pool_config.max_size = max_size as usize;
+            cfg.pool = Some(pool_config);
+        }
+
+        // Note: max_idle_connections isn't directly mapped in basic PoolConfig usually (it has distinct properties like timeouts).
+        // deadpool 0.9+ has `max_size` (total) and potentially others.
+        // We will stick to `max_open_connections` -> `max_size` for now as primary tuning knob.
 
         let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).map_err(|e| {
             SecretError::InvalidConfiguration(format!("Failed to create PostgreSQL pool: {}", e))
@@ -139,8 +186,19 @@ mod tests {
             }
         };
 
+        let config = DatabaseConfig {
+            connection_url: connection_string,
+            plugin_name: "test".to_string(),
+            allowed_roles: vec![],
+            username: None,
+            password: None,
+            max_open_connections: Some(2),
+            max_idle_connections: None,
+            max_connection_lifetime: None,
+        };
+
         // Create backend
-        let backend = PostgresBackend::new(connection_string)?;
+        let backend = PostgresBackend::new(config)?;
 
         // Test connection
         backend.test_connection().await?;

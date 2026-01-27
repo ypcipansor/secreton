@@ -58,6 +58,16 @@ impl DatabaseEngine {
 
     /// Generate database credentials
     async fn generate_credentials(&self, role_name: &str) -> SecretResult<HashMap<String, Value>> {
+        // Enforce allowed_roles if configured
+        if !self.config.allowed_roles.is_empty() {
+            if !self.config.allowed_roles.contains(&role_name.to_string()) {
+                return Err(SecretError::InvalidConfiguration(format!(
+                    "Role '{}' is not in the allowed_roles list",
+                    role_name
+                )));
+            }
+        }
+
         // Get role configuration
         let role = self.roles.get(role_name).ok_or_else(|| {
             SecretError::InvalidConfiguration(format!("Role '{}' not found", role_name))
@@ -95,14 +105,14 @@ impl DatabaseEngine {
         match db_type {
             DatabaseType::PostgreSQL => {
                 let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.connection_url.clone(),
+                    self.config.clone(),
                 )?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
             }
             DatabaseType::MySQL => {
                 let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.connection_url.clone(),
+                    self.config.clone(),
                 )?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
