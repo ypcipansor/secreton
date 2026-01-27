@@ -56,12 +56,13 @@ impl MysqlBackend {
             .collect()
     }
 
-    /// Split SQL statements by semicolon, respecting quotes
+    /// Split SQL statements by semicolon, respecting quotes and backticks
     fn split_sql_statements(&self, sql: &str) -> Vec<String> {
         let mut statements = Vec::new();
         let mut current = String::new();
         let mut in_single_quote = false;
         let mut in_double_quote = false;
+        let mut in_backtick = false;
         let mut escape = false;
 
         for c in sql.chars() {
@@ -77,19 +78,25 @@ impl MysqlBackend {
                     current.push(c);
                 }
                 '\'' => {
-                    if !in_double_quote {
+                    if !in_double_quote && !in_backtick {
                         in_single_quote = !in_single_quote;
                     }
                     current.push(c);
                 }
                 '"' => {
-                    if !in_single_quote {
+                    if !in_single_quote && !in_backtick {
                         in_double_quote = !in_double_quote;
                     }
                     current.push(c);
                 }
-                ';' => {
+                '`' => {
                     if !in_single_quote && !in_double_quote {
+                        in_backtick = !in_backtick;
+                    }
+                    current.push(c);
+                }
+                ';' => {
+                    if !in_single_quote && !in_double_quote && !in_backtick {
                         if !current.trim().is_empty() {
                             statements.push(current.trim().to_string());
                         }

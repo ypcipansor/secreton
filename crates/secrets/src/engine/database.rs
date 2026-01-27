@@ -289,14 +289,24 @@ impl SecretEngine for DatabaseEngine {
     }
 
     fn enable(&mut self) {
-        self.enabled = true;
-        // Lazily initialize backend if needed
-        if self.backend.is_none() && !self.config.connection_url.is_empty() {
-            if let Err(e) = self.init_backend() {
-                // Since enable() cannot return result, we log the error
-                // The backend will remain None, and subsequent calls will fail gracefully
-                eprintln!("Failed to initialize database backend during enable: {}", e);
+        // Lazily initialize backend if needed before enabling
+        if self.backend.is_none() {
+            if !self.config.connection_url.is_empty() {
+                match self.init_backend() {
+                    Ok(_) => self.enabled = true,
+                    Err(e) => {
+                        // Log error and keep enabled = false
+                        eprintln!("Failed to initialize database backend during enable: {}", e);
+                        self.enabled = false;
+                    }
+                }
+            } else {
+                // No config, cannot enable
+                self.enabled = false;
             }
+        } else {
+            // Backend already initialized
+            self.enabled = true;
         }
     }
 
