@@ -16,6 +16,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 
+use crate::ApiResponse;
+
 /// API state for Database engine
 #[derive(Clone)]
 pub struct DatabaseApiState {
@@ -95,7 +97,7 @@ pub fn create_database_router() -> Router<()> {
 pub async fn configure_database(
     Extension(state): Extension<DatabaseApiState>,
     Json(request): Json<ConfigRequest>,
-) -> Result<Json<ConfigResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<ConfigResponse>>, StatusCode> {
     let mut engine = state.engine.write().await;
 
     // Construct EngineConfig
@@ -130,10 +132,10 @@ pub async fn configure_database(
     match engine.init(&engine_config).await {
         Ok(_) => {
             info!("Database engine configured successfully");
-            Ok(Json(ConfigResponse {
+            Ok(Json(ApiResponse::success(ConfigResponse {
                 success: true,
                 message: "Database engine configured".to_string(),
-            }))
+            })))
         }
         Err(e) => {
             error!("Failed to configure database engine: {:?}", e);
@@ -146,11 +148,11 @@ pub async fn configure_database(
 #[axum::debug_handler]
 pub async fn list_roles(
     Extension(state): Extension<DatabaseApiState>,
-) -> Result<Json<ListRolesResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<ListRolesResponse>>, StatusCode> {
     let engine = state.engine.read().await;
     match engine.list("roles").await {
         Ok(roles) => {
-            Ok(Json(ListRolesResponse { roles }))
+            Ok(Json(ApiResponse::success(ListRolesResponse { roles })))
         }
         Err(e) => {
             error!("Failed to list roles: {:?}", e);
@@ -165,7 +167,7 @@ pub async fn create_role(
     Extension(state): Extension<DatabaseApiState>,
     Path(name): Path<String>,
     Json(request): Json<CreateRoleRequest>,
-) -> Result<Json<ConfigResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<ConfigResponse>>, StatusCode> {
     let mut engine = state.engine.write().await;
 
     let mut data = HashMap::new();
@@ -180,10 +182,10 @@ pub async fn create_role(
     match engine.write(&format!("roles/{}", name), data).await {
         Ok(_) => {
             info!("Role '{}' created/updated", name);
-            Ok(Json(ConfigResponse {
+            Ok(Json(ApiResponse::success(ConfigResponse {
                 success: true,
                 message: format!("Role '{}' configured", name),
-            }))
+            })))
         }
         Err(e) => {
             error!("Failed to create role '{}': {:?}", name, e);
@@ -197,7 +199,7 @@ pub async fn create_role(
 pub async fn get_credentials(
     Extension(state): Extension<DatabaseApiState>,
     Path(name): Path<String>,
-) -> Result<Json<CredsResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<CredsResponse>>, StatusCode> {
     let engine = state.engine.read().await;
 
     match engine.read(&format!("creds/{}", name)).await {
@@ -206,12 +208,12 @@ pub async fn get_credentials(
             let username = secret.data.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let password = secret.data.get("password").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-            Ok(Json(CredsResponse {
+            Ok(Json(ApiResponse::success(CredsResponse {
                 username,
                 password,
                 lease_id: secret.metadata.lease_id.unwrap_or_default(),
                 lease_duration: secret.metadata.lease_duration.unwrap_or(0),
-            }))
+            })))
         }
         Ok(None) => {
             warn!("Role '{}' not found or returned no secret", name);

@@ -16,6 +16,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, error};
 
+use crate::ApiResponse;
+
 /// API state for PKI engine
 #[derive(Clone)]
 pub struct PkiApiState {
@@ -70,7 +72,7 @@ pub fn create_pki_router() -> Router<()> {
 pub async fn issue_certificate(
     Extension(state): Extension<PkiApiState>,
     Json(request): Json<GenerateCertRequest>,
-) -> Result<Json<CertResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
     let mut engine = state.engine.write().await;
 
     let mut data = HashMap::new();
@@ -98,12 +100,12 @@ pub async fn issue_certificate(
             let ttl = secret.data.get("ttl").and_then(|v| v.as_u64()).unwrap_or(0);
             let expiration = Utc::now().timestamp() + ttl as i64;
 
-            Ok(Json(CertResponse {
+            Ok(Json(ApiResponse::success(CertResponse {
                 certificate: cert,
                 private_key: key,
                 serial_number: serial,
                 expiration,
-            }))
+            })))
         }
         Err(e) => {
             error!("Failed to issue certificate: {:?}", e);
