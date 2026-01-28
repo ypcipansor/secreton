@@ -37,8 +37,11 @@ impl Default for DatabaseApiState {
             max_idle_connections: Some(5),
             max_connection_lifetime: Some(30),
         };
+        // Manually enable the engine since init isn't called via standard flow here
+        let mut engine = DatabaseEngine::new(config);
+        engine.enable();
         Self {
-            engine: Arc::new(RwLock::new(DatabaseEngine::new(config))),
+            engine: Arc::new(RwLock::new(engine)),
         }
     }
 }
