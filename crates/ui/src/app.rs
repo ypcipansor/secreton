@@ -10,7 +10,7 @@ use crate::pages::pki::PkiPage;
 use crate::pages::policies::PoliciesList;
 use crate::pages::audit::AuditLog;
 use crate::pages::not_found::NotFound;
-use crate::components::layout::Layout;
+use crate::components::Layout;
 
 #[component]
 pub fn App() -> impl IntoView {
