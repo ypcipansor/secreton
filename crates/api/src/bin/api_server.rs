@@ -247,9 +247,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // and the prompt request to "integrate", serving on a secondary port is a valid strategy
     // when frameworks are incompatible version-wise.
     //
-    // Let's spawn Axum on port + 1.
+    // Let's spawn Axum on port + 10 to avoid conflict with Trunk dev server (8081).
 
-    let axum_port = http_port.checked_add(1).expect("HTTP port too high; cannot allocate enhanced API port");
+    let axum_port = http_port.checked_add(10).expect("HTTP port too high; cannot allocate enhanced API port");
     info!("Starting Enhanced API (Database/PKI) on port {}", axum_port);
 
     let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
