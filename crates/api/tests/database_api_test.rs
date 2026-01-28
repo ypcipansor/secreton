@@ -1,14 +1,44 @@
 use axum::Extension;
 use axum_test::TestServer;
+use secreton_api::ApiState;
 use secreton_api::database::{self, DatabaseApiState, ConfigRequest, ConfigResponse, ListRolesResponse, CreateRoleRequest};
+use secreton_api::pki::PkiApiState;
+use secreton_api::kv::KVApiState;
+use secreton_api::transit::TransitApiState;
+use secreton_api::config::ApiConfig;
+use secreton_performance::OptimizationLevel;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use secreton_secrets::{DatabaseEngine, DatabaseConfig};
 
 #[tokio::test]
 async fn test_database_api_endpoints() {
-    // Setup state
-    let state = DatabaseApiState::default();
+    // Setup full ApiState
+    let config = Arc::new(ApiConfig::default());
+    let auth = Arc::new(secreton_api::services::auth::AuthenticationService::new(
+        Arc::new(secreton_storage::MockStorageBackend::new()),
+        Arc::new(secreton_api::services::crypto::CryptoService::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
+        &config.auth
+    ).await.unwrap());
+
+    // We can use a simplified ApiState construction for tests or the public new() method
+    // Since new() requires many dependencies, constructing struct directly is easier if fields are public.
+    // ApiState fields are public.
+
+    let state = ApiState {
+        kv: KVApiState::default(),
+        transit: TransitApiState::default(),
+        database: DatabaseApiState::default(),
+        pki: PkiApiState::default(),
+        config: config.clone(),
+        secreton: Arc::new(secreton_common::StandardServiceContainer::default()),
+        auth: auth.clone(),
+        audit: Arc::new(secreton_api::services::admin::AdminService::new(
+             Arc::new(secreton_storage::MockStorageBackend::new()),
+             auth.clone(),
+             Arc::new(secreton_api::services::audit::AuditLogger::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
+             Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()))
+        ).await.unwrap()),
+    };
 
     // Create router with state extension
     let router = database::create_database_router()

@@ -1145,6 +1145,7 @@ impl ApiState {
 /// Create the main API router combining KV and Transit engines
 pub fn create_api_router(state: ApiState) -> axum::Router {
     use axum::middleware;
+    use tower_http::cors::{CorsLayer, Any};
 
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
@@ -1153,6 +1154,10 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
         .nest("/api/v1/pki", pki::create_pki_router())
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any))
         .layer(axum::Extension(state))
 }
 

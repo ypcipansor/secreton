@@ -159,6 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jwt_issuer = api_config.auth.jwt.issuer.clone();
     let jwt_audience = api_config.auth.jwt.audience.clone();
 
+    // Prepare address variables
+    let host_ip: std::net::IpAddr = host.parse().expect("Invalid host address");
+
     // Initialize Services
     let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
 
@@ -188,11 +191,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         audit.clone(),
         identity,
         policy_service,
-        performance
+        performance.clone()
     ).await?);
 
     // Construct HTTP Routes
-    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str);
+    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
+        .with(
+            warp::cors()
+                .allow_any_origin()
+                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
+                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
+        )
+        .with(warp::log("security_api"))
+        .recover(handle_rejection);
 
     // Initialize Axum components for new engines
     use secreton_api::{ApiState, KVApiState, TransitApiState};
@@ -238,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
     // Let's spawn Axum on port + 1.
 
-    let axum_port = http_port + 1;
+    let axum_port = http_port.checked_add(1).expect("HTTP port too high; cannot allocate enhanced API port");
     info!("Starting Enhanced API (Database/PKI) on port {}", axum_port);
 
     let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
