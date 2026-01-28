@@ -70,10 +70,10 @@ pub fn create_pki_router() -> Router<()> {
 /// Generate a certificate
 #[axum::debug_handler]
 pub async fn issue_certificate(
-    Extension(state): Extension<PkiApiState>,
+    Extension(state): Extension<crate::ApiState>,
     Json(request): Json<GenerateCertRequest>,
 ) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
-    let mut engine = state.engine.write().await;
+    let mut engine = state.pki.engine.write().await;
 
     let mut data = HashMap::new();
     data.insert("common_name".to_string(), Value::String(request.common_name));

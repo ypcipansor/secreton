@@ -1144,12 +1144,35 @@ impl ApiState {
 
 /// Create the main API router combining KV and Transit engines
 pub fn create_api_router(state: ApiState) -> axum::Router {
+    use axum::middleware;
+
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
         .nest("/api/v1/transit", transit::create_transit_router())
         .nest("/api/v1/database", database::create_database_router())
         .nest("/api/v1/pki", pki::create_pki_router())
-        .layer(axum::Extension(state.database.clone()))
-        .layer(axum::Extension(state.pki.clone()))
+        // Apply authentication middleware to all routes
+        .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .layer(axum::Extension(state))
+}
+
+/// Axum authentication middleware
+async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let auth_header = req.headers().get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "));
+
+    match auth_header {
+        Some(token) => {
+            match state.auth.validate_token(token).await {
+                Ok(_) => Ok(next.run(req).await),
+                Err(_) => Err(axum::http::StatusCode::UNAUTHORIZED),
+            }
+        }
+        None => Err(axum::http::StatusCode::UNAUTHORIZED),
+    }
 }

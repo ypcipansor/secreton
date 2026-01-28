@@ -95,10 +95,10 @@ pub fn create_database_router() -> Router<()> {
 /// Configure the database engine
 #[axum::debug_handler]
 pub async fn configure_database(
-    Extension(state): Extension<DatabaseApiState>,
+    Extension(state): Extension<crate::ApiState>,
     Json(request): Json<ConfigRequest>,
 ) -> Result<Json<ApiResponse<ConfigResponse>>, StatusCode> {
-    let mut engine = state.engine.write().await;
+    let mut engine = state.database.engine.write().await;
 
     // Construct EngineConfig
     let db_config = DatabaseConfig {
@@ -147,9 +147,9 @@ pub async fn configure_database(
 /// List all roles
 #[axum::debug_handler]
 pub async fn list_roles(
-    Extension(state): Extension<DatabaseApiState>,
+    Extension(state): Extension<crate::ApiState>,
 ) -> Result<Json<ApiResponse<ListRolesResponse>>, StatusCode> {
-    let engine = state.engine.read().await;
+    let engine = state.database.engine.read().await;
     match engine.list("roles").await {
         Ok(roles) => {
             Ok(Json(ApiResponse::success(ListRolesResponse { roles })))
@@ -164,11 +164,11 @@ pub async fn list_roles(
 /// Create or update a role
 #[axum::debug_handler]
 pub async fn create_role(
-    Extension(state): Extension<DatabaseApiState>,
+    Extension(state): Extension<crate::ApiState>,
     Path(name): Path<String>,
     Json(request): Json<CreateRoleRequest>,
 ) -> Result<Json<ApiResponse<ConfigResponse>>, StatusCode> {
-    let mut engine = state.engine.write().await;
+    let mut engine = state.database.engine.write().await;
 
     let mut data = HashMap::new();
     data.insert("sql".to_string(), Value::String(request.sql));
@@ -197,10 +197,10 @@ pub async fn create_role(
 /// Generate credentials
 #[axum::debug_handler]
 pub async fn get_credentials(
-    Extension(state): Extension<DatabaseApiState>,
+    Extension(state): Extension<crate::ApiState>,
     Path(name): Path<String>,
 ) -> Result<Json<ApiResponse<CredsResponse>>, StatusCode> {
-    let engine = state.engine.read().await;
+    let engine = state.database.engine.read().await;
 
     match engine.read(&format!("creds/{}", name)).await {
         Ok(Some(secret)) => {

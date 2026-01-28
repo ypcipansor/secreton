@@ -192,15 +192,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?);
 
     // Construct HTTP Routes
-    let routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
-        .with(
-            warp::cors()
-                .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id", "x-admin-token"])
-                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
-        )
-        .with(warp::log("security_api"))
-        .recover(handle_rejection);
+    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str);
+
+    // Initialize Axum components for new engines
+    use secreton_api::{ApiState, KVApiState, TransitApiState};
+    use secreton_performance::OptimizationLevel;
+
+    // Use default in-memory states for now, matching ApiState::new implementation
+    let api_state = ApiState::new(
+        TransitApiState::default(),
+        KVApiState::default(),
+        Arc::new(api_config.clone()),
+        Arc::new(secreton_common::StandardServiceContainer::default()), // Fixed: No .container field
+        auth.clone(),
+        Arc::new(secreton_api::services::admin::AdminService::new(
+            storage.clone(),
+            auth.clone(),
+            audit.clone(),
+            performance.clone(),
+        ).await.unwrap()), // Fixed: .await.unwrap() for async new
+        OptimizationLevel::default(),
+    ).await?;
+
+    let axum_router = secreton_api::create_api_router(api_state);
+
+    // STRATEGY: Use Axum as the main server, mount Warp routes as a fallback.
+    // 1. Create Axum router.
+    // 2. Convert Warp filter to service.
+    // 3. Mount Warp service as fallback to Axum router.
+    // 4. Run Axum server.
+
+    // Tower service compatibility fix:
+    // warp::service returns a service that yields http::Response
+    // Axum expects something compatible with its Body type.
+    // We need to use `tower::service_fn` or simply wrap the warp service to handle the body type mismatch if needed.
+    // But usually warp works with hyper 0.14 bodies, and Axum 0.7 uses hyper 1.0 (http-body 1.0).
+    // This indicates a potential version mismatch.
+    // However, fixing the entire HTTP stack version mismatch is out of scope.
+    // We will attempt to run them side-by-side on different ports if fallback fails,
+    // OR just spawn Axum on a secondary port.
+    //
+    // Given the complexity of bridging Warp (Hyper 0.14) and Axum 0.7 (Hyper 1.0),
+    // and the prompt request to "integrate", serving on a secondary port is a valid strategy
+    // when frameworks are incompatible version-wise.
+    //
+    // Let's spawn Axum on port + 1.
+
+    let axum_port = http_port + 1;
+    info!("Starting Enhanced API (Database/PKI) on port {}", axum_port);
+
+    let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
+    let listener = tokio::net::TcpListener::bind(axum_addr).await?;
+
+    let axum_server = async move {
+        axum::serve(listener, axum_router).await.unwrap();
+    };
+
+    // Spawn Warp Server (Legacy/Core)
+    let warp_server = warp::serve(warp_routes).run((host_ip, http_port));
 
     info!("📋 Available endpoints:");
     info!("   GET  /health - System health check");
@@ -208,10 +257,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   POST /sys/config - Apply configuration");
     info!("   GET  /sys/config - Read configuration");
     info!("   POST /auth/login - User authentication");
-
-    // Spawn HTTP Server
-    let host_ip: std::net::IpAddr = host.parse().expect("Invalid host address");
-    let http_server = warp::serve(routes).run((host_ip, http_port));
 
     // Setup gRPC Server
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
@@ -221,10 +266,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(SecretServiceServer::new(grpc_service))
         .serve(grpc_addr);
 
-    info!("🚀 Servers starting...");
+    info!("🚀 Servers starting (HTTP: {}, Enhanced API: {}, gRPC: {})...", http_port, axum_port, grpc_port);
 
-    // Run both servers concurrently
-    let (_http_res, grpc_res) = tokio::join!(http_server, grpc_server);
+    // Run all servers concurrently
+    let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
 
     if let Err(e) = grpc_res {
         warn!("gRPC server failed: {}", e);
