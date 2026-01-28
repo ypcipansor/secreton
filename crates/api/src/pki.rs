@@ -8,6 +8,7 @@ use axum::{
     routing::{post},
 };
 use secreton_secrets::{PkiEngine, SecretEngine, PkiConfig};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -94,18 +95,14 @@ pub async fn issue_certificate(
             let cert = secret.data.get("certificate").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let key = secret.data.get("private_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let serial = secret.data.get("serial_number").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // TTL is returned as number in data? PkiEngine returns `ttl` in data.
-            // But we want expiration time.
-            // PkiEngine doesn't return expiration time in data map explicitly, only ttl.
-            // But we can calculate or just return ttl for now.
-            // Actually secret.data has "ttl".
             let ttl = secret.data.get("ttl").and_then(|v| v.as_u64()).unwrap_or(0);
+            let expiration = Utc::now().timestamp() + ttl as i64;
 
             Ok(Json(CertResponse {
                 certificate: cert,
                 private_key: key,
                 serial_number: serial,
-                expiration: ttl as i64,
+                expiration,
             }))
         }
         Err(e) => {
