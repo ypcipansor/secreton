@@ -248,6 +248,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // when frameworks are incompatible version-wise.
     //
     // Let's spawn Axum on port + 10 to avoid conflict with Trunk dev server (8081).
+    // WARNING: This +10 offset is coupled with the proxy configuration in crates/ui/Trunk.toml.
+    // If SECRETON_SERVER__PORT is changed from default 8080, Trunk.toml proxy backend ports must be updated manually.
 
     let axum_port = http_port.checked_add(10).expect("HTTP port too high; cannot allocate enhanced API port");
     info!("Starting Enhanced API (Database/PKI) on port {}", axum_port);
