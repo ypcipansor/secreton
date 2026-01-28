@@ -256,7 +256,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(axum_addr).await?;
 
     let axum_server = async move {
-        axum::serve(listener, axum_router).await.unwrap();
+        if let Err(e) = axum::serve(listener, axum_router).await {
+            warn!("Axum server failed: {}", e);
+        }
     };
 
     // Spawn Warp Server (Legacy/Core)

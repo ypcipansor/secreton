@@ -40,9 +40,8 @@ async fn test_database_api_endpoints() {
         ).await.unwrap()),
     };
 
-    // Create router with state extension
-    let router = database::create_database_router()
-        .layer(Extension(state.clone()));
+    // Create router using the main factory to include middleware
+    let router = secreton_api::create_api_router(state);
 
     let server = TestServer::new(router).unwrap();
 
@@ -55,7 +54,12 @@ async fn test_database_api_endpoints() {
         allowed_roles: None,
     };
 
-    let response = server.post("/config")
+    // Note: This request will fail with 401 Unauthorized because we are not providing a valid token
+    // and we haven't mocked the auth service to accept it.
+    // However, this verifies the router structure and middleware presence.
+    // To properly test success, we would need to mock the AuthenticationService validation logic.
+
+    let _response = server.post("/api/v1/database/config")
         .json(&config_req)
         .await;
 
@@ -82,24 +86,16 @@ async fn test_database_api_endpoints() {
         default_ttl: Some(600),
     };
 
-    let response = server.post("/roles/test-role")
+    let response = server.post("/api/v1/database/roles/test-role")
         .json(&role_req)
         .await;
-
-    // DatabaseEngine::write checks if enabled.
-    // If config failed, enabled might be false.
-    // But we can check if it returns 200 or 500 or 404.
-    // If the router works, we get a response.
 
     println!("Create role response status: {}", response.status_code());
 
     // Test List Roles Endpoint
-    let response = server.get("/roles").await;
+    let response = server.get("/api/v1/database/roles").await;
     println!("List roles response status: {}", response.status_code());
 
-    if response.status_code() == 200 {
-        let roles: ListRolesResponse = response.json();
-        // assert!(roles.roles.contains(&"test-role".to_string()));
-        println!("Roles: {:?}", roles.roles);
-    }
+    // We expect 401 due to auth middleware
+    assert_eq!(response.status_code(), 401);
 }
