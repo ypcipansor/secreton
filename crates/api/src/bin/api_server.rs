@@ -159,6 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jwt_issuer = api_config.auth.jwt.issuer.clone();
     let jwt_audience = api_config.auth.jwt.audience.clone();
 
+    // Prepare address variables
+    let host_ip: std::net::IpAddr = host.parse().expect("Invalid host address");
+
     // Initialize Services
     let crypto = Arc::new(CryptoService::new(storage.clone()).await?);
 
@@ -188,11 +191,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         audit.clone(),
         identity,
         policy_service,
-        performance
+        performance.clone()
     ).await?);
 
     // Construct HTTP Routes
-    let routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
+    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -202,16 +205,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(warp::log("security_api"))
         .recover(handle_rejection);
 
+    // Initialize Axum components for new engines
+    use secreton_api::{ApiState, KVApiState, TransitApiState};
+    use secreton_performance::OptimizationLevel;
+
+    // Use default in-memory states for now, matching ApiState::new implementation
+    let api_state = ApiState::new(
+        TransitApiState::default(),
+        KVApiState::default(),
+        Arc::new(api_config.clone()),
+        Arc::new(secreton_common::StandardServiceContainer::default()), // Fixed: No .container field
+        auth.clone(),
+        Arc::new(secreton_api::services::admin::AdminService::new(
+            storage.clone(),
+            auth.clone(),
+            audit.clone(),
+            performance.clone(),
+        ).await.unwrap()), // Fixed: .await.unwrap() for async new
+        OptimizationLevel::default(),
+    ).await?;
+
+    let axum_router = secreton_api::create_api_router(api_state);
+
+    // STRATEGY: Use Axum as the main server, mount Warp routes as a fallback.
+    // 1. Create Axum router.
+    // 2. Convert Warp filter to service.
+    // 3. Mount Warp service as fallback to Axum router.
+    // 4. Run Axum server.
+
+    // Tower service compatibility fix:
+    // warp::service returns a service that yields http::Response
+    // Axum expects something compatible with its Body type.
+    // We need to use `tower::service_fn` or simply wrap the warp service to handle the body type mismatch if needed.
+    // But usually warp works with hyper 0.14 bodies, and Axum 0.7 uses hyper 1.0 (http-body 1.0).
+    // This indicates a potential version mismatch.
+    // However, fixing the entire HTTP stack version mismatch is out of scope.
+    // We will attempt to run them side-by-side on different ports if fallback fails,
+    // OR just spawn Axum on a secondary port.
+    //
+    // Given the complexity of bridging Warp (Hyper 0.14) and Axum 0.7 (Hyper 1.0),
+    // and the prompt request to "integrate", serving on a secondary port is a valid strategy
+    // when frameworks are incompatible version-wise.
+    //
+    // Let's spawn Axum on port + 10 to avoid conflict with Trunk dev server (8081).
+    // WARNING: This +10 offset is coupled with the proxy configuration in crates/ui/Trunk.toml.
+    // If SECRETON_SERVER__PORT is changed from default 8080, Trunk.toml proxy backend ports must be updated manually.
+
+    let axum_port = http_port.checked_add(10).expect("HTTP port too high; cannot allocate enhanced API port");
+    info!("Starting Enhanced API (Database/PKI) on port {}", axum_port);
+
+    let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
+    let listener = tokio::net::TcpListener::bind(axum_addr).await?;
+
+    let axum_server = async move {
+        if let Err(e) = axum::serve(listener, axum_router).await {
+            warn!("Axum server failed: {}", e);
+        }
+    };
+
+    // Spawn Warp Server (Legacy/Core)
+    let warp_server = warp::serve(warp_routes).run((host_ip, http_port));
+
     info!("📋 Available endpoints:");
     info!("   GET  /health - System health check");
     info!("   GET  /security/status - Security components status");
     info!("   POST /sys/config - Apply configuration");
     info!("   GET  /sys/config - Read configuration");
     info!("   POST /auth/login - User authentication");
-
-    // Spawn HTTP Server
-    let host_ip: std::net::IpAddr = host.parse().expect("Invalid host address");
-    let http_server = warp::serve(routes).run((host_ip, http_port));
 
     // Setup gRPC Server
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
@@ -221,10 +281,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(SecretServiceServer::new(grpc_service))
         .serve(grpc_addr);
 
-    info!("🚀 Servers starting...");
+    info!("🚀 Servers starting (HTTP: {}, Enhanced API: {}, gRPC: {})...", http_port, axum_port, grpc_port);
 
-    // Run both servers concurrently
-    let (_http_res, grpc_res) = tokio::join!(http_server, grpc_server);
+    // Run all servers concurrently
+    let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
 
     if let Err(e) = grpc_res {
         warn!("gRPC server failed: {}", e);

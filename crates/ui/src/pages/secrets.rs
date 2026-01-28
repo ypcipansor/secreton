@@ -5,8 +5,8 @@ use leptos::task::spawn_local;
 use crate::api;
 use crate::components::button::{Button, ButtonVariant};
 use crate::components::input::Input;
-use crate::components::modal::Modal;
-use crate::components::card::Card;
+use crate::components::Modal;
+use crate::components::Card;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]

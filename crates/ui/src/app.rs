@@ -5,10 +5,12 @@ use crate::auth::{provide_auth, use_auth};
 use crate::pages::login::Login;
 use crate::pages::dashboard::Dashboard;
 use crate::pages::secrets::SecretsList;
+use crate::pages::database::DatabaseSecrets;
+use crate::pages::pki::PkiPage;
 use crate::pages::policies::PoliciesList;
 use crate::pages::audit::AuditLog;
 use crate::pages::not_found::NotFound;
-use crate::components::layout::Layout;
+use crate::components::Layout;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -23,6 +25,8 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("") view=Dashboard />
                         <Route path=path!("secrets") view=SecretsList />
                         <Route path=path!("secrets/*path") view=SecretsList />
+                        <Route path=path!("database") view=DatabaseSecrets />
+                        <Route path=path!("pki") view=PkiPage />
                         <Route path=path!("policies") view=PoliciesList />
                         <Route path=path!("audit") view=AuditLog />
                     </ParentRoute>
