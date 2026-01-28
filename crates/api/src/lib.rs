@@ -1093,12 +1093,14 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
 // Re-export KV and Transit modules for axum-based API
 pub mod kv;
 pub mod transit;
+pub mod database;
 pub mod extractors;
 pub mod handlers;
 pub mod auth;
 
 // Re-export types needed by tests
 pub use kv::KVApiState;
+pub use database::DatabaseApiState;
 pub use secreton_performance::OptimizationLevel;
 pub use transit::TransitApiState;
 
@@ -1107,6 +1109,7 @@ pub use transit::TransitApiState;
 pub struct ApiState {
     pub kv: KVApiState,
     pub transit: TransitApiState,
+    pub database: DatabaseApiState,
     pub config: std::sync::Arc<crate::config::ApiConfig>,
     pub secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
     pub auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
@@ -1126,6 +1129,7 @@ impl ApiState {
         Ok(Self {
             kv: kv_state,
             transit: transit_state,
+            database: DatabaseApiState::default(),
             config,
             secreton,
             auth,
@@ -1139,5 +1143,7 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
     axum::Router::new()
         .nest("/v1/kv", kv::create_kv_router())
         .nest("/v1/transit", transit::create_transit_router())
+        .nest("/v1/database", database::create_database_router())
+        .layer(axum::Extension(state.database.clone()))
         .layer(axum::Extension(state))
 }
