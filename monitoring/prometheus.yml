@@ -13,7 +13,7 @@ scrape_configs:
 
   - job_name: 'secreton'
     static_configs:
-      - targets: ['secreton:9090']
+      - targets: ['secreton-backend:9090']
     metrics_path: '/metrics'
     scrape_interval: 5s
 
