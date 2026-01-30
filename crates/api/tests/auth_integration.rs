@@ -8,7 +8,10 @@ use std::sync::Arc;
 async fn test_verify_password_integration() {
     let storage = Arc::new(MockStorageBackend::new());
     let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-    let config = AuthConfig::default();
+    let mut config = AuthConfig::default();
+    config.jwt.secret = Some("test_secret".to_string());
+    config.jwt.issuer = "secreton".to_string();
+    config.jwt.audience = "secreton-api".to_string();
 
     let auth_service = AuthenticationService::new(storage, crypto, &config)
         .await

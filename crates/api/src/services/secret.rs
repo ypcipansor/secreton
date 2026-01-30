@@ -106,6 +106,11 @@ impl SecretService {
         })
     }
 
+    /// Helper to parse user ID to UUID
+    fn get_user_uuid(user: &secreton_auth::User) -> Uuid {
+        Uuid::parse_str(&user.id).unwrap_or_default()
+    }
+
     /// Check permission for an action on a path
     async fn check_permission(
         &self,
@@ -116,7 +121,6 @@ impl SecretService {
         // Strict Secret Isolation: Admin/Superuser cannot bypass data access policies.
         // They can only manage system configurations or resources they explicitly own.
         // Exception: "sys/" paths might be administrative.
-        // We removed the blanket bypass.
 
         // RBAC Check
         // Resolve role IDs
@@ -189,10 +193,10 @@ impl SecretService {
 
         // Strict Ownership Check
         // "User satu sama lain tidak dapat mengakses secret user yang lain... user root dan admin tidak bisa melihat"
-        let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
+        let user_uuid = Self::get_user_uuid(user);
         if encrypted_entry.owner_id != user_uuid {
              // Deny access even if RBAC allowed it (unless it's a shared secret system, but prompt implies strict isolation)
-             return Err(SecretError::PermissionDenied(format!("Access to secret '{}' is restricted to its owner.", path)));
+             return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
         }
 
         // Decrypt the secret data
@@ -251,8 +255,7 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
-        let owner_id = Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| Uuid::new_v4());
+        let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version
         let version = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
@@ -274,7 +277,7 @@ impl SecretService {
         // Ensure we are not overwriting someone else's secret
         if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
             if existing.owner_id != owner_id {
-                 return Err(SecretError::PermissionDenied(format!("Cannot overwrite secret '{}' owned by another user.", path)));
+                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
             }
         }
 
@@ -319,12 +322,12 @@ impl SecretService {
             .map_err(SecretError::Storage)?;
 
         if let Some(e) = entry {
-            let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
+            let user_uuid = Self::get_user_uuid(user);
             // Ownership check: Only owner can delete (unless it's a system admin action which deletes the USER, handled elsewhere)
             // But prompt says "root/admin cannot... delete... unless deleting user data".
             // So direct secret deletion must be owner-only.
             if e.owner_id != user_uuid {
-                return Err(SecretError::PermissionDenied(format!("Deletion of secret '{}' restricted to owner.", path)));
+                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
             }
         } else {
             return Err(SecretError::SecretNotFound { path: path.to_string() });
@@ -1118,8 +1121,9 @@ mod tests {
 
     // Mock user helper
     fn mock_user() -> secreton_auth::User {
+        let id = Uuid::new_v4().to_string();
         secreton_auth::User {
-            id: "user1".to_string(),
+            id: id.clone(),
             username: "user1".to_string(),
             email: Some("user1@example.com".to_string()),
             display_name: None,
@@ -1143,8 +1147,47 @@ mod tests {
         }
     }
 
+    async fn seed_admin_policy(policy_service: &secreton_auth::PolicyService) {
+        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+
+        let policy = Policy {
+            id: Uuid::new_v4(),
+            name: "admin_policy".to_string(),
+            policy_type: PolicyType::RBAC,
+            effect: PolicyEffect::Allow,
+            rules: vec![PolicyRule {
+                id: Uuid::new_v4(),
+                name: "allow_all".to_string(),
+                conditions: vec![],
+                actions: vec!["create".to_string(), "read".to_string(), "update".to_string(), "delete".to_string(), "list".to_string(), "list_versions".to_string(), "rotate".to_string(), "encrypt".to_string(), "decrypt".to_string(), "sign".to_string(), "verify".to_string(), "hash".to_string(), "write".to_string()],
+                resources: vec!["app/".to_string(), "keys/".to_string(), "sys/".to_string(), "key_data/".to_string(), "users/".to_string()],
+            }],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+        let p = policy_service.create_policy(policy).await.unwrap();
+
+        let role = Role {
+            id: Uuid::new_v4(),
+            name: "admin".to_string(),
+            description: None,
+            parent_role: None,
+            policies: vec![p.id],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let _ = policy_service.create_role(role).await;
+    }
+
     #[tokio::test]
     async fn test_secreton_service_creation() {
+        // Set root key for crypto service auto-unseal
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1158,6 +1201,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_secret_with_permission() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1165,21 +1211,26 @@ mod tests {
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
+        // Seed policy
+        seed_admin_policy(&policy_service).await;
+
         // Seed secret
         let mut data = HashMap::new();
         data.insert("key1".to_string(), "value1".to_string());
         
+        let user = mock_user();
+        let user_uuid = Uuid::parse_str(&user.id).unwrap();
+
         let secret_entry = SecretEntry::new(
             "app/config".to_string(),
             crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await.unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
-            Uuid::new_v4(),
+            user_uuid,
         );
         let _ = storage.store(&secret_entry).await;
 
         let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
-        let user = mock_user();
         let secret = service.get_secret("app/config", &user).await.unwrap();
         assert_eq!(secret.path, "app/config");
         assert!(secret.data.contains_key("key1"));
@@ -1187,12 +1238,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_put_secret_placeholder() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
+
+        // Seed policy
+        seed_admin_policy(&policy_service).await;
+
         let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
 
         let mut data = HashMap::new();
@@ -1205,12 +1263,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_encrypt_placeholder_response() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
+
+        // Seed policy
+        seed_admin_policy(&policy_service).await;
 
         // Define key entry structure matching secreton_core model for JSON serialization
         let key_entry = KeyEntry {
@@ -1229,9 +1293,11 @@ mod tests {
         let raw_key = vec![0u8; 32];
         let encrypted_key = crypto.encrypt_data(&raw_key).await.expect("failed to encrypt key data");
 
-        // Seed Key Metadata (required by get_key)
+        let user = mock_user();
+
+        // Seed Key Metadata (required by get_key) using user.id
         let key_metadata_entry = SecretEntry::new(
-            "keys/user1/key1".to_string(),
+            format!("keys/{}/key1", user.id),
             serde_json::to_vec(&key_entry).unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
@@ -1240,7 +1306,7 @@ mod tests {
         let _ = storage.store(&key_metadata_entry).await;
 
         let key_storage_entry = SecretEntry::new(
-            "key_data/user1/key1".to_string(),
+            format!("key_data/{}/key1", user.id),
             encrypted_key,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
@@ -1249,7 +1315,6 @@ mod tests {
         let _ = storage.store(&key_storage_entry).await;
 
         let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
-        let user = mock_user();
         let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), &user).await.unwrap();
         assert!(!result.ciphertext.is_empty());
         assert_eq!(key_version, 1);
@@ -1257,6 +1322,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_key_permission_denied() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
@@ -1297,6 +1365,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_key_permission_allowed() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
 
         let storage = Arc::new(MockStorageBackend::new());
@@ -1381,19 +1452,18 @@ mod list_secrets_tests {
     use uuid::Uuid;
 
     fn create_mock_user(id: &str, roles: Vec<String>) -> secreton_auth::User {
-        let is_admin = roles.iter().any(|r| r == "admin");
         secreton_auth::User {
             id: id.to_string(),
             username: format!("user_{}", id),
             email: Some(format!("user_{}@example.com", id)),
-            roles: if is_admin { vec!["admin".to_string()] } else { vec![] },
+            roles: roles,
             permissions: vec![],
             policies: vec![],
             display_name: None,
             full_name: None,
             password_hash: "".to_string(),
             is_active: true,
-            is_superuser: true, // Always bypass permission check for tests
+            is_superuser: false, // Strict check
             disabled: false,
             enabled: true,
             mfa_enabled: false,
@@ -1407,14 +1477,58 @@ mod list_secrets_tests {
         }
     }
 
+    // Helper to seed policy
+    async fn seed_allow_all_policy(policy_service: &secreton_auth::PolicyService, role_name: &str) {
+        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+
+        let policy = Policy {
+            id: Uuid::new_v4(),
+            name: format!("{}_policy", role_name),
+            policy_type: PolicyType::RBAC,
+            effect: PolicyEffect::Allow,
+            rules: vec![PolicyRule {
+                id: Uuid::new_v4(),
+                name: "allow_all".to_string(),
+                conditions: vec![],
+                actions: vec!["create".to_string(), "read".to_string(), "update".to_string(), "delete".to_string(), "list".to_string(), "list_versions".to_string(), "rotate".to_string(), "encrypt".to_string(), "decrypt".to_string(), "sign".to_string(), "verify".to_string(), "hash".to_string(), "write".to_string()],
+                resources: vec!["*".to_string(), "app/".to_string(), "keys/".to_string(), "sys/".to_string(), "key_data/".to_string(), "users/".to_string()],
+            }],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+        let p = policy_service.create_policy(policy).await.unwrap();
+
+        let role = Role {
+            id: Uuid::new_v4(),
+            name: role_name.to_string(),
+            description: None,
+            parent_role: None,
+            policies: vec![p.id],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let _ = policy_service.create_role(role).await;
+    }
+
     #[tokio::test]
     async fn test_list_secrets_permissions() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
+
+        // Seed policies for user and admin
+        seed_allow_all_policy(&policy_service, "user").await;
+        seed_allow_all_policy(&policy_service, "admin").await;
+
         let service = SecretService::new(storage.clone(), crypto.clone(), audit, identity, policy_service, performance).await.unwrap();
 
         let user1_uuid = Uuid::new_v4();

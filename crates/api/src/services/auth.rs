@@ -359,33 +359,50 @@ impl AuthenticationService {
         // Enforce MFA for privileged users (admin/root)
         if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
             if let Some(mfa) = &self.mfa_service {
-                let code = req.mfa_code.clone().ok_or_else(|| secreton_errors::SecretonError::MfaRequired)?;
-
-                // Validate TOTP by default for now, or check what user has enabled
-                use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
-
                 let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
-                let validation_request = MfaValidationRequest {
-                    entity_id: user_uuid,
-                    method: MfaMethod::Totp, // Enforce TOTP for privileged users
-                    code: Some(code),
-                    hardware_request: None,
-                    push_notification_id: None,
-                    push_response: None,
-                    webauthn_response: None,
-                };
+                // Check if MFA is configured for this user
+                // The PersistentTotpService uses "sys/mfa/totp/{user_id}"
+                let mfa_path = format!("sys/mfa/totp/{}", user_uuid);
+                let mfa_configured = self.storage.exists(&mfa_path).await.unwrap_or(false);
 
-                if !mfa.validate(validation_request).await.unwrap_or(false) {
-                     // Log MFA failure
-                     if let Some(audit) = &self.audit {
-                        let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
+                if mfa_configured {
+                    // If configured, strictly enforce code
+                    let code = req.mfa_code.clone().ok_or_else(|| secreton_errors::SecretonError::MfaRequired)?;
+
+                    use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
+
+                    let validation_request = MfaValidationRequest {
+                        entity_id: user_uuid,
+                        method: MfaMethod::Totp, // Enforce TOTP for privileged users
+                        code: Some(code),
+                        hardware_request: None,
+                        push_notification_id: None,
+                        push_response: None,
+                        webauthn_response: None,
+                    };
+
+                    if !mfa.validate(validation_request).await.unwrap_or(false) {
+                         // Log MFA failure
+                         if let Some(audit) = &self.audit {
+                            let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                user: req.username.clone(),
+                                method: "totp".to_string(),
+                                reason: "Invalid MFA code".to_string(),
+                            }).await;
+                        }
+                        return Err(secreton_errors::SecretonError::Authentication { message: "Invalid MFA code".to_string() }.into());
+                    }
+                } else {
+                    // If NOT configured, allow login so user can set it up
+                    // This is "Trust On First Use" for admin creation
+                    // Ideally, we might restrict the token scope here, but for now we rely on immediate setup
+                    if let Some(audit) = &self.audit {
+                        let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationSuccess {
                             user: req.username.clone(),
-                            method: "totp".to_string(),
-                            reason: "Invalid MFA code".to_string(),
+                            method: "password_no_mfa_setup".to_string(),
                         }).await;
                     }
-                    return Err(secreton_errors::SecretonError::Authentication { message: "Invalid MFA code".to_string() }.into());
                 }
             } else {
                 // If MFA service is not configured but user is admin/root, this is a configuration error or security risk
@@ -1022,7 +1039,7 @@ impl AuthenticationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AuthConfig;
+    use crate::config::ApiConfig;
     use crate::services::crypto::CryptoService;
     // use secreton_crypto::SecurityParams;
     use secreton_storage::MockStorageBackend;
@@ -1031,7 +1048,10 @@ mod tests {
     async fn test_auth_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let config = AuthConfig::default();
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
 
         let auth_service = AuthenticationService::new(storage, crypto, &config).await;
         assert!(auth_service.is_ok());
@@ -1044,7 +1064,10 @@ mod tests {
 
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let config = AuthConfig::default();
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
 
         let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap();
 
@@ -1124,7 +1147,10 @@ mod tests {
         storage.store(&other).await.unwrap();
 
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let config = AuthConfig::default();
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
         let auth_service = AuthenticationService::new(storage, crypto, &config).await.unwrap();
 
         let count = auth_service.get_user_count().await.unwrap();

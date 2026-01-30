@@ -13,7 +13,12 @@ use secreton_secrets::{DatabaseEngine, DatabaseConfig};
 #[tokio::test]
 async fn test_database_api_endpoints() {
     // Setup full ApiState
-    let config = Arc::new(ApiConfig::default());
+    let mut config_inner = ApiConfig::default();
+    config_inner.auth.jwt.secret = Some("test_secret".to_string());
+    config_inner.auth.jwt.issuer = "secreton".to_string();
+    config_inner.auth.jwt.audience = "secreton-api".to_string();
+    let config = Arc::new(config_inner);
+
     let auth = Arc::new(secreton_api::services::auth::AuthenticationService::new(
         Arc::new(secreton_storage::MockStorageBackend::new()),
         Arc::new(secreton_api::services::crypto::CryptoService::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),

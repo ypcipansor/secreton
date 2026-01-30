@@ -6,20 +6,8 @@ use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, Security
 use secreton_auth::mfa::{TotpService, TotpEnrollment, TotpValidationRequest, TotpConfig};
 use secreton_errors::SecretonError;
 use crate::services::crypto::CryptoService;
-use hmac::{Hmac, Mac};
-use sha1::Sha1;
 use rand::Rng;
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut result = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        result |= x ^ y;
-    }
-    result == 0
-}
+use totp_rs::{Algorithm, TOTP};
 
 pub struct PersistentTotpService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -43,82 +31,41 @@ impl PersistentTotpService {
         }
     }
 
-    /// Generate a random secret
+    /// Generate a random secret using totp-rs which handles Base32 encoding securely
     fn generate_secret() -> String {
+        // totp-rs doesn't expose a public random secret generator in the version used typically,
+        // but we can use the Secret type if available, or just generate bytes and encode.
+        // Or construct a TOTP object and get the secret.
+        // We will stick to generating random bytes and encoding them using the crate if possible,
+        // or just use `totp_rs::Secret::default().to_encoded().to_string()` if it exists.
+        // Checking common usage:
+        // Use standard RNG + Base32
         let mut rng = rand::thread_rng();
-        let bytes: Vec<u8> = (0..20).map(|_| rng.r#gen()).collect(); // 20 bytes = 160 bits (standard for SHA1)
-
-        // Minimal Base32 Encode (RFC 4648) without padding
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-        let mut result = String::new();
-        let mut buffer = 0u64;
-        let mut bits_left = 0;
-
-        for byte in bytes {
-            buffer = (buffer << 8) | (byte as u64);
-            bits_left += 8;
-            while bits_left >= 5 {
-                result.push(ALPHABET[((buffer >> (bits_left - 5)) & 0x1F) as usize] as char);
-                bits_left -= 5;
-            }
-        }
-        if bits_left > 0 {
-            result.push(ALPHABET[((buffer << (5 - bits_left)) & 0x1F) as usize] as char);
-        }
-        result
+        let bytes: Vec<u8> = (0..20).map(|_| rng.r#gen()).collect();
+        base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &bytes)
     }
 
-    /// Generate TOTP code from secret and time
-    fn generate_totp(
-        secret: &str,
-        time: u64,
-        period: u32,
-        digits: u32,
-    ) -> Result<String, SecretonError> {
-        // Minimal Base32 Decode
-        let mut secret_bytes = Vec::new();
-        let mut buffer = 0u64;
-        let mut bits_left = 0;
+    // Internal helper to create TOTP instance
+    fn create_totp_instance(&self, secret: &str) -> Result<TOTP, SecretonError> {
+        let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+            .ok_or_else(|| SecretonError::Configuration { message: "Invalid base32 secret".to_string() })?;
 
-        for c in secret.chars() {
-            let val = match c {
-                'A'..='Z' => c as u64 - 'A' as u64,
-                'a'..='z' => c as u64 - 'a' as u64,
-                '2'..='7' => c as u64 - '2' as u64 + 26,
-                '=' => continue,
-                _ => return Err(SecretonError::Configuration { message: "Invalid base32 char".to_string() }),
-            };
-            buffer = (buffer << 5) | val;
-            bits_left += 5;
-            if bits_left >= 8 {
-                secret_bytes.push((buffer >> (bits_left - 8)) as u8);
-                bits_left -= 8;
-            }
-        }
+        let algorithm = match self.config.algorithm.as_str() {
+            "SHA1" => Algorithm::SHA1,
+            "SHA256" => Algorithm::SHA256,
+            "SHA512" => Algorithm::SHA512,
+            _ => Algorithm::SHA1,
+        };
 
-        let counter = time / period as u64;
-
-        // HMAC-SHA1
-        let mut mac = Hmac::<Sha1>::new_from_slice(&secret_bytes).map_err(|_| {
-            SecretonError::Configuration {
-                message: "Failed to create HMAC".to_string(),
-            }
-        })?;
-
-        mac.update(&counter.to_be_bytes());
-        let result = mac.finalize().into_bytes();
-
-        // Dynamic truncation
-        let offset = (result[19] & 0xf) as usize;
-        let code = ((result[offset] & 0x7f) as u32) << 24
-            | (u32::from(result[offset + 1])) << 16
-            | (u32::from(result[offset + 2])) << 8
-            | u32::from(result[offset + 3]);
-
-        let modulus = 10u32.pow(digits);
-        let totp = code % modulus;
-
-        Ok(format!("{:0width$}", totp, width = digits as usize))
+        TOTP::new(
+            algorithm,
+            self.config.digits as usize,
+            1, // skew
+            self.config.period as u64,
+            secret_bytes,
+            Some(self.config.issuer.clone()),
+            "".to_string(), // account_name not strictly needed for validation logic
+        ).map_err(|e| SecretonError::Configuration { message: format!("Failed to create TOTP instance: {}", e) })
     }
 }
 
@@ -131,6 +78,8 @@ impl TotpService for PersistentTotpService {
     ) -> Result<TotpEnrollment, SecretonError> {
         let secret = Self::generate_secret();
 
+        // Use TOTP crate to generate URL if possible, or construct manually to be safe with format
+        // Re-using manual construction for stability unless totp-rs exposes easy builder
         let url = format!(
             "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm={}&digits={}&period={}",
             self.config.issuer,
@@ -207,37 +156,30 @@ impl TotpService for PersistentTotpService {
                 }
             }
 
-            // Check current time window and adjacent windows for clock skew
-            for time_offset in [-1i64, 0, 1].iter() {
-                let check_time =
-                    (current_timestamp as i64 + time_offset * self.config.period as i64) as u64;
-                let expected_code = Self::generate_totp(
-                    &enrollment.secret,
-                    check_time,
-                    self.config.period,
-                    self.config.digits,
-                )?;
+            // Use totp-rs for validation (it handles constant-time comparison internally)
+            let totp = self.create_totp_instance(&enrollment.secret)?;
 
-                // Constant-time comparison
-                if constant_time_eq(expected_code.as_bytes(), request.code.as_bytes()) {
-                    // Update last used time
-                    enrollment.last_used = Some(current_time);
+            // Validate against current time (totp-rs handles skew if configured, we passed skew=1)
+            let is_valid = totp.check(&request.code, current_timestamp);
 
-                    let data = serde_json::to_vec(&enrollment)
-                        .map_err(|e| SecretonError::Internal { message: format!("Failed to serialize enrollment: {}", e) })?;
+            if is_valid {
+                 // Update last used time
+                enrollment.last_used = Some(current_time);
 
-                    // Encrypt again
-                    let encrypted_data = self.crypto.encrypt_data(&data).await
-                        .map_err(|e| SecretonError::Encryption { message: format!("Failed to encrypt updated TOTP data: {}", e) })?;
+                let data = serde_json::to_vec(&enrollment)
+                    .map_err(|e| SecretonError::Internal { message: format!("Failed to serialize enrollment: {}", e) })?;
 
-                    let mut updated_entry = entry.clone();
-                    updated_entry.encrypted_data = encrypted_data;
+                // Encrypt again
+                let encrypted_data = self.crypto.encrypt_data(&data).await
+                    .map_err(|e| SecretonError::Encryption { message: format!("Failed to encrypt updated TOTP data: {}", e) })?;
 
-                    self.storage.store(&updated_entry).await
-                        .map_err(|e| SecretonError::Database { message: format!("Failed to update enrollment: {}", e) })?;
+                let mut updated_entry = entry.clone();
+                updated_entry.encrypted_data = encrypted_data;
 
-                    return Ok(true);
-                }
+                self.storage.store(&updated_entry).await
+                    .map_err(|e| SecretonError::Database { message: format!("Failed to update enrollment: {}", e) })?;
+
+                return Ok(true);
             }
         }
 

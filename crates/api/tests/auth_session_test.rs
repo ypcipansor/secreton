@@ -11,7 +11,11 @@ mod tests {
     async fn test_session_lifecycle() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let config = AuthConfig::default();
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
+
         let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.expect("Failed to create auth service");
 
         // 1. Initial State
