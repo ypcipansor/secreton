@@ -22,6 +22,8 @@ pub fn create_routes() -> Router<AppState> {
 pub struct InitRequest {
     pub shares: u8,
     pub threshold: u8,
+    pub root_username: Option<String>,
+    pub root_password: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +36,16 @@ async fn initialize(
     State(state): State<AppState>,
     Json(payload): Json<InitRequest>,
 ) -> ApiResult<Json<ApiResponse<InitResponse>>> {
-    let result = state.seal.init(payload.shares, payload.threshold).await
+    let root_username = payload.root_username.as_deref().unwrap_or("root");
+
+    let result = state.seal.init(
+        payload.shares,
+        payload.threshold,
+        root_username,
+        &payload.root_password,
+        &state.auth,
+        &state.mfa
+    ).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
     Ok(Json(ApiResponse::success(result)))
 }

@@ -85,6 +85,20 @@ pub struct InMemorySmsService {
     config: SmsConfig,
 }
 
+impl Default for SmsConfig {
+    fn default() -> Self {
+        Self {
+            provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+            api_key: "".to_string(),
+            api_secret: None,
+            from_number: "".to_string(),
+            message_template: "Your Secreton code is {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        }
+    }
+}
+
 impl InMemorySmsService {
     pub fn new(config: SmsConfig) -> Self {
         Self {

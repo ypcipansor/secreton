@@ -393,6 +393,7 @@ impl SecurityAPI {
         audit: Arc<crate::services::audit::AuditLogger>,
         seal: Arc<crate::services::seal::SealService>,
         secreton: Arc<crate::services::secret::SecretService>,
+        mfa: Arc<secreton_auth::mfa::CombinedMfaService>,
         backend_type: String,
     ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let storage_filter = warp::any().map(move || storage.clone());
@@ -402,6 +403,7 @@ impl SecurityAPI {
         let audit_filter = warp::any().map(move || audit.clone());
         let seal_filter = warp::any().map(move || seal.clone());
         let secreton_filter = warp::any().map(move || secreton.clone());
+        let mfa_filter = warp::any().map(move || mfa.clone());
 
         // Auth filter
         let auth_service = auth.clone();
@@ -443,6 +445,8 @@ impl SecurityAPI {
             .and(warp::post())
             .and(warp::body::json())
             .and(seal_filter.clone())
+            .and(auth_filter.clone())
+            .and(mfa_filter.clone())
             .and_then(handle_sys_init);
 
         let sys_unseal = api_v1
@@ -622,6 +626,8 @@ async fn handle_secret_delete(
 struct SysInitRequest {
     shares: u8,
     threshold: u8,
+    root_username: Option<String>,
+    root_password: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -631,9 +637,12 @@ struct SysUnsealRequest {
 
 async fn handle_sys_init(
     req: SysInitRequest,
-    seal: Arc<crate::services::seal::SealService>
+    seal: Arc<crate::services::seal::SealService>,
+    auth: Arc<crate::services::auth::AuthenticationService>,
+    mfa: Arc<secreton_auth::mfa::CombinedMfaService>,
 ) -> Result<impl Reply, Rejection> {
-    let result = seal.init(req.shares, req.threshold).await
+    let root_username = req.root_username.as_deref().unwrap_or("root");
+    let result = seal.init(req.shares, req.threshold, root_username, &req.root_password, &auth, &mfa).await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(result)))
 }
@@ -954,10 +963,21 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
         performance
     ).await.unwrap());
 
+    // Initialize MFA for start_security_server (mock)
+    let mfa = Arc::new(secreton_auth::mfa::CombinedMfaService::new(
+        Arc::new(secreton_auth::mfa::InMemoryTotpService::new("secreton-dev".to_string())),
+        Arc::new(secreton_auth::mfa::InMemorySmsService::new(secreton_auth::mfa::SmsConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(secreton_auth::mfa::EmailConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryHardwareService::new()),
+        Arc::new(secreton_auth::mfa::DefaultPushService::new_mock()),
+        Arc::new(secreton_auth::mfa::DefaultWebAuthnService::new_default()),
+        Arc::new(secreton_auth::mfa::DefaultRecoveryCodeService::new()),
+    ));
+
     // Inject storage, auth and audit into routes
     // For start_security_server, we just use the mock storage since this function
     // doesn't accept storage configuration
-    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton, "Memory (Mock)".to_string())
+    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton, mfa, "Memory (Mock)".to_string())
         .with(
             warp::cors()
                 .allow_any_origin()

@@ -24,11 +24,16 @@ async fn test_database_api_endpoints() {
     // Since new() requires many dependencies, constructing struct directly is easier if fields are public.
     // ApiState fields are public.
 
+    use secreton_api::ssh::SshApiState;
+    use secreton_api::totp::TotpApiState;
+
     let state = ApiState {
         kv: KVApiState::default(),
         transit: TransitApiState::default(),
         database: DatabaseApiState::default(),
         pki: PkiApiState::default(),
+        ssh: SshApiState::default(),
+        totp: TotpApiState::default(),
         config: config.clone(),
         secreton: Arc::new(secreton_common::StandardServiceContainer::default()),
         auth: auth.clone(),
