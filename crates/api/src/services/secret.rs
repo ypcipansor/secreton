@@ -113,10 +113,10 @@ impl SecretService {
         path: &str,
         action: &str,
     ) -> Result<(), SecretError> {
-        // Admin/Superuser bypass
-        if user.roles.iter().any(|r| r == "admin" || r == "superuser") || user.is_superuser {
-            return Ok(());
-        }
+        // Strict Secret Isolation: Admin/Superuser cannot bypass data access policies.
+        // They can only manage system configurations or resources they explicitly own.
+        // Exception: "sys/" paths might be administrative.
+        // We removed the blanket bypass.
 
         // RBAC Check
         // Resolve role IDs
@@ -186,6 +186,14 @@ impl SecretService {
         let encrypted_entry = self.storage.get_by_path(path).await
             .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
+
+        // Strict Ownership Check
+        // "User satu sama lain tidak dapat mengakses secret user yang lain... user root dan admin tidak bisa melihat"
+        let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
+        if encrypted_entry.owner_id != user_uuid {
+             // Deny access even if RBAC allowed it (unless it's a shared secret system, but prompt implies strict isolation)
+             return Err(SecretError::PermissionDenied(format!("Access to secret '{}' is restricted to its owner.", path)));
+        }
 
         // Decrypt the secret data
         let decrypted_data = self.crypto.decrypt(&encrypted_entry.encrypted_data).await
@@ -263,6 +271,13 @@ impl SecretService {
         );
         entry.version = version;
 
+        // Ensure we are not overwriting someone else's secret
+        if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            if existing.owner_id != owner_id {
+                 return Err(SecretError::PermissionDenied(format!("Cannot overwrite secret '{}' owned by another user.", path)));
+            }
+        }
+
         // Store encrypted data
         self.storage.store(&entry).await
             .map_err(SecretError::Storage)?;
@@ -299,12 +314,19 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "delete").await?;
 
-        // Check if secret exists before deletion
-        let exists = self.storage.get_by_path(path).await
-            .map_err(SecretError::Storage)?
-            .is_some();
+        // Check if secret exists and check ownership
+        let entry = self.storage.get_by_path(path).await
+            .map_err(SecretError::Storage)?;
 
-        if !exists {
+        if let Some(e) = entry {
+            let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
+            // Ownership check: Only owner can delete (unless it's a system admin action which deletes the USER, handled elsewhere)
+            // But prompt says "root/admin cannot... delete... unless deleting user data".
+            // So direct secret deletion must be owner-only.
+            if e.owner_id != user_uuid {
+                return Err(SecretError::PermissionDenied(format!("Deletion of secret '{}' restricted to owner.", path)));
+            }
+        } else {
             return Err(SecretError::SecretNotFound { path: path.to_string() });
         }
 
