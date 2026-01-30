@@ -65,26 +65,24 @@ impl SshEngine {
         let user_pub_key = PublicKey::from_openssh(public_key_str)
             .map_err(|e| SecretError::InvalidSecretData(format!("Invalid public key: {}", e)))?;
 
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let expire = now + ttl;
+
         // Build Certificate
-        // Compiler indicates 4 arguments, last two are u64 and u64.
-        // Assuming serial and timestamp/nonce or similar.
+        // new_with_random_nonce(rng, pub_key, valid_after, valid_before)
         let mut cert_builder = ssh_key::certificate::Builder::new_with_random_nonce(
             &mut OsRng,
             user_pub_key,
-            0, // u64
-            0, // u64
+            now,
+            expire,
         ).map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
 
+        cert_builder.serial(0).map_err(|e| SecretError::CryptoError(e.to_string()))?;
         cert_builder.cert_type(ssh_key::certificate::CertType::User).map_err(|e| SecretError::CryptoError(e.to_string()))?;
 
         for p in valid_principals {
             cert_builder.valid_principal(p).map_err(|e| SecretError::CryptoError(e.to_string()))?;
         }
-
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        // Validity methods are elusive. Commenting out for now to ensure compilation.
-        // cert_builder.valid_after(now);
-        // cert_builder.valid_before(now + ttl);
 
         // Sign
         let cert = cert_builder.sign(&ca_key)

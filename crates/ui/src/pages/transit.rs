@@ -111,7 +111,10 @@ pub fn TransitPage() -> impl IntoView {
                         set_output_result.set(res.ciphertext);
                         set_error_msg.set(None);
                     },
-                    Err(e) => set_error_msg.set(Some(format!("Encryption failed: {:?}", e))),
+                    Err(e) => {
+                        set_output_result.set(String::new());
+                        set_error_msg.set(Some(format!("Encryption failed: {:?}", e)));
+                    },
                 }
             }
         }
@@ -133,10 +136,16 @@ pub fn TransitPage() -> impl IntoView {
                                 set_output_result.set(s);
                                 set_error_msg.set(None);
                             },
-                            Err(_) => set_error_msg.set(Some("Failed to decode plaintext result".to_string())),
+                            Err(_) => {
+                                set_output_result.set(String::new());
+                                set_error_msg.set(Some("Failed to decode plaintext result".to_string()));
+                            },
                         }
                     },
-                    Err(e) => set_error_msg.set(Some(format!("Decryption failed: {:?}", e))),
+                    Err(e) => {
+                        set_output_result.set(String::new());
+                        set_error_msg.set(Some(format!("Decryption failed: {:?}", e)));
+                    },
                 }
             }
         }
