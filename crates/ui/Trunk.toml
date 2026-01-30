@@ -8,7 +8,7 @@ port = 8081
 open = false
 ws_protocol = "ws"
 
-# Proxy configuration for Database/PKI/Transit/SSH endpoints served by Axum
+# Proxy configuration for Database/PKI/Transit/SSH/TOTP endpoints served by Axum
 # Note: The backend port 8090 assumes the API server is running on default port 8080 (offset +10).
 # If the API server port is changed, this must be updated manually.
 [[proxy]]
@@ -26,6 +26,10 @@ backend = "http://127.0.0.1:8090/api/v1/transit/"
 [[proxy]]
 rewrite = "/api/v1/ssh/"
 backend = "http://127.0.0.1:8090/api/v1/ssh/"
+
+[[proxy]]
+rewrite = "/api/v1/totp/"
+backend = "http://127.0.0.1:8090/api/v1/totp/"
 
 [[proxy]]
 rewrite = "/api/v1/"

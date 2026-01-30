@@ -1096,6 +1096,7 @@ pub mod transit;
 pub mod database;
 pub mod pki;
 pub mod ssh;
+pub mod totp;
 pub mod extractors;
 pub mod handlers;
 pub mod auth;
@@ -1105,6 +1106,7 @@ pub use kv::KVApiState;
 pub use database::DatabaseApiState;
 pub use pki::PkiApiState;
 pub use ssh::SshApiState;
+pub use totp::TotpApiState;
 pub use secreton_performance::OptimizationLevel;
 pub use transit::TransitApiState;
 
@@ -1116,6 +1118,7 @@ pub struct ApiState {
     pub database: DatabaseApiState,
     pub pki: PkiApiState,
     pub ssh: SshApiState,
+    pub totp: TotpApiState,
     pub config: std::sync::Arc<crate::config::ApiConfig>,
     pub secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
     pub auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
@@ -1138,6 +1141,7 @@ impl ApiState {
             database: DatabaseApiState::default(),
             pki: PkiApiState::default(),
             ssh: SshApiState::default(),
+            totp: TotpApiState::default(),
             config,
             secreton,
             auth,
@@ -1157,6 +1161,7 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
         .nest("/api/v1/database", database::create_database_router())
         .nest("/api/v1/pki", pki::create_pki_router())
         .nest("/api/v1/ssh", ssh::create_ssh_router())
+        .nest("/api/v1/totp", totp::create_totp_router())
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .layer(CorsLayer::new()
