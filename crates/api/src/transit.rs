@@ -13,7 +13,7 @@ use tracing::{info, warn};
 use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions};
 
 // Import ApiState from the parent module
-use crate::ApiState;
+use crate::{ApiState, ApiResponse};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -28,40 +28,40 @@ impl Default for TransitApiState {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListKeysResponse {
     pub keys: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct CreateKeyRequest {
     pub key_type: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateKeyResponse {
     pub success: bool,
     pub message: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct EncryptRequest {
     pub plaintext: String,       // base64 encoded
     pub context: Option<String>, // base64 encoded
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EncryptResponse {
     pub ciphertext: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct DecryptRequest {
     pub ciphertext: String,
     pub context: Option<String>, // base64 encoded
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DecryptResponse {
     pub plaintext: String, // base64 encoded
 }
@@ -74,16 +74,16 @@ pub fn create_transit_router() -> Router<()> {
         .route("/decrypt/{key_name}", post(decrypt_data))
 }
 
-pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ListKeysResponse> {
+pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ApiResponse<ListKeysResponse>> {
     let keys = state.transit.engine.list_keys().await;
-    Json(ListKeysResponse { keys })
+    Json(ApiResponse::success(ListKeysResponse { keys }))
 }
 
 pub async fn create_key(
     Path(key_name): Path<String>,
     Extension(state): Extension<ApiState>,
     Json(request): Json<CreateKeyRequest>,
-) -> Result<Json<CreateKeyResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
     // Parse key type from string to KeyType enum
     let key_type = match request.key_type.as_deref().unwrap_or("aes256-gcm") {
         "aes256-gcm" => KeyType::Aes256Gcm,
@@ -109,10 +109,10 @@ pub async fn create_key(
     {
         Ok(_) => {
             info!("Created key: {}", key_name);
-            Ok(Json(CreateKeyResponse {
+            Ok(Json(ApiResponse::success(CreateKeyResponse {
                 success: true,
                 message: format!("Key '{}' created", key_name),
-            }))
+            })))
         }
         Err(e) => {
             warn!("Failed to create key {}: {:?}", key_name, e);
@@ -126,7 +126,7 @@ pub async fn encrypt_data(
     Extension(state): Extension<ApiState>,
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
-) -> Result<Json<EncryptResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<EncryptResponse>>, StatusCode> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 plaintext
@@ -153,7 +153,7 @@ pub async fn encrypt_data(
     {
         Ok(ciphertext) => {
             info!("Encrypted data with key: {}", key_name);
-            Ok(Json(EncryptResponse { ciphertext }))
+            Ok(Json(ApiResponse::success(EncryptResponse { ciphertext })))
         }
         Err(e) => {
             warn!("Failed to encrypt with key {}: {:?}", key_name, e);
@@ -167,7 +167,7 @@ pub async fn decrypt_data(
     Extension(state): Extension<ApiState>,
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
-) -> Result<Json<DecryptResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<DecryptResponse>>, StatusCode> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode context if provided
@@ -188,9 +188,9 @@ pub async fn decrypt_data(
     {
         Ok(plaintext_bytes) => {
             info!("Decrypted data with key: {}", key_name);
-            Ok(Json(DecryptResponse {
+            Ok(Json(ApiResponse::success(DecryptResponse {
                 plaintext: BASE64.encode(&plaintext_bytes),
-            }))
+            })))
         }
         Err(e) => {
             warn!("Failed to decrypt with key {}: {:?}", key_name, e);

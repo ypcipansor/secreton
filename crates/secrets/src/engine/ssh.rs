@@ -8,6 +8,8 @@ use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
+use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding, Certificate};
+use ssh_key::rand_core::OsRng;
 
 /// ssh secret engine
 pub struct SshEngine {
@@ -22,6 +24,72 @@ impl SshEngine {
             enabled: false,
         }
     }
+
+    /// Generate a new Ed25519 CA key pair
+    pub fn generate_ca(&mut self) -> SecretResult<(String, String)> {
+        let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+            .map_err(|e| SecretError::CryptoError(e.to_string()))?;
+
+        let public_key = private_key.public_key();
+
+        // Encode keys
+        let priv_pem = private_key.to_openssh(LineEnding::LF)
+            .map_err(|e| SecretError::CryptoError(e.to_string()))?
+            .to_string();
+
+        let pub_str = public_key.to_openssh()
+            .map_err(|e| SecretError::CryptoError(e.to_string()))?;
+
+        // Update config
+        self.config.ca_private_key = Some(priv_pem.clone());
+        self.config.ca_public_key = Some(pub_str.clone());
+
+        Ok((priv_pem, pub_str))
+    }
+
+    /// Sign a public key
+    pub fn sign_key(
+        &self,
+        public_key_str: &str,
+        valid_principals: Vec<String>,
+        ttl: u64,
+    ) -> SecretResult<String> {
+        // Load CA Key
+        let ca_priv_pem = self.config.ca_private_key.as_ref()
+            .ok_or_else(|| SecretError::InvalidConfiguration("CA private key not configured".to_string()))?;
+
+        let ca_key = PrivateKey::from_openssh(ca_priv_pem)
+            .map_err(|e| SecretError::CryptoError(format!("Invalid CA key: {}", e)))?;
+
+        // Parse Public Key to sign
+        let user_pub_key = PublicKey::from_openssh(public_key_str)
+            .map_err(|e| SecretError::InvalidSecretData(format!("Invalid public key: {}", e)))?;
+
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let expire = now + ttl;
+
+        // Build Certificate
+        // new_with_random_nonce(rng, pub_key, valid_after, valid_before)
+        let mut cert_builder = ssh_key::certificate::Builder::new_with_random_nonce(
+            &mut OsRng,
+            user_pub_key,
+            now,
+            expire,
+        ).map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
+
+        cert_builder.serial(0).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        cert_builder.cert_type(ssh_key::certificate::CertType::User).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+
+        for p in valid_principals {
+            cert_builder.valid_principal(p).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        }
+
+        // Sign
+        let cert = cert_builder.sign(&ca_key)
+            .map_err(|e| SecretError::CryptoError(format!("Signing failed: {}", e)))?;
+
+        Ok(cert.to_string())
+    }
 }
 
 #[async_trait]
@@ -35,11 +103,31 @@ impl SecretEngine for SshEngine {
         Ok(())
     }
 
-    async fn read(&self, _path: &str) -> SecretResult<Option<Secret>> {
+    async fn read(&self, path: &str) -> SecretResult<Option<Secret>> {
         if !self.enabled {
             return Err(SecretError::EngineNotFound("Ssh".to_string()));
         }
-        Ok(None)
+
+        match path {
+            "config/ca" => {
+                if let (Some(pub_key), _) = (&self.config.ca_public_key, &self.config.ca_private_key) {
+                     let mut data = HashMap::new();
+                     data.insert("public_key".to_string(), Value::String(pub_key.clone()));
+                     // Do not return private key on read usually, unless explicitly requested or for backup
+                     Ok(Some(Secret {
+                        id: Uuid::new_v4(),
+                        path: path.to_string(),
+                        data,
+                        metadata: SecretMetadata::default(),
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None)
+        }
     }
 
     async fn write(&mut self, path: &str, data: HashMap<String, Value>) -> SecretResult<Secret> {
@@ -48,8 +136,70 @@ impl SecretEngine for SshEngine {
         }
 
         match path {
+            "config/ca" => {
+                // Generate new CA
+                let (priv_k, pub_k) = self.generate_ca()?;
+                let mut resp_data = HashMap::new();
+                resp_data.insert("public_key".to_string(), Value::String(pub_k));
+                // Return private key once here? Or just store it.
+                // Typically we return it once if generated.
+                resp_data.insert("private_key".to_string(), Value::String(priv_k));
+
+                Ok(Secret {
+                    id: Uuid::new_v4(),
+                    path: path.to_string(),
+                    data: resp_data,
+                    metadata: SecretMetadata::default(),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                })
+            }
+            "sign" => {
+                // Sign Key
+                let public_key = data.get("public_key")
+                    .and_then(|v| v.as_str())
+                    .ok_or(SecretError::InvalidSecretData("Missing 'public_key'".to_string()))?;
+
+                let principals_val = data.get("valid_principals");
+                let principals: Vec<String> = if let Some(v) = principals_val {
+                    if let Some(arr) = v.as_array() {
+                        arr.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect()
+                    } else if let Some(s) = v.as_str() {
+                        vec![s.to_string()]
+                    } else {
+                         vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
+                let ttl = data.get("ttl")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(self.config.default_lease_ttl);
+
+                let signed_cert = self.sign_key(public_key, principals, ttl)?;
+
+                let mut resp_data = HashMap::new();
+                resp_data.insert("signed_key".to_string(), Value::String(signed_cert));
+
+                Ok(Secret {
+                     id: Uuid::new_v4(),
+                    path: path.to_string(),
+                    data: resp_data,
+                    metadata: SecretMetadata {
+                        version: 1,
+                        created_by: "ssh-engine".to_string(),
+                        updated_by: "ssh-engine".to_string(),
+                        lease_id: None,
+                        lease_duration: Some(ttl),
+                        ..Default::default()
+                    },
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                })
+            }
             "keys" => {
-                // Generate SSH key pair
+                // Generate SSH key pair (Old Logic)
                 let key_data = self.generate_ssh_key(&data).await?;
                 Ok(Secret {
                     id: Uuid::new_v4(),
@@ -102,7 +252,7 @@ impl SecretEngine for SshEngine {
 }
 
 impl SshEngine {
-    /// Generate SSH key pair using Ed25519
+    /// Generate SSH key pair using Ed25519 (Legacy method kept for 'keys' path)
     async fn generate_ssh_key(
         &self,
         data: &HashMap<String, Value>,

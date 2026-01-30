@@ -6,3 +6,6 @@ pub mod pki;
 pub mod policies;
 pub mod audit;
 pub mod not_found;
+pub mod transit;
+pub mod ssh;
+pub mod totp;
