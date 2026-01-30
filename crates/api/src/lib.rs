@@ -627,7 +627,6 @@ struct SysInitRequest {
     shares: u8,
     threshold: u8,
     root_username: Option<String>,
-    root_password: String,
 }
 
 #[derive(Debug, Deserialize)]

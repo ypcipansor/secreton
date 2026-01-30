@@ -233,15 +233,16 @@ impl SealService {
 
         tracing::info!("Root token generated internally but discarded to enforce zero-trust/MFA.");
 
-        // Clear root key immediately
-        self.crypto.clear_root_key().await;
-
         let root_user = root_user_result.map_err(|e| anyhow!("Failed to create root user: {}", e))?;
 
         // Enable TOTP for Root
+        // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
         let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
         let totp_config = mfa.enable_totp(user_uuid, root_user.username.clone()).await
             .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
+
+        // Clear root key immediately after use
+        self.crypto.clear_root_key().await;
 
         Ok(InitResponse {
             keys: keys_hex,
