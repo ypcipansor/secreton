@@ -249,6 +249,11 @@ impl AuthenticationService {
 
     /// Authenticate user with username and password
     pub async fn login(&self, req: ApiLoginRequest) -> ApiResult<ApiLoginResponse> {
+        // Root user cannot login via password (authentication is handled via unseal/SSS token)
+        if req.username == "root" {
+             return Err(secreton_errors::SecretonError::Authentication { message: "Root login disabled via password. Use unseal process.".to_string() }.into());
+        }
+
         // Check lockout status before attempting login
         let user_path = format!("{}{}", USER_STORAGE_PREFIX, req.username);
         let user_entry = self.storage.get_by_path(&user_path).await.ok().flatten();

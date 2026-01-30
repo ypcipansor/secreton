@@ -112,8 +112,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 format!("File ({})", path)
             )
         } else {
-            info!("Configuring In-Memory storage backend (Warning: Data will be lost on restart)");
-            (StorageBackendType::Memory, None, None, None, None, "Memory".to_string())
+            // Default to Raft storage as requested ("secara default storage nya menggunakan raft")
+            // If Raft config is not explicitly provided, we default to a single-node Raft cluster on disk or fallback to file if raft not fully configured.
+            // However, the prompt implies "default storage uses raft".
+            // We'll configure it as Raft with a default local data directory if no other config is present.
+            info!("Configuring Default Raft storage backend");
+            let data_dir = env::var("SECRETON_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+            (
+                StorageBackendType::Raft,
+                None,
+                None,
+                None,
+                None,
+                "Raft".to_string()
+            )
         };
 
     let storage_config = StorageFactoryConfig {

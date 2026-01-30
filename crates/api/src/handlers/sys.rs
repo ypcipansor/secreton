@@ -23,7 +23,7 @@ pub struct InitRequest {
     pub shares: u8,
     pub threshold: u8,
     pub root_username: Option<String>,
-    pub root_password: String,
+    // root_password removed as root has no password login
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,7 +42,6 @@ async fn initialize(
         payload.shares,
         payload.threshold,
         root_username,
-        &payload.root_password,
         &state.auth,
         &state.mfa
     ).await

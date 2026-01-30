@@ -642,7 +642,7 @@ async fn handle_sys_init(
     mfa: Arc<secreton_auth::mfa::CombinedMfaService>,
 ) -> Result<impl Reply, Rejection> {
     let root_username = req.root_username.as_deref().unwrap_or("root");
-    let result = seal.init(req.shares, req.threshold, root_username, &req.root_password, &auth, &mfa).await
+    let result = seal.init(req.shares, req.threshold, root_username, &auth, &mfa).await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(result)))
 }

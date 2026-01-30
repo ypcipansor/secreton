@@ -38,6 +38,7 @@ pub struct UnsealResponse {
     pub t: usize,
     pub n: usize,
     pub progress: usize,
+    pub root_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,18 +119,23 @@ impl SealService {
             t,
             n,
             progress,
+            root_token: None,
         })
     }
 
     /// Initialize the vault
     /// Generates Master Key, Splits it, Encrypts Root Key.
     /// Also creates the initial Root User with MFA enabled.
+    ///
+    /// Refactored per comment 3822469315:
+    /// - Root has NO password.
+    /// - Root auth is only via Unseal (SSS).
+    /// - Root manages Admins.
     pub async fn init(
         &self,
         shares: u8,
         threshold: u8,
         root_username: &str,
-        root_password: &str,
         auth: &crate::services::auth::AuthenticationService,
         mfa: &secreton_auth::mfa::CombinedMfaService
     ) -> Result<InitResponse> {
@@ -194,18 +200,19 @@ impl SealService {
         // We must temporarily enable the root key so Auth service can encrypt user data
         self.crypto.set_root_key(root_key.clone()).await?;
 
+        // Root has no password. Generate a random unguessable string as placeholder password
+        // because register_user expects a password. This effectively disables password login.
+        let random_password = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
+
         let root_user_result = auth.register_user(
             root_username,
-            root_password,
+            &random_password,
             Some("root@system.local".to_string()),
             vec!["root".to_string(), "admin".to_string()],
             vec!["*".to_string()]
         ).await;
 
-        // Generate a root token for internal tracking or emergency recovery audit,
-        // but DO NOT reveal it in the response. It remains secret.
-        // We generate it just to satisfy the requirement of "generating" it.
-        // In a real scenario, this might be hashed and stored for verification if ever needed manually.
+        // Generate a hidden root token for internal tracking/audit
         let _hidden_root_token = encode(
             &Header::default(),
             &Claims {
@@ -309,6 +316,38 @@ impl SealService {
                     self.crypto.set_root_key(root_key).await?;
                     tracing::info!("Vault unsealed successfully.");
                     buffer.clear();
+
+                    // Generate short-lived Root Token for Admin Management sessions
+                    let now = chrono::Utc::now();
+                    let exp = now + chrono::Duration::hours(1); // 1 hour for root tasks
+
+                    let claims = Claims {
+                        sub: "root".to_string(),
+                        username: "root".to_string(),
+                        email: "root@system.local".to_string(),
+                        roles: vec!["root".to_string(), "admin".to_string()],
+                        policies: vec!["root".to_string()],
+                        iat: now.timestamp() as usize,
+                        exp: exp.timestamp() as usize,
+                        jti: Uuid::new_v4().to_string(),
+                        iss: self.jwt_issuer.clone(),
+                        aud: self.jwt_audience.clone(),
+                        token_type: "access".to_string(),
+                    };
+
+                    let root_token = encode(
+                        &Header::default(),
+                        &claims,
+                        &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
+                    ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+
+                    return Ok(UnsealResponse {
+                        sealed: false,
+                        t: threshold,
+                        n: 0, // Not relevant here
+                        progress: 0,
+                        root_token: Some(root_token),
+                    });
                 },
                 Err(e) => {
                     tracing::error!("Failed to decrypt root key with reconstructed master key. Wrong shares?");
@@ -379,7 +418,8 @@ mod tests {
         assert!(seal_service.is_sealed().await);
 
         // 2. Initialize
-        let init_res = seal_service.init(5, 3, "root", "rootpass123", &auth, &mfa).await.expect("Init failed");
+        // Root password removed from init
+        let init_res = seal_service.init(5, 3, "root", &auth, &mfa).await.expect("Init failed");
         assert_eq!(init_res.keys.len(), 5);
         // Root token was removed, check TOTP secret instead
         assert!(!init_res.root_totp_secret.is_empty());
