@@ -11,6 +11,7 @@ use crate::pages::policies::PoliciesList;
 use crate::pages::audit::AuditLog;
 use crate::pages::not_found::NotFound;
 use crate::pages::transit::TransitPage;
+use crate::pages::ssh::SshPage;
 use crate::components::Layout;
 
 #[component]
@@ -29,6 +30,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("database") view=DatabaseSecrets />
                         <Route path=path!("pki") view=PkiPage />
                         <Route path=path!("transit") view=TransitPage />
+                        <Route path=path!("ssh") view=SshPage />
                         <Route path=path!("policies") view=PoliciesList />
                         <Route path=path!("audit") view=AuditLog />
                     </ParentRoute>

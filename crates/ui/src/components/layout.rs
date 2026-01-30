@@ -106,6 +106,14 @@ pub fn Layout(children: Children) -> impl IntoView {
                         <span>"Transit"</span>
                     </Link>
                     <Link
+                        href="/ssh"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
+                        <span class="text-lg">"🖥️"</span>
+                        <span>"SSH"</span>
+                    </Link>
+                    <Link
                         href="/policies"
                         class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
                         active_class="bg-gray-800 text-white shadow-inner"

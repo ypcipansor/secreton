@@ -157,6 +157,8 @@ pub struct SshConfig {
     pub max_lease_ttl: u64,
     pub allowed_users: Vec<String>,
     pub allowed_extensions: Vec<String>,
+    pub ca_private_key: Option<String>,
+    pub ca_public_key: Option<String>,
 }
 
 /// TOTP engine configuration

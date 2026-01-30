@@ -1095,6 +1095,7 @@ pub mod kv;
 pub mod transit;
 pub mod database;
 pub mod pki;
+pub mod ssh;
 pub mod extractors;
 pub mod handlers;
 pub mod auth;
@@ -1103,6 +1104,7 @@ pub mod auth;
 pub use kv::KVApiState;
 pub use database::DatabaseApiState;
 pub use pki::PkiApiState;
+pub use ssh::SshApiState;
 pub use secreton_performance::OptimizationLevel;
 pub use transit::TransitApiState;
 
@@ -1113,6 +1115,7 @@ pub struct ApiState {
     pub transit: TransitApiState,
     pub database: DatabaseApiState,
     pub pki: PkiApiState,
+    pub ssh: SshApiState,
     pub config: std::sync::Arc<crate::config::ApiConfig>,
     pub secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
     pub auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
@@ -1134,6 +1137,7 @@ impl ApiState {
             transit: transit_state,
             database: DatabaseApiState::default(),
             pki: PkiApiState::default(),
+            ssh: SshApiState::default(),
             config,
             secreton,
             auth,
@@ -1147,108 +1151,12 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
     use axum::middleware;
     use tower_http::cors::{CorsLayer, Any};
 
-    // Note: We use with_state(state) which returns Router<ApiState>? No, it returns Router.
-    // Router::new().with_state(state) returns Router<()>.
-    // Wait, Router::new() -> Router<()>.
-    // .nest() requires the nested router to have compatible state.
-    // The sub-routers (kv, transit...) are created as Router<()>.
-    // If we call .with_state(state) at the end, it transforms Router<()> into Router<()> effectively injecting the state?
-    // Actually, with_state transforms Router<S> to Router<NewS> (usually ()).
-    // So if we have routes that need ApiState, we should construct them such.
-    // But our sub-routers are `Router<()>`. They extract state via Extension currently?
-    // No, we migrated them to `Extension<ApiState>`. `Extension` works regardless of `Router` state type as long as it's in the layer.
-    // BUT `auth_middleware` uses `State<ApiState>`. This requires the router to have that state.
-    // If `create_api_router` returns `Router`, it usually means `Router<()>`.
-    // When we call `.with_state(state)`, the resulting router handles the state internally and exposes `Router<()>`.
-
-    // The error `expected (), found ApiState` suggests the `create_api_router` signature expects `Router` (which defaults to `Router<()>`),
-    // but `with_state` might be returning something else or `state` passed is wrong?
-    // Actually, `Router::new()` is `Router<()>`.
-    // `.with_state(state)` consumes `Router<S>` and returns `Router<()>`.
-    // The issue might be that `nest` expects `Router<S>` (where S is ())?
-    // If `kv::create_kv_router()` returns `Router<()>`, then `nest` works.
-
-    // The error says: expected `()`, found `ApiState`.
-    // This usually happens if `Router` was inferred to be `Router<()>` somewhere, but we are providing `ApiState`.
-    // Ah, `create_api_router` return type is `axum::Router` -> `axum::Router<()>`.
-    // `with_state` returns `Router<()>` if the input state matches.
-    // Wait, if we start with `Router::new()`, S is `()`.
-    // `.route_layer(middleware::from_fn_with_state(state.clone(), ...))` -> this middleware likely enforces S=ApiState?
-    // No, `from_fn_with_state` allows the middleware to have its own state independent of the router's S.
-    //
-    // However, if `auth_middleware` uses `State<ApiState>`, it extracts from the router's state.
-    // If we use `from_fn_with_state`, the state is injected into the middleware specifically.
-    // The middleware function signature:
-    // async fn auth_middleware(State(state): State<ApiState>, ...)
-    // If using `from_fn_with_state`, the middleware gets that state. It does NOT extract from the Router's global state S.
-    // So the router S can remain `()`.
-    //
-    // So why did I add `.with_state(state)`? Because review said "Missing .with_state() call causes auth middleware to fail".
-    // If I use `from_fn_with_state`, I don't need `.with_state` on the router for THAT middleware.
-    // BUT, if other handlers (converted to `State<ApiState>`) need it, then we need `.with_state`.
-    // I did NOT convert handlers to `State<ApiState>`, they use `Extension<ApiState>`.
-    // So `with_state` is actually redundant if `auth_middleware` is the only one using `State`.
-    // AND `auth_middleware` uses `from_fn_with_state`.
-    //
-    // Wait, `from_fn_with_state` provides the state to the middleware.
-    // The middleware signature `State(state): State<ApiState>` extracts it.
-    // This works fine.
-    //
-    // The review said: "The create_api_router function uses middleware::from_fn_with_state(state.clone(), auth_middleware) which requires the router to have state configured via .with_state()."
-    // This claim in the review might be slightly misunderstood or I misunderstood it.
-    // If `from_fn_with_state` is used, the middleware has access to that state.
-    // The `State` extractor in the middleware extracts the state provided to `from_fn_with_state`.
-    //
-    // However, let's look at the error again:
-    // error[E0308]: mismatched types
-    //    --> crates/api/src/lib.rs:1165:21
-    //     |
-    // 1165 |         .with_state(state)
-    //      |          ---------- ^^^^^ expected `()`, found `ApiState`
-    //
-    // `Router::new()` is `Router<()>`.
-    // `.with_state(state)`: `state` is `ApiState`.
-    // `with_state` expects `S` (the current state of the router).
-    // NO! `with_state` PROVICES the state to the router, transforming `Router<S>` to `Router<()>` usually?
-    // Actually: `pub fn with_state<S2>(self, state: S) -> Router<S2>`
-    // It transforms `Router<S>` into `Router<S2>`? No.
-    // It creates a `Router` that has state `S` baked in?
-    //
-    // If I have `Router<()>` (from `Router::new()`), and call `with_state(api_state)`,
-    // it typically fails because `Router::new()` expects its handlers to NOT require state (or require `()`).
-    // But my handlers use `Extension`, so they don't care about `State`.
-    //
-    // If I want to use `with_state`, I should probably NOT start with `Router::new()` if I intended the router to BE `Router<ApiState>`.
-    // But `axum::Router` is alias for `Router<()>`.
-    //
-    // If `auth_middleware` works with `from_fn_with_state`, I don't need `with_state`.
-    // I suspect the "fix" I applied (`with_state`) is what caused the compile error because `Router::new()` creates a `Router<()>` which implies `S=()`.
-    // Calling `with_state(ApiState)` on `Router<()>` is invalid because `()` != `ApiState`.
-    // `with_state` is used to provide the state value for a `Router<S>`.
-    // Since `Router::new()` is `Router<()>`, `with_state` expects `()`.
-    //
-    // To make a `Router<ApiState>`, I shouldn't use `Router::new()`. I should use `Router::with_state`? No.
-    // Usually you build `Router::new()` then attach routes that expect `S`, then call `.with_state(s)` to finalize it into `Router<()>`.
-    // But my routes (via `create_kv_router` etc) return `Router<()>`.
-    // So the whole tree is `Router<()>`.
-    //
-    // The review claim: "Missing .with_state() call causes auth middleware to fail at runtime... because middleware cannot extract the required State<ApiState>."
-    // This is true if `from_fn_with_state` was NOT used, or if `from_fn` was used with `State` extractor.
-    // But `from_fn_with_state` explicitly provides the state.
-    //
-    // Let's verify if `State` extractor works with `from_fn_with_state`.
-    // Documentation says yes.
-    //
-    // So, `with_state` is likely unnecessary and incorrect here because the router is `Router<()>`.
-    // I will remove `.with_state(state)`.
-    //
-    // AND I will check if I need to revert `state.clone()` in `Extension`.
-
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
         .nest("/api/v1/transit", transit::create_transit_router())
         .nest("/api/v1/database", database::create_database_router())
         .nest("/api/v1/pki", pki::create_pki_router())
+        .nest("/api/v1/ssh", ssh::create_ssh_router())
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .layer(CorsLayer::new()
