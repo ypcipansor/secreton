@@ -8,7 +8,7 @@ port = 8081
 open = false
 ws_protocol = "ws"
 
-# Proxy configuration for Database/PKI endpoints served by Axum
+# Proxy configuration for Database/PKI/Transit endpoints served by Axum
 # Note: The backend port 8090 assumes the API server is running on default port 8080 (offset +10).
 # If the API server port is changed, this must be updated manually.
 [[proxy]]
@@ -18,6 +18,10 @@ backend = "http://127.0.0.1:8090/api/v1/database/"
 [[proxy]]
 rewrite = "/api/v1/pki/"
 backend = "http://127.0.0.1:8090/api/v1/pki/"
+
+[[proxy]]
+rewrite = "/api/v1/transit/"
+backend = "http://127.0.0.1:8090/api/v1/transit/"
 
 [[proxy]]
 rewrite = "/api/v1/"
