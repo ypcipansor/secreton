@@ -158,9 +158,21 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
 
-        // Try to get from cache first
+        // Get encrypted secret from storage
+        let encrypted_entry = self.storage.get_by_path(path).await
+            .map_err(SecretError::Storage)?
+            .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
+
+        // Strict Ownership Check
+        // "User satu sama lain tidak dapat mengakses secret user yang lain... user root dan admin tidak bisa melihat"
+        let user_uuid = Self::get_user_uuid(user);
+        if encrypted_entry.owner_id != user_uuid {
+             // Deny access even if RBAC allowed it (unless it's a shared secret system, but prompt implies strict isolation)
+             return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+        }
+
+        // Try to get decrypted data from cache first
         if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
-            // Decrypt the cached data
             match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
                 Ok(secret_map) => {
                     // Log access in performance optimizer (cache hit)
@@ -174,9 +186,9 @@ impl SecretService {
                     return Ok(SecretData {
                         path: path.to_string(),
                         data: secret_map,
-                        version: 0, // Cache might not store version or we'd need to extend it
-                        created_at: chrono::Utc::now(), // Approximate
-                        updated_at: chrono::Utc::now(), // Approximate
+                        version: encrypted_entry.version, // Use actual version from storage
+                        created_at: encrypted_entry.created_at,
+                        updated_at: encrypted_entry.updated_at,
                     });
                 }
                 Err(_) => {
@@ -184,19 +196,6 @@ impl SecretService {
                     let _ = self.performance.invalidate_cached(path).await;
                 }
             }
-        }
-
-        // Get encrypted secret from storage
-        let encrypted_entry = self.storage.get_by_path(path).await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
-
-        // Strict Ownership Check
-        // "User satu sama lain tidak dapat mengakses secret user yang lain... user root dan admin tidak bisa melihat"
-        let user_uuid = Self::get_user_uuid(user);
-        if encrypted_entry.owner_id != user_uuid {
-             // Deny access even if RBAC allowed it (unless it's a shared secret system, but prompt implies strict isolation)
-             return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
         }
 
         // Decrypt the secret data
@@ -257,12 +256,19 @@ impl SecretService {
         // Parse user_id as UUID
         let owner_id = Self::get_user_uuid(user);
 
-        // Get existing secret to check for version
-        let version = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
-            existing.version + 1
+        // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
+        let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            (existing.version + 1, Some(existing.owner_id))
         } else {
-            1
+            (1, None)
         };
+
+        // Ensure we are not overwriting someone else's secret
+        if let Some(existing_owner_id) = existing_owner {
+            if existing_owner_id != owner_id {
+                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+            }
+        }
 
         // Create SecretEntry
         let mut entry = secreton_storage::SecretEntry::new(
@@ -273,13 +279,6 @@ impl SecretService {
             owner_id,
         );
         entry.version = version;
-
-        // Ensure we are not overwriting someone else's secret
-        if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
-            if existing.owner_id != owner_id {
-                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
-            }
-        }
 
         // Store encrypted data
         self.storage.store(&entry).await
