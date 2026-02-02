@@ -426,20 +426,28 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn validate(&self, request: MfaValidationRequest) -> AuthMethodResult<bool> {
+        // Try in-memory cache first for performance
         let enrollments = self.enrollments.read().await;
+        let has_memory_enrollment = enrollments.get(&request.entity_id)
+            .map(|e| e.methods.contains(&request.method))
+            .unwrap_or(false);
+        drop(enrollments);
 
-        if let Some(enrollment) = enrollments.get(&request.entity_id) {
-            // Check if the requested method is enrolled
-            if !enrollment.methods.contains(&request.method) {
-                return Ok(false);
-            }
-
-            // Validate using the specific method
-            drop(enrollments);
-            self.validate_method(&request).await
-        } else {
-            Ok(false)
+        // If found in memory, proceed with validation logic that delegates to underlying service
+        if has_memory_enrollment {
+            return self.validate_method(&request).await;
         }
+
+        // If not in memory, check if we should fallback to persistence
+        // Specifically for TOTP, the PersistentTotpService manages its own storage.
+        if request.method == MfaMethod::Totp {
+            // Attempt to validate directly against the persistent service
+            // This handles the case where the server restarted and memory cache is empty
+            return self.validate_method(&request).await;
+        }
+
+        // For other methods, default to false if no enrollment found in memory (assuming they don't have persistence implemented same way yet)
+        Ok(false)
     }
 
     async fn get_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<Option<MfaEnrollment>> {

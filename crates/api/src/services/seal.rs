@@ -378,7 +378,9 @@ mod tests {
     async fn test_seal_flow() {
         use crate::services::auth::AuthenticationService;
         use crate::config::AuthConfig;
-        use secreton_auth::mfa::{CombinedMfaService, InMemoryTotpService, InMemorySmsService, InMemoryEmailService, InMemoryHardwareService, DefaultPushService, DefaultWebAuthnService, DefaultRecoveryCodeService, SmsConfig, EmailConfig};
+        // Updated test to use PersistentTotpService instead of InMemoryTotpService to match production config
+        use crate::services::mfa_persistence::PersistentTotpService;
+        use secreton_auth::mfa::{CombinedMfaService, InMemorySmsService, InMemoryEmailService, InMemoryHardwareService, DefaultPushService, DefaultWebAuthnService, DefaultRecoveryCodeService, SmsConfig, EmailConfig};
 
         let storage = Arc::new(MockStorageBackend::new());
         // Clean env to ensure sealed start
@@ -393,8 +395,10 @@ mod tests {
         let mut config = config;
         config.jwt.secret = Some("test-secret-1234567890".to_string());
 
+        let persistent_totp = Arc::new(PersistentTotpService::new(storage.clone(), crypto.clone(), "secreton-test".to_string()));
+
         let mfa = Arc::new(CombinedMfaService::new(
-            Arc::new(InMemoryTotpService::new("secreton-test".to_string())),
+            persistent_totp,
             Arc::new(InMemorySmsService::new(SmsConfig::default())),
             Arc::new(InMemoryEmailService::new(EmailConfig::default())),
             Arc::new(InMemoryHardwareService::new()),
