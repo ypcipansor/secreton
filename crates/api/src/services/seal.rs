@@ -29,7 +29,6 @@ pub struct InitResponse {
     pub keys_base64: Vec<String>, // Base64 encoded shares
     // Root token removed for security
     pub root_totp_uri: String,
-    pub root_totp_secret: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -248,7 +247,7 @@ impl SealService {
             keys: keys_hex,
             keys_base64,
             root_totp_uri: totp_config.url,
-            root_totp_secret: totp_config.secret,
+            // Secret removed for security
         })
     }
 
@@ -427,7 +426,8 @@ mod tests {
         let init_res = seal_service.init(5, 3, "root", &auth, &mfa).await.expect("Init failed");
         assert_eq!(init_res.keys.len(), 5);
         // Root token was removed, check TOTP secret instead
-        assert!(!init_res.root_totp_secret.is_empty());
+        // assert!(!init_res.root_totp_secret.is_empty()); // Removed
+        assert!(!init_res.root_totp_uri.is_empty());
         assert!(seal_service.is_initialized().await);
         assert!(seal_service.is_sealed().await); // Still sealed
 
