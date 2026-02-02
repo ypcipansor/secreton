@@ -33,12 +33,6 @@ impl PersistentTotpService {
 
     /// Generate a random secret using totp-rs which handles Base32 encoding securely
     fn generate_secret() -> String {
-        // totp-rs doesn't expose a public random secret generator in the version used typically,
-        // but we can use the Secret type if available, or just generate bytes and encode.
-        // Or construct a TOTP object and get the secret.
-        // We will stick to generating random bytes and encoding them using the crate if possible,
-        // or just use `totp_rs::Secret::default().to_encoded().to_string()` if it exists.
-        // Checking common usage:
         // Use standard RNG + Base32
         let mut rng = rand::thread_rng();
         let bytes: Vec<u8> = (0..20).map(|_| rng.r#gen()).collect();
@@ -78,8 +72,6 @@ impl TotpService for PersistentTotpService {
     ) -> Result<TotpEnrollment, SecretonError> {
         let secret = Self::generate_secret();
 
-        // Use TOTP crate to generate URL if possible, or construct manually to be safe with format
-        // Re-using manual construction for stability unless totp-rs exposes easy builder
         let url = format!(
             "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm={}&digits={}&period={}",
             self.config.issuer,
@@ -142,8 +134,6 @@ impl TotpService for PersistentTotpService {
             // Allow a small grace period or strictly check if used within the same window
             if let Some(last_used) = enrollment.last_used {
                 let window_size = self.config.period as i64;
-                let time_diff = current_time.signed_duration_since(last_used).num_seconds();
-
                 // If used within the last window (or slightly more to be safe), reject.
                 // A stricter check is: (current / period) <= (last_used / period)
                 // If last used was in the same or future window (clock skew?), reject.
@@ -181,9 +171,13 @@ impl TotpService for PersistentTotpService {
 
                 return Ok(true);
             }
+            // Code is invalid
+            Ok(false)
+        } else {
+            // Enrollment not found
+            // Return error to distinguish from invalid code, as suggested by review
+            Err(SecretonError::NotFound { resource: format!("MFA enrollment for user {}", request.entity_id) })
         }
-
-        Ok(false)
     }
 
     async fn get_enrollment(

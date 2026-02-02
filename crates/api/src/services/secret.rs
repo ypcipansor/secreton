@@ -158,7 +158,7 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
 
-        // Get encrypted secret from storage
+        // Get encrypted secret from storage to verify ownership first (Fix Cache Bypass)
         let encrypted_entry = self.storage.get_by_path(path).await
             .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
@@ -402,18 +402,13 @@ impl SecretService {
     ) -> Result<Vec<SecretData>, SecretError> {
         // Parse user_id as UUID for ownership check
         let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
-        let is_admin = user.roles.iter().any(|r| r == "admin" || r == "superuser");
 
-        // Build query params
-        // Optimize: Use storage-level filtering for owner_id if not admin
-        let mut query = secreton_storage::QueryParams::new();
+        // Strict isolation: always filter by owner ID
+        let mut query = secreton_storage::QueryParams::new()
+            .with_owner(user_uuid);
 
         if let Some(p) = prefix {
             query = query.with_path_prefix(p.to_string());
-        }
-
-        if !is_admin {
-            query = query.with_owner(user_uuid);
         }
 
         // Get secrets from storage
@@ -1565,11 +1560,12 @@ mod list_secrets_tests {
         assert_eq!(secrets_user2.len(), 1);
         assert_eq!(secrets_user2[0].path, "app/user2/secret1");
 
-        // Test admin accessing list (should see all)
+        // Test admin accessing list (should see ZERO, because strict isolation is enforced)
         let admin_uuid = Uuid::new_v4();
         let admin = create_mock_user(&admin_uuid.to_string(), vec!["admin".to_string()]);
         let secrets_admin = service.list_secrets(None, &admin).await.unwrap();
 
-        assert_eq!(secrets_admin.len(), 2);
+        // Expectation changed from 2 to 0 to reflect strict Zero Trust isolation
+        assert_eq!(secrets_admin.len(), 0);
     }
 }
