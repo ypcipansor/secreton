@@ -46,6 +46,8 @@ jsonwebtoken.workspace = true
 
 # Utility crates
 base64.workspace = true
+base32.workspace = true
+totp-rs.workspace = true
 hex.workspace = true
 lru.workspace = true
 lazy_static.workspace = true

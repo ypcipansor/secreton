@@ -154,16 +154,60 @@ mod tests {
     use uuid::Uuid;
 
     async fn server_with_routes() -> (TestServer, String) {
-        let config = ApiConfig::default();
+        // Set root key for crypto service auto-unseal
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
+
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+
         let services = Arc::new(
             ApiServiceContainer::new(&config)
                 .await
                 .expect("Failed to create services"),
         );
 
+        // Bootstrap PolicyService with an admin policy
+        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+
+        let policy = Policy {
+            id: Uuid::new_v4(),
+            name: "admin_policy".to_string(),
+            policy_type: PolicyType::RBAC,
+            effect: PolicyEffect::Allow,
+            rules: vec![PolicyRule {
+                id: Uuid::new_v4(),
+                name: "allow_all".to_string(),
+                conditions: vec![],
+                actions: vec!["create".to_string(), "read".to_string(), "update".to_string(), "delete".to_string(), "list".to_string(), "list_versions".to_string(), "rotate".to_string(), "encrypt".to_string(), "decrypt".to_string(), "sign".to_string(), "verify".to_string(), "hash".to_string(), "write".to_string()],
+                resources: vec!["app/".to_string(), "keys/".to_string(), "sys/".to_string(), "key_data/".to_string(), "users/".to_string()],
+            }],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            enabled: true,
+        };
+        let p = services.policy.create_policy(policy).await.expect("failed to create policy");
+
+        let role = Role {
+            id: Uuid::new_v4(),
+            name: "admin".to_string(), // Matches user role
+            description: None,
+            parent_role: None,
+            policies: vec![p.id],
+            metadata: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        services.policy.create_role(role).await.expect("failed to create role");
+
         // Generate mock token
+        let user_id = Uuid::new_v4();
         let user = secreton_auth::User {
-            id: "mock_user".to_string(),
+            id: user_id.to_string(),
             username: "mock_user".to_string(),
             email: Some("mock@example.com".to_string()),
             display_name: Some("Mock User".to_string()),
@@ -198,7 +242,7 @@ mod tests {
             encrypted_data,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
-            Uuid::new_v4(),
+            user_id,
         );
         services.storage.store(&entry).await.ok();
 
@@ -1055,7 +1099,7 @@ pub async fn sign_data(
 
     // Sign data using secreton service
     let signature_result = state.secreton.sign_data(&request.key_id, &data, &user).await
-        .map_err(|e: crate::services::secret::SecretError| match e {
+        .map_err(|e| match e {
              secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
              _ => crate::ApiError::Internal(format!("Failed to operation: {}", e))
         })?;

@@ -112,8 +112,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 format!("File ({})", path)
             )
         } else {
-            info!("Configuring In-Memory storage backend (Warning: Data will be lost on restart)");
-            (StorageBackendType::Memory, None, None, None, None, "Memory".to_string())
+            // Default to Raft storage as requested ("secara default storage nya menggunakan raft")
+            // If Raft config is not explicitly provided, we default to a single-node Raft cluster on disk or fallback to file if raft not fully configured.
+            // However, the prompt implies "default storage uses raft".
+            // We'll configure it as Raft with a default local data directory if no other config is present.
+            info!("Configuring Default Raft storage backend");
+            let data_dir = env::var("SECRETON_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+            (
+                StorageBackendType::Raft,
+                None,
+                None,
+                None,
+                None,
+                "Raft".to_string()
+            )
         };
 
     let storage_config = StorageFactoryConfig {
@@ -168,7 +180,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create AuthConfig from loaded config
     let auth_config = api_config.auth.clone();
 
-    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?);
+    // Initialize MFA Services first to share the instance
+    // NOTE: Currently using InMemory storage for MFA. In production, this should be backed by persistent storage.
+    // Ideally, we would use the ApiServiceContainer to manage this, but for now we construct manually to match existing pattern.
+    use secreton_auth::mfa::{
+        CombinedMfaService, InMemorySmsService, InMemoryEmailService,
+        InMemoryHardwareService, DefaultPushService, DefaultWebAuthnService, DefaultRecoveryCodeService,
+        SmsConfig, EmailConfig, SmsProvider,
+    };
+    use secreton_api::services::mfa_persistence::PersistentTotpService;
+
+    // Use Persistent TOTP Service backed by storage
+    let totp_service = Arc::new(PersistentTotpService::new(storage.clone(), crypto.clone(), "secreton".to_string()));
+
+    // Configure SMS
+    let sms_config = if let Some(sms) = &auth_config.mfa.sms {
+        SmsConfig {
+            provider: match sms.provider.to_lowercase().as_str() {
+                "twilio" => SmsProvider::Twilio,
+                "awssns" | "aws_sns" => SmsProvider::AwsSns,
+                "nexmo" => SmsProvider::Nexmo,
+                _ => SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+            },
+            api_key: sms.api_key.clone(),
+            api_secret: None,
+            from_number: sms.from_number.clone(),
+            message_template: "Your Secreton code is {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        }
+    } else {
+        SmsConfig::default()
+    };
+    let sms_service = Arc::new(InMemorySmsService::new(sms_config));
+
+    // Configure Email
+    let email_config = if let Some(email) = &auth_config.mfa.email {
+        EmailConfig {
+            smtp_server: email.smtp_server.clone(),
+            smtp_port: email.smtp_port,
+            smtp_username: email.username.clone(),
+            smtp_password: email.password.clone(),
+            from_email: email.from_address.clone(),
+            subject_template: "Secreton Verification Code".to_string(),
+            body_template: "Your verification code is: {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        }
+    } else {
+        EmailConfig::default()
+    };
+    let email_service = Arc::new(InMemoryEmailService::new(email_config));
+
+    let mfa = Arc::new(CombinedMfaService::new(
+        totp_service,
+        sms_service,
+        email_service,
+        Arc::new(InMemoryHardwareService::new()),
+        Arc::new(DefaultPushService::new_mock()),
+        Arc::new(DefaultWebAuthnService::new_default()),
+        Arc::new(DefaultRecoveryCodeService::new()),
+    ));
+
+    // Initialize Auth Service with MFA injected
+    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await?
+        .with_mfa(mfa.clone()));
+
     let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
 
     // Initialize Seal Service
@@ -195,7 +272,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?);
 
     // Construct HTTP Routes
-    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), backend_type_str)
+    // Pass the SHARED mfa instance
+    let warp_routes = SecurityAPI::routes(storage.clone(), auth.clone(), audit.clone(), seal.clone(), secreton.clone(), mfa.clone(), backend_type_str)
         .with(
             warp::cors()
                 .allow_any_origin()

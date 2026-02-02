@@ -28,6 +28,7 @@ pub fn Login() -> impl IntoView {
 
     let (username, set_username) = signal("".to_string());
     let (password, set_password) = signal("".to_string());
+    let (mfa_code, set_mfa_code) = signal("".to_string());
     let (error, set_error) = signal(Option::<String>::None);
     let (loading, set_loading) = signal(false);
 
@@ -38,10 +39,11 @@ pub fn Login() -> impl IntoView {
 
         let navigate = navigate.clone(); // Clone for async block if needed, though use_navigate returns copy-able type usually
         spawn_local(async move {
+            let mfa_val = mfa_code.get_untracked();
             let req = LoginRequest {
                 username: username.get_untracked(),
                 password: password.get_untracked(),
-                mfa_code: None, // TODO: MFA support
+                mfa_code: if mfa_val.is_empty() { None } else { Some(mfa_val) },
                 remember_me: Some(true),
             };
 
@@ -101,6 +103,19 @@ pub fn Login() -> impl IntoView {
                                 placeholder="Password"
                                 prop:value=password
                                 on:input=move |ev| set_password.set(event_target_value(&ev))
+                                disabled=loading
+                            />
+                        </div>
+                        <div>
+                            <label for="mfa_code" class="sr-only">"MFA Code (Optional)"</label>
+                            <input
+                                id="mfa_code"
+                                name="mfa_code"
+                                type="text"
+                                class="relative block w-full px-3 py-2 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                placeholder="MFA Code (if required)"
+                                prop:value=mfa_code
+                                on:input=move |ev| set_mfa_code.set(event_target_value(&ev))
                                 disabled=loading
                             />
                         </div>

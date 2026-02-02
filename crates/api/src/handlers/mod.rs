@@ -122,7 +122,10 @@ mod tests {
     async fn test_root_endpoint() {
         use secreton_config::ApiConfig as SharedApiConfig;
         
-        let config = ApiConfig::default();
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
         let shared_config = SharedApiConfig::default();
         
         let services = Arc::new(
@@ -146,7 +149,10 @@ mod tests {
     async fn test_version_endpoint() {
         use secreton_config::ApiConfig as SharedApiConfig;
 
-        let config = ApiConfig::default();
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
         let shared_config = SharedApiConfig::default();
 
         let services = Arc::new(

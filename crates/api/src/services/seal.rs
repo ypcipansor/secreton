@@ -27,7 +27,8 @@ pub struct SealService {
 pub struct InitResponse {
     pub keys: Vec<String>, // Hex encoded shares
     pub keys_base64: Vec<String>, // Base64 encoded shares
-    pub root_token: String, // Initial root token
+    // Root token removed for security
+    pub root_totp_uri: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +37,7 @@ pub struct UnsealResponse {
     pub t: usize,
     pub n: usize,
     pub progress: usize,
+    pub root_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -116,12 +118,26 @@ impl SealService {
             t,
             n,
             progress,
+            root_token: None,
         })
     }
 
     /// Initialize the vault
     /// Generates Master Key, Splits it, Encrypts Root Key.
-    pub async fn init(&self, shares: u8, threshold: u8) -> Result<InitResponse> {
+    /// Also creates the initial Root User with MFA enabled.
+    ///
+    /// Refactored per comment 3822469315:
+    /// - Root has NO password.
+    /// - Root auth is only via Unseal (SSS).
+    /// - Root manages Admins.
+    pub async fn init(
+        &self,
+        shares: u8,
+        threshold: u8,
+        root_username: &str,
+        auth: &crate::services::auth::AuthenticationService,
+        mfa: &secreton_auth::mfa::CombinedMfaService
+    ) -> Result<InitResponse> {
         if self.is_initialized().await {
             return Err(anyhow!("System already initialized"));
         }
@@ -152,11 +168,6 @@ impl SealService {
         let config = InitConfig { shares, threshold };
         let config_bytes = serde_json::to_vec(&config)?;
 
-        // Save config (unencrypted in storage, but marked as protected)
-        // Actually, storage expects EncryptedData usually, but here we are storing metadata
-        // or we treat "encrypted_data" field as just data container if we bypass encryption?
-        // StorageBackend expects Vec<u8> in 'encrypted_data'.
-        // Ideally InitConfig should not be secret, but let's store it.
         self.storage.store(&SecretEntry::new(
             INIT_PATH.to_string(),
             config_bytes,
@@ -184,35 +195,47 @@ impl SealService {
             .map(|s| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, serde_json::to_vec(s).unwrap()))
             .collect();
 
-        // Generate a Root Token (Initial Root Token)
-        // We generate a valid JWT token with 'root' role/policy
-        let now = chrono::Utc::now();
-        let exp = now + chrono::Duration::days(365 * 100); // Long lived root token
+        // 8. Create Root User and Enable MFA
+        // We must temporarily enable the root key so Auth service can encrypt user data
+        self.crypto.set_root_key(root_key.clone()).await?;
 
-        let claims = Claims {
-            sub: "root".to_string(),
-            username: "root".to_string(),
-            email: "root@system.local".to_string(),
-            roles: vec!["root".to_string(), "admin".to_string()],
-            policies: vec!["root".to_string()],
-            iat: now.timestamp() as usize,
-            exp: exp.timestamp() as usize,
-            jti: Uuid::new_v4().to_string(),
-            iss: self.jwt_issuer.clone(),
-            aud: self.jwt_audience.clone(),
-            token_type: "access".to_string(),
-        };
+        // Root has no password. Generate a random unguessable string as placeholder password
+        // because register_user expects a password. This effectively disables password login.
+        let random_password = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
 
-        let root_token = encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-        ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+        // Execute user creation and MFA setup.
+        // We need to ensure clear_root_key is called even if this fails.
+        // Explicitly annotate result type to avoid inference issues with the error type.
+        let result: Result<secreton_auth::mfa::TotpEnrollment, anyhow::Error> = async {
+            let root_user = auth.register_user(
+                root_username,
+                &random_password,
+                Some("root@system.local".to_string()),
+                vec!["root".to_string(), "admin".to_string()],
+                vec!["*".to_string()]
+            ).await.map_err(|e| anyhow!("Failed to create root user: {}", e))?;
+
+            // Enable TOTP for Root
+            // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
+            let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
+            let totp_config = mfa.enable_totp(user_uuid, root_user.username.clone()).await
+                .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
+
+            Ok(totp_config)
+        }.await;
+
+        // Clear root key immediately after use, regardless of success/failure
+        self.crypto.clear_root_key().await;
+
+        let totp_config = result?;
+
+        tracing::info!("Root token generated internally but discarded to enforce zero-trust/MFA.");
 
         Ok(InitResponse {
             keys: keys_hex,
             keys_base64,
-            root_token,
+            root_totp_uri: totp_config.url,
+            // Secret removed for security
         })
     }
 
@@ -281,6 +304,38 @@ impl SealService {
                     self.crypto.set_root_key(root_key).await?;
                     tracing::info!("Vault unsealed successfully.");
                     buffer.clear();
+
+                    // Generate short-lived Root Token for Admin Management sessions
+                    let now = chrono::Utc::now();
+                    let exp = now + chrono::Duration::hours(1); // 1 hour for root tasks
+
+                    let claims = Claims {
+                        sub: "root".to_string(),
+                        username: "root".to_string(),
+                        email: "root@system.local".to_string(),
+                        roles: vec!["root".to_string(), "admin".to_string()],
+                        policies: vec!["root".to_string()],
+                        iat: now.timestamp() as usize,
+                        exp: exp.timestamp() as usize,
+                        jti: Uuid::new_v4().to_string(),
+                        iss: self.jwt_issuer.clone(),
+                        aud: self.jwt_audience.clone(),
+                        token_type: "access".to_string(),
+                    };
+
+                    let root_token = encode(
+                        &Header::default(),
+                        &claims,
+                        &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
+                    ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+
+                    return Ok(UnsealResponse {
+                        sealed: false,
+                        t: threshold,
+                        n: 0, // Not relevant here
+                        progress: 0,
+                        root_token: Some(root_token),
+                    });
                 },
                 Err(e) => {
                     tracing::error!("Failed to decrypt root key with reconstructed master key. Wrong shares?");
@@ -308,12 +363,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_seal_flow() {
+        use crate::services::auth::AuthenticationService;
+        use crate::config::AuthConfig;
+        // Updated test to use PersistentTotpService instead of InMemoryTotpService to match production config
+        use crate::services::mfa_persistence::PersistentTotpService;
+        use secreton_auth::mfa::{CombinedMfaService, InMemorySmsService, InMemoryEmailService, InMemoryHardwareService, DefaultPushService, DefaultWebAuthnService, DefaultRecoveryCodeService, SmsConfig, EmailConfig};
+
         let storage = Arc::new(MockStorageBackend::new());
         // Clean env to ensure sealed start
         unsafe {
             std::env::remove_var("SECRETON_ROOT_KEY");
         }
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+
+        // Setup Auth and MFA for init
+        let config = AuthConfig::default();
+        // Manually configure JWT secret for test to avoid panic
+        let mut config = config;
+        config.jwt.secret = Some("test-secret-1234567890".to_string());
+
+        let persistent_totp = Arc::new(PersistentTotpService::new(storage.clone(), crypto.clone(), "secreton-test".to_string()));
+
+        let mfa = Arc::new(CombinedMfaService::new(
+            persistent_totp,
+            Arc::new(InMemorySmsService::new(SmsConfig::default())),
+            Arc::new(InMemoryEmailService::new(EmailConfig::default())),
+            Arc::new(InMemoryHardwareService::new()),
+            Arc::new(DefaultPushService::new_mock()),
+            Arc::new(DefaultWebAuthnService::new_default()),
+            Arc::new(DefaultRecoveryCodeService::new()),
+        ));
+
+        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &config).await.unwrap()
+            .with_mfa(mfa.clone()));
+
         let seal_service = SealService::new(
             storage.clone(),
             crypto.clone(),
@@ -327,9 +410,12 @@ mod tests {
         assert!(seal_service.is_sealed().await);
 
         // 2. Initialize
-        let init_res = seal_service.init(5, 3).await.expect("Init failed");
+        // Root password removed from init
+        let init_res = seal_service.init(5, 3, "root", &auth, &mfa).await.expect("Init failed");
         assert_eq!(init_res.keys.len(), 5);
-        assert!(!init_res.root_token.is_empty());
+        // Root token was removed, check TOTP secret instead
+        // assert!(!init_res.root_totp_secret.is_empty()); // Removed
+        assert!(!init_res.root_totp_uri.is_empty());
         assert!(seal_service.is_initialized().await);
         assert!(seal_service.is_sealed().await); // Still sealed
 

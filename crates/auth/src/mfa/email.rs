@@ -74,6 +74,22 @@ pub struct InMemoryEmailService {
     config: EmailConfig,
 }
 
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            smtp_server: "localhost".to_string(),
+            smtp_port: 25,
+            smtp_username: "".to_string(),
+            smtp_password: "".to_string(),
+            from_email: "noreply@secreton.local".to_string(),
+            subject_template: "Secreton Code: {code}".to_string(),
+            body_template: "Your code is: {code}".to_string(),
+            code_length: 6,
+            code_expiry_seconds: 300,
+        }
+    }
+}
+
 impl InMemoryEmailService {
     pub fn new(config: EmailConfig) -> Self {
         Self {

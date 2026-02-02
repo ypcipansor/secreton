@@ -74,7 +74,10 @@ mod tests {
     use uuid::Uuid;
 
     async fn server_with_routes() -> TestServer {
-        let config = ApiConfig::default();
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
         let services = Arc::new(
             ApiServiceContainer::new(&config)
                 .await

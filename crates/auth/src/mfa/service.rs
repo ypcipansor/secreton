@@ -223,7 +223,7 @@ impl CombinedMfaService {
     }
 
     /// Enable SMS for an entity (initiate enrollment)
-    pub async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
+    pub async fn enable_sms_impl(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
         self.sms_service.enroll(entity_id, phone_number).await?;
         self.sms_service.send_code(entity_id).await?;
         Ok(())
@@ -255,7 +255,7 @@ impl CombinedMfaService {
     }
 
     /// Enable Email for an entity (initiate enrollment)
-    pub async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
+    pub async fn enable_email_impl(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
         self.email_service.enroll(entity_id, email).await?;
         self.email_service.send_code(entity_id).await?;
         Ok(())
@@ -287,7 +287,7 @@ impl CombinedMfaService {
     }
 
     /// Start WebAuthn registration
-    pub async fn start_webauthn_registration(
+    pub async fn start_webauthn_registration_impl(
         &self,
         entity_id: Uuid,
         user_name: &str,
@@ -299,7 +299,7 @@ impl CombinedMfaService {
     }
 
     /// Complete WebAuthn registration
-    pub async fn complete_webauthn_registration(
+    pub async fn complete_webauthn_registration_impl(
         &self,
         response: crate::mfa::webauthn::RegistrationResponse,
     ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
@@ -426,25 +426,57 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn validate(&self, request: MfaValidationRequest) -> AuthMethodResult<bool> {
+        // Try in-memory cache first for performance
         let enrollments = self.enrollments.read().await;
+        let has_memory_enrollment = enrollments.get(&request.entity_id)
+            .map(|e| e.methods.contains(&request.method))
+            .unwrap_or(false);
+        drop(enrollments);
 
-        if let Some(enrollment) = enrollments.get(&request.entity_id) {
-            // Check if the requested method is enrolled
-            if !enrollment.methods.contains(&request.method) {
-                return Ok(false);
-            }
-
-            // Validate using the specific method
-            drop(enrollments);
-            self.validate_method(&request).await
-        } else {
-            Ok(false)
+        // If found in memory, proceed with validation logic that delegates to underlying service
+        if has_memory_enrollment {
+            return self.validate_method(&request).await;
         }
+
+        // If not in memory, check if we should fallback to persistence
+        // Specifically for TOTP, the PersistentTotpService manages its own storage.
+        if request.method == MfaMethod::Totp {
+            // Attempt to validate directly against the persistent service
+            // This handles the case where the server restarted and memory cache is empty
+            return self.validate_method(&request).await;
+        }
+
+        // For other methods, default to false if no enrollment found in memory (assuming they don't have persistence implemented same way yet)
+        Ok(false)
     }
 
     async fn get_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<Option<MfaEnrollment>> {
+        // Try in-memory first
         let enrollments = self.enrollments.read().await;
-        Ok(enrollments.get(&entity_id).cloned())
+        if let Some(enrollment) = enrollments.get(&entity_id) {
+            return Ok(Some(enrollment.clone()));
+        }
+        drop(enrollments);
+
+        // Fallback to persistence for TOTP
+        // This constructs a partial MfaEnrollment if TOTP exists
+        if let Ok(Some(totp_enrollment)) = self.totp_service.get_enrollment(entity_id).await {
+            // Construct enrollment object
+            let enrollment = MfaEnrollment {
+                entity_id,
+                methods: vec![MfaMethod::Totp],
+                required_methods: vec![MfaMethod::Totp], // Assume required if enrolled
+                enrolled_at: totp_enrollment.creation_time,
+            };
+
+            // Populate cache for future use
+            let mut enrollments_write = self.enrollments.write().await;
+            enrollments_write.insert(entity_id, enrollment.clone());
+
+            return Ok(Some(enrollment));
+        }
+
+        Ok(None)
     }
 
     async fn update_enrollment(
@@ -512,8 +544,24 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn is_mfa_required(&self, entity_id: Uuid) -> AuthMethodResult<bool> {
+        // Try in-memory first
         let enrollments = self.enrollments.read().await;
-        Ok(enrollments.contains_key(&entity_id))
+        if enrollments.contains_key(&entity_id) {
+            return Ok(true);
+        }
+        drop(enrollments);
+
+        // Fallback to persistence check for TOTP
+        // Using get_enrollment instead of exists logic for now as interface doesn't strictly have `exists`
+        // Optimization: Could add `has_enrollment` to TotpService trait
+        if let Ok(Some(_)) = self.totp_service.get_enrollment(entity_id).await {
+            // Found in persistence, so MFA is required
+            // We should ideally populate the cache here too, or let get_enrollment do it next time
+            // For now, just return true
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     async fn enable_totp(
@@ -577,11 +625,11 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
-        self.enable_sms(entity_id, phone_number).await
+        self.enable_sms_impl(entity_id, phone_number).await
     }
 
     async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
-        self.enable_email(entity_id, email).await
+        self.enable_email_impl(entity_id, email).await
     }
 
     async fn start_webauthn_registration(
@@ -590,13 +638,13 @@ impl MfaService for CombinedMfaService {
         user_name: &str,
         display_name: &str,
     ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge> {
-        self.start_webauthn_registration(entity_id, user_name, display_name).await
+        self.start_webauthn_registration_impl(entity_id, user_name, display_name).await
     }
 
     async fn complete_webauthn_registration(
         &self,
         response: crate::mfa::webauthn::RegistrationResponse,
     ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
-        self.complete_webauthn_registration(response).await
+        self.complete_webauthn_registration_impl(response).await
     }
 }

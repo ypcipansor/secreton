@@ -11,9 +11,10 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use secreton_errors::SecretonError;
+use serde::{Serialize, Deserialize};
 
 /// TOTP configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpConfig {
     pub issuer: String,
     pub period: u32,       // Time step in seconds (usually 30)
@@ -22,7 +23,7 @@ pub struct TotpConfig {
 }
 
 /// TOTP enrollment
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpEnrollment {
     pub id: Uuid,
     pub entity_id: Uuid,
