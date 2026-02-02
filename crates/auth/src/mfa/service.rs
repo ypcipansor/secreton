@@ -451,8 +451,32 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn get_enrollment(&self, entity_id: Uuid) -> AuthMethodResult<Option<MfaEnrollment>> {
+        // Try in-memory first
         let enrollments = self.enrollments.read().await;
-        Ok(enrollments.get(&entity_id).cloned())
+        if let Some(enrollment) = enrollments.get(&entity_id) {
+            return Ok(Some(enrollment.clone()));
+        }
+        drop(enrollments);
+
+        // Fallback to persistence for TOTP
+        // This constructs a partial MfaEnrollment if TOTP exists
+        if let Ok(Some(totp_enrollment)) = self.totp_service.get_enrollment(entity_id).await {
+            // Construct enrollment object
+            let enrollment = MfaEnrollment {
+                entity_id,
+                methods: vec![MfaMethod::Totp],
+                required_methods: vec![MfaMethod::Totp], // Assume required if enrolled
+                enrolled_at: totp_enrollment.creation_time,
+            };
+
+            // Populate cache for future use
+            let mut enrollments_write = self.enrollments.write().await;
+            enrollments_write.insert(entity_id, enrollment.clone());
+
+            return Ok(Some(enrollment));
+        }
+
+        Ok(None)
     }
 
     async fn update_enrollment(
@@ -520,8 +544,24 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn is_mfa_required(&self, entity_id: Uuid) -> AuthMethodResult<bool> {
+        // Try in-memory first
         let enrollments = self.enrollments.read().await;
-        Ok(enrollments.contains_key(&entity_id))
+        if enrollments.contains_key(&entity_id) {
+            return Ok(true);
+        }
+        drop(enrollments);
+
+        // Fallback to persistence check for TOTP
+        // Using get_enrollment instead of exists logic for now as interface doesn't strictly have `exists`
+        // Optimization: Could add `has_enrollment` to TotpService trait
+        if let Ok(Some(_)) = self.totp_service.get_enrollment(entity_id).await {
+            // Found in persistence, so MFA is required
+            // We should ideally populate the cache here too, or let get_enrollment do it next time
+            // For now, just return true
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     async fn enable_totp(
