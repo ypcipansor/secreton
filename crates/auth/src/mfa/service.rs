@@ -223,7 +223,7 @@ impl CombinedMfaService {
     }
 
     /// Enable SMS for an entity (initiate enrollment)
-    pub async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
+    pub async fn enable_sms_impl(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
         self.sms_service.enroll(entity_id, phone_number).await?;
         self.sms_service.send_code(entity_id).await?;
         Ok(())
@@ -255,7 +255,7 @@ impl CombinedMfaService {
     }
 
     /// Enable Email for an entity (initiate enrollment)
-    pub async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
+    pub async fn enable_email_impl(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
         self.email_service.enroll(entity_id, email).await?;
         self.email_service.send_code(entity_id).await?;
         Ok(())
@@ -287,7 +287,7 @@ impl CombinedMfaService {
     }
 
     /// Start WebAuthn registration
-    pub async fn start_webauthn_registration(
+    pub async fn start_webauthn_registration_impl(
         &self,
         entity_id: Uuid,
         user_name: &str,
@@ -299,7 +299,7 @@ impl CombinedMfaService {
     }
 
     /// Complete WebAuthn registration
-    pub async fn complete_webauthn_registration(
+    pub async fn complete_webauthn_registration_impl(
         &self,
         response: crate::mfa::webauthn::RegistrationResponse,
     ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
@@ -625,11 +625,11 @@ impl MfaService for CombinedMfaService {
     }
 
     async fn enable_sms(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
-        self.enable_sms(entity_id, phone_number).await
+        self.enable_sms_impl(entity_id, phone_number).await
     }
 
     async fn enable_email(&self, entity_id: Uuid, email: String) -> AuthMethodResult<()> {
-        self.enable_email(entity_id, email).await
+        self.enable_email_impl(entity_id, email).await
     }
 
     async fn start_webauthn_registration(
@@ -638,13 +638,13 @@ impl MfaService for CombinedMfaService {
         user_name: &str,
         display_name: &str,
     ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge> {
-        self.start_webauthn_registration(entity_id, user_name, display_name).await
+        self.start_webauthn_registration_impl(entity_id, user_name, display_name).await
     }
 
     async fn complete_webauthn_registration(
         &self,
         response: crate::mfa::webauthn::RegistrationResponse,
     ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
-        self.complete_webauthn_registration(response).await
+        self.complete_webauthn_registration_impl(response).await
     }
 }
