@@ -203,45 +203,33 @@ impl SealService {
         // because register_user expects a password. This effectively disables password login.
         let random_password = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
 
-        let root_user_result = auth.register_user(
-            root_username,
-            &random_password,
-            Some("root@system.local".to_string()),
-            vec!["root".to_string(), "admin".to_string()],
-            vec!["*".to_string()]
-        ).await;
+        // Execute user creation and MFA setup.
+        // We need to ensure clear_root_key is called even if this fails.
+        // Explicitly annotate result type to avoid inference issues with the error type.
+        let result: Result<secreton_auth::mfa::TotpEnrollment, anyhow::Error> = async {
+            let root_user = auth.register_user(
+                root_username,
+                &random_password,
+                Some("root@system.local".to_string()),
+                vec!["root".to_string(), "admin".to_string()],
+                vec!["*".to_string()]
+            ).await.map_err(|e| anyhow!("Failed to create root user: {}", e))?;
 
-        // Generate a hidden root token for internal tracking/audit
-        let _hidden_root_token = encode(
-            &Header::default(),
-            &Claims {
-                sub: "root_internal".to_string(),
-                username: "root_internal".to_string(),
-                email: "root@system.local".to_string(),
-                roles: vec!["root".to_string()],
-                policies: vec!["root".to_string()],
-                iat: chrono::Utc::now().timestamp() as usize,
-                exp: (chrono::Utc::now() + chrono::Duration::days(365)).timestamp() as usize,
-                jti: Uuid::new_v4().to_string(),
-                iss: self.jwt_issuer.clone(),
-                aud: self.jwt_audience.clone(),
-                token_type: "access".to_string(),
-            },
-            &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-        ).unwrap_or_default();
+            // Enable TOTP for Root
+            // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
+            let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
+            let totp_config = mfa.enable_totp(user_uuid, root_user.username.clone()).await
+                .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
+
+            Ok(totp_config)
+        }.await;
+
+        // Clear root key immediately after use, regardless of success/failure
+        self.crypto.clear_root_key().await;
+
+        let totp_config = result?;
 
         tracing::info!("Root token generated internally but discarded to enforce zero-trust/MFA.");
-
-        let root_user = root_user_result.map_err(|e| anyhow!("Failed to create root user: {}", e))?;
-
-        // Enable TOTP for Root
-        // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
-        let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
-        let totp_config = mfa.enable_totp(user_uuid, root_user.username.clone()).await
-            .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
-
-        // Clear root key immediately after use
-        self.crypto.clear_root_key().await;
 
         Ok(InitResponse {
             keys: keys_hex,
