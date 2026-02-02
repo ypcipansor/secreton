@@ -8,11 +8,15 @@ use secreton_errors::SecretonError;
 use crate::services::crypto::CryptoService;
 use rand::Rng;
 use totp_rs::{Algorithm, TOTP};
+use std::collections::HashMap;
+use tokio::sync::Mutex;
 
 pub struct PersistentTotpService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     config: TotpConfig,
+    // Per-user locks to prevent replay race conditions within this instance
+    user_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
 }
 
 const TOTP_PREFIX: &str = "sys/mfa/totp/";
@@ -28,6 +32,7 @@ impl PersistentTotpService {
                 digits: 6,
                 algorithm: "SHA1".to_string(),
             },
+            user_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -61,6 +66,14 @@ impl PersistentTotpService {
             "".to_string(), // account_name not strictly needed for validation logic
         ).map_err(|e| SecretonError::Configuration { message: format!("Failed to create TOTP instance: {}", e) })
     }
+
+    // Helper to acquire a lock for a specific user
+    async fn acquire_user_lock(&self, user_id: Uuid) -> Arc<Mutex<()>> {
+        let mut locks = self.user_locks.lock().await;
+        locks.entry(user_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
 }
 
 #[async_trait]
@@ -70,6 +83,9 @@ impl TotpService for PersistentTotpService {
         entity_id: Uuid,
         account_name: String,
     ) -> Result<TotpEnrollment, SecretonError> {
+        let _user_lock = self.acquire_user_lock(entity_id).await;
+        let _guard = _user_lock.lock().await;
+
         let secret = Self::generate_secret();
 
         let url = format!(
@@ -117,6 +133,10 @@ impl TotpService for PersistentTotpService {
     }
 
     async fn validate(&self, request: TotpValidationRequest) -> Result<bool, SecretonError> {
+        // Serialize validation requests for the same user to prevent replay race conditions
+        let _user_lock = self.acquire_user_lock(request.entity_id).await;
+        let _guard = _user_lock.lock().await;
+
         let path = format!("{}{}", TOTP_PREFIX, request.entity_id);
 
         if let Some(entry) = self.storage.get_by_path(&path).await.map_err(|e| SecretonError::Database { message: e.to_string() })? {
@@ -200,6 +220,9 @@ impl TotpService for PersistentTotpService {
     }
 
     async fn remove_enrollment(&self, entity_id: Uuid) -> Result<(), SecretonError> {
+        let _user_lock = self.acquire_user_lock(entity_id).await;
+        let _guard = _user_lock.lock().await;
+
         let path = format!("{}{}", TOTP_PREFIX, entity_id);
         self.storage.delete_by_path(&path).await
             .map_err(|e| SecretonError::Database { message: format!("Failed to delete enrollment: {}", e) })?;
