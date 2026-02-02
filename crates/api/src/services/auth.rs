@@ -361,10 +361,8 @@ impl AuthenticationService {
             if let Some(mfa) = &self.mfa_service {
                 let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
-                // Check if MFA is configured for this user
-                // The PersistentTotpService uses "sys/mfa/totp/{user_id}"
-                let mfa_path = format!("sys/mfa/totp/{}", user_uuid);
-                let mfa_configured = self.storage.exists(&mfa_path).await.unwrap_or(false);
+                // Use MFA service to check requirement instead of raw storage lookup
+                let mfa_configured = mfa.is_mfa_required(user_uuid).await.unwrap_or(false);
 
                 if mfa_configured {
                     // If configured, strictly enforce code
