@@ -128,7 +128,10 @@ pub trait StorageBackend: Send + Sync {
     ) -> Result<(), CoreError>;
     async fn delete_secret(&self, path: &str, namespace: &str) -> Result<(), CoreError>;
     async fn list_users(&self) -> Result<Vec<secreton_auth::UserInfo>, CoreError>;
-    async fn get_user_details(&self, username: &str) -> Result<Option<secreton_auth::UserInfo>, CoreError>;
+    async fn get_user_details(
+        &self,
+        username: &str,
+    ) -> Result<Option<secreton_auth::UserInfo>, CoreError>;
 }
 
 pub enum StorageType {
@@ -1632,7 +1635,10 @@ impl StorageBackend for PostgresStorage {
         Ok(users)
     }
 
-    async fn get_user_details(&self, username: &str) -> Result<Option<secreton_auth::UserInfo>, CoreError> {
+    async fn get_user_details(
+        &self,
+        username: &str,
+    ) -> Result<Option<secreton_auth::UserInfo>, CoreError> {
         let client = self.pool.get().await.map_err(|e| CoreError::Database {
             message: e.to_string(),
         })?;

@@ -365,15 +365,18 @@ mod tests {
 
             // Check it's not the old default
             assert_ne!(config1.jwt_secret, "default-secret-change-in-production");
-            assert_ne!(config1.jwt_refresh_secret, "default-refresh-secret-change-in-production");
+            assert_ne!(
+                config1.jwt_refresh_secret,
+                "default-refresh-secret-change-in-production"
+            );
 
             // Check randomness (highly unlikely to match)
             assert_ne!(config1.jwt_secret, config2.jwt_secret);
             assert_ne!(config1.jwt_refresh_secret, config2.jwt_refresh_secret);
 
-        // Check length (UUID is 36 chars)
-        assert_eq!(config1.jwt_secret.len(), 36);
-        assert_eq!(config1.jwt_refresh_secret.len(), 36);
+            // Check length (UUID is 36 chars)
+            assert_eq!(config1.jwt_secret.len(), 36);
+            assert_eq!(config1.jwt_refresh_secret.len(), 36);
         }
     }
 }

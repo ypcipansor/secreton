@@ -1,20 +1,14 @@
 //! PKI Secrets Engine API endpoints
 
-use axum::{
-    Router,
-    extract::{Extension},
-    http::StatusCode,
-    response::Json,
-    routing::{post},
-};
-use secreton_secrets::{PkiEngine, SecretEngine, PkiConfig};
+use axum::{Router, extract::Extension, http::StatusCode, response::Json, routing::post};
 use chrono::Utc;
+use secreton_secrets::{PkiConfig, PkiEngine, SecretEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::ApiResponse;
 
@@ -63,8 +57,7 @@ pub struct CertResponse {
 
 /// Create the PKI router with all endpoints
 pub fn create_pki_router() -> Router<()> {
-    Router::new()
-        .route("/issue", post(issue_certificate))
+    Router::new().route("/issue", post(issue_certificate))
 }
 
 /// Generate a certificate
@@ -76,15 +69,24 @@ pub async fn issue_certificate(
     let mut engine = state.pki.engine.write().await;
 
     let mut data = HashMap::new();
-    data.insert("common_name".to_string(), Value::String(request.common_name));
+    data.insert(
+        "common_name".to_string(),
+        Value::String(request.common_name),
+    );
     if let Some(ttl) = request.ttl {
-        data.insert("ttl".to_string(), Value::Number(serde_json::Number::from(ttl)));
+        data.insert(
+            "ttl".to_string(),
+            Value::Number(serde_json::Number::from(ttl)),
+        );
     }
     if let Some(kt) = request.key_type {
         data.insert("key_type".to_string(), Value::String(kt));
     }
     if let Some(kb) = request.key_bits {
-        data.insert("key_bits".to_string(), Value::Number(serde_json::Number::from(kb)));
+        data.insert(
+            "key_bits".to_string(),
+            Value::Number(serde_json::Number::from(kb)),
+        );
     }
     if let Some(org) = request.organization {
         data.insert("organization".to_string(), Value::String(org));
@@ -94,9 +96,24 @@ pub async fn issue_certificate(
         Ok(secret) => {
             info!("Certificate issued");
             // Extract from secret.data
-            let cert = secret.data.get("certificate").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let key = secret.data.get("private_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let serial = secret.data.get("serial_number").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cert = secret
+                .data
+                .get("certificate")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let key = secret
+                .data
+                .get("private_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let serial = secret
+                .data
+                .get("serial_number")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let ttl = secret.data.get("ttl").and_then(|v| v.as_u64()).unwrap_or(0);
             let expiration = Utc::now().timestamp() + ttl as i64;
 

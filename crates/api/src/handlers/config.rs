@@ -1,11 +1,11 @@
-use crate::services::config::ConfigService;
 use crate::config::ApiConfig;
-use secreton_storage::StorageBackend;
-use crate::services::auth::AuthenticationService;
 use crate::services::audit::{AuditLogger, SecurityEventType};
-use warp::{Rejection, Reply};
+use crate::services::auth::AuthenticationService;
+use crate::services::config::ConfigService;
+use secreton_storage::StorageBackend;
 use std::sync::Arc;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
+use warp::{Rejection, Reply};
 
 /// Handler for saving configuration
 pub async fn handle_post_config(
@@ -15,7 +15,6 @@ pub async fn handle_post_config(
     auth: Arc<AuthenticationService>,
     audit: Arc<AuditLogger>,
 ) -> Result<impl Reply, Rejection> {
-
     let username;
 
     // Validate token and check permissions
@@ -23,14 +22,20 @@ pub async fn handle_post_config(
     match auth.validate_token(&token_str).await {
         Ok(user) => {
             // Check if user has admin permissions
-            let is_admin = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+            let is_admin =
+                user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
             if !is_admin {
-                warn!("Unauthorized config update attempt by user: {}", user.username);
-                return Err(warp::reject::custom(crate::ApiError::Authorization("Insufficient permissions".to_string())));
+                warn!(
+                    "Unauthorized config update attempt by user: {}",
+                    user.username
+                );
+                return Err(warp::reject::custom(crate::ApiError::Authorization(
+                    "Insufficient permissions".to_string(),
+                )));
             }
             username = user.username.clone();
             info!("Authorized config update by user: {}", username);
-        },
+        }
         Err(_) => {
             // Allow if bootstrapping (no users exist yet)
             // This allows the first configuration to be pushed which might set up auth
@@ -39,8 +44,10 @@ pub async fn handle_post_config(
                 info!("Allowing config update during bootstrapping (no users found)");
                 username = "bootstrapper".to_string();
             } else {
-                 warn!("Unauthorized config update attempt: invalid token");
-                 return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+                warn!("Unauthorized config update attempt: invalid token");
+                return Err(warp::reject::custom(crate::ApiError::Authentication(
+                    "Invalid token".to_string(),
+                )));
             }
         }
     }
@@ -72,19 +79,20 @@ pub async fn handle_post_config(
             info!("Configuration updated successfully");
 
             // Log audit event
-            let _ = audit.log_event(SecurityEventType::ConfigChange {
-                user: username,
-                changed_keys: vec!["all".to_string()], // We don't diff yet
-            }).await;
+            let _ = audit
+                .log_event(SecurityEventType::ConfigChange {
+                    user: username,
+                    changed_keys: vec!["all".to_string()], // We don't diff yet
+                })
+                .await;
 
             Ok(warp::reply::json(&crate::ApiResponse::<()>::success(())))
         }
         Err(e) => {
             error!("Failed to update configuration: {}", e);
-            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(format!(
-                "Failed to update configuration: {}",
-                e
-            ))))
+            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(
+                format!("Failed to update configuration: {}", e),
+            )))
         }
     }
 }
@@ -103,14 +111,20 @@ pub async fn handle_delete_config(
     match auth.validate_token(&token_str).await {
         Ok(user) => {
             // Check if user has admin permissions
-            let is_admin = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+            let is_admin =
+                user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
             if !is_admin {
-                warn!("Unauthorized config delete attempt by user: {}", user.username);
-                return Err(warp::reject::custom(crate::ApiError::Authorization("Insufficient permissions".to_string())));
+                warn!(
+                    "Unauthorized config delete attempt by user: {}",
+                    user.username
+                );
+                return Err(warp::reject::custom(crate::ApiError::Authorization(
+                    "Insufficient permissions".to_string(),
+                )));
             }
             username = user.username.clone();
             info!("Authorized config delete by user: {}", username);
-        },
+        }
         Err(_) => {
             // Allow if bootstrapping (no users exist yet)
             match auth.get_user_count().await {
@@ -120,12 +134,16 @@ pub async fn handle_delete_config(
                 }
                 Ok(_) => {
                     warn!("Unauthorized config delete attempt: invalid token");
-                    return Err(warp::reject::custom(crate::ApiError::Authentication("Invalid token".to_string())));
+                    return Err(warp::reject::custom(crate::ApiError::Authentication(
+                        "Invalid token".to_string(),
+                    )));
                 }
                 Err(e) => {
                     error!("Failed to check user count during config delete: {}", e);
                     // Fail closed if we can't verify user count
-                    return Err(warp::reject::custom(crate::ApiError::Internal("Failed to verify system state".to_string())));
+                    return Err(warp::reject::custom(crate::ApiError::Internal(
+                        "Failed to verify system state".to_string(),
+                    )));
                 }
             }
         }
@@ -138,39 +156,35 @@ pub async fn handle_delete_config(
             info!("Configuration deleted successfully");
 
             // Log audit event
-            let _ = audit.log_event(SecurityEventType::ConfigChange {
-                user: username,
-                changed_keys: vec!["deleted".to_string()],
-            }).await;
+            let _ = audit
+                .log_event(SecurityEventType::ConfigChange {
+                    user: username,
+                    changed_keys: vec!["deleted".to_string()],
+                })
+                .await;
 
             Ok(warp::reply::json(&crate::ApiResponse::<()>::success(())))
         }
         Err(e) => {
             error!("Failed to delete configuration: {}", e);
-            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(format!(
-                "Failed to delete configuration: {}",
-                e
-            ))))
+            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(
+                format!("Failed to delete configuration: {}", e),
+            )))
         }
     }
 }
 
 /// Handler for getting configuration
-pub async fn handle_get_config(
-    storage: Arc<dyn StorageBackend>,
-) -> Result<impl Reply, Rejection> {
+pub async fn handle_get_config(storage: Arc<dyn StorageBackend>) -> Result<impl Reply, Rejection> {
     info!("Received get configuration request");
 
     match ConfigService::load_config(storage.as_ref()).await {
-        Ok(config) => {
-            Ok(warp::reply::json(&crate::ApiResponse::success(config)))
-        }
+        Ok(config) => Ok(warp::reply::json(&crate::ApiResponse::success(config))),
         Err(e) => {
             error!("Failed to load configuration: {}", e);
-            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(format!(
-                "Failed to load configuration: {}",
-                e
-            ))))
+            Ok(warp::reply::json(&crate::ApiResponse::<()>::error(
+                format!("Failed to load configuration: {}", e),
+            )))
         }
     }
 }

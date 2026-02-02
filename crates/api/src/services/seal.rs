@@ -1,13 +1,13 @@
+use crate::services::crypto::CryptoService;
+use anyhow::{Result, anyhow};
+use jsonwebtoken::{EncodingKey, Header, encode};
+use secreton_crypto::shamir::{self, Share};
+use secreton_crypto::{AlgorithmId, EncryptedData};
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
-use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
 use uuid::Uuid;
-use crate::services::crypto::CryptoService;
-use secreton_crypto::{AlgorithmId, EncryptedData};
-use secreton_crypto::shamir::{self, Share};
-use jsonwebtoken::{encode, Header, EncodingKey};
 
 /// Seal/Unseal Service
 /// Manages the initialization and sealing status of the vault.
@@ -25,9 +25,9 @@ pub struct SealService {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitResponse {
-    pub keys: Vec<String>, // Hex encoded shares
+    pub keys: Vec<String>,        // Hex encoded shares
     pub keys_base64: Vec<String>, // Base64 encoded shares
-    pub root_token: String, // Initial root token
+    pub root_token: String,       // Initial root token
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,7 +89,11 @@ impl SealService {
     pub async fn is_initialized(&self) -> bool {
         // We use list instead of get to check existence without reading full data if possible,
         // but get is safer.
-        self.storage.get_by_path(INIT_PATH).await.unwrap_or(None).is_some()
+        self.storage
+            .get_by_path(INIT_PATH)
+            .await
+            .unwrap_or(None)
+            .is_some()
     }
 
     /// Check if the system is sealed
@@ -102,9 +106,9 @@ impl SealService {
         let sealed = self.is_sealed().await;
 
         let (t, n) = if let Ok(Some(entry)) = self.storage.get_by_path(INIT_PATH).await {
-             let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)
+            let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)
                 .map_err(|_| anyhow!("Failed to parse init config"))?;
-             (config.threshold as usize, config.shares as usize)
+            (config.threshold as usize, config.shares as usize)
         } else {
             (0, 0)
         };
@@ -130,7 +134,7 @@ impl SealService {
             return Err(anyhow!("Threshold cannot be greater than shares"));
         }
         if threshold < 2 {
-             return Err(anyhow!("Threshold must be at least 2"));
+            return Err(anyhow!("Threshold must be at least 2"));
         }
 
         // 1. Generate Master Key (32 bytes)
@@ -157,31 +161,46 @@ impl SealService {
         // or we treat "encrypted_data" field as just data container if we bypass encryption?
         // StorageBackend expects Vec<u8> in 'encrypted_data'.
         // Ideally InitConfig should not be secret, but let's store it.
-        self.storage.store(&SecretEntry::new(
-            INIT_PATH.to_string(),
-            config_bytes,
-            EncryptionMetadata::default(),
-            SecurityLevel::Public,
-            Uuid::nil()
-        )).await.map_err(|e| anyhow!("Failed to store init config: {}", e))?;
+        self.storage
+            .store(&SecretEntry::new(
+                INIT_PATH.to_string(),
+                config_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Public,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
 
         // 6. Store Encrypted Root Key
-        let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey { data: encrypted_root })?;
-        self.storage.store(&SecretEntry::new(
-            ROOT_KEY_PATH.to_string(),
-            enc_root_bytes,
-            EncryptionMetadata::default(),
-            SecurityLevel::TopSecret,
-            Uuid::nil()
-        )).await.map_err(|e| anyhow!("Failed to store root key: {}", e))?;
+        let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey {
+            data: encrypted_root,
+        })?;
+        self.storage
+            .store(&SecretEntry::new(
+                ROOT_KEY_PATH.to_string(),
+                enc_root_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::TopSecret,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
         // 7. Format Response
-        let keys_hex: Vec<String> = splits.iter()
+        let keys_hex: Vec<String> = splits
+            .iter()
             .map(|s| hex::encode(serde_json::to_vec(s).unwrap())) // We encode the whole Share struct
             .collect();
 
-        let keys_base64: Vec<String> = splits.iter()
-            .map(|s| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, serde_json::to_vec(s).unwrap()))
+        let keys_base64: Vec<String> = splits
+            .iter()
+            .map(|s| {
+                base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    serde_json::to_vec(s).unwrap(),
+                )
+            })
             .collect();
 
         // Generate a Root Token (Initial Root Token)
@@ -207,7 +226,8 @@ impl SealService {
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-        ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+        )
+        .map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
 
         Ok(InitResponse {
             keys: keys_hex,
@@ -229,12 +249,12 @@ impl SealService {
         let share_bytes = if let Ok(b) = hex::decode(share_str) {
             b
         } else {
-             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
                 .map_err(|_| anyhow!("Invalid share format (expected hex or base64)"))?
         };
 
-        let share: Share = serde_json::from_slice(&share_bytes)
-            .map_err(|_| anyhow!("Invalid share structure"))?;
+        let share: Share =
+            serde_json::from_slice(&share_bytes).map_err(|_| anyhow!("Invalid share structure"))?;
 
         let mut buffer = self.unseal_buffer.write().await;
 
@@ -245,11 +265,14 @@ impl SealService {
 
         // Check threshold
         let (threshold, _) = {
-             let entry = self.storage.get_by_path(INIT_PATH).await
+            let entry = self
+                .storage
+                .get_by_path(INIT_PATH)
+                .await
                 .map_err(|e| anyhow!("Storage error: {}", e))?
                 .ok_or(anyhow!("Init config missing"))?;
-             let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)?;
-             (config.threshold as usize, config.shares as usize)
+            let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)?;
+            (config.threshold as usize, config.shares as usize)
         };
 
         if buffer.len() >= threshold {
@@ -267,7 +290,10 @@ impl SealService {
             };
 
             // Get Encrypted Root Key
-            let entry = self.storage.get_by_path(ROOT_KEY_PATH).await
+            let entry = self
+                .storage
+                .get_by_path(ROOT_KEY_PATH)
+                .await
                 .map_err(|e| anyhow!("Storage error: {}", e))?
                 .ok_or(anyhow!("Root key missing"))?;
 
@@ -281,10 +307,15 @@ impl SealService {
                     self.crypto.set_root_key(root_key).await?;
                     tracing::info!("Vault unsealed successfully.");
                     buffer.clear();
-                },
+                }
                 Err(e) => {
-                    tracing::error!("Failed to decrypt root key with reconstructed master key. Wrong shares?");
-                    return Err(anyhow!("Failed to decrypt root key. Invalid shares? Error: {}", e));
+                    tracing::error!(
+                        "Failed to decrypt root key with reconstructed master key. Wrong shares?"
+                    );
+                    return Err(anyhow!(
+                        "Failed to decrypt root key. Invalid shares? Error: {}",
+                        e
+                    ));
                 }
             }
         }
@@ -319,7 +350,7 @@ mod tests {
             crypto.clone(),
             "test-secret".to_string(),
             "secreton".to_string(),
-            "secreton-api".to_string()
+            "secreton-api".to_string(),
         );
 
         // 1. Check initial state
@@ -334,17 +365,26 @@ mod tests {
         assert!(seal_service.is_sealed().await); // Still sealed
 
         // 3. Unseal (partial)
-        let status = seal_service.unseal(&init_res.keys[0]).await.expect("Unseal 1 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[0])
+            .await
+            .expect("Unseal 1 failed");
         assert!(status.sealed);
         assert_eq!(status.progress, 1);
 
         // 4. Unseal (partial)
-        let status = seal_service.unseal(&init_res.keys[1]).await.expect("Unseal 2 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[1])
+            .await
+            .expect("Unseal 2 failed");
         assert!(status.sealed);
         assert_eq!(status.progress, 2);
 
         // 5. Unseal (complete)
-        let status = seal_service.unseal(&init_res.keys[2]).await.expect("Unseal 3 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[2])
+            .await
+            .expect("Unseal 3 failed");
         assert!(!status.sealed);
         assert!(!seal_service.is_sealed().await);
 

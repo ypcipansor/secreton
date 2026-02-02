@@ -1,12 +1,12 @@
-use leptos::prelude::*;
-use leptos_router::hooks::{use_params_map, use_navigate};
-use leptos_router::components::A;
-use leptos::task::spawn_local;
 use crate::api;
 use crate::components::button::{Button, ButtonVariant};
 use crate::components::input::Input;
-use crate::components::Modal;
 use crate::components::Card;
+use crate::components::Modal;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use leptos_router::components::A;
+use leptos_router::hooks::{use_navigate, use_params_map};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -22,24 +22,20 @@ pub fn SecretsList() -> impl IntoView {
     let navigate = use_navigate();
 
     // Derived path from router
-    let path = move || {
-        params.with(|p| p.get("path").unwrap_or_default())
-    };
+    let path = move || params.with(|p| p.get("path").unwrap_or_default());
 
-    let secret_resource = LocalResource::new(
-        move || {
-            let current_path = path();
-            async move {
-                let url = if current_path.is_empty() {
-                    "/secrets/data/".to_string()
-                } else {
-                    format!("/secrets/data/{}", current_path)
-                };
+    let secret_resource = LocalResource::new(move || {
+        let current_path = path();
+        async move {
+            let url = if current_path.is_empty() {
+                "/secrets/data/".to_string()
+            } else {
+                format!("/secrets/data/{}", current_path)
+            };
 
-                api::get::<serde_json::Value>(&url).await
-            }
-        },
-    );
+            api::get::<serde_json::Value>(&url).await
+        }
+    });
 
     // Modal State
     let (show_modal, set_show_modal) = signal(false);
@@ -52,7 +48,11 @@ pub fn SecretsList() -> impl IntoView {
     // Helper to add a row
     let add_row = move || {
         set_kv_rows.update(|rows| {
-            rows.push(KvRow { id: next_id.get(), key: "".to_string(), value: "".to_string() });
+            rows.push(KvRow {
+                id: next_id.get(),
+                key: "".to_string(),
+                value: "".to_string(),
+            });
         });
         set_next_id.update(|n| *n += 1);
     };
@@ -84,7 +84,11 @@ pub fn SecretsList() -> impl IntoView {
     // Open Modal for Create (New)
     let open_create = move |_| {
         set_new_secret_path.set("".to_string());
-        set_kv_rows.set(vec![KvRow { id: 0, key: "".to_string(), value: "".to_string() }]);
+        set_kv_rows.set(vec![KvRow {
+            id: 0,
+            key: "".to_string(),
+            value: "".to_string(),
+        }]);
         set_next_id.set(1);
         set_show_modal.set(true);
     };
@@ -92,17 +96,25 @@ pub fn SecretsList() -> impl IntoView {
     // Open Modal for Edit (Existing)
     let open_edit = move |_| {
         if let Some(Ok(serde_json::Value::Object(map))) = secret_resource.get() {
-             let mut rows = Vec::new();
-             let mut id = 0;
-             for (k, v) in map {
-                 let val_str = if v.is_string() { v.as_str().unwrap().to_string() } else { v.to_string() };
-                 rows.push(KvRow { id, key: k.clone(), value: val_str });
-                 id += 1;
-             }
-             set_kv_rows.set(rows);
-             set_next_id.set(id);
-             set_new_secret_path.set("".to_string()); // Not used for edit
-             set_show_modal.set(true);
+            let mut rows = Vec::new();
+            let mut id = 0;
+            for (k, v) in map {
+                let val_str = if v.is_string() {
+                    v.as_str().unwrap().to_string()
+                } else {
+                    v.to_string()
+                };
+                rows.push(KvRow {
+                    id,
+                    key: k.clone(),
+                    value: val_str,
+                });
+                id += 1;
+            }
+            set_kv_rows.set(rows);
+            set_next_id.set(id);
+            set_new_secret_path.set("".to_string()); // Not used for edit
+            set_show_modal.set(true);
         }
     };
 
@@ -149,10 +161,17 @@ pub fn SecretsList() -> impl IntoView {
     let navigate_delete = navigate.clone();
     let handle_delete = move || {
         let current_path = path();
-        if current_path.is_empty() { return; }
+        if current_path.is_empty() {
+            return;
+        }
 
-        let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false);
-        if !confirm { return; }
+        let confirm = web_sys::window()
+            .unwrap()
+            .confirm_with_message(&format!("Delete secret at {}?", current_path))
+            .unwrap_or(false);
+        if !confirm {
+            return;
+        }
 
         let navigate = navigate_delete.clone();
         spawn_local(async move {

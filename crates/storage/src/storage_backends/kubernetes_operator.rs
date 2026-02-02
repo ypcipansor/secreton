@@ -129,7 +129,10 @@ impl KubernetesOperator {
         labels.insert("managed-by".to_string(), "secreton-operator".to_string());
 
         let mut annotations = HashMap::new();
-        annotations.insert("secreton.secreton.io/path".to_string(), secreton_path.to_string());
+        annotations.insert(
+            "secreton.secreton.io/path".to_string(),
+            secreton_path.to_string(),
+        );
 
         let secret = K8sSecret {
             name: name.to_string(),

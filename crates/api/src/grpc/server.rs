@@ -1,9 +1,11 @@
-use tonic::{Request, Response, Status};
-use secreton_grpc::secreton::v1::secret_service_server::SecretService;
-use secreton_grpc::secreton::v1::{GetSecretRequest, GetSecretResponse, PutSecretRequest, PutSecretResponse};
-use std::sync::Arc;
-use crate::services::secret::SecretService as CoreSecretService;
 use crate::services::auth::AuthenticationService;
+use crate::services::secret::SecretService as CoreSecretService;
+use secreton_grpc::secreton::v1::secret_service_server::SecretService;
+use secreton_grpc::secreton::v1::{
+    GetSecretRequest, GetSecretResponse, PutSecretRequest, PutSecretResponse,
+};
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
 
 pub struct GrpcSecretService {
     core_service: Arc<CoreSecretService>,
@@ -11,13 +13,23 @@ pub struct GrpcSecretService {
 }
 
 impl GrpcSecretService {
-    pub fn new(core_service: Arc<CoreSecretService>, auth_service: Arc<AuthenticationService>) -> Self {
-        Self { core_service, auth_service }
+    pub fn new(
+        core_service: Arc<CoreSecretService>,
+        auth_service: Arc<AuthenticationService>,
+    ) -> Self {
+        Self {
+            core_service,
+            auth_service,
+        }
     }
 
     // Helper to extract user from metadata by verifying token with AuthenticationService
-    async fn authenticate_user(&self, metadata: &tonic::metadata::MetadataMap) -> Result<secreton_auth::User, Status> {
-        let token_str = metadata.get("authorization")
+    async fn authenticate_user(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+    ) -> Result<secreton_auth::User, Status> {
+        let token_str = metadata
+            .get("authorization")
             .ok_or_else(|| Status::unauthenticated("Missing authorization header"))?
             .to_str()
             .map_err(|_| Status::invalid_argument("Invalid authorization header"))?;
@@ -29,7 +41,10 @@ impl GrpcSecretService {
             Err(e) => {
                 // Determine status code based on error type
                 // Assuming simple mapping for now
-                Err(Status::unauthenticated(format!("Authentication failed: {}", e)))
+                Err(Status::unauthenticated(format!(
+                    "Authentication failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -48,11 +63,7 @@ impl SecretService for GrpcSecretService {
 
         // Call Core Service with the authenticated user
         match self.core_service.get_secret(&req.path, &user).await {
-            Ok(secret) => {
-                 Ok(Response::new(GetSecretResponse {
-                    data: secret.data,
-                }))
-            }
+            Ok(secret) => Ok(Response::new(GetSecretResponse { data: secret.data })),
             Err(e) => {
                 // We should map SecretError to Status codes
                 // For simplified error handling:
@@ -70,14 +81,16 @@ impl SecretService for GrpcSecretService {
 
         let req = request.into_inner();
 
-        match self.core_service.put_secret(&req.path, req.data, &user).await {
-             Ok(secret) => {
-                 Ok(Response::new(PutSecretResponse {
-                    path: secret.path,
-                    version: secret.version.to_string(),
-                }))
-             }
-             Err(e) => Err(Status::internal(e.to_string()))
+        match self
+            .core_service
+            .put_secret(&req.path, req.data, &user)
+            .await
+        {
+            Ok(secret) => Ok(Response::new(PutSecretResponse {
+                path: secret.path,
+                version: secret.version.to_string(),
+            })),
+            Err(e) => Err(Status::internal(e.to_string())),
         }
     }
 }

@@ -1,8 +1,8 @@
+use crate::api::{delete, get, post};
+use crate::components::{Button, Card, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
-use crate::components::{Button, Card, Input};
-use crate::api::{post, get, delete};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateKeyRequest {
@@ -34,7 +34,8 @@ pub fn TotpPage() -> impl IntoView {
     let (create_msg, set_create_msg) = signal(Option::<String>::None);
 
     // Code Generation State
-    let (generated_codes, set_generated_codes) = signal(std::collections::HashMap::<String, String>::new());
+    let (generated_codes, set_generated_codes) =
+        signal(std::collections::HashMap::<String, String>::new());
 
     let fetch_keys = move || {
         set_loading_keys.set(true);

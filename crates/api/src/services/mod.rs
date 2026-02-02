@@ -3,39 +3,33 @@
 //! Provides centralized access to all application services
 //! including storage, crypto, authentication, and business logic.
 
-pub mod auth;
-pub mod secret;
 pub mod admin;
+pub mod auth;
 pub mod config;
+pub mod secret;
 
-use std::sync::Arc;
 use anyhow::Result;
-use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServiceContainer};
+use secreton_common::{InitResult, ServiceContainer, ServiceHealth, StandardServiceContainer};
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
+use std::sync::Arc;
 pub mod audit;
 pub mod crypto;
 pub mod seal;
+use crate::config::ApiConfig; // Use local ApiConfig with auth field
 use crate::services::audit::AuditLogger;
-use crate::config::ApiConfig;  // Use local ApiConfig with auth field
+use crate::services::auth::AuthenticationService;
 use crate::services::crypto::CryptoService;
 use crate::services::seal::SealService;
-use crate::services::auth::AuthenticationService;
 use secreton_auth::policies::service::PolicyService;
-use secreton_auth::{InMemoryIdentityService, IdentityService};
-use secreton_performance::{SecretPerformanceOptimizer, SecretPerformanceConfig};
+use secreton_auth::{IdentityService, InMemoryIdentityService};
+use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
 
 // MFA Services
 use secreton_auth::mfa::{
-    CombinedMfaService,
-    InMemoryTotpService,
-    InMemorySmsService,
-    InMemoryEmailService,
-    InMemoryHardwareService,
-    DefaultPushService,
-    DefaultWebAuthnService,
-    DefaultRecoveryCodeService,
-    SmsConfig, SmsProvider, EmailConfig,
+    CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
+    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService,
+    InMemoryTotpService, SmsConfig, SmsProvider,
 };
 
 /// Service container holding all application services
@@ -67,7 +61,7 @@ impl ApiServiceContainer {
     /// Create new service container
     pub async fn new(config: &ApiConfig) -> Result<Self> {
         let _registry = StandardServiceContainer::new();
-        
+
         // Initialize storage backend
         let storage = StorageFactory::create(config.storage.clone()).await?;
 
@@ -78,7 +72,12 @@ impl ApiServiceContainer {
         let seal = Arc::new(SealService::new(
             storage.clone(),
             crypto.clone(),
-        config.auth.jwt.secret.clone().expect("JWT secret must be configured"),
+            config
+                .auth
+                .jwt
+                .secret
+                .clone()
+                .expect("JWT secret must be configured"),
             config.auth.jwt.issuer.clone(),
             config.auth.jwt.audience.clone(),
         ));
@@ -87,39 +86,47 @@ impl ApiServiceContainer {
         let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
 
         // Initialize authentication service
-        let auth = Arc::new(AuthenticationService::new(
-            storage.clone(),
-            crypto.clone(),
-            &config.auth,
-        ).await?
-        .with_audit(audit.clone()));
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto.clone(), &config.auth)
+                .await?
+                .with_audit(audit.clone()),
+        );
 
         // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());
         // Initialize identity service
-        let identity: Arc<dyn IdentityService + Send + Sync> = Arc::new(InMemoryIdentityService::new());
+        let identity: Arc<dyn IdentityService + Send + Sync> =
+            Arc::new(InMemoryIdentityService::new());
 
         // Initialize secret performance optimizer
-        let performance = Arc::new(SecretPerformanceOptimizer::new(SecretPerformanceConfig::default()));
+        let performance = Arc::new(SecretPerformanceOptimizer::new(
+            SecretPerformanceConfig::default(),
+        ));
 
         // Initialize secret service
-        let secreton = Arc::new(secret::SecretService::new(
-            storage.clone(),
-            crypto.clone(),
-            audit.clone(),
-            identity.clone(),
-            policy_service.clone(),
-            performance.clone(),
-        ).await?);
+        let secreton = Arc::new(
+            secret::SecretService::new(
+                storage.clone(),
+                crypto.clone(),
+                audit.clone(),
+                identity.clone(),
+                policy_service.clone(),
+                performance.clone(),
+            )
+            .await?,
+        );
 
         // Initialize admin service
-        let admin = Arc::new(admin::AdminService::new(
-            storage.clone(),
-            auth.clone(),
-            audit.clone(),
-            performance.clone(),
-        ).await?
-        .with_crypto(crypto.clone()));
+        let admin = Arc::new(
+            admin::AdminService::new(
+                storage.clone(),
+                auth.clone(),
+                audit.clone(),
+                performance.clone(),
+            )
+            .await?
+            .with_crypto(crypto.clone()),
+        );
 
         // Initialize MFA Services using configuration
         let mfa_config = &config.auth.mfa;
@@ -134,7 +141,9 @@ impl ApiServiceContainer {
                     "twilio" => SmsProvider::Twilio,
                     "awssns" | "aws_sns" => SmsProvider::AwsSns,
                     "nexmo" => SmsProvider::Nexmo,
-                    _ => SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+                    _ => SmsProvider::Custom {
+                        url: "http://localhost/sms".to_string(),
+                    },
                 },
                 api_key: sms.api_key.clone(),
                 api_secret: None, // Config doesn't have secret yet
@@ -146,7 +155,9 @@ impl ApiServiceContainer {
         } else {
             // Default config if not provided
             SmsConfig {
-                provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+                provider: SmsProvider::Custom {
+                    url: "http://localhost/sms".to_string(),
+                },
                 api_key: "dummy-key".to_string(),
                 api_secret: None,
                 from_number: "000000".to_string(),
@@ -238,9 +249,9 @@ impl ApiServiceContainer {
         })
     }
 
-
     pub fn get_service<T: 'static>(&self, name: &str) -> Result<&T> {
-        self.registry.get_service(name)
+        self.registry
+            .get_service(name)
             .ok_or_else(|| anyhow::anyhow!("Service '{}' not found", name))
     }
 
@@ -255,8 +266,13 @@ impl ApiServiceContainer {
 impl ServiceContainer for ApiServiceContainer {
     async fn initialize(&mut self) -> InitResult<()> {
         if !self.initialized.load(std::sync::atomic::Ordering::SeqCst) {
-            self.initialize_services().await.map_err(|e| secreton_common::ServiceInitError::InitializationFailed { message: e.to_string() })?;
-            self.initialized.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.initialize_services().await.map_err(|e| {
+                secreton_common::ServiceInitError::InitializationFailed {
+                    message: e.to_string(),
+                }
+            })?;
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
     }

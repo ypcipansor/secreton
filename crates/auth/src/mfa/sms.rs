@@ -215,7 +215,9 @@ impl SmsService for InMemorySmsService {
         let mut pending_codes = self.pending_codes.write().await;
 
         if let Some(pending_code) = pending_codes.get(&request.entity_id)
-            && pending_code.code == request.code && pending_code.expiry > Utc::now() {
+            && pending_code.code == request.code
+            && pending_code.expiry > Utc::now()
+        {
             // Code is valid, remove it and update enrollment
             pending_codes.remove(&request.entity_id);
 

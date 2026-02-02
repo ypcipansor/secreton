@@ -5,6 +5,8 @@
 
 #![allow(clippy::collapsible_if)]
 
+use crate::ApiState;
+use crate::auth::{JwtAuthService, extract_bearer_token};
 use axum::{
     Json,
     extract::{Extension, Request},
@@ -12,17 +14,15 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use crate::auth::{extract_bearer_token, JwtAuthService};
-use crate::ApiState;
 use hex;
 use lru::LruCache;
 use secreton_errors::SecretonError;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use tokio::sync::RwLock;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 use x509_parser::prelude::*;
@@ -140,14 +140,10 @@ fn validate_cached_certificate(
     let not_after = cert.validity().not_after.to_datetime();
 
     // Convert time types properly
-    let not_before_chrono = chrono::DateTime::<chrono::Utc>::from_timestamp(
-        not_before.unix_timestamp(),
-        0
-    ).unwrap();
-    let not_after_chrono = chrono::DateTime::<chrono::Utc>::from_timestamp(
-        not_after.unix_timestamp(),
-        0
-    ).unwrap();
+    let not_before_chrono =
+        chrono::DateTime::<chrono::Utc>::from_timestamp(not_before.unix_timestamp(), 0).unwrap();
+    let not_after_chrono =
+        chrono::DateTime::<chrono::Utc>::from_timestamp(not_after.unix_timestamp(), 0).unwrap();
 
     // Check if certificate is not yet valid
     if now < not_before_chrono {
@@ -260,7 +256,8 @@ pub async fn mtls_auth_middleware(
                     &client_cert_der,
                     None,
                     &mtls_config.allowed_subjects,
-                ).await;
+                )
+                .await;
 
                 let validation_time = start_time.elapsed().as_millis() as u64;
 
@@ -640,13 +637,7 @@ mod tests {
 }
 
 pub mod auth {
-    use axum::{
-        extract::Request,
-        middleware::Next,
-        response::Response,
-        http::StatusCode,
-    };
-    
+    use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 
     #[derive(Clone)]
     pub struct AuthMiddleware;
@@ -674,7 +665,9 @@ pub mod auth {
                 return Ok(next.run(req).await);
             }
 
-            let auth_header = req.headers().get("authorization")
+            let auth_header = req
+                .headers()
+                .get("authorization")
                 .and_then(|h| h.to_str().ok())
                 .ok_or(StatusCode::UNAUTHORIZED)?;
 
@@ -686,7 +679,10 @@ pub mod auth {
 
             // Validate token using the authentication service
             // Note: validate_token returns a User object on success
-            let user = state.auth.validate_token(token).await
+            let user = state
+                .auth
+                .validate_token(token)
+                .await
                 .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
             // Create request context or simplified user info to store in extensions
@@ -700,12 +696,8 @@ pub mod auth {
 
 pub mod seal {
     use axum::{
-        extract::Request,
-        middleware::Next,
+        Json, extract::Request, http::StatusCode, middleware::Next, response::IntoResponse,
         response::Response,
-        http::StatusCode,
-        response::IntoResponse,
-        Json,
     };
     use serde_json::json;
 
@@ -725,14 +717,15 @@ pub mod seal {
                 || path.contains("/sys/unseal")
                 || path.contains("/sys/seal-status")
                 || path.contains("/sys/health")
-                || path.ends_with("/health") // Global health
+                || path.ends_with("/health")
+            // Global health
             {
                 return Ok(next.run(req).await);
             }
 
             // Check if sealed
             if state.seal.is_sealed().await {
-                 let body = Json(json!({
+                let body = Json(json!({
                     "error": "Secreton is sealed",
                     "code": 503
                 }));
@@ -745,24 +738,19 @@ pub mod seal {
 }
 
 pub mod cors {
-    use tower_http::cors::{CorsLayer, Any};
-    
+    use tower_http::cors::{Any, CorsLayer};
+
     pub fn create_cors_layer() -> CorsLayer {
-         CorsLayer::new()
-             .allow_origin(Any)
-             .allow_methods(Any)
-             .allow_headers(Any)
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
     }
 }
 
 pub mod rate_limit {
-    use axum::{
-        extract::Request,
-        middleware::Next,
-        response::Response,
-        http::StatusCode,
-    };
-    
+    use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+
     #[derive(Clone)]
     pub struct RateLimitMiddleware;
 

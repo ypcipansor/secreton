@@ -121,8 +121,7 @@ impl AuditEntry {
 }
 
 /// Tamper-evident audit log storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditLog {
     pub entries: Vec<AuditEntry>,
     pub entry_index: HashMap<String, usize>, // audit_id -> index

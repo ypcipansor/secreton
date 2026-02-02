@@ -5,7 +5,7 @@ use crate::error::*;
 use crate::model::DatabaseConfig;
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{Rng, distributions::Alphanumeric};
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio_postgres::NoTls;
@@ -101,7 +101,10 @@ impl DatabaseBackend for PostgresBackend {
         role_sql: &str,
     ) -> SecretResult<HashMap<String, Value>> {
         let client = self.pool.get().await.map_err(|e| {
-            SecretError::BackendOperationFailed(format!("Failed to get connection from pool: {}", e))
+            SecretError::BackendOperationFailed(format!(
+                "Failed to get connection from pool: {}",
+                e
+            ))
         })?;
 
         let username = self.generate_username();
@@ -126,9 +129,14 @@ impl DatabaseBackend for PostgresBackend {
         // Use batch_execute to support multiple statements
         if let Err(e) = client.batch_execute(&sql).await {
             // Attempt cleanup if role execution fails
-            let _ = client.batch_execute(&format!("DROP USER IF EXISTS \"{}\"", username)).await;
+            let _ = client
+                .batch_execute(&format!("DROP USER IF EXISTS \"{}\"", username))
+                .await;
 
-            return Err(SecretError::BackendOperationFailed(format!("Failed to execute role SQL: {}", e)));
+            return Err(SecretError::BackendOperationFailed(format!(
+                "Failed to execute role SQL: {}",
+                e
+            )));
         }
 
         let mut result = HashMap::new();
@@ -141,7 +149,10 @@ impl DatabaseBackend for PostgresBackend {
 
     async fn test_connection(&self) -> SecretResult<()> {
         let client = self.pool.get().await.map_err(|e| {
-            SecretError::BackendOperationFailed(format!("Failed to get connection from pool: {}", e))
+            SecretError::BackendOperationFailed(format!(
+                "Failed to get connection from pool: {}",
+                e
+            ))
         })?;
 
         client.simple_query("SELECT 1").await.map_err(|e| {
@@ -153,12 +164,17 @@ impl DatabaseBackend for PostgresBackend {
 
     async fn revoke_credentials(&self, username: &str) -> SecretResult<()> {
         let client = self.pool.get().await.map_err(|e| {
-            SecretError::BackendOperationFailed(format!("Failed to get connection from pool: {}", e))
+            SecretError::BackendOperationFailed(format!(
+                "Failed to get connection from pool: {}",
+                e
+            ))
         })?;
 
         // Sanitize username to ensure it only contains allowed characters
         if !username.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            return Err(SecretError::InvalidOperation("Invalid username format".to_string()));
+            return Err(SecretError::InvalidOperation(
+                "Invalid username format".to_string(),
+            ));
         }
 
         let drop_user_sql = format!("DROP USER IF EXISTS \"{}\"", username);
@@ -215,7 +231,10 @@ mod tests {
         // Verify credentials contain required fields
         assert!(creds.contains_key("username"));
         assert!(creds.contains_key("password"));
-        assert_eq!(creds.get("role").and_then(|v| v.as_str()), Some("test_role"));
+        assert_eq!(
+            creds.get("role").and_then(|v| v.as_str()),
+            Some("test_role")
+        );
 
         // Clean up
         backend.revoke_credentials(username).await?;

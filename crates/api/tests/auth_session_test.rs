@@ -1,21 +1,26 @@
 #[cfg(test)]
 mod tests {
-    use secreton_api::services::auth::{AuthenticationService, Session};
-    use secreton_storage::{MockStorageBackend, QueryParams, SecretEntry, StorageBackend};
-    use secreton_api::config::AuthConfig;
-    use std::sync::Arc;
-    use secreton_api::services::crypto::CryptoService;
     use chrono::Utc;
+    use secreton_api::config::AuthConfig;
+    use secreton_api::services::auth::{AuthenticationService, Session};
+    use secreton_api::services::crypto::CryptoService;
+    use secreton_storage::{MockStorageBackend, QueryParams, SecretEntry, StorageBackend};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_session_lifecycle() {
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let config = AuthConfig::default();
-        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.expect("Failed to create auth service");
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config)
+            .await
+            .expect("Failed to create auth service");
 
         // 1. Initial State
-        let count = auth_service.get_active_session_count().await.expect("Failed to get count");
+        let count = auth_service
+            .get_active_session_count()
+            .await
+            .expect("Failed to get count");
         assert_eq!(count, 0, "Initial session count should be 0");
 
         // 2. Login (create session simulation)
@@ -43,12 +48,19 @@ mod tests {
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::Secret,
             uuid::Uuid::new_v4(),
-        ).with_expiration(expires_at);
+        )
+        .with_expiration(expires_at);
 
-        storage.store(&entry).await.expect("Failed to store session");
+        storage
+            .store(&entry)
+            .await
+            .expect("Failed to store session");
 
         // 3. Verify count
-        let count = auth_service.get_active_session_count().await.expect("Failed to get count");
+        let count = auth_service
+            .get_active_session_count()
+            .await
+            .expect("Failed to get count");
         assert_eq!(count, 1, "Session count should be 1 after manual insertion");
 
         // 4. Create expired session
@@ -67,16 +79,29 @@ mod tests {
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::Secret,
             uuid::Uuid::new_v4(),
-        ).with_expiration(expired_at);
+        )
+        .with_expiration(expired_at);
 
-        storage.store(&expired_entry).await.expect("Failed to store expired session");
+        storage
+            .store(&expired_entry)
+            .await
+            .expect("Failed to store expired session");
 
         // 5. Verify count again (MockStorageBackend filters expired by default in count/list unless specified)
-        let count = auth_service.get_active_session_count().await.expect("Failed to get count");
-        assert_eq!(count, 1, "Session count should still be 1 (ignoring expired)");
+        let count = auth_service
+            .get_active_session_count()
+            .await
+            .expect("Failed to get count");
+        assert_eq!(
+            count, 1,
+            "Session count should still be 1 (ignoring expired)"
+        );
 
         // 6. Cleanup expired sessions
-        let deleted = auth_service.cleanup_expired_sessions().await.expect("Failed to cleanup");
+        let deleted = auth_service
+            .cleanup_expired_sessions()
+            .await
+            .expect("Failed to cleanup");
         assert_eq!(deleted, 1, "Should have deleted 1 expired session");
 
         // 7. Verify storage content
@@ -86,7 +111,11 @@ mod tests {
             ..Default::default()
         };
         let entries = storage.list(&params).await.expect("Failed to list");
-        assert_eq!(entries.len(), 1, "Should only have 1 session left in storage");
+        assert_eq!(
+            entries.len(),
+            1,
+            "Should only have 1 session left in storage"
+        );
         assert_eq!(entries[0].path, format!("sys/auth/sessions/{}", session_id));
     }
 }

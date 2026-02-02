@@ -4,20 +4,25 @@
 //! delegating actual authentication logic to the auth crate while maintaining
 //! API-specific concerns like session management and storage integration.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use serde_json;
+use std::collections::HashMap;
+use std::sync::Arc;
+use uuid::Uuid;
 
+use crate::ApiResult;
 use crate::config::AuthConfig;
 use crate::services::crypto::CryptoService;
-use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel, QueryParams};
-use secreton_auth::{AuthService as UnifiedAuthService, LoginRequest, TokenConfig, JwtTokenService, UserPassAuthMethod};
+use secreton_auth::{
+    AuthService as UnifiedAuthService, JwtTokenService, LoginRequest, TokenConfig,
+    UserPassAuthMethod,
+};
 use secreton_core::User;
+use secreton_storage::{
+    EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+};
 use thiserror::Error;
-use crate::ApiResult;
 
 pub const USER_STORAGE_PREFIX: &str = "users/";
 const SESSION_STORAGE_PREFIX: &str = "sys/auth/sessions/";
@@ -131,7 +136,6 @@ pub struct ApiLoginResponse {
     pub token: AuthToken,
 }
 
-
 /// Authentication service facade
 pub struct AuthenticationService {
     /// Unified authentication service
@@ -168,10 +172,24 @@ impl AuthenticationService {
     ) -> Result<Self> {
         // Create token service
         let token_config = TokenConfig {
-            jwt_secret: config.jwt.secret.clone().expect("JWT secret must be configured"),
-            jwt_refresh_secret: config.jwt.secret.clone().expect("JWT secret must be configured"), // Use same secret as no refresh_secret field
-            access_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(config.jwt.expiration)).unwrap_or(chrono::Duration::hours(1)),
-            refresh_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(config.jwt.refresh_expiration)).unwrap_or(chrono::Duration::days(7)),
+            jwt_secret: config
+                .jwt
+                .secret
+                .clone()
+                .expect("JWT secret must be configured"),
+            jwt_refresh_secret: config
+                .jwt
+                .secret
+                .clone()
+                .expect("JWT secret must be configured"), // Use same secret as no refresh_secret field
+            access_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(
+                config.jwt.expiration,
+            ))
+            .unwrap_or(chrono::Duration::hours(1)),
+            refresh_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(
+                config.jwt.refresh_expiration,
+            ))
+            .unwrap_or(chrono::Duration::days(7)),
             issuer: config.jwt.issuer.clone(),
             audience: config.jwt.audience.clone(),
         };
@@ -185,14 +203,18 @@ impl AuthenticationService {
         // Initialize/Enable the method
         // Manually enable as we are skipping the full init flow for built-in method
         use secreton_auth::service::AuthMethodImpl;
-        let _ = userpass_method_impl.init(&secreton_auth::model::AuthMethod {
-            method_type: secreton_auth::model::AuthMethodType::UserPass,
-            enabled: true,
-            config: HashMap::new(),
-        }).await;
+        let _ = userpass_method_impl
+            .init(&secreton_auth::model::AuthMethod {
+                method_type: secreton_auth::model::AuthMethodType::UserPass,
+                enabled: true,
+                config: HashMap::new(),
+            })
+            .await;
 
         let userpass_method = Arc::new(userpass_method_impl);
-        auth_service.register_method("userpass".to_string(), userpass_method.clone()).await;
+        auth_service
+            .register_method("userpass".to_string(), userpass_method.clone())
+            .await;
 
         // Load existing users from storage
         let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
@@ -208,14 +230,16 @@ impl AuthenticationService {
                 };
 
                 if let Ok(user) = serde_json::from_slice::<User>(&user_data) {
-                    userpass_method.add_user(
-                        user.username.clone(),
-                        user.password_hash.clone(),
-                        user.id.clone(),
-                        user.roles.clone(),
-                        user.policies.clone(),
-                        user.permissions.clone(),
-                    ).await;
+                    userpass_method
+                        .add_user(
+                            user.username.clone(),
+                            user.password_hash.clone(),
+                            user.id.clone(),
+                            user.roles.clone(),
+                            user.policies.clone(),
+                            user.permissions.clone(),
+                        )
+                        .await;
                 }
             }
         }
@@ -258,7 +282,10 @@ impl AuthenticationService {
                                     reason: "Account locked".to_string(),
                                 }).await;
                             }
-                            return Err(secreton_errors::SecretonError::Authentication { message: "Account is locked. Please try again later.".to_string() }.into());
+                            return Err(secreton_errors::SecretonError::Authentication {
+                                message: "Account is locked. Please try again later.".to_string(),
+                            }
+                            .into());
                         }
                     }
                 }
@@ -274,8 +301,11 @@ impl AuthenticationService {
         };
 
         // Authenticate using unified auth service
-        let response = self.auth_service.login(&request).await
-            .map_err(|e| secreton_errors::SecretonError::Authentication { message: e.to_string() })?;
+        let response = self.auth_service.login(&request).await.map_err(|e| {
+            secreton_errors::SecretonError::Authentication {
+                message: e.to_string(),
+            }
+        })?;
 
         if !response.success {
             // Handle failed login attempt
@@ -284,14 +314,19 @@ impl AuthenticationService {
 
                 // Max attempts check (e.g. 5), but exempt privileged users from auto-lockout (DoS protection)
                 if !u.is_privileged() && u.failed_login_attempts >= 5 {
-                     u.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
-                     // Log lockout
-                     if let Some(audit) = &self.audit {
-                        let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
-                            user: req.username.clone(),
-                            method: "userpass".to_string(),
-                            reason: "Account locked due to too many failed attempts".to_string(),
-                        }).await;
+                    u.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                    // Log lockout
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: req.username.clone(),
+                                    method: "userpass".to_string(),
+                                    reason: "Account locked due to too many failed attempts"
+                                        .to_string(),
+                                },
+                            )
+                            .await;
                     }
                 }
 
@@ -306,17 +341,24 @@ impl AuthenticationService {
                 }
             }
 
-            return Err(secreton_errors::SecretonError::Authentication { message: "Invalid credentials".to_string() }.into());
+            return Err(secreton_errors::SecretonError::Authentication {
+                message: "Invalid credentials".to_string(),
+            }
+            .into());
         }
 
-        let user_info = response.user_info
-            .ok_or_else(|| secreton_errors::SecretonError::Internal { message: "No user info returned".to_string() })?;
+        let user_info =
+            response
+                .user_info
+                .ok_or_else(|| secreton_errors::SecretonError::Internal {
+                    message: "No user info returned".to_string(),
+                })?;
 
         // Convert UserInfo to User (simplified)
         let mut user = if let Some(u) = stored_user {
-             u
+            u
         } else {
-             User {
+            User {
                 id: user_info.id.clone().unwrap_or_default(),
                 username: user_info.username.clone(),
                 email: user_info.email,
@@ -332,7 +374,7 @@ impl AuthenticationService {
                 enabled: true,
                 mfa_enabled: false,
                 mfa_secret: None,
-                last_login: None, // UserInfo lacks last_login
+                last_login: None,               // UserInfo lacks last_login
                 created_at: chrono::Utc::now(), // UserInfo lacks created_at
                 updated_at: chrono::Utc::now(),
                 metadata: user_info.metadata.clone(),
@@ -343,7 +385,8 @@ impl AuthenticationService {
 
         // Reset failed login attempts on success
         // Also ensure user is persisted if it didn't exist (new user)
-        let should_persist = user_entry.is_none() || user.failed_login_attempts > 0 || user.locked_until.is_some();
+        let should_persist =
+            user_entry.is_none() || user.failed_login_attempts > 0 || user.locked_until.is_some();
 
         if user.failed_login_attempts > 0 || user.locked_until.is_some() {
             user.failed_login_attempts = 0;
@@ -351,22 +394,23 @@ impl AuthenticationService {
         }
 
         if should_persist {
-             // Update user in storage
-             if let Ok(user_data) = serde_json::to_vec(&user)
-                && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                    let entry = if let Some(mut e) = user_entry {
-                        e.encrypted_data = encrypted;
-                        e
-                    } else {
-                         SecretEntry::new(
-                            user_path,
-                            encrypted,
-                            EncryptionMetadata::default(),
-                            SecurityLevel::Secret,
-                            Uuid::parse_str(&user.id).unwrap_or_default(),
-                        )
-                    };
-                    let _ = self.storage.store(&entry).await;
+            // Update user in storage
+            if let Ok(user_data) = serde_json::to_vec(&user)
+                && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+            {
+                let entry = if let Some(mut e) = user_entry {
+                    e.encrypted_data = encrypted;
+                    e
+                } else {
+                    SecretEntry::new(
+                        user_path,
+                        encrypted,
+                        EncryptionMetadata::default(),
+                        SecurityLevel::Secret,
+                        Uuid::parse_str(&user.id).unwrap_or_default(),
+                    )
+                };
+                let _ = self.storage.store(&entry).await;
             }
         }
 
@@ -375,19 +419,27 @@ impl AuthenticationService {
 
         // Create and store session
         let now = chrono::Utc::now();
-        let expires_at = now + chrono::Duration::from_std(std::time::Duration::from_secs(self.config.jwt.expiration))
+        let expires_at = now
+            + chrono::Duration::from_std(std::time::Duration::from_secs(
+                self.config.jwt.expiration,
+            ))
             .unwrap_or(chrono::Duration::hours(1));
 
         // Create token pair with session binding
-        let token_pair = self.token_service.create_token_pair(
-            &user.id,
-            &user.username,
-            user.email.as_deref(), // Convert Option<&String> to Option<&str>
-            &user.roles,
-            &user.policies, // Use user.policies which we just created
-            false, // MFA status from auth result
-            Some(session_id.clone()),
-        ).map_err(|e| secreton_errors::SecretonError::Authentication { message: e.to_string() })?;
+        let token_pair = self
+            .token_service
+            .create_token_pair(
+                &user.id,
+                &user.username,
+                user.email.as_deref(), // Convert Option<&String> to Option<&str>
+                &user.roles,
+                &user.policies, // Use user.policies which we just created
+                false,          // MFA status from auth result
+                Some(session_id.clone()),
+            )
+            .map_err(|e| secreton_errors::SecretonError::Authentication {
+                message: e.to_string(),
+            })?;
 
         let session = Session {
             id: session_id.clone(),
@@ -402,8 +454,10 @@ impl AuthenticationService {
         };
 
         // Serialize session
-        let session_data = serde_json::to_vec(&session)
-            .map_err(|e| secreton_errors::SecretonError::Internal { message: format!("Failed to serialize session: {}", e) })?;
+        let session_data =
+            serde_json::to_vec(&session).map_err(|e| secreton_errors::SecretonError::Internal {
+                message: format!("Failed to serialize session: {}", e),
+            })?;
 
         // Create storage entry
         let entry = SecretEntry::new(
@@ -412,11 +466,15 @@ impl AuthenticationService {
             EncryptionMetadata::default(), // No actual encryption for now as we don't have CryptoService active
             SecurityLevel::Secret,
             Uuid::parse_str(&user.id).unwrap_or_default(),
-        ).with_expiration(expires_at);
+        )
+        .with_expiration(expires_at);
 
         // Store session
-        self.storage.store(&entry).await
-            .map_err(|e| secreton_errors::SecretonError::Authentication { message: format!("Failed to store session: {}", e) })?;
+        self.storage.store(&entry).await.map_err(|e| {
+            secreton_errors::SecretonError::Authentication {
+                message: format!("Failed to store session: {}", e),
+            }
+        })?;
 
         Ok(ApiLoginResponse {
             token: AuthToken {
@@ -425,7 +483,7 @@ impl AuthenticationService {
                 token_type: token_pair.token_type,
                 expires_in: token_pair.expires_in,
                 user,
-            }
+            },
         })
     }
 
@@ -436,14 +494,16 @@ impl AuthenticationService {
             return Err(AuthError::InvalidToken);
         }
 
-        let claims = self.token_service.validate_access_token(token)
+        let claims = self
+            .token_service
+            .validate_access_token(token)
             .map_err(|_| AuthError::InvalidToken)?;
 
         // Verify session binding (Security hardening)
         // Ensure the session associated with this token still exists and is valid
         let session_path = format!("{}{}", SESSION_STORAGE_PREFIX, claims.claims.jti);
         if !self.storage.exists(&session_path).await.unwrap_or(false) {
-             return Err(AuthError::InvalidToken);
+            return Err(AuthError::InvalidToken);
         }
 
         // Convert claims to User (simplified)
@@ -493,16 +553,23 @@ impl AuthenticationService {
     /// Refresh access token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthToken, AuthError> {
         // Validate first to get user info for session creation
-        let claims = self.token_service.validate_refresh_token(refresh_token)
+        let claims = self
+            .token_service
+            .validate_refresh_token(refresh_token)
             .map_err(|_| AuthError::InvalidToken)?;
 
         // Generate session ID
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
-        let expires_at = now + chrono::Duration::from_std(std::time::Duration::from_secs(self.config.jwt.expiration))
+        let expires_at = now
+            + chrono::Duration::from_std(std::time::Duration::from_secs(
+                self.config.jwt.expiration,
+            ))
             .unwrap_or(chrono::Duration::hours(1));
 
-        let token_pair = self.token_service.refresh_access_token(refresh_token, Some(session_id.clone()))
+        let token_pair = self
+            .token_service
+            .refresh_access_token(refresh_token, Some(session_id.clone()))
             .map_err(|_| AuthError::InvalidToken)?;
 
         // Store session
@@ -518,8 +585,9 @@ impl AuthenticationService {
             last_accessed: now,
         };
 
-        let session_data = serde_json::to_vec(&session)
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e)))?;
+        let session_data = serde_json::to_vec(&session).map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e))
+        })?;
 
         let entry = SecretEntry::new(
             format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
@@ -527,13 +595,19 @@ impl AuthenticationService {
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::parse_str(&claims.sub).unwrap_or_default(),
-        ).with_expiration(expires_at);
+        )
+        .with_expiration(expires_at);
 
-        self.storage.store(&entry).await.map_err(AuthError::Storage)?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AuthError::Storage)?;
 
         // For refresh, we need to get user info again
         // This is simplified - in production you'd cache or store user info
-        let claims = self.token_service.validate_access_token(&token_pair.access_token)
+        let claims = self
+            .token_service
+            .validate_access_token(&token_pair.access_token)
             .map_err(|_| AuthError::InvalidToken)?;
 
         let user = User {
@@ -587,14 +661,20 @@ impl AuthenticationService {
         let user_id = Uuid::new_v4().to_string();
 
         // Create in UserPass method (generates hash)
-        let password_hash = self.userpass_method.create_user(
-            username.to_string(),
-            password,
-            user_id.clone(),
-            roles.clone(),
-            vec!["default".to_string()],
-            permissions.clone(),
-        ).await.map_err(|_| AuthError::Internal(anyhow::anyhow!("Failed to create user in auth method")))?;
+        let password_hash = self
+            .userpass_method
+            .create_user(
+                username.to_string(),
+                password,
+                user_id.clone(),
+                roles.clone(),
+                vec!["default".to_string()],
+                permissions.clone(),
+            )
+            .await
+            .map_err(|_| {
+                AuthError::Internal(anyhow::anyhow!("Failed to create user in auth method"))
+            })?;
 
         let user = User {
             id: user_id,
@@ -603,7 +683,8 @@ impl AuthenticationService {
             password_hash,
             full_name: None,
             is_active: true,
-            is_superuser: roles.contains(&"admin".to_string()) || roles.contains(&"root".to_string()),
+            is_superuser: roles.contains(&"admin".to_string())
+                || roles.contains(&"root".to_string()),
             roles,
             permissions,
             policies: vec!["default".to_string()],
@@ -622,11 +703,12 @@ impl AuthenticationService {
 
         // Store user
         let user_data = serde_json::to_vec(&user)
-             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
 
         // Encrypt user data
-        let encrypted_data = self.crypto.encrypt_data(&user_data).await
-            .map_err(|e| AuthError::Crypto(secreton_crypto::CryptoError::Internal(e.to_string())))?;
+        let encrypted_data = self.crypto.encrypt_data(&user_data).await.map_err(|e| {
+            AuthError::Crypto(secreton_crypto::CryptoError::Internal(e.to_string()))
+        })?;
 
         let entry = SecretEntry::new(
             path,
@@ -650,7 +732,14 @@ impl AuthenticationService {
         roles: Vec<String>,
         permissions: Vec<String>,
     ) -> Result<User, AuthError> {
-        self.register_user(username, password, Some(email.to_string()), roles, permissions).await
+        self.register_user(
+            username,
+            password,
+            Some(email.to_string()),
+            roles,
+            permissions,
+        )
+        .await
     }
 
     /// Check if user has permission (simplified)
@@ -663,12 +752,9 @@ impl AuthenticationService {
 
         // Check for specific permissions based on roles
         match permission {
-            "secreton:read" | "secreton:list" => {
-                Ok(user.roles.contains(&"user".to_string()) || user.roles.contains(&"viewer".to_string()))
-            }
-            "secreton:write" => {
-                Ok(user.roles.contains(&"user".to_string()))
-            }
+            "secreton:read" | "secreton:list" => Ok(user.roles.contains(&"user".to_string())
+                || user.roles.contains(&"viewer".to_string())),
+            "secreton:write" => Ok(user.roles.contains(&"user".to_string())),
             _ => Ok(false),
         }
     }
@@ -687,7 +773,10 @@ impl AuthenticationService {
             ..Default::default()
         };
 
-        let count = self.storage.count(&params).await
+        let count = self
+            .storage
+            .count(&params)
+            .await
             .map_err(AuthError::Storage)?;
 
         Ok(count)
@@ -703,7 +792,10 @@ impl AuthenticationService {
             ..Default::default()
         };
 
-        let entries = self.storage.list(&params).await
+        let entries = self
+            .storage
+            .list(&params)
+            .await
             .map_err(AuthError::Storage)?;
 
         let mut sessions = Vec::new();
@@ -713,8 +805,8 @@ impl AuthenticationService {
                     sessions.push(session);
                 }
             } else if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
-                 // Fallback? encrypted_data is actually plaintext in current impl since no crypto used for sessions yet
-                 if session.user_id == user_id {
+                // Fallback? encrypted_data is actually plaintext in current impl since no crypto used for sessions yet
+                if session.user_id == user_id {
                     sessions.push(session);
                 }
             }
@@ -724,26 +816,39 @@ impl AuthenticationService {
     }
 
     /// Revoke a specific user session
-    pub async fn revoke_user_session(&self, session_id: &str, user_id: &str) -> Result<(), AuthError> {
+    pub async fn revoke_user_session(
+        &self,
+        session_id: &str,
+        user_id: &str,
+    ) -> Result<(), AuthError> {
         let path = format!("{}{}", SESSION_STORAGE_PREFIX, session_id);
 
         // Verify ownership
-        if let Some(entry) = self.storage.get_by_path(&path).await.map_err(AuthError::Storage)? {
-             if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
-                 if session.user_id != user_id {
-                     return Err(AuthError::PermissionDenied);
-                 }
-                 // Revoke the token associated with this session
-                 self.revoke_token(session.token, session.expires_at).await;
-             }
+        if let Some(entry) = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AuthError::Storage)?
+        {
+            if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+                if session.user_id != user_id {
+                    return Err(AuthError::PermissionDenied);
+                }
+                // Revoke the token associated with this session
+                self.revoke_token(session.token, session.expires_at).await;
+            }
         } else {
-            return Err(AuthError::Storage(secreton_storage::StorageError::NotFound {
-                resource_type: "session".to_string(),
-                id: session_id.to_string()
-            }));
+            return Err(AuthError::Storage(
+                secreton_storage::StorageError::NotFound {
+                    resource_type: "session".to_string(),
+                    id: session_id.to_string(),
+                },
+            ));
         }
 
-        self.storage.delete_by_path(&path).await
+        self.storage
+            .delete_by_path(&path)
+            .await
             .map_err(AuthError::Storage)?;
 
         Ok(())
@@ -751,7 +856,10 @@ impl AuthenticationService {
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
-        let deleted_count = self.storage.delete_expired(Some(SESSION_STORAGE_PREFIX.to_string())).await
+        let deleted_count = self
+            .storage
+            .delete_expired(Some(SESSION_STORAGE_PREFIX.to_string()))
+            .await
             .map_err(AuthError::Storage)?;
 
         if deleted_count > 0 {
@@ -780,18 +888,24 @@ impl AuthenticationService {
     pub async fn generate_token(&self, user: &User) -> Result<String, AuthError> {
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
-        let expires_at = now + chrono::Duration::from_std(std::time::Duration::from_secs(self.config.jwt.expiration))
-             .unwrap_or(chrono::Duration::hours(1));
+        let expires_at = now
+            + chrono::Duration::from_std(std::time::Duration::from_secs(
+                self.config.jwt.expiration,
+            ))
+            .unwrap_or(chrono::Duration::hours(1));
 
-        let token = self.token_service.create_access_token(
-            &user.id,
-            &user.username,
-            user.email.as_deref(),
-            &user.roles,
-            &user.policies,
-            false, // MFA not required for simple token generation
-            Some(session_id.clone()),
-        ).map_err(|e| AuthError::Internal(anyhow::anyhow!("Token generation failed: {}", e)))?;
+        let token = self
+            .token_service
+            .create_access_token(
+                &user.id,
+                &user.username,
+                user.email.as_deref(),
+                &user.roles,
+                &user.policies,
+                false, // MFA not required for simple token generation
+                Some(session_id.clone()),
+            )
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Token generation failed: {}", e)))?;
 
         // Store session for API token
         let session = Session {
@@ -815,9 +929,13 @@ impl AuthenticationService {
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::parse_str(&user.id).unwrap_or_default(),
-        ).with_expiration(expires_at);
+        )
+        .with_expiration(expires_at);
 
-        self.storage.store(&entry).await.map_err(AuthError::Storage)?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AuthError::Storage)?;
 
         Ok(token)
     }
@@ -827,7 +945,7 @@ impl AuthenticationService {
         // Generate a longer-lived refresh token
         let now = chrono::Utc::now();
         let exp = now + chrono::Duration::days(7);
-        
+
         let claims = Claims {
             sub: user.id.clone(),
             username: user.username.clone(),
@@ -839,18 +957,31 @@ impl AuthenticationService {
             iss: self.config.jwt.issuer.clone(),
             aud: self.config.jwt.audience.clone(),
         };
-        
+
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &claims,
-            &jsonwebtoken::EncodingKey::from_secret(self.config.jwt.secret.as_ref().expect("JWT secret must be configured").as_bytes()),
-        ).map_err(|e| AuthError::Internal(anyhow::anyhow!("Refresh token generation failed: {}", e)))?;
-        
+            &jsonwebtoken::EncodingKey::from_secret(
+                self.config
+                    .jwt
+                    .secret
+                    .as_ref()
+                    .expect("JWT secret must be configured")
+                    .as_bytes(),
+            ),
+        )
+        .map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Refresh token generation failed: {}", e))
+        })?;
+
         Ok(token)
     }
 
     /// Authenticate user
-    pub async fn authenticate(&self, credentials: crate::services::auth::LoginRequest) -> Result<secreton_core::AuthResult, AuthError> {
+    pub async fn authenticate(
+        &self,
+        credentials: crate::services::auth::LoginRequest,
+    ) -> Result<secreton_core::AuthResult, AuthError> {
         let request = secreton_auth::LoginRequest {
             username: credentials.username,
             password: credentials.password,
@@ -858,21 +989,26 @@ impl AuthenticationService {
             remember_me: credentials.remember_me,
         };
 
-        let result = self.auth_service.login(&request).await
+        let result = self
+            .auth_service
+            .login(&request)
+            .await
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Auth failed: {}", e)))?;
 
         if !result.success {
-             return Err(AuthError::InvalidCredentials);
+            return Err(AuthError::InvalidCredentials);
         }
 
         // Generate token explicitly if not part of AuthResult yet in this version,
-        // or ensure AuthResult has what we need. 
+        // or ensure AuthResult has what we need.
         // Logic in login() (line 175) generates tokens using self.token_service.
         // We should replicate that or use it.
 
-        let user_info = result.user_info.as_ref()
+        let user_info = result
+            .user_info
+            .as_ref()
             .ok_or(AuthError::Internal(anyhow::anyhow!("No user info")))?;
-        
+
         let user_roles = &user_info.roles;
         let policies = vec!["default".to_string()]; // Placeholder policies
 
@@ -880,20 +1016,26 @@ impl AuthenticationService {
         let session_id = Uuid::new_v4().to_string();
 
         // Generate tokens with session binding
-        let token_pair = self.token_service.create_token_pair(
-            user_info.id.as_deref().unwrap_or_default(),
-            &user_info.username,
-            user_info.email.as_deref(),
-            user_roles,
-            &policies,
-            result.mfa_required,
-            Some(session_id.clone()),
-        ).map_err(|_| AuthError::Internal(anyhow::anyhow!("Token generation failed")))?;
+        let token_pair = self
+            .token_service
+            .create_token_pair(
+                user_info.id.as_deref().unwrap_or_default(),
+                &user_info.username,
+                user_info.email.as_deref(),
+                user_roles,
+                &policies,
+                result.mfa_required,
+                Some(session_id.clone()),
+            )
+            .map_err(|_| AuthError::Internal(anyhow::anyhow!("Token generation failed")))?;
 
         // Store session
         let now = chrono::Utc::now();
-        let expires_at = now + chrono::Duration::from_std(std::time::Duration::from_secs(self.config.jwt.expiration))
-             .unwrap_or(chrono::Duration::hours(1));
+        let expires_at = now
+            + chrono::Duration::from_std(std::time::Duration::from_secs(
+                self.config.jwt.expiration,
+            ))
+            .unwrap_or(chrono::Duration::hours(1));
 
         let session = Session {
             id: session_id.clone(),
@@ -916,9 +1058,13 @@ impl AuthenticationService {
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::parse_str(&session.user_id).unwrap_or_default(),
-        ).with_expiration(expires_at);
+        )
+        .with_expiration(expires_at);
 
-        self.storage.store(&entry).await.map_err(AuthError::Storage)?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AuthError::Storage)?;
 
         Ok(secreton_core::AuthResult {
             success: true,
@@ -932,12 +1078,19 @@ impl AuthenticationService {
     }
 
     /// OAuth login - create or update user from OAuth info
-    pub async fn oauth_login(&self, oauth_user: &crate::handlers::auth::OAuthUserInfo) -> Result<User, AuthError> {
+    pub async fn oauth_login(
+        &self,
+        oauth_user: &crate::handlers::auth::OAuthUserInfo,
+    ) -> Result<User, AuthError> {
         // Try to find existing user by OAuth ID or email
         // For now, create a stub user
         let user = User {
             id: oauth_user.id.clone(),
-            username: if oauth_user.username.is_empty() { oauth_user.email.clone() } else { oauth_user.username.clone() },
+            username: if oauth_user.username.is_empty() {
+                oauth_user.email.clone()
+            } else {
+                oauth_user.username.clone()
+            },
             email: Some(oauth_user.email.clone()),
             display_name: Some(oauth_user.name.clone()),
             disabled: false,
@@ -958,7 +1111,7 @@ impl AuthenticationService {
             failed_login_attempts: 0,
             locked_until: None,
         };
-        
+
         Ok(user)
     }
 }
@@ -983,14 +1136,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_expired_sessions() {
-        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
         use uuid::Uuid;
 
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let config = AuthConfig::default();
 
-        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap();
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config)
+            .await
+            .unwrap();
 
         // Add expired session
         let expired_session = SecretEntry::new(
@@ -999,7 +1154,8 @@ mod tests {
             EncryptionMetadata::default(),
             SecurityLevel::Internal,
             Uuid::new_v4(),
-        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+        )
+        .with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
         storage.store(&expired_session).await.unwrap();
 
         // Add active session
@@ -1009,7 +1165,8 @@ mod tests {
             EncryptionMetadata::default(),
             SecurityLevel::Internal,
             Uuid::new_v4(),
-        ).with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
+        )
+        .with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
         storage.store(&active_session).await.unwrap();
 
         // Add unrelated expired entry
@@ -1019,7 +1176,8 @@ mod tests {
             EncryptionMetadata::default(),
             SecurityLevel::Internal,
             Uuid::new_v4(),
-        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+        )
+        .with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
         storage.store(&unrelated_expired).await.unwrap();
 
         // Run cleanup
@@ -1029,14 +1187,23 @@ mod tests {
         assert_eq!(cleaned_count, 1, "Should cleanup exactly 1 session");
 
         // Check storage state
-        assert!(!storage.exists("sys/auth/sessions/expired1").await.unwrap(), "Expired session should be removed");
-        assert!(storage.exists("sys/auth/sessions/active1").await.unwrap(), "Active session should remain");
-        assert!(storage.exists("other/path/expired2").await.unwrap(), "Unrelated expired entry should remain");
+        assert!(
+            !storage.exists("sys/auth/sessions/expired1").await.unwrap(),
+            "Expired session should be removed"
+        );
+        assert!(
+            storage.exists("sys/auth/sessions/active1").await.unwrap(),
+            "Active session should remain"
+        );
+        assert!(
+            storage.exists("other/path/expired2").await.unwrap(),
+            "Unrelated expired entry should remain"
+        );
     }
 
     #[tokio::test]
     async fn test_get_user_count() {
-        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
 
         let storage = Arc::new(MockStorageBackend::new());
 
@@ -1069,7 +1236,9 @@ mod tests {
 
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let config = AuthConfig::default();
-        let auth_service = AuthenticationService::new(storage, crypto, &config).await.unwrap();
+        let auth_service = AuthenticationService::new(storage, crypto, &config)
+            .await
+            .unwrap();
 
         let count = auth_service.get_user_count().await.unwrap();
         assert_eq!(count, 2);

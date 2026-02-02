@@ -3,17 +3,15 @@
 //! Provides JWT-based authentication, role-based access control,
 //! and integration with external identity providers.
 
-use axum::{
-    http::{HeaderValue},
-};
+use axum::http::HeaderValue;
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
+use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tracing::warn;
 use uuid::Uuid;
-use secreton_errors::SecretonError;
 
 /// JWT claims structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -313,17 +311,18 @@ impl JwtAuthService {
         let header = r#"{"alg":"HS256","typ":"JWT"}"#;
         let header_b64 = general_purpose::URL_SAFE_NO_PAD.encode(header);
 
-        let payload =
-            serde_json::to_string(claims).map_err(|e| SecretonError::Cryptographic {
-                message: format!("Failed to serialize claims: {}", e),
-            })?;
+        let payload = serde_json::to_string(claims).map_err(|e| SecretonError::Cryptographic {
+            message: format!("Failed to serialize claims: {}", e),
+        })?;
         let payload_b64 = general_purpose::URL_SAFE_NO_PAD.encode(payload);
 
         let message = format!("{}.{}", header_b64, payload_b64);
 
-        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
-            .map_err(|e| SecretonError::Cryptographic {
-                message: format!("Failed to create HMAC: {}", e),
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes()).map_err(|e| {
+                SecretonError::Cryptographic {
+                    message: format!("Failed to create HMAC: {}", e),
+                }
             })?;
         mac.update(message.as_bytes());
         let signature = mac.finalize().into_bytes();
@@ -353,9 +352,11 @@ impl JwtAuthService {
                 reason: format!("Failed to decode signature: {}", e),
             })?;
 
-        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes())
-            .map_err(|e| SecretonError::Cryptographic {
-                message: format!("Failed to initialize HMAC: {}", e),
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(self.config.jwt_secret.as_bytes()).map_err(|e| {
+                SecretonError::Cryptographic {
+                    message: format!("Failed to initialize HMAC: {}", e),
+                }
             })?;
         mac.update(message.as_bytes());
 
@@ -370,8 +371,8 @@ impl JwtAuthService {
                 reason: format!("Failed to decode payload: {}", e),
             })?;
 
-        let claims: Claims = serde_json::from_slice(&payload)
-            .map_err(|e| SecretonError::TokenInvalid {
+        let claims: Claims =
+            serde_json::from_slice(&payload).map_err(|e| SecretonError::TokenInvalid {
                 reason: format!("Failed to parse claims: {}", e),
             })?;
 

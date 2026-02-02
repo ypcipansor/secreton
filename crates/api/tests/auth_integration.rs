@@ -19,5 +19,9 @@ async fn test_verify_password_integration() {
         .verify_password("any_user", "any_password")
         .await;
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), false, "Should return false for non-existent user/invalid credentials");
+    assert_eq!(
+        result.unwrap(),
+        false,
+        "Should return false for non-existent user/invalid credentials"
+    );
 }

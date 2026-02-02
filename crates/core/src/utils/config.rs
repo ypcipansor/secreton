@@ -67,10 +67,12 @@ impl Config {
     pub fn from_env() -> Self {
         let jwt_secret = std::env::var("SECRETON_JWT_SECRET")
             .unwrap_or_else(|_| "your-super-secret-jwt-key-change-this-in-production".to_string());
-        let jwt_refresh_secret = std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
-            "your-super-secret-refresh-key-change-this-in-production".to_string()
-        });
-        let server_host = std::env::var("SECRETON_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let jwt_refresh_secret =
+            std::env::var("SECRETON_JWT_REFRESH_SECRET").unwrap_or_else(|_| {
+                "your-super-secret-refresh-key-change-this-in-production".to_string()
+            });
+        let server_host =
+            std::env::var("SECRETON_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let server_port: u16 = std::env::var("SECRETON_PORT")
             .unwrap_or_else(|_| "8080".to_string())
             .parse()

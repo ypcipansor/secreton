@@ -5,15 +5,15 @@ use axum::{
     extract::{Extension, Path},
     http::StatusCode,
     response::Json,
-    routing::{post, get, delete},
+    routing::{delete, get, post},
 };
-use secreton_secrets::{TotpEngine, SecretEngine};
+use secreton_secrets::{SecretEngine, TotpEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::ApiResponse;
 
@@ -82,16 +82,25 @@ pub async fn create_key(
         data.insert("account_name".to_string(), Value::String(account_name));
     }
     if let Some(period) = request.period {
-        data.insert("period".to_string(), Value::Number(serde_json::Number::from(period)));
+        data.insert(
+            "period".to_string(),
+            Value::Number(serde_json::Number::from(period)),
+        );
     }
     if let Some(digits) = request.digits {
-        data.insert("digits".to_string(), Value::Number(serde_json::Number::from(digits)));
+        data.insert(
+            "digits".to_string(),
+            Value::Number(serde_json::Number::from(digits)),
+        );
     }
 
     match engine.write(&format!("keys/{}", name), data).await {
         Ok(_) => {
             info!("TOTP Key created: {}", name);
-            Ok(Json(ApiResponse::success(format!("Key '{}' created", name))))
+            Ok(Json(ApiResponse::success(format!(
+                "Key '{}' created",
+                name
+            ))))
         }
         Err(e) => {
             error!("Failed to create key {}: {:?}", name, e);
@@ -110,7 +119,12 @@ pub async fn generate_code(
 
     match engine.read(&format!("code/{}", name)).await {
         Ok(Some(secret)) => {
-            let code = secret.data.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let code = secret
+                .data
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             Ok(Json(ApiResponse::success(CodeResponse { code })))
         }
         Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -129,9 +143,7 @@ pub async fn list_keys(
     let engine = state.totp.engine.read().await;
 
     match engine.list("keys").await {
-        Ok(keys) => {
-            Ok(Json(ApiResponse::success(ListKeysResponse { keys })))
-        }
+        Ok(keys) => Ok(Json(ApiResponse::success(ListKeysResponse { keys }))),
         Err(e) => {
             error!("Failed to list keys: {:?}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -150,7 +162,10 @@ pub async fn delete_key(
     match engine.delete(&format!("keys/{}", name)).await {
         Ok(_) => {
             info!("TOTP Key deleted: {}", name);
-            Ok(Json(ApiResponse::success(format!("Key '{}' deleted", name))))
+            Ok(Json(ApiResponse::success(format!(
+                "Key '{}' deleted",
+                name
+            ))))
         }
         Err(e) => {
             error!("Failed to delete key {}: {:?}", name, e);
