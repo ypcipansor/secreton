@@ -1,8 +1,8 @@
+use crate::api::post;
+use crate::components::{Button, Card, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
-use crate::components::{Button, Card, Input};
-use crate::api::{post};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GenerateCertRequest {

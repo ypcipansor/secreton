@@ -1,13 +1,13 @@
 //! Administrative handlers for system management.
-//! 
+//!
 //! Provides endpoints for user management, system configuration,
 //! monitoring, and maintenance operations.
 
 use axum::{
+    Router,
     extract::{Path, Query, State},
     response::Json,
     routing::{delete, get, post, put},
-    Router,
 };
 
 use serde::{Deserialize, Serialize};
@@ -15,11 +15,11 @@ use std::collections::HashMap;
 
 use crate::handlers::{AppState, secret::ListQuery};
 use crate::{
-    services::admin::{CreateUserRequest, UpdateUserRequest},
     ApiResponse, ApiResult,
+    services::admin::{CreateUserRequest, UpdateUserRequest},
 };
-use secreton_storage::SecretEntry;
-use secreton_crypto::{hashing, encryption}; // Moved from inside function to top-level
+use secreton_crypto::{encryption, hashing};
+use secreton_storage::SecretEntry; // Moved from inside function to top-level
 
 /// Create administrative routes
 pub fn create_routes() -> Router<AppState> {
@@ -33,34 +33,32 @@ pub fn create_routes() -> Router<AppState> {
         .route("/users/{user_id}/roles", get(get_user_roles))
         .route("/users/{user_id}/roles", post(assign_user_roles))
         .route("/users/{user_id}/permissions", get(get_user_permissions))
-        
         // Role management
         .route("/roles", get(list_roles))
         .route("/roles", post(create_role))
         .route("/roles/{role_name}", get(get_role))
         .route("/roles/{role_name}", put(update_role))
         .route("/roles/{role_name}", delete(delete_role))
-        
         // System configuration
         .route("/config", get(get_config))
         .route("/config", put(update_config))
         .route("/config/reload", post(reload_config))
-        
         // System monitoring
         .route("/metrics", get(get_system_metrics))
         .route("/status", get(get_system_status))
         .route("/logs", get(get_system_logs))
-        
         // Maintenance operations
         .route("/maintenance/gc", post(run_garbage_collection))
         .route("/maintenance/compact", post(compact_database))
         .route("/maintenance/vacuum", post(vacuum_database))
-        
         // Security operations
         .route("/security/scan", post(run_security_scan))
         .route("/security/reports", get(get_security_reports))
         .route("/security/incidents", get(get_security_incidents))
-        .route("/security/incidents/{incident_id}", get(get_security_incident))
+        .route(
+            "/security/incidents/{incident_id}",
+            get(get_security_incident),
+        )
 }
 
 #[cfg(test)]
@@ -69,7 +67,7 @@ mod tests {
     use crate::config::ApiConfig;
     use crate::services::ApiServiceContainer;
     use axum_test::TestServer;
-    use secreton_storage::{SecretEntry, StorageBackend, EncryptionMetadata, SecurityLevel};
+    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -108,25 +106,25 @@ mod tests {
             is_superuser: true,
             permissions: vec![],
         };
-        // Simplified: Direct storage injection would be better if we knew the schema, 
-        // but assuming we can't easily access storage internal map. 
+        // Simplified: Direct storage injection would be better if we knew the schema,
+        // but assuming we can't easily access storage internal map.
         // Using auth service if available or just mocking the response if the test mocks the service.
         // Actually, let's use the service if possible.
         // But wait, the test fails because it returns 0 users.
         // We need to inject into the MockStorageBackend.
         // Since we can't easily access the inner mock map from here without casting,
-        // let's try to use the auth service to create a user if defined, 
+        // let's try to use the auth service to create a user if defined,
         // or assumes MockStorageBackend is used.
-        
-        // Let's rely on `server_with_routes` using `InMemorySecretStorage` which is Mock compatible? 
+
+        // Let's rely on `server_with_routes` using `InMemorySecretStorage` which is Mock compatible?
         // No, ApiServiceContainer uses `MockStorageBackend`.
-        
+
         // Let's try to use a valid `User` struct from `secreton_auth` and save it to storage.
         // Note: The failure is `test_list_users_returns_placeholder_user` failing on `users.len() == 1`.
-        
-        // If I can't easily insert, I will change the test expectation to 0 for now to verify passing, 
+
+        // If I can't easily insert, I will change the test expectation to 0 for now to verify passing,
         // but the test name says "returns_placeholder_user".
-        
+
         // A better approach: The failing test expects a user "admin".
         // Let's manually inject it via the storage interface.
         // Use crate::services::admin::UserInfo (as expected by list_users deserialization)
@@ -143,7 +141,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
             metadata: Default::default(),
         };
-        
+
         let user_json = serde_json::to_vec(&user_info).unwrap();
         // Construct storage entry
         let entry = SecretEntry::new(
@@ -153,11 +151,16 @@ mod tests {
             SecurityLevel::Secret,
             Uuid::new_v4(),
         );
-        services.storage.store(&entry).await.expect("Failed to store seeded user");
+        services
+            .storage
+            .store(&entry)
+            .await
+            .expect("Failed to store seeded user");
 
         let app = create_routes().with_state(services);
         use std::net::SocketAddr;
-        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to start test server")
+        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server")
     }
 
     #[tokio::test]
@@ -418,10 +421,19 @@ pub async fn list_users(
     State(state): State<AppState>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<UserResponse>>>> {
-    let users: Vec<crate::services::admin::UserInfo> = state.admin.list_users().await
-        .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
-    
-    let user_responses: Vec<UserResponse> = users.into_iter()
+    let users: Vec<crate::services::admin::UserInfo> =
+        state
+            .admin
+            .list_users()
+            .await
+            .map_err(|e: crate::services::admin::AdminError| {
+                secreton_errors::SecretonError::Internal {
+                    message: e.to_string(),
+                }
+            })?;
+
+    let user_responses: Vec<UserResponse> = users
+        .into_iter()
         .map(|user| UserResponse {
             id: user.id,
             username: user.username,
@@ -455,9 +467,13 @@ pub async fn create_user(
         metadata: HashMap::new(),
     };
 
-    let user: crate::services::admin::UserInfo = state.admin.create_user(create_request).await
-        .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
-    
+    let user: crate::services::admin::UserInfo =
+        state.admin.create_user(create_request).await.map_err(
+            |e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal {
+                message: e.to_string(),
+            },
+        )?;
+
     let user_response = UserResponse {
         id: user.id,
         username: user.username,
@@ -482,9 +498,17 @@ pub async fn get_user(
     // Assuming OAuthUserInfo is a type that can be converted to UserResponse or used to fetch UserInfo
     // This snippet seems to be a placeholder or from a different context, as `oauth_provider` and `access_token` are not defined here.
     // The original logic for fetching a user by ID is retained, as the provided snippet is incomplete and inconsistent.
-    let user: crate::services::admin::UserInfo = state.admin.get_user(&user_id).await
-        .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
-    
+    let user: crate::services::admin::UserInfo =
+        state
+            .admin
+            .get_user(&user_id)
+            .await
+            .map_err(|e: crate::services::admin::AdminError| {
+                secreton_errors::SecretonError::Internal {
+                    message: e.to_string(),
+                }
+            })?;
+
     let user_response = UserResponse {
         id: user.id,
         username: user.username,
@@ -514,9 +538,16 @@ pub async fn update_user(
         roles: request.roles,
     };
 
-    let user: crate::services::admin::UserInfo = state.admin.update_user(&user_id, update_request).await
-        .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
-    
+    let user: crate::services::admin::UserInfo = state
+        .admin
+        .update_user(&user_id, update_request)
+        .await
+        .map_err(|e: crate::services::admin::AdminError| {
+            secreton_errors::SecretonError::Internal {
+                message: e.to_string(),
+            }
+        })?;
+
     let user_response = UserResponse {
         id: user.id,
         username: user.username,
@@ -539,8 +570,15 @@ pub async fn delete_user(
     Path(user_id): Path<String>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    state.admin.delete_user(&user_id).await
-        .map_err(|e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
+    state
+        .admin
+        .delete_user(&user_id)
+        .await
+        .map_err(|e: crate::services::admin::AdminError| {
+            secreton_errors::SecretonError::Internal {
+                message: e.to_string(),
+            }
+        })?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "User deleted successfully"
@@ -585,75 +623,109 @@ pub async fn get_config(
     Ok(Json(ApiResponse::success(config)))
 }
 
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 pub async fn get_system_metrics(
     State(state): State<AppState>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<SystemMetrics>>> {
-    let stats = state.admin.get_system_stats().await
+    let stats = state
+        .admin
+        .get_system_stats()
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Use shared telemetry collector if available
-    let (memory, cpu, disk, network, uptime) = if let Some(telemetry) = Option::<secreton_core::telemetry::TelemetryCollector>::None { // Stubbed due to compilation issue
-        let m: secreton_core::telemetry::SystemMetrics = telemetry.get_metrics().await;
+    let (memory, cpu, disk, network, uptime) =
+        if let Some(telemetry) = Option::<secreton_core::telemetry::TelemetryCollector>::None {
+            // Stubbed due to compilation issue
+            let m: secreton_core::telemetry::SystemMetrics = telemetry.get_metrics().await;
 
-        let mem = MemoryMetrics {
-            total: m.performance.total_memory_bytes,
-            used: m.performance.memory_usage_bytes,
-            free: m.performance.total_memory_bytes.saturating_sub(m.performance.memory_usage_bytes),
-            cached: 0, // Not currently tracked in core metrics
+            let mem = MemoryMetrics {
+                total: m.performance.total_memory_bytes,
+                used: m.performance.memory_usage_bytes,
+                free: m
+                    .performance
+                    .total_memory_bytes
+                    .saturating_sub(m.performance.memory_usage_bytes),
+                cached: 0, // Not currently tracked in core metrics
+            };
+
+            let cpu = CpuMetrics {
+                cores: num_cpus::get() as u32,
+                usage_percent: m.performance.cpu_usage_percent as f64,
+                load_average: [
+                    m.system.load_average_1m as f64,
+                    m.system.load_average_5m as f64,
+                    m.system.load_average_15m as f64,
+                ],
+            };
+
+            let disk = DiskMetrics {
+                total: m.performance.total_disk_bytes,
+                used: m.performance.disk_usage_bytes,
+                free: m
+                    .performance
+                    .total_disk_bytes
+                    .saturating_sub(m.performance.disk_usage_bytes),
+                usage_percent: if m.performance.total_disk_bytes > 0 {
+                    (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64)
+                        * 100.0
+                } else {
+                    0.0
+                },
+            };
+
+            let net = NetworkMetrics {
+                bytes_sent: m.performance.network_tx_bytes,
+                bytes_received: m.performance.network_rx_bytes,
+                packets_sent: 0,     // Not tracked
+                packets_received: 0, // Not tracked
+            };
+
+            (mem, cpu, disk, net, m.system.uptime_seconds)
+        } else {
+            // Fallback for when telemetry service is missing
+            (
+                MemoryMetrics {
+                    total: 0,
+                    used: 0,
+                    free: 0,
+                    cached: 0,
+                },
+                CpuMetrics {
+                    cores: 1,
+                    usage_percent: 0.0,
+                    load_average: [0.0; 3],
+                },
+                DiskMetrics {
+                    total: 0,
+                    used: 0,
+                    free: 0,
+                    usage_percent: 0.0,
+                },
+                NetworkMetrics {
+                    bytes_sent: 0,
+                    bytes_received: 0,
+                    packets_sent: 0,
+                    packets_received: 0,
+                },
+                stats.uptime_seconds,
+            )
         };
-
-        let cpu = CpuMetrics {
-            cores: num_cpus::get() as u32,
-            usage_percent: m.performance.cpu_usage_percent as f64,
-            load_average: [
-                m.system.load_average_1m as f64,
-                m.system.load_average_5m as f64,
-                m.system.load_average_15m as f64
-            ],
-        };
-
-        let disk = DiskMetrics {
-            total: m.performance.total_disk_bytes,
-            used: m.performance.disk_usage_bytes,
-            free: m.performance.total_disk_bytes.saturating_sub(m.performance.disk_usage_bytes),
-            usage_percent: if m.performance.total_disk_bytes > 0 {
-                (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64) * 100.0
-            } else {
-                0.0
-            },
-        };
-
-        let net = NetworkMetrics {
-            bytes_sent: m.performance.network_tx_bytes,
-            bytes_received: m.performance.network_rx_bytes,
-            packets_sent: 0, // Not tracked
-            packets_received: 0, // Not tracked
-        };
-
-        (mem, cpu, disk, net, m.system.uptime_seconds)
-    } else {
-        // Fallback for when telemetry service is missing
-        (
-             MemoryMetrics { total: 0, used: 0, free: 0, cached: 0 },
-             CpuMetrics { cores: 1, usage_percent: 0.0, load_average: [0.0; 3] },
-             DiskMetrics { total: 0, used: 0, free: 0, usage_percent: 0.0 },
-             NetworkMetrics { bytes_sent: 0, bytes_received: 0, packets_sent: 0, packets_received: 0 },
-             stats.uptime_seconds
-        )
-    };
 
     // Count total policies from storage
-    let total_policies: u64 = state.storage.list(&secreton_storage::QueryParams {
-        path_prefix: Some("policies/".to_string()),
-        limit: None,
-        offset: Some(0),
-        ..Default::default()
-    }).await
-    .map(|entries: Vec<SecretEntry>| entries.len() as u64)
-    .unwrap_or(0);
+    let total_policies: u64 = state
+        .storage
+        .list(&secreton_storage::QueryParams {
+            path_prefix: Some("policies/".to_string()),
+            limit: None,
+            offset: Some(0),
+            ..Default::default()
+        })
+        .await
+        .map(|entries: Vec<SecretEntry>| entries.len() as u64)
+        .unwrap_or(0);
 
     let metrics = SystemMetrics {
         uptime,
@@ -683,15 +755,17 @@ pub async fn get_system_status(
     let storage_status = check_storage_health(&state).await;
     let auth_status = check_auth_health(&state).await;
 
-    let overall_status = if database_status == "healthy" && 
-                          cache_status == "healthy" && 
-                          crypto_status == "healthy" &&
-                          storage_status == "healthy" &&
-                          auth_status == "healthy" {
+    let overall_status = if database_status == "healthy"
+        && cache_status == "healthy"
+        && crypto_status == "healthy"
+        && storage_status == "healthy"
+        && auth_status == "healthy"
+    {
         "healthy"
-    } else if database_status == "unhealthy" || 
-              storage_status == "unhealthy" ||
-              crypto_status == "unhealthy" {
+    } else if database_status == "unhealthy"
+        || storage_status == "unhealthy"
+        || crypto_status == "unhealthy"
+    {
         "unhealthy"
     } else {
         "degraded"
@@ -721,7 +795,10 @@ pub async fn get_system_status(
 pub async fn run_security_scan(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<SecurityScanResult>>> {
-    let report = state.admin.run_security_scan().await
+    let report = state
+        .admin
+        .run_security_scan()
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     let scan_result = SecurityScanResult {
@@ -729,14 +806,18 @@ pub async fn run_security_scan(
         status: report.status,
         started_at: report.started_at,
         completed_at: report.completed_at,
-        findings: report.findings.into_iter().map(|f| SecurityFinding {
-            severity: f.severity,
-            category: f.category,
-            title: f.title,
-            description: f.description,
-            recommendation: f.recommendation,
-            affected_resources: f.affected_resources,
-        }).collect(),
+        findings: report
+            .findings
+            .into_iter()
+            .map(|f| SecurityFinding {
+                severity: f.severity,
+                category: f.category,
+                title: f.title,
+                description: f.description,
+                recommendation: f.recommendation,
+                affected_resources: f.affected_resources,
+            })
+            .collect(),
     };
 
     Ok(Json(ApiResponse::success(scan_result)))
@@ -746,7 +827,7 @@ pub async fn get_security_incidents(
     State(_state): State<AppState>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecurityIncident>>>> {
-    // For now, return empty list - in a real implementation, 
+    // For now, return empty list - in a real implementation,
     // this would query the security monitoring system
     let incidents = Vec::new();
 
@@ -757,8 +838,11 @@ pub async fn get_security_incidents(
 pub async fn run_garbage_collection(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.run_garbage_collection().await
-        .map_err(|e| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
+    let result = state.admin.run_garbage_collection().await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
 
     let data = serde_json::json!({
         "message": "Garbage collection completed",
@@ -774,8 +858,11 @@ pub async fn run_garbage_collection(
 pub async fn compact_database(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.compact_database().await
-        .map_err(|e| secreton_errors::SecretonError::Internal { message: e.to_string() })?;
+    let result = state.admin.compact_database().await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
 
     let data = serde_json::json!({
         "message": "Database compaction completed",
@@ -795,7 +882,9 @@ async fn check_database_health(_state: &AppState) -> String {
         // This would need to be implemented based on the actual storage backend
         // For now, assume healthy if we can access the service
         Ok::<(), ()>(())
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(_)) => "healthy".to_string(),
         _ => "unhealthy".to_string(),
     }
@@ -809,23 +898,21 @@ async fn check_cache_health(_state: &AppState) -> String {
 
 async fn check_crypto_health(_state: &AppState) -> String {
     // Test basic crypto operations
-    
+
     // Test hash function
     let test_data = b"test data for crypto health check";
     if hashing::compute_hash(secreton_crypto::AlgorithmId::Sha256, test_data).is_err() {
         return "unhealthy".to_string();
     }
-    
+
     // Test symmetric encryption
     let key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm).unwrap();
     let engine = encryption::CryptoEngine::new();
     match engine.encrypt(secreton_crypto::AlgorithmId::Aes256Gcm, test_data, &key) {
-        Ok(encrypted) => {
-            match engine.decrypt(&encrypted, &key) {
-                Ok(decrypted) if decrypted == test_data => "healthy".to_string(),
-                _ => "unhealthy".to_string(),
-            }
-        }
+        Ok(encrypted) => match engine.decrypt(&encrypted, &key) {
+            Ok(decrypted) if decrypted == test_data => "healthy".to_string(),
+            _ => "unhealthy".to_string(),
+        },
         _ => "unhealthy".to_string(),
     }
 }
@@ -835,7 +922,9 @@ async fn check_storage_health(_state: &AppState) -> String {
     match timeout(Duration::from_secs(5), async {
         // This would test the storage backend
         Ok::<(), ()>(())
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(_)) => "healthy".to_string(),
         _ => "unhealthy".to_string(),
     }
@@ -846,7 +935,9 @@ async fn check_auth_health(_state: &AppState) -> String {
     match timeout(Duration::from_secs(5), async {
         // Test auth service availability
         Ok::<(), ()>(())
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(_)) => "healthy".to_string(),
         _ => "degraded".to_string(),
     }
@@ -866,7 +957,9 @@ pub async fn assign_user_roles(
     Path(_user_id): Path<String>,
     Json(_request): Json<serde_json::Value>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    Ok(Json(ApiResponse::success(serde_json::json!({"status": "updated"}))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({"status": "updated"}),
+    )))
 }
 
 pub async fn get_user_permissions(
@@ -932,7 +1025,9 @@ pub async fn delete_role(
     State(_state): State<AppState>,
     Path(_role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    Ok(Json(ApiResponse::success(serde_json::json!({"status": "deleted"}))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({"status": "deleted"}),
+    )))
 }
 
 pub async fn update_config(
@@ -974,7 +1069,9 @@ pub async fn update_config(
 pub async fn reload_config(
     State(_state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    Ok(Json(ApiResponse::success(serde_json::json!({"status": "reloaded"}))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({"status": "reloaded"}),
+    )))
 }
 
 pub async fn get_system_logs(
@@ -987,7 +1084,9 @@ pub async fn get_system_logs(
 pub async fn vacuum_database(
     State(_state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    Ok(Json(ApiResponse::success(serde_json::json!({"status": "vacuumed"}))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({"status": "vacuumed"}),
+    )))
 }
 
 pub async fn get_security_reports(

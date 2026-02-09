@@ -76,7 +76,9 @@ impl DatabaseEngine {
         if let Some(backend) = &self.backend {
             backend.generate_credentials(role_name, &role.sql).await
         } else {
-            Err(SecretError::InvalidConfiguration("Database backend not initialized".to_string()))
+            Err(SecretError::InvalidConfiguration(
+                "Database backend not initialized".to_string(),
+            ))
         }
     }
 
@@ -104,22 +106,20 @@ impl DatabaseEngine {
 
         match db_type {
             DatabaseType::PostgreSQL => {
-                let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.clone(),
-                )?;
+                let backend =
+                    crate::backend::database::postgres::PostgresBackend::new(self.config.clone())?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
             }
             DatabaseType::MySQL => {
-                let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.clone(),
-                )?;
+                let backend =
+                    crate::backend::database::mysql::MysqlBackend::new(self.config.clone())?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
             }
-            DatabaseType::MongoDB => {
-                Err(SecretError::NotImplemented("MongoDB backend not fully implemented".to_string()))
-            }
+            DatabaseType::MongoDB => Err(SecretError::NotImplemented(
+                "MongoDB backend not fully implemented".to_string(),
+            )),
         }
     }
 }
@@ -135,24 +135,29 @@ impl SecretEngine for DatabaseEngine {
 
         if config.enabled && db_config_value.is_none() {
             return Err(SecretError::InvalidConfiguration(
-                "Database configuration missing for enabled engine".to_string()
+                "Database configuration missing for enabled engine".to_string(),
             ));
         }
 
         if let Some(db_config) = db_config_value {
-             match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
-                 Ok(cfg) => {
-                     self.config = cfg;
-                     // Validate connection URL regardless of enabled state
-                     self.detect_database_type(&self.config.connection_url)?;
+            match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
+                Ok(cfg) => {
+                    self.config = cfg;
+                    // Validate connection URL regardless of enabled state
+                    self.detect_database_type(&self.config.connection_url)?;
 
-                     // Initialize backend only if enabled to avoid wasteful resource allocation
-                     if config.enabled {
-                         self.init_backend()?;
-                     }
-                 },
-                 Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
-             }
+                    // Initialize backend only if enabled to avoid wasteful resource allocation
+                    if config.enabled {
+                        self.init_backend()?;
+                    }
+                }
+                Err(e) => {
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Invalid database configuration: {}",
+                        e
+                    )));
+                }
+            }
         }
 
         self.enabled = config.enabled;

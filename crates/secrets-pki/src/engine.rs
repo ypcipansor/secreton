@@ -1,20 +1,20 @@
 //! PKI engine implementation
 
-use der::Decode;
-use der::EncodePem;
-use x509_cert::Certificate;
 use crate::error::PkiError;
 use crate::model::{
     CertificateRequest, CertificateResponse, PkiConfig, RevocationReason, SshKeyRequest,
     SshKeyResponse,
 };
 use chrono::{DateTime, Duration, Utc};
+use der::Decode;
+use der::EncodePem;
 use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, DistinguishedName, DnType, SanType};
 use ssh_key::{Algorithm, PrivateKey};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use x509_cert::Certificate;
 
 /// Revoked certificate entry
 #[derive(Debug, Clone)]
@@ -90,8 +90,10 @@ impl PkiEngine {
             not_before_chrono.timestamp(),
         )
         .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
-        params.not_after = ::time::OffsetDateTime::from_unix_timestamp(not_after_chrono.timestamp())
-            .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
+        params.not_after = ::time::OffsetDateTime::from_unix_timestamp(
+            not_after_chrono.timestamp(),
+        )
+        .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
 
         // Add subject alternative names
         for dns_name in &request.alt_names {
@@ -327,7 +329,10 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse PEM: {}", e)))?;
 
         if label != "CERTIFICATE" {
-             return Err(PkiError::CertificateParsing(format!("Invalid PEM label: {}", label)));
+            return Err(PkiError::CertificateParsing(format!(
+                "Invalid PEM label: {}",
+                label
+            )));
         }
 
         let cert = Certificate::from_der(&cert_bytes)
@@ -344,23 +349,35 @@ impl PkiEngine {
             _ => format!("Unknown ({})", algorithm_oid),
         };
 
-
         // Extract validity
-        let valid_from = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
-        let valid_until = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+        let valid_from = cert
+            .tbs_certificate
+            .validity
+            .not_before
+            .to_unix_duration()
+            .as_secs() as i64;
+        let valid_until = cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs() as i64;
 
         // Extract Subject and Issuer
         let subject = Self::extract_dn(&cert.tbs_certificate.subject);
         let issuer = Self::extract_dn(&cert.tbs_certificate.issuer);
 
         // Extract public key PEM
-        let public_key_pem = spki.to_pem(der::pem::LineEnding::LF)
-             .map_err(|e| PkiError::CertificateParsing(format!("Failed to encode public key: {}", e)))?;
+        let public_key_pem = spki.to_pem(der::pem::LineEnding::LF).map_err(|e| {
+            PkiError::CertificateParsing(format!("Failed to encode public key: {}", e))
+        })?;
 
         // Calculate key bits based on algorithm
         let key_bits = match key_type.as_str() {
             "RSA" => {
-                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes()) {
+                if let Ok(rsa_pub) =
+                    pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes())
+                {
                     rsa_pub.modulus.as_bytes().len() * 8
                 } else {
                     // Try parsing as SPKI if raw bytes fails or if it's SPKI inside?
@@ -368,7 +385,7 @@ impl PkiEngine {
                     // For RSA, it is RSAPublicKey (PKCS#1).
                     0
                 }
-            },
+            }
             "ECDSA" => {
                 // Check curve from parameters
                 // For now, simple mapping if possible, else 0
@@ -378,7 +395,7 @@ impl PkiEngine {
                             "1.2.840.10045.3.1.7" => 256, // P-256
                             "1.3.132.0.34" => 384,        // P-384
                             "1.3.132.0.35" => 521,        // P-521
-                            _ => 0
+                            _ => 0,
                         }
                     } else {
                         0
@@ -386,7 +403,7 @@ impl PkiEngine {
                 } else {
                     0
                 }
-            },
+            }
             _ => 0,
         };
 
@@ -398,10 +415,12 @@ impl PkiEngine {
             signature_algorithm: cert.signature_algorithm.oid.to_string(),
             subject,
             issuer,
-            valid_from: chrono::DateTime::from_timestamp(valid_from, 0)
-                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_from timestamp".to_string()))?,
-            valid_until: chrono::DateTime::from_timestamp(valid_until, 0)
-                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_until timestamp".to_string()))?,
+            valid_from: chrono::DateTime::from_timestamp(valid_from, 0).ok_or_else(|| {
+                PkiError::CertificateParsing("Invalid valid_from timestamp".to_string())
+            })?,
+            valid_until: chrono::DateTime::from_timestamp(valid_until, 0).ok_or_else(|| {
+                PkiError::CertificateParsing("Invalid valid_until timestamp".to_string())
+            })?,
         })
     }
 

@@ -3,6 +3,7 @@
 //! Provides HTTP API endpoints for all security operations
 //! integrating with the comprehensive security/ directory modules.
 
+use axum::Json;
 use chrono::{DateTime, Utc};
 use secreton_errors::SecretonError;
 use serde::{Deserialize, Serialize};
@@ -11,15 +12,14 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warp::{Filter, Rejection, Reply, reject};
-use axum::Json;
 
 use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
 use secreton_storage::StorageBackend;
 
-pub mod services;
-pub mod middleware;
 pub mod config;
 pub mod grpc;
+pub mod middleware;
+pub mod services;
 pub type ApiResult<T> = Result<T, ApiError>;
 
 /// API Response wrapper
@@ -409,13 +409,20 @@ impl SecurityAPI {
         let auth_service = auth.clone();
         let with_user = warp::header::header("authorization")
             .map(move |auth_header: String| (auth_header, auth_service.clone()))
-            .and_then(|(auth_header, auth_service): (String, Arc<crate::services::auth::AuthenticationService>)| async move {
-                let token = auth_header.strip_prefix("Bearer ").unwrap_or(&auth_header);
-                match auth_service.validate_token(token).await {
-                    Ok(user) => Ok(user),
-                    Err(_) => Err(warp::reject::custom(ApiError::Authentication("Invalid token".to_string()))),
-                }
-            });
+            .and_then(
+                |(auth_header, auth_service): (
+                    String,
+                    Arc<crate::services::auth::AuthenticationService>,
+                )| async move {
+                    let token = auth_header.strip_prefix("Bearer ").unwrap_or(&auth_header);
+                    match auth_service.validate_token(token).await {
+                        Ok(user) => Ok(user),
+                        Err(_) => Err(warp::reject::custom(ApiError::Authentication(
+                            "Invalid token".to_string(),
+                        ))),
+                    }
+                },
+            );
 
         let health = warp::path("health")
             .and(warp::get())
@@ -586,10 +593,12 @@ struct SecretPutRequest {
 async fn handle_secret_get(
     path: warp::filters::path::Tail,
     user: secreton_auth::User,
-    secreton: Arc<crate::services::secret::SecretService>
+    secreton: Arc<crate::services::secret::SecretService>,
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
-    let secret = secreton.get_secret(path_str, &user).await
+    let secret = secreton
+        .get_secret(path_str, &user)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Wrap in ApiResponse
@@ -603,10 +612,12 @@ async fn handle_secret_put(
     path: warp::filters::path::Tail,
     user: secreton_auth::User,
     payload: SecretPutRequest,
-    secreton: Arc<crate::services::secret::SecretService>
+    secreton: Arc<crate::services::secret::SecretService>,
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
-    let secret = secreton.put_secret(path_str, payload.data, &user).await
+    let secret = secreton
+        .put_secret(path_str, payload.data, &user)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(secret)))
 }
@@ -614,10 +625,12 @@ async fn handle_secret_put(
 async fn handle_secret_delete(
     path: warp::filters::path::Tail,
     user: secreton_auth::User,
-    secreton: Arc<crate::services::secret::SecretService>
+    secreton: Arc<crate::services::secret::SecretService>,
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
-    secreton.delete_secret(path_str, &user).await
+    secreton
+        .delete_secret(path_str, &user)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success("Deleted")))
 }
@@ -641,24 +654,30 @@ async fn handle_sys_init(
     mfa: Arc<secreton_auth::mfa::CombinedMfaService>,
 ) -> Result<impl Reply, Rejection> {
     let root_username = req.root_username.as_deref().unwrap_or("root");
-    let result = seal.init(req.shares, req.threshold, root_username, &auth, &mfa).await
+    let result = seal
+        .init(req.shares, req.threshold, root_username, &auth, &mfa)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(result)))
 }
 
 async fn handle_sys_unseal(
     req: SysUnsealRequest,
-    seal: Arc<crate::services::seal::SealService>
+    seal: Arc<crate::services::seal::SealService>,
 ) -> Result<impl Reply, Rejection> {
-    let result = seal.unseal(&req.key).await
+    let result = seal
+        .unseal(&req.key)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(result)))
 }
 
 async fn handle_sys_seal_status(
-    seal: Arc<crate::services::seal::SealService>
+    seal: Arc<crate::services::seal::SealService>,
 ) -> Result<impl Reply, Rejection> {
-    let result = seal.get_status().await
+    let result = seal
+        .get_status()
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(result)))
 }
@@ -668,23 +687,37 @@ async fn health_handler(
     storage: Arc<dyn StorageBackend>,
     backend_type: String,
 ) -> Result<impl Reply, Rejection> {
-    let health_status = storage.health_check().await.unwrap_or(secreton_storage::HealthStatus {
-        is_healthy: false,
-        response_time_ms: 0.0,
-        connections_active: 0,
-        connections_idle: 0,
-        last_error: Some("Health check failed".to_string()),
-        uptime_seconds: 0,
-    });
+    let health_status = storage
+        .health_check()
+        .await
+        .unwrap_or(secreton_storage::HealthStatus {
+            is_healthy: false,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: Some("Health check failed".to_string()),
+            uptime_seconds: 0,
+        });
 
     let db_status = if health_status.is_healthy {
-        format!("{} (Healthy, {}ms)", backend_type, health_status.response_time_ms)
+        format!(
+            "{} (Healthy, {}ms)",
+            backend_type, health_status.response_time_ms
+        )
     } else {
-        format!("{} (Unhealthy: {})", backend_type, health_status.last_error.unwrap_or_default())
+        format!(
+            "{} (Unhealthy: {})",
+            backend_type,
+            health_status.last_error.unwrap_or_default()
+        )
     };
 
     let response = ApiResponse::success(HealthCheckResponse {
-        status: if health_status.is_healthy { "healthy".to_string() } else { "unhealthy".to_string() },
+        status: if health_status.is_healthy {
+            "healthy".to_string()
+        } else {
+            "unhealthy".to_string()
+        },
         version: "2.0.1".to_string(),
         uptime: health_status.uptime_seconds,
         dependencies: HealthCheckDependencies {
@@ -935,38 +968,66 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     let storage = Arc::new(secreton_storage::MockStorageBackend::new());
 
     // Initialize required services for auth and audit
-    let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+    let crypto = Arc::new(
+        crate::services::crypto::CryptoService::new(storage.clone())
+            .await
+            .unwrap(),
+    );
     let auth_config = crate::config::AuthConfig::default();
-    let auth = Arc::new(crate::services::auth::AuthenticationService::new(storage.clone(), crypto.clone(), &auth_config).await.unwrap());
-    let audit = Arc::new(crate::services::audit::AuditLogger::new(storage.clone()).await.unwrap());
+    let auth = Arc::new(
+        crate::services::auth::AuthenticationService::new(
+            storage.clone(),
+            crypto.clone(),
+            &auth_config,
+        )
+        .await
+        .unwrap(),
+    );
+    let audit = Arc::new(
+        crate::services::audit::AuditLogger::new(storage.clone())
+            .await
+            .unwrap(),
+    );
 
     let seal = Arc::new(crate::services::seal::SealService::new(
         storage.clone(),
         crypto.clone(),
         "dev-secret".to_string(),
         "secreton".to_string(),
-        "secreton-api".to_string()
+        "secreton-api".to_string(),
     ));
 
     // Initialize Secret Service components
     let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
     let policy_service = Arc::new(secreton_auth::PolicyService::new());
-    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()));
+    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(
+        secreton_performance::SecretPerformanceConfig::default(),
+    ));
 
-    let secreton = Arc::new(crate::services::secret::SecretService::new(
-        storage.clone(),
-        crypto.clone(),
-        audit.clone(),
-        identity,
-        policy_service,
-        performance
-    ).await.unwrap());
+    let secreton = Arc::new(
+        crate::services::secret::SecretService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap(),
+    );
 
     // Initialize MFA for start_security_server (mock)
     let mfa = Arc::new(secreton_auth::mfa::CombinedMfaService::new(
-        Arc::new(secreton_auth::mfa::InMemoryTotpService::new("secreton-dev".to_string())),
-        Arc::new(secreton_auth::mfa::InMemorySmsService::new(secreton_auth::mfa::SmsConfig::default())),
-        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(secreton_auth::mfa::EmailConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryTotpService::new(
+            "secreton-dev".to_string(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemorySmsService::new(
+            secreton_auth::mfa::SmsConfig::default(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(
+            secreton_auth::mfa::EmailConfig::default(),
+        )),
         Arc::new(secreton_auth::mfa::InMemoryHardwareService::new()),
         Arc::new(secreton_auth::mfa::DefaultPushService::new_mock()),
         Arc::new(secreton_auth::mfa::DefaultWebAuthnService::new_default()),
@@ -976,17 +1037,27 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
     // Inject storage, auth and audit into routes
     // For start_security_server, we just use the mock storage since this function
     // doesn't accept storage configuration
-    let routes_with_storage = SecurityAPI::routes(storage, auth, audit, seal, secreton, mfa, "Memory (Mock)".to_string())
-        .with(
-            warp::cors()
-                .allow_any_origin()
-                .allow_headers(vec!["content-type", "authorization", "x-session-id"])
-                .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
-        )
-        .with(warp::log("security_api"))
-        .recover(handle_rejection);
+    let routes_with_storage = SecurityAPI::routes(
+        storage,
+        auth,
+        audit,
+        seal,
+        secreton,
+        mfa,
+        "Memory (Mock)".to_string(),
+    )
+    .with(
+        warp::cors()
+            .allow_any_origin()
+            .allow_headers(vec!["content-type", "authorization", "x-session-id"])
+            .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]),
+    )
+    .with(warp::log("security_api"))
+    .recover(handle_rejection);
 
-    warp::serve(routes_with_storage).run(([127, 0, 0, 1], port)).await;
+    warp::serve(routes_with_storage)
+        .run(([127, 0, 0, 1], port))
+        .await;
 
     Ok(())
 }
@@ -1031,18 +1102,49 @@ impl ApiError {
 impl axum::response::IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self.0 {
-            SecretonError::Authentication { message } => (axum::http::StatusCode::UNAUTHORIZED, message.clone()),
-            SecretonError::Authorization { message } => (axum::http::StatusCode::FORBIDDEN, message.clone()),
-            SecretonError::NotFound { resource } => (axum::http::StatusCode::NOT_FOUND, format!("Resource not found: {}", resource)),
-            SecretonError::Validation { message } => (axum::http::StatusCode::BAD_REQUEST, message.clone()),
-            SecretonError::Internal { message } => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message.clone()),
-            SecretonError::Configuration { message } => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Configuration error: {}", message)),
-            SecretonError::Network { message } => (axum::http::StatusCode::BAD_GATEWAY, message.clone()),
-            SecretonError::Parse { message } => (axum::http::StatusCode::BAD_REQUEST, message.clone()),
-            SecretonError::MfaRequired => (axum::http::StatusCode::UNAUTHORIZED, "MFA required".to_string()),
-            SecretonError::AccountLocked { username } => (axum::http::StatusCode::FORBIDDEN, format!("Account locked: {}", username)),
-            SecretonError::PasswordExpired { username } => (axum::http::StatusCode::FORBIDDEN, format!("Password expired: {}", username)),
-            _ => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Unknown error".to_string()),
+            SecretonError::Authentication { message } => {
+                (axum::http::StatusCode::UNAUTHORIZED, message.clone())
+            }
+            SecretonError::Authorization { message } => {
+                (axum::http::StatusCode::FORBIDDEN, message.clone())
+            }
+            SecretonError::NotFound { resource } => (
+                axum::http::StatusCode::NOT_FOUND,
+                format!("Resource not found: {}", resource),
+            ),
+            SecretonError::Validation { message } => {
+                (axum::http::StatusCode::BAD_REQUEST, message.clone())
+            }
+            SecretonError::Internal { message } => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message.clone(),
+            ),
+            SecretonError::Configuration { message } => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Configuration error: {}", message),
+            ),
+            SecretonError::Network { message } => {
+                (axum::http::StatusCode::BAD_GATEWAY, message.clone())
+            }
+            SecretonError::Parse { message } => {
+                (axum::http::StatusCode::BAD_REQUEST, message.clone())
+            }
+            SecretonError::MfaRequired => (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "MFA required".to_string(),
+            ),
+            SecretonError::AccountLocked { username } => (
+                axum::http::StatusCode::FORBIDDEN,
+                format!("Account locked: {}", username),
+            ),
+            SecretonError::PasswordExpired { username } => (
+                axum::http::StatusCode::FORBIDDEN,
+                format!("Password expired: {}", username),
+            ),
+            _ => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Unknown error".to_string(),
+            ),
         };
 
         let body = Json(ApiResponse::<()>::error(message));
@@ -1110,23 +1212,23 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
 }
 
 // Re-export KV and Transit modules for axum-based API
-pub mod kv;
-pub mod transit;
+pub mod auth;
 pub mod database;
+pub mod extractors;
+pub mod handlers;
+pub mod kv;
 pub mod pki;
 pub mod ssh;
 pub mod totp;
-pub mod extractors;
-pub mod handlers;
-pub mod auth;
+pub mod transit;
 
 // Re-export types needed by tests
-pub use kv::KVApiState;
 pub use database::DatabaseApiState;
+pub use kv::KVApiState;
 pub use pki::PkiApiState;
+pub use secreton_performance::OptimizationLevel;
 pub use ssh::SshApiState;
 pub use totp::TotpApiState;
-pub use secreton_performance::OptimizationLevel;
 pub use transit::TransitApiState;
 
 /// Main API state combining all engine states
@@ -1172,7 +1274,7 @@ impl ApiState {
 /// Create the main API router combining KV and Transit engines
 pub fn create_api_router(state: ApiState) -> axum::Router {
     use axum::middleware;
-    use tower_http::cors::{CorsLayer, Any};
+    use tower_http::cors::{Any, CorsLayer};
 
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
@@ -1182,11 +1284,16 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
         .nest("/api/v1/ssh", ssh::create_ssh_router())
         .nest("/api/v1/totp", totp::create_totp_router())
         // Apply authentication middleware to all routes
-        .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
-        .layer(CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(axum::Extension(state))
 }
 
@@ -1196,17 +1303,17 @@ async fn auth_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, axum::http::StatusCode> {
-    let auth_header = req.headers().get("authorization")
+    let auth_header = req
+        .headers()
+        .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "));
 
     match auth_header {
-        Some(token) => {
-            match state.auth.validate_token(token).await {
-                Ok(_) => Ok(next.run(req).await),
-                Err(_) => Err(axum::http::StatusCode::UNAUTHORIZED),
-            }
-        }
+        Some(token) => match state.auth.validate_token(token).await {
+            Ok(_) => Ok(next.run(req).await),
+            Err(_) => Err(axum::http::StatusCode::UNAUTHORIZED),
+        },
         None => Err(axum::http::StatusCode::UNAUTHORIZED),
     }
 }

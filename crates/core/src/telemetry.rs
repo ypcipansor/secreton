@@ -125,8 +125,7 @@ impl TelemetryCollector {
         let start_time = self.start_time;
 
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
 
             loop {
                 interval.tick().await;

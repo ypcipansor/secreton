@@ -2,20 +2,20 @@
 
 #![allow(clippy::collapsible_if)]
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid;
 // sha2::Digest is imported locally where needed (e.g., create_backup)
 
 use crate::services::audit::AuditLogger;
-use crate::services::crypto::CryptoService;
-use secreton_storage::{StorageBackend, QueryParams};
 use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
+use crate::services::crypto::CryptoService;
 use secreton_performance::SecretPerformanceOptimizer;
+use secreton_storage::{QueryParams, StorageBackend};
 
 /// Admin service errors
 #[derive(Error, Debug)]
@@ -122,7 +122,7 @@ pub struct AdminService {
     #[allow(dead_code)] // Reserved for future audit integration
     _audit: Arc<AuditLogger>,
     performance: Arc<SecretPerformanceOptimizer>,
-    #[allow(dead_code)] // Reserved for request metrics  
+    #[allow(dead_code)] // Reserved for request metrics
     _request_count: Arc<std::sync::Mutex<u64>>,
     #[allow(dead_code)] // Reserved for rate calculation
     _last_request_time: Arc<std::sync::Mutex<std::time::Instant>>,
@@ -160,11 +160,13 @@ impl AdminService {
         let uptime_seconds = self.get_system_uptime().await;
 
         // Get user count from auth service
-        let total_users = self.auth.get_user_count().await
-            .map_err(AdminError::Auth)?;
+        let total_users = self.auth.get_user_count().await.map_err(AdminError::Auth)?;
 
         // Get active sessions
-        let active_sessions = self.auth.get_active_session_count().await
+        let active_sessions = self
+            .auth
+            .get_active_session_count()
+            .await
             .map_err(AdminError::Auth)?;
 
         // Get secret/key counts from storage
@@ -211,7 +213,10 @@ impl AdminService {
 
     /// Get storage counts (secrets and keys)
     async fn get_storage_counts(&self) -> Result<(u64, u64), AdminError> {
-        let stats = self.storage.get_stats().await
+        let stats = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
 
         // For now, consider all entries as secrets, and keys as a subset
@@ -224,7 +229,10 @@ impl AdminService {
 
     /// Get storage usage in bytes
     async fn get_storage_usage(&self) -> Result<u64, AdminError> {
-        let stats = self.storage.get_stats().await
+        let stats = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
         Ok(stats.total_size_bytes)
     }
@@ -243,7 +251,10 @@ impl AdminService {
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::minutes(5);
 
-        match self.get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000)).await {
+        match self
+            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000))
+            .await
+        {
             Ok(audit_logs) => {
                 let total_requests = audit_logs.len() as f64;
                 let minutes_elapsed = 5.0; // 5 minutes window
@@ -269,29 +280,32 @@ impl AdminService {
     pub async fn create_backup(&self) -> Result<BackupInfo, AdminError> {
         let backup_id = uuid::Uuid::new_v4().to_string();
         let backup_path = format!("backups/{}", backup_id);
-        
+
         // Get all secreton entries to backup
         let query_params = secreton_storage::QueryParams {
             path_prefix: None,
-            
+
             limit: None,
             offset: Some(0),
             ..Default::default()
         };
-        
-        let entries = self.storage.list(&query_params).await
+
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
             .map_err(AdminError::Storage)?;
-        
+
         // Serialize all entries
-        let backup_data = serde_json::to_string(&entries)
-            .map_err(|e| AdminError::Internal(e.into()))?;
-        
+        let backup_data =
+            serde_json::to_string(&entries).map_err(|e| AdminError::Internal(e.into()))?;
+
         // Calculate checksum
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(backup_data.as_bytes());
         let checksum = format!("sha256:{:x}", hasher.finalize());
-        
+
         // Store backup metadata
         let size_bytes = backup_data.len() as u64;
         let mut metadata = HashMap::new();
@@ -299,7 +313,7 @@ impl AdminService {
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
         metadata.insert("data".to_string(), backup_data);
-        
+
         let backup_entry = secreton_storage::SecretEntry {
             id: uuid::Uuid::new_v4(),
             path: backup_path,
@@ -321,10 +335,12 @@ impl AdminService {
             updated_at: chrono::Utc::now(),
             expires_at: None,
         };
-        
-        self.storage.store(&backup_entry).await
+
+        self.storage
+            .store(&backup_entry)
+            .await
             .map_err(AdminError::Storage)?;
-        
+
         let backup_info = BackupInfo {
             id: backup_id,
             created_at: chrono::Utc::now(),
@@ -339,7 +355,7 @@ impl AdminService {
                 m
             },
         };
-        
+
         Ok(backup_info)
     }
 
@@ -347,22 +363,30 @@ impl AdminService {
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
         let query_params = secreton_storage::QueryParams {
             path_prefix: None,
-            
+
             limit: None,
             offset: Some(0),
             ..Default::default()
         };
-        
-        let entries = self.storage.list(&query_params).await
+
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
             .map_err(AdminError::Storage)?;
-        
-        let backups = entries.into_iter()
+
+        let backups = entries
+            .into_iter()
             .filter_map(|entry| {
                 let backup_id = entry.path.split('/').next_back()?.to_string();
                 Some(BackupInfo {
                     id: backup_id,
                     created_at: entry.created_at,
-                    size_bytes: entry.metadata.get("data").map(|d| d.len() as u64).unwrap_or(0),
+                    size_bytes: entry
+                        .metadata
+                        .get("data")
+                        .map(|d| d.len() as u64)
+                        .unwrap_or(0),
                     compressed: true,
                     encrypted: true,
                     checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
@@ -370,35 +394,42 @@ impl AdminService {
                 })
             })
             .collect();
-        
+
         Ok(backups)
     }
 
     /// Restore from backup
     pub async fn restore_backup(&self, backup_id: &str) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
-        
+
         let backup_path = format!("backups/{}", backup_id);
-        let backup_entry = self.storage.get_by_path(&backup_path).await
+        let backup_entry = self
+            .storage
+            .get_by_path(&backup_path)
+            .await
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("Backup {} not found", backup_id)))?;
-        
+
         // Get backup data
-        let backup_data = backup_entry.metadata.get("data")
+        let backup_data = backup_entry
+            .metadata
+            .get("data")
             .ok_or_else(|| AdminError::Internal(anyhow::anyhow!("Backup data not found")))?;
-        
+
         // Parse entries
-        let entries: Vec<secreton_storage::SecretEntry> = serde_json::from_str(backup_data)
-            .map_err(|e| AdminError::Internal(e.into()))?;
-        
+        let entries: Vec<secreton_storage::SecretEntry> =
+            serde_json::from_str(backup_data).map_err(|e| AdminError::Internal(e.into()))?;
+
         // Restore each entry (excluding backup entries themselves)
         for entry in &entries {
             if !entry.path.starts_with("backups/") {
-                self.storage.store(entry).await
+                self.storage
+                    .store(entry)
+                    .await
                     .map_err(AdminError::Storage)?;
             }
         }
-        
+
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
             operation: "restore_backup".to_string(),
@@ -406,10 +437,14 @@ impl AdminService {
             duration_ms: duration.as_millis() as u64,
             details: {
                 let mut details = HashMap::new();
-                details.insert("backup_id".to_string(), serde_json::Value::String(backup_id.to_string()));
-                details.insert("entries_restored".to_string(), serde_json::Value::Number(
-                    serde_json::Number::from(entries.len() as u64)
-                ));
+                details.insert(
+                    "backup_id".to_string(),
+                    serde_json::Value::String(backup_id.to_string()),
+                );
+                details.insert(
+                    "entries_restored".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(entries.len() as u64)),
+                );
                 details
             },
         })
@@ -418,9 +453,12 @@ impl AdminService {
     /// Run garbage collection
     pub async fn run_garbage_collection(&self) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
-        
+
         // Clean expired sessions
-        let expired_sessions = self.auth.cleanup_expired_sessions().await
+        let expired_sessions = self
+            .auth
+            .cleanup_expired_sessions()
+            .await
             .map_err(AdminError::Auth)?;
 
         // Clean expired secrets (this would need to be implemented in storage)
@@ -430,11 +468,20 @@ impl AdminService {
         let storage_cleaned = self.storage_cleanup().await?;
 
         let duration = start_time.elapsed();
-        
+
         let mut details = HashMap::new();
-        details.insert("expired_sessions".to_string(), serde_json::Value::Number(expired_sessions.into()));
-        details.insert("expired_secrets".to_string(), serde_json::Value::Number(expired_secrets.into()));
-        details.insert("storage_cleaned_bytes".to_string(), serde_json::Value::Number(storage_cleaned.into()));
+        details.insert(
+            "expired_sessions".to_string(),
+            serde_json::Value::Number(expired_sessions.into()),
+        );
+        details.insert(
+            "expired_secrets".to_string(),
+            serde_json::Value::Number(expired_secrets.into()),
+        );
+        details.insert(
+            "storage_cleaned_bytes".to_string(),
+            serde_json::Value::Number(storage_cleaned.into()),
+        );
 
         Ok(MaintenanceResult {
             operation: "garbage_collection".to_string(),
@@ -447,12 +494,12 @@ impl AdminService {
     /// Compact database
     pub async fn compact_database(&self) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
-        
+
         // Perform database compaction based on storage backend
         let compaction_result = self.perform_database_compaction().await?;
-        
+
         let duration = start_time.elapsed();
-        
+
         Ok(MaintenanceResult {
             operation: "compact_database".to_string(),
             success: compaction_result.success,
@@ -472,23 +519,28 @@ impl AdminService {
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
         let query_params = secreton_storage::QueryParams {
             path_prefix: None,
-            
+
             limit,
             offset: Some(0),
             ..Default::default()
         };
-        
-        let entries = self.storage.list(&query_params).await
+
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
             .map_err(AdminError::Storage)?;
-        
-        let mut audit_logs: Vec<AuditLogEntry> = entries.into_iter()
+
+        let mut audit_logs: Vec<AuditLogEntry> = entries
+            .into_iter()
             .filter_map(|entry| {
-                entry.metadata.get("log_data").and_then(|data| {
-                    serde_json::from_str(data).ok()
-                })
+                entry
+                    .metadata
+                    .get("log_data")
+                    .and_then(|data| serde_json::from_str(data).ok())
             })
             .collect();
-        
+
         // Apply filters
         if let Some(start) = start_time {
             audit_logs.retain(|log| log.timestamp >= start);
@@ -502,10 +554,10 @@ impl AdminService {
         if let Some(act) = action {
             audit_logs.retain(|log| log.action == act);
         }
-        
+
         // Sort by timestamp descending
         audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        
+
         Ok(audit_logs)
     }
 
@@ -517,15 +569,17 @@ impl AdminService {
         end_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<String, AdminError> {
         // Get all audit logs for the time range
-        let audit_logs = self.get_audit_logs(start_time, end_time, None, None, None).await?;
-        
+        let audit_logs = self
+            .get_audit_logs(start_time, end_time, None, None, None)
+            .await?;
+
         match format.to_lowercase().as_str() {
-            "json" => {
-                serde_json::to_string_pretty(&audit_logs)
-                    .map_err(|e| AdminError::Internal(e.into()))
-            },
+            "json" => serde_json::to_string_pretty(&audit_logs)
+                .map_err(|e| AdminError::Internal(e.into())),
             "csv" => {
-                let mut csv_content = String::from("timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n");
+                let mut csv_content = String::from(
+                    "timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n",
+                );
                 for log in audit_logs {
                     csv_content.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
@@ -540,9 +594,10 @@ impl AdminService {
                     ));
                 }
                 Ok(csv_content)
-            },
+            }
             "xml" => {
-                let mut xml_content = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
+                let mut xml_content =
+                    String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
                 for log in audit_logs {
                     xml_content.push_str(&format!(
                         "  <entry>\n    <timestamp>{}</timestamp>\n    <user_id>{}</user_id>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
@@ -555,8 +610,11 @@ impl AdminService {
                 }
                 xml_content.push_str("</audit_logs>");
                 Ok(xml_content)
-            },
-            _ => Err(AdminError::InvalidConfig(format!("Unsupported export format: {}", format)))
+            }
+            _ => Err(AdminError::InvalidConfig(format!(
+                "Unsupported export format: {}",
+                format
+            ))),
         }
     }
 
@@ -564,7 +622,7 @@ impl AdminService {
     pub async fn run_security_scan(&self) -> Result<SecurityScanResult, AdminError> {
         let scan_id = uuid::Uuid::new_v4().to_string();
         let started_at = chrono::Utc::now();
-        
+
         let mut findings = Vec::new();
 
         // Run checks concurrently
@@ -591,8 +649,6 @@ impl AdminService {
         })
     }
 
-
-    
     /// Update a policy definition
     pub async fn update_policy(&self, _name: &str, _content: &str) -> Result<(), AdminError> {
         // Placeholder - requires reference to PolicyService or storage update
@@ -608,7 +664,9 @@ impl AdminService {
         let password_policy = self.get_password_policy().await?;
 
         // Query for all users
-        let users = self.list_users().await
+        let users = self
+            .list_users()
+            .await
             .map_err(|e| AdminError::Internal(anyhow::anyhow!("Failed to list users: {}", e)))?;
 
         // Check each user account
@@ -616,13 +674,18 @@ impl AdminService {
             // Check if user has been inactive for too long
             if let Some(last_login) = user.last_login {
                 let days_since_login = (chrono::Utc::now() - last_login).num_days();
-                if days_since_login > 90 { // 90 days inactivity threshold
+                if days_since_login > 90 {
+                    // 90 days inactivity threshold
                     findings.push(SecurityFinding {
                         severity: "medium".to_string(),
                         category: "authentication".to_string(),
                         title: format!("Inactive user account: {}", user.username),
-                        description: format!("User {} has not logged in for {} days", user.username, days_since_login),
-                        recommendation: "Review inactive accounts and disable if no longer needed".to_string(),
+                        description: format!(
+                            "User {} has not logged in for {} days",
+                            user.username, days_since_login
+                        ),
+                        recommendation: "Review inactive accounts and disable if no longer needed"
+                            .to_string(),
                         affected_resources: vec![format!("user:{}", user.username)],
                     });
                 }
@@ -635,7 +698,10 @@ impl AdminService {
                     severity: "low".to_string(),
                     category: "authentication".to_string(),
                     title: format!("Unused user account: {}", user.username),
-                    description: format!("User {} was created {} days ago but has never logged in", user.username, days_since_creation),
+                    description: format!(
+                        "User {} was created {} days ago but has never logged in",
+                        user.username, days_since_creation
+                    ),
                     recommendation: "Review unused accounts and remove if not needed".to_string(),
                     affected_resources: vec![format!("user:{}", user.username)],
                 });
@@ -648,8 +714,12 @@ impl AdminService {
                 severity: "high".to_string(),
                 category: "configuration".to_string(),
                 title: "Weak password minimum length".to_string(),
-                description: format!("Password policy requires minimum length of {} characters", password_policy.min_length),
-                recommendation: "Increase minimum password length to at least 8 characters".to_string(),
+                description: format!(
+                    "Password policy requires minimum length of {} characters",
+                    password_policy.min_length
+                ),
+                recommendation: "Increase minimum password length to at least 8 characters"
+                    .to_string(),
                 affected_resources: vec!["password_policy".to_string()],
             });
         }
@@ -659,8 +729,10 @@ impl AdminService {
                 severity: "medium".to_string(),
                 category: "configuration".to_string(),
                 title: "Password policy doesn't require uppercase".to_string(),
-                description: "Password policy should require at least one uppercase character".to_string(),
-                recommendation: "Enable uppercase character requirement in password policy".to_string(),
+                description: "Password policy should require at least one uppercase character"
+                    .to_string(),
+                recommendation: "Enable uppercase character requirement in password policy"
+                    .to_string(),
                 affected_resources: vec!["password_policy".to_string()],
             });
         }
@@ -670,8 +742,10 @@ impl AdminService {
                 severity: "medium".to_string(),
                 category: "configuration".to_string(),
                 title: "Password policy doesn't require numbers".to_string(),
-                description: "Password policy should require at least one numeric character".to_string(),
-                recommendation: "Enable numeric character requirement in password policy".to_string(),
+                description: "Password policy should require at least one numeric character"
+                    .to_string(),
+                recommendation: "Enable numeric character requirement in password policy"
+                    .to_string(),
                 affected_resources: vec!["password_policy".to_string()],
             });
         }
@@ -681,8 +755,10 @@ impl AdminService {
                 severity: "low".to_string(),
                 category: "configuration".to_string(),
                 title: "Password policy doesn't require special characters".to_string(),
-                description: "Password policy should require at least one special character".to_string(),
-                recommendation: "Enable special character requirement in password policy".to_string(),
+                description: "Password policy should require at least one special character"
+                    .to_string(),
+                recommendation: "Enable special character requirement in password policy"
+                    .to_string(),
                 affected_resources: vec!["password_policy".to_string()],
             });
         }
@@ -698,8 +774,12 @@ impl AdminService {
                             severity: "high".to_string(),
                             category: "authentication".to_string(),
                             title: format!("Potentially weak password for user: {}", user.username),
-                            description: format!("User {} has a password hint containing '{}'", user.username, indicator),
-                            recommendation: "Require user to change password immediately".to_string(),
+                            description: format!(
+                                "User {} has a password hint containing '{}'",
+                                user.username, indicator
+                            ),
+                            recommendation: "Require user to change password immediately"
+                                .to_string(),
                             affected_resources: vec![format!("user:{}", user.username)],
                         });
                         break;
@@ -715,7 +795,8 @@ impl AdminService {
                 category: "authentication".to_string(),
                 title: "Password security review completed".to_string(),
                 description: "No immediate password security issues found".to_string(),
-                recommendation: "Continue regular password policy reviews and user account audits".to_string(),
+                recommendation: "Continue regular password policy reviews and user account audits"
+                    .to_string(),
                 affected_resources: vec!["password_security".to_string()],
             });
         }
@@ -724,7 +805,9 @@ impl AdminService {
     }
 
     /// Get password policy from configuration
-    async fn get_password_policy(&self) -> Result<secreton_common::password::PasswordPolicy, AdminError> {
+    async fn get_password_policy(
+        &self,
+    ) -> Result<secreton_common::password::PasswordPolicy, AdminError> {
         // Try to get password policy from system config
         let config_path = "system/config";
         if let Ok(Some(config_entry)) = self.storage.get_by_path(config_path).await {
@@ -824,8 +907,12 @@ impl AdminService {
                                     severity: "high".to_string(),
                                     category: "certificates".to_string(),
                                     title: format!("Certificate expiring soon: {}", entry.path),
-                                    description: format!("Certificate {} expires in {} days", entry.path, days_until_expiry),
-                                    recommendation: "Renew the certificate before it expires".to_string(),
+                                    description: format!(
+                                        "Certificate {} expires in {} days",
+                                        entry.path, days_until_expiry
+                                    ),
+                                    recommendation: "Renew the certificate before it expires"
+                                        .to_string(),
                                     affected_resources: vec![entry.path.clone()],
                                 });
                             }
@@ -834,7 +921,8 @@ impl AdminService {
                 }
 
                 // Check for certificates without expiry information
-                let certs_without_expiry: Vec<_> = entries.into_iter()
+                let certs_without_expiry: Vec<_> = entries
+                    .into_iter()
                     .filter(|entry| !entry.metadata.contains_key("expires_at"))
                     .collect();
 
@@ -856,7 +944,9 @@ impl AdminService {
                     category: "certificates".to_string(),
                     title: "Certificate monitoring not available".to_string(),
                     description: "Unable to scan certificate storage for expiry dates".to_string(),
-                    recommendation: "Ensure certificate storage is accessible and properly configured".to_string(),
+                    recommendation:
+                        "Ensure certificate storage is accessible and properly configured"
+                            .to_string(),
                     affected_resources: vec!["certificate_storage".to_string()],
                 });
             }
@@ -884,8 +974,12 @@ impl AdminService {
                                     severity: "high".to_string(),
                                     category: "pki_certificates".to_string(),
                                     title: format!("PKI Certificate expiring soon: {}", entry.path),
-                                    description: format!("PKI Certificate {} expires in {} days", entry.path, days_until_expiry),
-                                    recommendation: "Renew the PKI certificate before it expires".to_string(),
+                                    description: format!(
+                                        "PKI Certificate {} expires in {} days",
+                                        entry.path, days_until_expiry
+                                    ),
+                                    recommendation: "Renew the PKI certificate before it expires"
+                                        .to_string(),
                                     affected_resources: vec![entry.path],
                                 });
                             }
@@ -940,7 +1034,8 @@ impl AdminService {
                     category: "configuration".to_string(),
                     title: "Audit logging configuration missing".to_string(),
                     description: "Audit logging configuration is not set".to_string(),
-                    recommendation: "Configure audit logging to track security-relevant events".to_string(),
+                    recommendation: "Configure audit logging to track security-relevant events"
+                        .to_string(),
                     affected_resources: vec!["audit_system".to_string()],
                 });
             }
@@ -954,8 +1049,10 @@ impl AdminService {
                         severity: "medium".to_string(),
                         category: "authentication".to_string(),
                         title: "Multi-factor authentication disabled".to_string(),
-                        description: "MFA is disabled, reducing authentication security".to_string(),
-                        recommendation: "Enable multi-factor authentication for all users".to_string(),
+                        description: "MFA is disabled, reducing authentication security"
+                            .to_string(),
+                        recommendation: "Enable multi-factor authentication for all users"
+                            .to_string(),
                         affected_resources: vec!["authentication".to_string()],
                     });
                 }
@@ -975,22 +1072,34 @@ impl AdminService {
         if let Some(config) = &config_data {
             if let Some(session_timeout) = config.get("session_timeout") {
                 if let Some(timeout_minutes) = session_timeout.as_u64() {
-                    if timeout_minutes > 480 { // 8 hours
+                    if timeout_minutes > 480 {
+                        // 8 hours
                         findings.push(SecurityFinding {
                             severity: "low".to_string(),
                             category: "configuration".to_string(),
                             title: "Long session timeout".to_string(),
-                            description: format!("Session timeout is set to {} minutes, which may reduce security", timeout_minutes),
-                            recommendation: "Consider reducing session timeout to 480 minutes (8 hours) or less".to_string(),
+                            description: format!(
+                                "Session timeout is set to {} minutes, which may reduce security",
+                                timeout_minutes
+                            ),
+                            recommendation:
+                                "Consider reducing session timeout to 480 minutes (8 hours) or less"
+                                    .to_string(),
                             affected_resources: vec!["session_management".to_string()],
                         });
-                    } else if timeout_minutes < 15 { // 15 minutes minimum
+                    } else if timeout_minutes < 15 {
+                        // 15 minutes minimum
                         findings.push(SecurityFinding {
                             severity: "medium".to_string(),
                             category: "configuration".to_string(),
                             title: "Very short session timeout".to_string(),
-                            description: format!("Session timeout is set to {} minutes, which may impact usability", timeout_minutes),
-                            recommendation: "Consider increasing session timeout to at least 15 minutes".to_string(),
+                            description: format!(
+                                "Session timeout is set to {} minutes, which may impact usability",
+                                timeout_minutes
+                            ),
+                            recommendation:
+                                "Consider increasing session timeout to at least 15 minutes"
+                                    .to_string(),
                             affected_resources: vec!["session_management".to_string()],
                         });
                     }
@@ -1002,13 +1111,18 @@ impl AdminService {
         if let Some(config) = &config_data {
             if let Some(jwt_expiration) = config.get("jwt_expiration") {
                 if let Some(expiration_hours) = jwt_expiration.as_u64() {
-                    if expiration_hours > 24 { // 24 hours
+                    if expiration_hours > 24 {
+                        // 24 hours
                         findings.push(SecurityFinding {
                             severity: "low".to_string(),
                             category: "configuration".to_string(),
                             title: "Long JWT expiration".to_string(),
-                            description: format!("JWT tokens expire after {} hours, which may reduce security", expiration_hours),
-                            recommendation: "Consider reducing JWT expiration to 24 hours or less".to_string(),
+                            description: format!(
+                                "JWT tokens expire after {} hours, which may reduce security",
+                                expiration_hours
+                            ),
+                            recommendation: "Consider reducing JWT expiration to 24 hours or less"
+                                .to_string(),
                             affected_resources: vec!["authentication".to_string()],
                         });
                     }
@@ -1020,7 +1134,8 @@ impl AdminService {
         if let Some(config) = &config_data {
             if let Some(rate_limit) = config.get("rate_limit_requests_per_minute") {
                 if let Some(limit) = rate_limit.as_u64() {
-                    if limit > 1000 { // Very high limit
+                    if limit > 1000 {
+                        // Very high limit
                         findings.push(SecurityFinding {
                             severity: "low".to_string(),
                             category: "configuration".to_string(),
@@ -1029,7 +1144,8 @@ impl AdminService {
                             recommendation: "Consider reducing rate limit to prevent abuse".to_string(),
                             affected_resources: vec!["rate_limiting".to_string()],
                         });
-                    } else if limit < 10 { // Very low limit
+                    } else if limit < 10 {
+                        // Very low limit
                         findings.push(SecurityFinding {
                             severity: "medium".to_string(),
                             category: "configuration".to_string(),
@@ -1083,7 +1199,8 @@ impl AdminService {
         if let Some(config) = &config_data {
             if let Some(backup_retention) = config.get("backup_retention_days") {
                 if let Some(days) = backup_retention.as_u64() {
-                    if days > 365 { // Over a year
+                    if days > 365 {
+                        // Over a year
                         findings.push(SecurityFinding {
                             severity: "low".to_string(),
                             category: "configuration".to_string(),
@@ -1092,7 +1209,8 @@ impl AdminService {
                             recommendation: "Consider reducing backup retention period".to_string(),
                             affected_resources: vec!["backup_system".to_string()],
                         });
-                    } else if days < 7 { // Less than a week
+                    } else if days < 7 {
+                        // Less than a week
                         findings.push(SecurityFinding {
                             severity: "medium".to_string(),
                             category: "configuration".to_string(),
@@ -1110,7 +1228,8 @@ impl AdminService {
         if let Some(config) = &config_data {
             if let Some(log_retention) = config.get("log_retention_days") {
                 if let Some(days) = log_retention.as_u64() {
-                    if days > 365 { // Over a year
+                    if days > 365 {
+                        // Over a year
                         findings.push(SecurityFinding {
                             severity: "low".to_string(),
                             category: "configuration".to_string(),
@@ -1119,7 +1238,8 @@ impl AdminService {
                             recommendation: "Consider reducing log retention period based on compliance requirements".to_string(),
                             affected_resources: vec!["logging_system".to_string()],
                         });
-                    } else if days < 30 { // Less than a month
+                    } else if days < 30 {
+                        // Less than a month
                         findings.push(SecurityFinding {
                             severity: "medium".to_string(),
                             category: "configuration".to_string(),
@@ -1157,10 +1277,13 @@ impl AdminService {
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::hours(24);
 
-        let audit_logs = self.get_audit_logs(Some(start_time), Some(end_time), None, None, Some(1000)).await?;
+        let audit_logs = self
+            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(1000))
+            .await?;
 
         // Check for failed login attempts
-        let failed_logins = audit_logs.iter()
+        let failed_logins = audit_logs
+            .iter()
             .filter(|log| log.action == "login" && !log.success)
             .count();
 
@@ -1176,7 +1299,8 @@ impl AdminService {
         }
 
         // Check for unusual access patterns
-        let suspicious_actions = audit_logs.iter()
+        let suspicious_actions = audit_logs
+            .iter()
             .filter(|log| log.action == "delete" || log.action == "modify")
             .count();
 
@@ -1185,8 +1309,13 @@ impl AdminService {
                 severity: "low".to_string(),
                 category: "access_control".to_string(),
                 title: "High volume of destructive operations".to_string(),
-                description: format!("Detected {} potentially destructive operations in the last 24 hours", suspicious_actions),
-                recommendation: "Monitor for unusual access patterns and ensure proper authorization".to_string(),
+                description: format!(
+                    "Detected {} potentially destructive operations in the last 24 hours",
+                    suspicious_actions
+                ),
+                recommendation:
+                    "Monitor for unusual access patterns and ensure proper authorization"
+                        .to_string(),
                 affected_resources: vec!["secreton_operations".to_string()],
             });
         }
@@ -1200,56 +1329,69 @@ impl AdminService {
         config_updates: HashMap<String, serde_json::Value>,
     ) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
-        
+
         // Validate configuration updates
         let mut invalid_keys = Vec::new();
         for key in config_updates.keys() {
             // Only allow specific configuration keys for security
-            if !matches!(key.as_str(),
-                "jwt_expiration" | "session_timeout" | "max_failed_attempts" |
-                "password_policy_min_length" | "password_policy_require_uppercase" |
-                "password_policy_require_numbers" | "password_policy_require_special" |
-                "rate_limit_requests_per_minute" | "enable_mfa" | "enable_audit_logging" |
-                "backup_retention_days" | "log_retention_days"
+            if !matches!(
+                key.as_str(),
+                "jwt_expiration"
+                    | "session_timeout"
+                    | "max_failed_attempts"
+                    | "password_policy_min_length"
+                    | "password_policy_require_uppercase"
+                    | "password_policy_require_numbers"
+                    | "password_policy_require_special"
+                    | "rate_limit_requests_per_minute"
+                    | "enable_mfa"
+                    | "enable_audit_logging"
+                    | "backup_retention_days"
+                    | "log_retention_days"
             ) {
                 invalid_keys.push(key.clone());
             }
         }
-        
+
         if !invalid_keys.is_empty() {
-            return Err(AdminError::InvalidConfig(
-                format!("Invalid configuration keys: {}", invalid_keys.join(", "))
-            ));
+            return Err(AdminError::InvalidConfig(format!(
+                "Invalid configuration keys: {}",
+                invalid_keys.join(", ")
+            )));
         }
-        
+
         // Store configuration in system config path
         let config_path = "system/config";
-        let current_config = self.storage.get_by_path(config_path).await
+        let current_config = self
+            .storage
+            .get_by_path(config_path)
+            .await
             .map_err(AdminError::Storage)?;
-        
+
         let mut config_data: HashMap<String, serde_json::Value> = current_config
             .and_then(|entry| {
-                entry.metadata.get("config_data").and_then(|data| {
-                    serde_json::from_str(data).ok()
-                })
+                entry
+                    .metadata
+                    .get("config_data")
+                    .and_then(|data| serde_json::from_str(data).ok())
             })
             .unwrap_or_default();
-        
+
         // Apply updates
         let mut updated_count = 0;
         for (key, value) in config_updates {
             config_data.insert(key, value);
             updated_count += 1;
         }
-        
+
         // Persist updated configuration
-        let config_json = serde_json::to_string(&config_data)
-            .map_err(|e| AdminError::Internal(e.into()))?;
-        
+        let config_json =
+            serde_json::to_string(&config_data).map_err(|e| AdminError::Internal(e.into()))?;
+
         let mut metadata = HashMap::new();
         metadata.insert("config_data".to_string(), config_json);
         metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
-        
+
         let config_entry = secreton_storage::SecretEntry {
             id: uuid::Uuid::new_v4(),
             path: config_path.to_string(),
@@ -1271,10 +1413,12 @@ impl AdminService {
             updated_at: chrono::Utc::now(),
             expires_at: None,
         };
-        
-        self.storage.store(&config_entry).await
+
+        self.storage
+            .store(&config_entry)
+            .await
             .map_err(AdminError::Storage)?;
-        
+
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
             operation: "update_config".to_string(),
@@ -1282,12 +1426,19 @@ impl AdminService {
             duration_ms: duration.as_millis() as u64,
             details: {
                 let mut details = HashMap::new();
-                details.insert("updated_keys".to_string(), serde_json::Value::Array(
-                    config_data.keys().map(|k| serde_json::Value::String(k.clone())).collect()
-                ));
-                details.insert("update_count".to_string(), serde_json::Value::Number(
-                    serde_json::Number::from(updated_count as u64)
-                ));
+                details.insert(
+                    "updated_keys".to_string(),
+                    serde_json::Value::Array(
+                        config_data
+                            .keys()
+                            .map(|k| serde_json::Value::String(k.clone()))
+                            .collect(),
+                    ),
+                );
+                details.insert(
+                    "update_count".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(updated_count as u64)),
+                );
                 details
             },
         })
@@ -1304,7 +1455,9 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self.storage.list(&query_params)
+        let entries = self
+            .storage
+            .list(&query_params)
             .await
             .map_err(AdminError::Storage)?;
 
@@ -1321,7 +1474,9 @@ impl AdminService {
     /// Get user by ID
     pub async fn get_user(&self, user_id: &str) -> Result<UserInfo, AdminError> {
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
-        let entry = self.storage.get_by_path(&path)
+        let entry = self
+            .storage
+            .get_by_path(&path)
             .await
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
@@ -1332,13 +1487,17 @@ impl AdminService {
     /// Create a new user
     pub async fn create_user(&self, request: CreateUserRequest) -> Result<UserInfo, AdminError> {
         // Use auth service to create user (handles password hashing and storage)
-        let user = self.auth.create_user(
-            &request.username,
-            &request.email,
-            &request.password,
-            request.roles,
-            request.permissions,
-        ).await.map_err(AdminError::Auth)?;
+        let user = self
+            .auth
+            .create_user(
+                &request.username,
+                &request.email,
+                &request.password,
+                request.roles,
+                request.permissions,
+            )
+            .await
+            .map_err(AdminError::Auth)?;
 
         // Map User to UserInfo
         Ok(UserInfo {
@@ -1357,7 +1516,11 @@ impl AdminService {
     }
 
     /// Update an existing user
-    pub async fn update_user(&self, user_id: &str, request: UpdateUserRequest) -> Result<UserInfo, AdminError> {
+    pub async fn update_user(
+        &self,
+        user_id: &str,
+        request: UpdateUserRequest,
+    ) -> Result<UserInfo, AdminError> {
         // Get existing user
         let mut user = self.get_user(user_id).await?;
 
@@ -1378,7 +1541,8 @@ impl AdminService {
 
         // Store updated user
         let entry = self.user_info_to_secreton_entry(&user).await?;
-        self.storage.update(&entry)
+        self.storage
+            .update(&entry)
             .await
             .map_err(AdminError::Storage)?;
 
@@ -1389,11 +1553,15 @@ impl AdminService {
     pub async fn delete_user(&self, user_id: &str) -> Result<(), AdminError> {
         // Prevent deletion of admin user
         if user_id == "user_1" {
-            return Err(AdminError::NotPermitted("Cannot delete admin user".to_string()));
+            return Err(AdminError::NotPermitted(
+                "Cannot delete admin user".to_string(),
+            ));
         }
 
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
-        let deleted = self.storage.delete_by_path(&path)
+        let deleted = self
+            .storage
+            .delete_by_path(&path)
             .await
             .map_err(AdminError::Storage)?;
 
@@ -1403,8 +1571,7 @@ impl AdminService {
 
         // Cascade delete: Remove all secrets owned by this user
         if let Ok(owner_uuid) = uuid::Uuid::parse_str(user_id) {
-            let query_params = secreton_storage::QueryParams::new()
-                .with_owner(owner_uuid);
+            let query_params = secreton_storage::QueryParams::new().with_owner(owner_uuid);
 
             if let Ok(secrets) = self.storage.list(&query_params).await {
                 for secret in secrets {
@@ -1420,27 +1587,36 @@ impl AdminService {
     }
 
     /// Helper method to convert UserInfo to SecretEntry for storage
-    async fn user_info_to_secreton_entry(&self, user: &UserInfo) -> Result<secreton_storage::SecretEntry, AdminError> {
-        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+    async fn user_info_to_secreton_entry(
+        &self,
+        user: &UserInfo,
+    ) -> Result<secreton_storage::SecretEntry, AdminError> {
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
 
-        let user_data = serde_json::to_vec(user)
-            .map_err(|e| AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e)))?;
+        let user_data = serde_json::to_vec(user).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
+        })?;
 
         // Create encryption metadata
         let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
-            let enc = crypto.encrypt_data(&user_data).await
+            let enc = crypto
+                .encrypt_data(&user_data)
+                .await
                 .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
             (enc, EncryptionMetadata::default())
         } else {
             // Fallback for tests or if crypto not configured (should not happen in prod)
-            (user_data, EncryptionMetadata {
-                algorithm: "none".to_string(),
-                key_id: "none".to_string(),
-                iv: vec![],
-                auth_tag: None,
-                aad: None,
-                kdf_params: None,
-            })
+            (
+                user_data,
+                EncryptionMetadata {
+                    algorithm: "none".to_string(),
+                    key_id: "none".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
         };
 
         let user_id = uuid::Uuid::parse_str(&user.id)
@@ -1456,7 +1632,10 @@ impl AdminService {
     }
 
     /// Helper method to convert SecretEntry to UserInfo
-    async fn secreton_entry_to_user_info(&self, entry: &secreton_storage::SecretEntry) -> Result<UserInfo, AdminError> {
+    async fn secreton_entry_to_user_info(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> Result<UserInfo, AdminError> {
         let data = if let Some(crypto) = &self.crypto {
             match crypto.decrypt(&entry.encrypted_data).await {
                 Ok(d) => d,
@@ -1469,27 +1648,38 @@ impl AdminService {
             entry.encrypted_data.clone()
         };
 
-        let user: UserInfo = serde_json::from_slice(&data)
-            .map_err(|e| AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e)))?;
+        let user: UserInfo = serde_json::from_slice(&data).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
+        })?;
         Ok(user)
     }
 
     /// Perform storage cleanup
     async fn storage_cleanup(&self) -> Result<u64, AdminError> {
         // Get current storage stats
-        let before_stats = self.storage.get_stats().await
+        let before_stats = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
 
         // Perform cleanup operations
-        self.storage.delete_expired(None).await
+        self.storage
+            .delete_expired(None)
+            .await
             .map_err(AdminError::Storage)?;
 
         // Get stats after cleanup
-        let after_stats = self.storage.get_stats().await
+        let after_stats = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
 
         // Calculate cleanup bytes
-        let cleanup_bytes = before_stats.total_size_bytes.saturating_sub(after_stats.total_size_bytes);
+        let cleanup_bytes = before_stats
+            .total_size_bytes
+            .saturating_sub(after_stats.total_size_bytes);
 
         Ok(cleanup_bytes)
     }
@@ -1507,16 +1697,25 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self.storage.list(&query_params).await
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
             .map_err(AdminError::Storage)?;
 
         for entry in entries {
             // Check if the secret has an expires_at field
             if let Some(expires_at_str) = entry.metadata.get("expires_at")
-                && let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_at_str) {
+                && let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_at_str)
+            {
                 let expires_at_utc = expires_at.with_timezone(&chrono::Utc);
                 if expires_at_utc <= now
-                    && self.storage.delete_by_path(&entry.path).await.map_err(AdminError::Storage)? {
+                    && self
+                        .storage
+                        .delete_by_path(&entry.path)
+                        .await
+                        .map_err(AdminError::Storage)?
+                {
                     expired_count += 1;
                     // Log the cleanup
                     tracing::info!("Cleaned up expired secret: {}", entry.path);
@@ -1530,7 +1729,10 @@ impl AdminService {
     /// Perform database compaction
     async fn perform_database_compaction(&self) -> Result<CompactionResult, AdminError> {
         // Get stats before compaction
-        let stats_before = self.storage.get_stats().await
+        let stats_before = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
 
         // Perform compaction based on storage backend type
@@ -1538,16 +1740,34 @@ impl AdminService {
         let compaction_successful = true;
 
         // Get stats after compaction (simulated)
-        let stats_after = self.storage.get_stats().await
+        let stats_after = self
+            .storage
+            .get_stats()
+            .await
             .map_err(AdminError::Storage)?;
 
         let mut details = HashMap::new();
-        details.insert("original_size_bytes".to_string(), serde_json::Value::Number(stats_before.total_size_bytes.into()));
-        details.insert("compacted_size_bytes".to_string(), serde_json::Value::Number(stats_after.total_size_bytes.into()));
-        details.insert("space_saved_bytes".to_string(), serde_json::Value::Number(
-            (stats_before.total_size_bytes.saturating_sub(stats_after.total_size_bytes)).into()
-        ));
-        details.insert("entries_processed".to_string(), serde_json::Value::Number(stats_before.total_entries.into()));
+        details.insert(
+            "original_size_bytes".to_string(),
+            serde_json::Value::Number(stats_before.total_size_bytes.into()),
+        );
+        details.insert(
+            "compacted_size_bytes".to_string(),
+            serde_json::Value::Number(stats_after.total_size_bytes.into()),
+        );
+        details.insert(
+            "space_saved_bytes".to_string(),
+            serde_json::Value::Number(
+                (stats_before
+                    .total_size_bytes
+                    .saturating_sub(stats_after.total_size_bytes))
+                .into(),
+            ),
+        );
+        details.insert(
+            "entries_processed".to_string(),
+            serde_json::Value::Number(stats_before.total_entries.into()),
+        );
 
         Ok(CompactionResult {
             success: compaction_successful,
@@ -1602,20 +1822,28 @@ pub struct CompactionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secreton_crypto::SecurityParams;
-    use secreton_storage::MockStorageBackend;
     use crate::config::AuthConfig;
     use crate::services::audit::AuditLogger;
+    use secreton_crypto::SecurityParams;
+    use secreton_storage::MockStorageBackend;
 
     #[tokio::test]
     async fn test_admin_service_creation() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap(),
+        );
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
@@ -1626,17 +1854,30 @@ mod tests {
     #[tokio::test]
     async fn test_get_system_stats() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap(),
+        );
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, audit, performance)
+            .await
+            .unwrap();
 
-        let stats = service.get_system_stats().await.expect("stats should be retrieved");
+        let stats = service
+            .get_system_stats()
+            .await
+            .expect("stats should be retrieved");
         assert!(stats.uptime_seconds >= 0);
         assert!(stats.total_users >= 0);
         assert!(stats.cache_hit_rate >= 0.0 && stats.cache_hit_rate <= 1.0);
@@ -1646,15 +1887,25 @@ mod tests {
     #[tokio::test]
     async fn test_create_backup_returns_metadata() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap(),
+        );
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, audit, performance)
+            .await
+            .unwrap();
 
         let backup = service.create_backup().await.expect("backup");
         assert!(backup.encrypted);
@@ -1664,15 +1915,25 @@ mod tests {
     #[tokio::test]
     async fn test_run_garbage_collection_returns_details() {
         let storage = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap(),
+        );
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, audit, performance)
+            .await
+            .unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");
@@ -1683,7 +1944,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_cleanup_removes_expired_items() {
-        use secreton_storage::{SecretEntry, EncryptionMetadata, SecurityLevel};
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
 
         let storage = Arc::new(MockStorageBackend::new());
 
@@ -1694,7 +1955,8 @@ mod tests {
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             uuid::Uuid::new_v4(),
-        ).with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
+        )
+        .with_expiration(chrono::Utc::now() - chrono::Duration::hours(1));
 
         storage.store(&expired_entry).await.unwrap();
 
@@ -1705,19 +1967,30 @@ mod tests {
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             uuid::Uuid::new_v4(),
-        ).with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
+        )
+        .with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
 
         storage.store(&valid_entry).await.unwrap();
 
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap(),
+        );
         let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage.clone(), auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage.clone(), auth, audit, performance)
+            .await
+            .unwrap();
 
         // Run cleanup
         let cleaned_bytes = service.storage_cleanup().await.unwrap();

@@ -1,14 +1,16 @@
 use axum::Extension;
 use axum_test::TestServer;
 use secreton_api::ApiState;
-use secreton_api::database::{self, DatabaseApiState, ConfigRequest, ConfigResponse, ListRolesResponse, CreateRoleRequest};
-use secreton_api::pki::PkiApiState;
-use secreton_api::kv::KVApiState;
-use secreton_api::transit::TransitApiState;
 use secreton_api::config::ApiConfig;
+use secreton_api::database::{
+    self, ConfigRequest, ConfigResponse, CreateRoleRequest, DatabaseApiState, ListRolesResponse,
+};
+use secreton_api::kv::KVApiState;
+use secreton_api::pki::PkiApiState;
+use secreton_api::transit::TransitApiState;
 use secreton_performance::OptimizationLevel;
+use secreton_secrets::{DatabaseConfig, DatabaseEngine};
 use std::sync::Arc;
-use secreton_secrets::{DatabaseEngine, DatabaseConfig};
 
 #[tokio::test]
 async fn test_database_api_endpoints() {
@@ -19,11 +21,21 @@ async fn test_database_api_endpoints() {
     config_inner.auth.jwt.audience = "secreton-api".to_string();
     let config = Arc::new(config_inner);
 
-    let auth = Arc::new(secreton_api::services::auth::AuthenticationService::new(
-        Arc::new(secreton_storage::MockStorageBackend::new()),
-        Arc::new(secreton_api::services::crypto::CryptoService::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
-        &config.auth
-    ).await.unwrap());
+    let auth = Arc::new(
+        secreton_api::services::auth::AuthenticationService::new(
+            Arc::new(secreton_storage::MockStorageBackend::new()),
+            Arc::new(
+                secreton_api::services::crypto::CryptoService::new(Arc::new(
+                    secreton_storage::MockStorageBackend::new(),
+                ))
+                .await
+                .unwrap(),
+            ),
+            &config.auth,
+        )
+        .await
+        .unwrap(),
+    );
 
     // We can use a simplified ApiState construction for tests or the public new() method
     // Since new() requires many dependencies, constructing struct directly is easier if fields are public.
@@ -42,12 +54,24 @@ async fn test_database_api_endpoints() {
         config: config.clone(),
         secreton: Arc::new(secreton_common::StandardServiceContainer::default()),
         auth: auth.clone(),
-        audit: Arc::new(secreton_api::services::admin::AdminService::new(
-             Arc::new(secreton_storage::MockStorageBackend::new()),
-             auth.clone(),
-             Arc::new(secreton_api::services::audit::AuditLogger::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
-             Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()))
-        ).await.unwrap()),
+        audit: Arc::new(
+            secreton_api::services::admin::AdminService::new(
+                Arc::new(secreton_storage::MockStorageBackend::new()),
+                auth.clone(),
+                Arc::new(
+                    secreton_api::services::audit::AuditLogger::new(Arc::new(
+                        secreton_storage::MockStorageBackend::new(),
+                    ))
+                    .await
+                    .unwrap(),
+                ),
+                Arc::new(secreton_performance::SecretPerformanceOptimizer::new(
+                    secreton_performance::SecretPerformanceConfig::default(),
+                )),
+            )
+            .await
+            .unwrap(),
+        ),
     };
 
     // Create router using the main factory to include middleware
@@ -69,7 +93,8 @@ async fn test_database_api_endpoints() {
     // However, this verifies the router structure and middleware presence.
     // To properly test success, we would need to mock the AuthenticationService validation logic.
 
-    let _response = server.post("/api/v1/database/config")
+    let _response = server
+        .post("/api/v1/database/config")
         .json(&config_req)
         .await;
 
@@ -96,7 +121,8 @@ async fn test_database_api_endpoints() {
         default_ttl: Some(600),
     };
 
-    let response = server.post("/api/v1/database/roles/test-role")
+    let response = server
+        .post("/api/v1/database/roles/test-role")
         .json(&role_req)
         .await;
 

@@ -1,23 +1,23 @@
 //! OCI storage backend for Secreton
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use reqwest::Client;
-use chrono::Utc;
-use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, sha2::Sha256};
-use rsa::signature::{Signer, SignatureEncoding};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use sha2::{Digest};
+use chrono::Utc;
+use reqwest::Client;
+use rsa::signature::{SignatureEncoding, Signer};
+use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, sha2::Sha256};
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
+use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use std::env;
-use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::{
-    StorageBackend, StorageError, SecretEntry, StorageResult,
-    StorageTransaction, HealthStatus, StorageStats, QueryParams
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use secreton_common::models::oauth_state::OAuthState;
 
@@ -27,7 +27,7 @@ fn expand_path(path: &str) -> Option<PathBuf> {
         if path == "~" {
             return Some(PathBuf::from(home));
         } else if path.starts_with("~/") || path.starts_with("~\\") {
-             return Some(PathBuf::from(home).join(&path[2..]));
+            return Some(PathBuf::from(home).join(&path[2..]));
         }
     }
     Some(PathBuf::from(path))
@@ -49,7 +49,7 @@ fn parse_ini_file(path: &Path, profile: &str) -> Option<HashMap<String, String>>
         }
 
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current_section = trimmed[1..trimmed.len()-1].to_string();
+            current_section = trimmed[1..trimmed.len() - 1].to_string();
             in_target_section = current_section == profile;
             continue;
         }
@@ -64,12 +64,17 @@ fn parse_ini_file(path: &Path, profile: &str) -> Option<HashMap<String, String>>
     if props.is_empty() { None } else { Some(props) }
 }
 
-fn load_config_from_file(config_file: Option<&str>, profile: Option<&str>) -> Option<HashMap<String, String>> {
+fn load_config_from_file(
+    config_file: Option<&str>,
+    profile: Option<&str>,
+) -> Option<HashMap<String, String>> {
     let path = if let Some(p) = config_file {
         expand_path(p)
     } else {
-        env::var("OCI_CONFIG_FILE").ok().and_then(|p| expand_path(&p))
-        .or_else(|| expand_path("~/.oci/config"))
+        env::var("OCI_CONFIG_FILE")
+            .ok()
+            .and_then(|p| expand_path(&p))
+            .or_else(|| expand_path("~/.oci/config"))
     };
 
     let path = path?;
@@ -100,7 +105,9 @@ pub struct OCIStorage {
 impl OCIStorage {
     pub fn new(mut config: OCIConfig) -> Self {
         if config.private_key_pem.is_none() {
-             if let Some(props) = load_config_from_file(config.config_file.as_deref(), config.profile.as_deref()) {
+            if let Some(props) =
+                load_config_from_file(config.config_file.as_deref(), config.profile.as_deref())
+            {
                 if config.user_ocid.is_none() {
                     config.user_ocid = props.get("user").cloned();
                 }
@@ -114,7 +121,7 @@ impl OCIStorage {
                 if let Some(key_file_path) = props.get("key_file") {
                     if let Some(key_path) = expand_path(key_file_path) {
                         if let Ok(content) = fs::read_to_string(key_path) {
-                             config.private_key_pem = Some(content);
+                            config.private_key_pem = Some(content);
                         }
                     }
                 }
@@ -127,7 +134,11 @@ impl OCIStorage {
             None
         };
 
-        Self { config, client: Client::new(), key }
+        Self {
+            config,
+            client: Client::new(),
+            key,
+        }
     }
 
     fn get_url(&self, path: &str) -> String {
@@ -136,7 +147,10 @@ impl OCIStorage {
         // We miss namespace in config. Assuming bucket name might include it or we need a field.
         // Let's assume namespace is derived or placeholder.
         let namespace = "namespace";
-        format!("https://objectstorage.{}.oraclecloud.com/n/{}/b/{}/o/{}", self.config.region, namespace, self.config.bucket, path)
+        format!(
+            "https://objectstorage.{}.oraclecloud.com/n/{}/b/{}/o/{}",
+            self.config.region, namespace, self.config.bucket, path
+        )
     }
 
     fn sign_request(&self, verb: &str, url: &str, body: Option<&[u8]>) -> StorageResult<String> {
@@ -148,10 +162,18 @@ impl OCIStorage {
         // 5. content-type (if body)
         // 6. x-content-sha256
 
-        let key = self.key.as_ref().ok_or(StorageError::ConfigurationError { message: "Missing private key for OCI".to_string() })?;
+        let key = self.key.as_ref().ok_or(StorageError::ConfigurationError {
+            message: "Missing private key for OCI".to_string(),
+        })?;
         let now = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let uri = url.split("oraclecloud.com").nth(1).unwrap_or("/");
-        let host = url.split("://").nth(1).unwrap_or("").split("/").next().unwrap_or("");
+        let host = url
+            .split("://")
+            .nth(1)
+            .unwrap_or("")
+            .split("/")
+            .next()
+            .unwrap_or("");
 
         let mut headers = vec![
             format!("(request-target): {} {}", verb.to_lowercase(), uri),
@@ -173,7 +195,12 @@ impl OCIStorage {
         let signature = signing_key.sign(signing_string.as_bytes());
         let signature_b64 = BASE64.encode(signature.to_bytes());
 
-        let key_id = format!("{}/{}/{}", self.config.tenancy_ocid.as_deref().unwrap_or(""), self.config.user_ocid.as_deref().unwrap_or(""), self.config.fingerprint.as_deref().unwrap_or(""));
+        let key_id = format!(
+            "{}/{}/{}",
+            self.config.tenancy_ocid.as_deref().unwrap_or(""),
+            self.config.user_ocid.as_deref().unwrap_or(""),
+            self.config.fingerprint.as_deref().unwrap_or("")
+        );
         let algo = "rsa-sha256";
         let headers_list = if body.is_some() {
             "(request-target) date host content-length content-type x-content-sha256"
@@ -181,7 +208,10 @@ impl OCIStorage {
             "(request-target) date host"
         };
 
-        Ok(format!("Signature version=\"1\",keyId=\"{}\",algorithm=\"{}\",headers=\"{}\",signature=\"{}\"", key_id, algo, headers_list, signature_b64))
+        Ok(format!(
+            "Signature version=\"1\",keyId=\"{}\",algorithm=\"{}\",headers=\"{}\",signature=\"{}\"",
+            key_id, algo, headers_list, signature_b64
+        ))
     }
 }
 
@@ -189,7 +219,9 @@ impl OCIStorage {
 impl StorageBackend for OCIStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let url = self.get_url(&entry.path);
-        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
 
         let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let mut hasher = Sha256::new();
@@ -198,9 +230,19 @@ impl StorageBackend for OCIStorage {
 
         let auth = self.sign_request("PUT", &url, Some(&data))?;
 
-        let res = self.client.put(&url)
+        let res = self
+            .client
+            .put(&url)
             .header("Date", date)
-            .header("Host", url.split("://").nth(1).unwrap_or("").split("/").next().unwrap_or(""))
+            .header(
+                "Host",
+                url.split("://")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split("/")
+                    .next()
+                    .unwrap_or(""),
+            )
             .header("Content-Type", "application/json")
             .header("Content-Length", data.len())
             .header("x-content-sha256", hash)
@@ -208,9 +250,15 @@ impl StorageBackend for OCIStorage {
             .body(data)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
-        if !res.status().is_success() { return Err(StorageError::QueryFailed { message: res.status().to_string() }); }
+        if !res.status().is_success() {
+            return Err(StorageError::QueryFailed {
+                message: res.status().to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -223,18 +271,44 @@ impl StorageBackend for OCIStorage {
         let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let auth = self.sign_request("GET", &url, None)?;
 
-        let res = self.client.get(&url)
+        let res = self
+            .client
+            .get(&url)
             .header("Date", date)
-            .header("Host", url.split("://").nth(1).unwrap_or("").split("/").next().unwrap_or(""))
+            .header(
+                "Host",
+                url.split("://")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split("/")
+                    .next()
+                    .unwrap_or(""),
+            )
             .header("Authorization", auth)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
-        if res.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
-        if !res.status().is_success() { return Err(StorageError::QueryFailed { message: res.status().to_string() }); }
-        let bytes = res.bytes().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
-        let entry = serde_json::from_slice(&bytes).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !res.status().is_success() {
+            return Err(StorageError::QueryFailed {
+                message: res.status().to_string(),
+            });
+        }
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
+        let entry =
+            serde_json::from_slice(&bytes).map_err(|e| StorageError::SerializationError {
+                message: e.to_string(),
+            })?;
         Ok(Some(entry))
     }
 
@@ -251,13 +325,25 @@ impl StorageBackend for OCIStorage {
         let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let auth = self.sign_request("DELETE", &url, None)?;
 
-        let res = self.client.delete(&url)
+        let res = self
+            .client
+            .delete(&url)
             .header("Date", date)
-            .header("Host", url.split("://").nth(1).unwrap_or("").split("/").next().unwrap_or(""))
+            .header(
+                "Host",
+                url.split("://")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split("/")
+                    .next()
+                    .unwrap_or(""),
+            )
             .header("Authorization", auth)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
         Ok(res.status().is_success())
     }
 
@@ -278,11 +364,26 @@ impl StorageBackend for OCIStorage {
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {
-        Ok(HealthStatus { is_healthy: true, response_time_ms: 0.0, connections_active: 0, connections_idle: 0, last_error: None, uptime_seconds: 0 })
+        Ok(HealthStatus {
+            is_healthy: true,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: None,
+            uptime_seconds: 0,
+        })
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        Ok(StorageStats { total_entries: 0, total_size_bytes: 0, average_entry_size: 0.0, entries_by_security_level: std::collections::HashMap::new(), entries_created_today: 0, entries_updated_today: 0, expired_entries: 0 })
+        Ok(StorageStats {
+            total_entries: 0,
+            total_size_bytes: 0,
+            average_entry_size: 0.0,
+            entries_by_security_level: std::collections::HashMap::new(),
+            entries_created_today: 0,
+            entries_updated_today: 0,
+            expired_entries: 0,
+        })
     }
 
     async fn migrate(&self) -> StorageResult<()> {
@@ -290,11 +391,17 @@ impl StorageBackend for OCIStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "OCI".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "OCI".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "OCI".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
@@ -310,11 +417,16 @@ mod tests {
 
     #[test]
     fn test_expand_path() {
-        let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap();
+        let home = env::var("HOME")
+            .or_else(|_| env::var("USERPROFILE"))
+            .unwrap();
         // Just verify it expands ~
         let path = expand_path("~/.oci/config").unwrap();
         assert!(path.to_string_lossy().contains(&home));
-        assert!(path.to_string_lossy().ends_with(".oci/config") || path.to_string_lossy().ends_with(".oci\\config"));
+        assert!(
+            path.to_string_lossy().ends_with(".oci/config")
+                || path.to_string_lossy().ends_with(".oci\\config")
+        );
 
         let path = expand_path("/tmp/config").unwrap();
         assert_eq!(path, PathBuf::from("/tmp/config"));
@@ -372,9 +484,19 @@ mod tests {
         let storage = OCIStorage::new(config);
 
         assert_eq!(storage.config.user_ocid.as_deref(), Some("ocid1.user.test"));
-        assert_eq!(storage.config.tenancy_ocid.as_deref(), Some("ocid1.tenancy.test"));
+        assert_eq!(
+            storage.config.tenancy_ocid.as_deref(),
+            Some("ocid1.tenancy.test")
+        );
         assert_eq!(storage.config.fingerprint.as_deref(), Some("11:22:33"));
         assert!(storage.config.private_key_pem.is_some());
-        assert!(storage.config.private_key_pem.as_ref().unwrap().contains("-----BEGIN PRIVATE KEY-----"));
+        assert!(
+            storage
+                .config
+                .private_key_pem
+                .as_ref()
+                .unwrap()
+                .contains("-----BEGIN PRIVATE KEY-----")
+        );
     }
 }

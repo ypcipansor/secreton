@@ -3,14 +3,16 @@
 //! This module provides a GraphQL interface for the Secreton secrets management system.
 //! It allows clients to query and mutate secrets using GraphQL queries and mutations.
 
-use async_graphql::{Context, EmptySubscription, FieldError, FieldResult, Object, Schema, SimpleObject};
-use async_graphql::{InputObject, Enum};
+use async_graphql::{
+    Context, EmptySubscription, FieldError, FieldResult, Object, Schema, SimpleObject,
+};
+use async_graphql::{Enum, InputObject};
+use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose::STANDARD as base64};
 
 /// GraphQL secret representation
 #[derive(SimpleObject, Clone)]
@@ -154,7 +156,12 @@ pub struct MutationRoot {
 #[async_trait::async_trait]
 pub trait SecretsManager: Send + Sync {
     /// Create a new secret
-    async fn create_secret(&self, path: &str, data: &str, ttl: Option<i64>) -> Result<GQLSecret, String>;
+    async fn create_secret(
+        &self,
+        path: &str,
+        data: &str,
+        ttl: Option<i64>,
+    ) -> Result<GQLSecret, String>;
 
     /// Read an existing secret
     async fn read_secret(&self, path: &str) -> Result<GQLSecret, String>;
@@ -169,19 +176,28 @@ pub trait SecretsManager: Send + Sync {
     async fn list_secrets(&self, path: &str) -> Result<Vec<GQLSecret>, String>;
 
     /// Wrap a response with a token
-    async fn wrap_response(&self, data: &str, wrap_config: ResponseWrapInput) -> Result<WrappedResponse, String>;
+    async fn wrap_response(
+        &self,
+        data: &str,
+        wrap_config: ResponseWrapInput,
+    ) -> Result<WrappedResponse, String>;
 
     /// Unwrap a response using a token
     async fn unwrap_response(&self, token: &str) -> Result<String, String>;
 
     /// Execute batch operations
-    async fn execute_batch(&self, operations: Vec<SecretOperation>) -> Result<BatchOperationResult, String>;
+    async fn execute_batch(
+        &self,
+        operations: Vec<SecretOperation>,
+    ) -> Result<BatchOperationResult, String>;
 }
 
 impl QueryRoot {
     /// Create a new query root
     pub fn new(secrets_manager: Arc<dyn SecretsManager>) -> Self {
-        Self { _secrets_manager: secrets_manager }
+        Self {
+            _secrets_manager: secrets_manager,
+        }
     }
 }
 
@@ -189,30 +205,36 @@ impl QueryRoot {
 impl QueryRoot {
     /// Get a secret by path
     async fn secret(&self, ctx: &Context<'_>, path: String) -> FieldResult<GQLSecret> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.read_secret(&path)
+        secrets_manager
+            .read_secret(&path)
             .await
             .map_err(|e| FieldError::new(format!("Failed to read secret: {}", e)))
     }
 
     /// List secrets under a path
     async fn secrets(&self, ctx: &Context<'_>, path: String) -> FieldResult<Vec<GQLSecret>> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.list_secrets(&path)
+        secrets_manager
+            .list_secrets(&path)
             .await
             .map_err(|e| FieldError::new(format!("Failed to list secrets: {}", e)))
     }
 
     /// Get a wrapped response by token
     async fn wrapped_response(&self, ctx: &Context<'_>, token: String) -> FieldResult<String> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.unwrap_response(&token)
+        secrets_manager
+            .unwrap_response(&token)
             .await
             .map_err(|e| FieldError::new(format!("Failed to unwrap response: {}", e)))
     }
@@ -226,7 +248,9 @@ impl QueryRoot {
 impl MutationRoot {
     /// Create a new mutation root
     pub fn new(secrets_manager: Arc<dyn SecretsManager>) -> Self {
-        Self { _secrets_manager: secrets_manager }
+        Self {
+            _secrets_manager: secrets_manager,
+        }
     }
 }
 
@@ -234,59 +258,89 @@ impl MutationRoot {
 impl MutationRoot {
     /// Create a new secret
     async fn create_secret(&self, ctx: &Context<'_>, input: SecretInput) -> FieldResult<GQLSecret> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.create_secret(&input.path, &input.data, input.ttl)
+        secrets_manager
+            .create_secret(&input.path, &input.data, input.ttl)
             .await
             .map_err(|e| FieldError::new(format!("Failed to create secret: {}", e)))
     }
 
     /// Update an existing secret
-    async fn update_secret(&self, ctx: &Context<'_>, path: String, data: String) -> FieldResult<GQLSecret> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+    async fn update_secret(
+        &self,
+        ctx: &Context<'_>,
+        path: String,
+        data: String,
+    ) -> FieldResult<GQLSecret> {
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.update_secret(&path, &data)
+        secrets_manager
+            .update_secret(&path, &data)
             .await
             .map_err(|e| FieldError::new(format!("Failed to update secret: {}", e)))
     }
 
     /// Delete a secret
     async fn delete_secret(&self, ctx: &Context<'_>, path: String) -> FieldResult<bool> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.delete_secret(&path)
+        secrets_manager
+            .delete_secret(&path)
             .await
             .map_err(|e| FieldError::new(format!("Failed to delete secret: {}", e)))
     }
 
     /// Wrap a response with a token
-    async fn wrap_response(&self, ctx: &Context<'_>, data: String, wrap_config: ResponseWrapInput) -> FieldResult<WrappedResponse> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+    async fn wrap_response(
+        &self,
+        ctx: &Context<'_>,
+        data: String,
+        wrap_config: ResponseWrapInput,
+    ) -> FieldResult<WrappedResponse> {
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.wrap_response(&data, wrap_config)
+        secrets_manager
+            .wrap_response(&data, wrap_config)
             .await
             .map_err(|e| FieldError::new(format!("Failed to wrap response: {}", e)))
     }
 
     /// Execute batch operations
-    async fn execute_batch(&self, ctx: &Context<'_>, input: BatchOperationInput) -> FieldResult<BatchOperationResult> {
-        let secrets_manager = ctx.data::<Arc<dyn SecretsManager>>()
+    async fn execute_batch(
+        &self,
+        ctx: &Context<'_>,
+        input: BatchOperationInput,
+    ) -> FieldResult<BatchOperationResult> {
+        let secrets_manager = ctx
+            .data::<Arc<dyn SecretsManager>>()
             .map_err(|_| FieldError::new("Secrets manager not available"))?;
 
-        secrets_manager.execute_batch(input.operations)
+        secrets_manager
+            .execute_batch(input.operations)
             .await
             .map_err(|e| FieldError::new(format!("Failed to execute batch: {}", e)))
     }
 }
 
 /// Create a GraphQL schema for the secrets management system
-pub fn create_graphql_schema(secrets_manager: Arc<dyn SecretsManager>) -> Schema<QueryRoot, MutationRoot, EmptySubscription> {
-    Schema::build(QueryRoot::new(secrets_manager.clone()), MutationRoot::new(secrets_manager), EmptySubscription)
-        .finish()
+pub fn create_graphql_schema(
+    secrets_manager: Arc<dyn SecretsManager>,
+) -> Schema<QueryRoot, MutationRoot, EmptySubscription> {
+    Schema::build(
+        QueryRoot::new(secrets_manager.clone()),
+        MutationRoot::new(secrets_manager),
+        EmptySubscription,
+    )
+    .finish()
 }
 
 /// Default implementation of SecretsManager for testing
@@ -311,7 +365,12 @@ impl Default for DefaultSecretsManager {
 
 #[async_trait::async_trait]
 impl SecretsManager for DefaultSecretsManager {
-    async fn create_secret(&self, path: &str, data: &str, ttl: Option<i64>) -> Result<GQLSecret, String> {
+    async fn create_secret(
+        &self,
+        path: &str,
+        data: &str,
+        ttl: Option<i64>,
+    ) -> Result<GQLSecret, String> {
         let secret = GQLSecret {
             id: Uuid::new_v4().to_string(),
             path: path.to_string(),
@@ -324,12 +383,17 @@ impl SecretsManager for DefaultSecretsManager {
             metadata: HashMap::new(),
         };
 
-        self.secrets.write().await.insert(path.to_string(), secret.clone());
+        self.secrets
+            .write()
+            .await
+            .insert(path.to_string(), secret.clone());
         Ok(secret)
     }
 
     async fn read_secret(&self, path: &str) -> Result<GQLSecret, String> {
-        self.secrets.read().await
+        self.secrets
+            .read()
+            .await
             .get(path)
             .cloned()
             .ok_or_else(|| format!("Secret not found: {}", path))
@@ -350,20 +414,26 @@ impl SecretsManager for DefaultSecretsManager {
 
     async fn delete_secret(&self, path: &str) -> Result<bool, String> {
         let mut secrets = self.secrets.write().await;
-        secrets.remove(path)
+        secrets
+            .remove(path)
             .map(|_| true)
             .ok_or_else(|| format!("Secret not found: {}", path))
     }
 
     async fn list_secrets(&self, path: &str) -> Result<Vec<GQLSecret>, String> {
         let secrets = self.secrets.read().await;
-        Ok(secrets.values()
+        Ok(secrets
+            .values()
             .filter(|s| s.path.starts_with(path))
             .cloned()
             .collect())
     }
 
-    async fn wrap_response(&self, data: &str, _wrap_config: ResponseWrapInput) -> Result<WrappedResponse, String> {
+    async fn wrap_response(
+        &self,
+        data: &str,
+        _wrap_config: ResponseWrapInput,
+    ) -> Result<WrappedResponse, String> {
         let token = Uuid::new_v4().to_string();
         let expires_at = Utc::now() + chrono::Duration::hours(24);
 
@@ -381,7 +451,10 @@ impl SecretsManager for DefaultSecretsManager {
         Ok(format!("Unwrapped data for token: {}", token))
     }
 
-    async fn execute_batch(&self, operations: Vec<SecretOperation>) -> Result<BatchOperationResult, String> {
+    async fn execute_batch(
+        &self,
+        operations: Vec<SecretOperation>,
+    ) -> Result<BatchOperationResult, String> {
         let mut results = Vec::new();
         let mut success_count = 0u32;
         let mut failure_count = 0u32;
@@ -389,7 +462,14 @@ impl SecretsManager for DefaultSecretsManager {
         for (index, operation) in operations.iter().enumerate() {
             let result = match operation.operation_type {
                 OperationType::Create => {
-                    match self.create_secret(&operation.path, operation.data.as_deref().unwrap_or(""), None).await {
+                    match self
+                        .create_secret(
+                            &operation.path,
+                            operation.data.as_deref().unwrap_or(""),
+                            None,
+                        )
+                        .await
+                    {
                         Ok(_) => {
                             success_count += 1;
                             OperationResult {
@@ -410,30 +490,31 @@ impl SecretsManager for DefaultSecretsManager {
                         }
                     }
                 }
-                OperationType::Read => {
-                    match self.read_secret(&operation.path).await {
-                        Ok(_) => {
-                            success_count += 1;
-                            OperationResult {
-                                index: index as u32,
-                                success: true,
-                                data: Some("Read".to_string()),
-                                error: None,
-                            }
-                        }
-                        Err(e) => {
-                            failure_count += 1;
-                            OperationResult {
-                                index: index as u32,
-                                success: false,
-                                data: None,
-                                error: Some(e),
-                            }
+                OperationType::Read => match self.read_secret(&operation.path).await {
+                    Ok(_) => {
+                        success_count += 1;
+                        OperationResult {
+                            index: index as u32,
+                            success: true,
+                            data: Some("Read".to_string()),
+                            error: None,
                         }
                     }
-                }
+                    Err(e) => {
+                        failure_count += 1;
+                        OperationResult {
+                            index: index as u32,
+                            success: false,
+                            data: None,
+                            error: Some(e),
+                        }
+                    }
+                },
                 OperationType::Update => {
-                    match self.update_secret(&operation.path, operation.data.as_deref().unwrap_or("")).await {
+                    match self
+                        .update_secret(&operation.path, operation.data.as_deref().unwrap_or(""))
+                        .await
+                    {
                         Ok(_) => {
                             success_count += 1;
                             OperationResult {
@@ -454,28 +535,26 @@ impl SecretsManager for DefaultSecretsManager {
                         }
                     }
                 }
-                OperationType::Delete => {
-                    match self.delete_secret(&operation.path).await {
-                        Ok(_) => {
-                            success_count += 1;
-                            OperationResult {
-                                index: index as u32,
-                                success: true,
-                                data: Some("Deleted".to_string()),
-                                error: None,
-                            }
-                        }
-                        Err(e) => {
-                            failure_count += 1;
-                            OperationResult {
-                                index: index as u32,
-                                success: false,
-                                data: None,
-                                error: Some(e),
-                            }
+                OperationType::Delete => match self.delete_secret(&operation.path).await {
+                    Ok(_) => {
+                        success_count += 1;
+                        OperationResult {
+                            index: index as u32,
+                            success: true,
+                            data: Some("Deleted".to_string()),
+                            error: None,
                         }
                     }
-                }
+                    Err(e) => {
+                        failure_count += 1;
+                        OperationResult {
+                            index: index as u32,
+                            success: false,
+                            data: None,
+                            error: Some(e),
+                        }
+                    }
+                },
             };
 
             results.push(result);
@@ -527,13 +606,19 @@ pub async fn start_graphql_server(
     let _schema = create_graphql_schema(secrets_manager);
 
     let _app = async_graphql::http::GraphiQLSource::build()
-        .endpoint(&format!("http://{}:{}/graphql", config.bind_address, config.port))
+        .endpoint(&format!(
+            "http://{}:{}/graphql",
+            config.bind_address, config.port
+        ))
         .title("Secreton GraphQL API")
         .finish();
 
     // In a real implementation, this would start an HTTP server
     // For demonstration, we'll just print the configuration
-    println!("GraphQL API server would start on {}:{}", config.bind_address, config.port);
+    println!(
+        "GraphQL API server would start on {}:{}",
+        config.bind_address, config.port
+    );
     println!("Introspection: {}", config.enable_introspection);
     println!("Playground: {}", config.enable_playground);
 

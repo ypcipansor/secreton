@@ -13,7 +13,7 @@ use tracing::{info, warn};
 use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions};
 
 // Import ApiState from the parent module
-use crate::{ApiState, ApiResponse};
+use crate::{ApiResponse, ApiState};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -74,7 +74,9 @@ pub fn create_transit_router() -> Router<()> {
         .route("/decrypt/{key_name}", post(decrypt_data))
 }
 
-pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ApiResponse<ListKeysResponse>> {
+pub async fn list_keys(
+    Extension(state): Extension<ApiState>,
+) -> Json<ApiResponse<ListKeysResponse>> {
     let keys = state.transit.engine.list_keys().await;
     Json(ApiResponse::success(ListKeysResponse { keys }))
 }

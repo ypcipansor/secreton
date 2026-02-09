@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use crate::api;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -23,11 +23,8 @@ struct AuditResponse {
 #[component]
 pub fn AuditLog() -> impl IntoView {
     // Fetch audit events using LocalResource since reqwest is !Send in WASM
-    let audit_resource = LocalResource::new(
-        move || async move {
-            api::get::<AuditResponse>("/audit/events").await
-        },
-    );
+    let audit_resource =
+        LocalResource::new(move || async move { api::get::<AuditResponse>("/audit/events").await });
 
     view! {
         <div class="space-y-6">

@@ -1,11 +1,16 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use secreton_storage::{SecretEntry, StorageBackend, StorageTransaction, backends::PostgresBackend, EncryptionMetadata, SecurityLevel};
-use uuid::Uuid;
-use tokio::runtime::Runtime;
+use criterion::{Criterion, criterion_group, criterion_main};
+use secreton_storage::{
+    EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend, StorageTransaction,
+    backends::PostgresBackend,
+};
 use std::env;
+use tokio::runtime::Runtime;
+use uuid::Uuid;
 
 async fn setup_postgres() -> Option<PostgresBackend> {
-    let url = env::var("SECRETON_DATABASE__URL").unwrap_or_else(|_| "postgres://secreton:secreton-password@localhost:5432/secreton".to_string());
+    let url = env::var("SECRETON_DATABASE__URL").unwrap_or_else(|_| {
+        "postgres://secreton:secreton-password@localhost:5432/secreton".to_string()
+    });
 
     // Attempt to create backend, return None if fails (to allow bench to run/skip)
     match PostgresBackend::new(&url).await {
@@ -24,11 +29,7 @@ fn bench_postgres_transaction(c: &mut Criterion) {
     if backend_opt.is_none() {
         println!("Skipping postgres benchmark - backend not available");
         // We still need to register a benchmark function to avoid criterion errors
-        c.bench_function("postgres_transaction_noop", |b| {
-             b.iter(|| {
-                 1 + 1
-             })
-        });
+        c.bench_function("postgres_transaction_noop", |b| b.iter(|| 1 + 1));
         return;
     }
     let backend = backend_opt.unwrap();
