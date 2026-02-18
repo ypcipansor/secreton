@@ -272,6 +272,7 @@ pub fn TransitPage() -> impl IntoView {
                                 <option value="chacha20-poly1305">"ChaCha20-Poly1305"</option>
                                 <option value="ed25519">"Ed25519 (Sign)"</option>
                                 <option value="ecdsa-p256">"ECDSA P-256 (Sign)"</option>
+                                <option value="ecdsa-secp256k1">"ECDSA secp256k1 (Sign)"</option>
                             </select>
                         </div>
                         <Button on_click=Box::new(move |_| { create_key_action.dispatch(()); })>"Create"</Button>

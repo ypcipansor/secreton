@@ -305,7 +305,7 @@ pub async fn verify_data(
         .await
     {
         Ok(valid) => {
-            info!("Verified data with key: {}, valid: {}", key_name, valid);
+            tracing::debug!("Verified data with key: {}, valid: {}", key_name, valid);
             Ok(Json(ApiResponse::success(VerifyResponse { valid })))
         }
         Err(e) => {
