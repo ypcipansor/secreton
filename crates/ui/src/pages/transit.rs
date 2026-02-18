@@ -217,10 +217,9 @@ pub fn TransitPage() -> impl IntoView {
         async move {
             if let Some(k) = key {
                 // Trim inputs to avoid whitespace issues
-                let text_trimmed = text.trim();
                 let sig_trimmed = sig.trim();
 
-                let b64_input = BASE64.encode(text_trimmed.as_bytes());
+                let b64_input = BASE64.encode(text.as_bytes());
                 let req = VerifyRequest {
                     input: b64_input,
                     signature: sig_trimmed.to_string(),
