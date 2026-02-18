@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions, SignatureAlgorithm};
+use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions, SignatureAlgorithm, KeyUsage};
 
 // Import ApiState from the parent module
 use crate::{ApiState, ApiResponse};
@@ -127,7 +127,13 @@ pub async fn create_key(
         }
     };
 
-    let options = KeyOptions::default();
+    let options = match key_type {
+        KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => KeyOptions {
+            usage: vec![KeyUsage::Sign, KeyUsage::Verify],
+            ..KeyOptions::default()
+        },
+        _ => KeyOptions::default(),
+    };
 
     match state
         .transit
@@ -324,7 +330,10 @@ mod tests {
             .create_key(
                 key_name.clone(),
                 KeyType::Ed25519,
-                Some(KeyOptions::default()),
+                Some(KeyOptions {
+                    usage: vec![KeyUsage::Sign, KeyUsage::Verify],
+                    ..KeyOptions::default()
+                }),
             )
             .await
             .expect("Failed to create key");
