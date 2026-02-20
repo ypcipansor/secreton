@@ -128,14 +128,10 @@ pub fn TransitPage() -> impl IntoView {
             let path = format!("/transit/keys/{}", name);
             match api::get::<KeyInfo>(&path).await {
                 Ok(info) => {
+                    // Auto-switch tab based on capability
+                    match info.key_type {
                         KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
                             set_active_tab.set("sign".to_string());
-                            match info.key_type {
-                                KeyType::Ed25519 => set_selected_algo.set("ed25519".to_string()),
-                                KeyType::EcdsaP256 => set_selected_algo.set("ecdsa-p256".to_string()),
-                                KeyType::EcdsaSecp256k1 => set_selected_algo.set("ecdsa-secp256k1".to_string()),
-                                _ => {}
-                            }
                         },
                         _ => {
                             set_active_tab.set("encrypt".to_string());
@@ -393,8 +389,9 @@ pub fn TransitPage() -> impl IntoView {
                                             <h2 class="text-lg font-semibold">"Operations: " <span class="text-blue-600">{key}</span></h2>
                                             {move || {
                                                 let info = key_info.get();
-                                                let can_encrypt = info.as_ref().map(|i| matches!(i.key_type, KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305)).unwrap_or(true);
-                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1)).unwrap_or(true);
+                                                // X25519 supports encryption
+                                                let can_encrypt = info.as_ref().map(|i| matches!(i.key_type, KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 | KeyType::X25519 | KeyType::Rsa(_))).unwrap_or(true);
+                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 | KeyType::Rsa(_))).unwrap_or(true);
 
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
