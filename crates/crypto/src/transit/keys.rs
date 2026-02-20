@@ -539,7 +539,9 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 
                 // Decode ciphertext
