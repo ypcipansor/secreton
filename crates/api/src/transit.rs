@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions, SignatureAlgorithm, KeyUsage};
+use secreton_crypto::transit::{KeyType, TransitEngine, keys::{KeyOptions, KeyInfo}, SignatureAlgorithm, KeyUsage};
 
 // Import ApiState from the parent module
 use crate::{ApiState, ApiResponse};
@@ -95,7 +95,7 @@ pub struct VerifyResponse {
 pub fn create_transit_router() -> Router<()> {
     Router::new()
         .route("/keys", get(list_keys))
-        .route("/keys/{key_name}", post(create_key))
+        .route("/keys/{key_name}", post(create_key).get(get_key_info))
         .route("/encrypt/{key_name}", post(encrypt_data))
         .route("/decrypt/{key_name}", post(decrypt_data))
         .route("/sign/{key_name}", post(sign_data))
@@ -105,6 +105,16 @@ pub fn create_transit_router() -> Router<()> {
 pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ApiResponse<ListKeysResponse>> {
     let keys = state.transit.engine.list_keys().await;
     Json(ApiResponse::success(ListKeysResponse { keys }))
+}
+
+pub async fn get_key_info(
+    Path(key_name): Path<String>,
+    Extension(state): Extension<ApiState>,
+) -> Result<Json<ApiResponse<KeyInfo>>, StatusCode> {
+    match state.transit.engine.get_key_info(&key_name).await {
+        Ok(info) => Ok(Json(ApiResponse::success(info))),
+        Err(_) => Err(StatusCode::NOT_FOUND),
+    }
 }
 
 pub async fn create_key(

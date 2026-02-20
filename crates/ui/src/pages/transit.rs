@@ -69,11 +69,33 @@ pub struct VerifyResponse {
     pub valid: bool,
 }
 
+// Simplified KeyInfo struct for frontend
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KeyInfo {
+    pub name: String,
+    pub key_type: KeyType,
+    // other fields omitted for brevity if not needed
+}
+
+// KeyType enum matching backend
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KeyType {
+    Aes256Gcm,
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
+    Ed25519,
+    EcdsaP256,
+    EcdsaSecp256k1,
+    X25519,
+    Rsa(u32),
+}
+
 #[component]
 pub fn TransitPage() -> impl IntoView {
     // State
     let (keys, set_keys) = signal(Vec::<String>::new());
     let (selected_key, set_selected_key) = signal(Option::<String>::None);
+    let (key_info, set_key_info) = signal(Option::<KeyInfo>::None);
     let (active_tab, set_active_tab) = signal("encrypt".to_string());
 
     // Create Key Form
@@ -95,6 +117,25 @@ pub fn TransitPage() -> impl IntoView {
             match api::get::<ListKeysResponse>("/transit/keys").await {
                 Ok(res) => set_keys.set(res.keys),
                 Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
+            }
+        }
+    });
+
+    // Fetch Key Info
+    let fetch_key_info = Action::new_local(move |key_name: &String| {
+        let name = key_name.clone();
+        async move {
+            let path = format!("/transit/keys/{}", name);
+            match api::get::<KeyInfo>(&path).await {
+                Ok(info) => {
+                    set_key_info.set(Some(info));
+                    // Auto-switch tab based on capability if needed
+                    // Logic handled in view rendering
+                },
+                Err(e) => {
+                     set_error_msg.set(Some(format!("Failed to fetch key info: {:?}", e)));
+                     set_key_info.set(None);
+                }
             }
         }
     });
@@ -305,6 +346,7 @@ pub fn TransitPage() -> impl IntoView {
                                                         )
                                                         on:click=move |_| {
                                                             set_selected_key.set(Some(k_clone.clone()));
+                                                            fetch_key_info.dispatch(k_clone.clone());
                                                             set_output_result.set(String::new());
                                                             set_input_text.set(String::new());
                                                             set_signature_input.set(String::new());
@@ -338,54 +380,75 @@ pub fn TransitPage() -> impl IntoView {
                                     <Card>
                                         <div class="flex justify-between items-center mb-6">
                                             <h2 class="text-lg font-semibold">"Operations: " <span class="text-blue-600">{key}</span></h2>
-                                            <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
-                                                <button
-                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                    on:click=move |_| {
-                                                        set_active_tab.set("encrypt".to_string());
-                                                        set_output_result.set(String::new());
-                                                        set_input_text.set(String::new());
-                                                        set_error_msg.set(None);
-                                                    }
-                                                >
-                                                    "Encrypt"
-                                                </button>
-                                                <button
-                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                    on:click=move |_| {
-                                                        set_active_tab.set("decrypt".to_string());
-                                                        set_output_result.set(String::new());
-                                                        set_input_text.set(String::new());
-                                                        set_error_msg.set(None);
-                                                    }
-                                                >
-                                                    "Decrypt"
-                                                </button>
-                                                <button
-                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                    on:click=move |_| {
-                                                        set_active_tab.set("sign".to_string());
-                                                        set_output_result.set(String::new());
-                                                        set_input_text.set(String::new());
-                                                        set_error_msg.set(None);
-                                                    }
-                                                >
-                                                    "Sign"
-                                                </button>
-                                                <button
-                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                    on:click=move |_| {
-                                                        set_active_tab.set("verify".to_string());
-                                                        set_output_result.set(String::new());
-                                                        set_input_text.set(String::new());
-                                                        set_signature_input.set(String::new());
-                                                        set_verify_result.set(None);
-                                                        set_error_msg.set(None);
-                                                    }
-                                                >
-                                                    "Verify"
-                                                </button>
-                                            </div>
+                                            {move || {
+                                                let info = key_info.get();
+                                                let can_encrypt = info.as_ref().map(|i| matches!(i.key_type, KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305)).unwrap_or(true);
+                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1)).unwrap_or(true);
+
+                                                view! {
+                                                    <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
+                                                        {if can_encrypt {
+                                                            view! {
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("encrypt".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Encrypt"
+                                                                </button>
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("decrypt".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Decrypt"
+                                                                </button>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {}.into_any()
+                                                        }}
+
+                                                        {if can_sign {
+                                                            view! {
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("sign".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Sign"
+                                                                </button>
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("verify".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_signature_input.set(String::new());
+                                                                        set_verify_result.set(None);
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Verify"
+                                                                </button>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {}.into_any()
+                                                        }}
+                                                    </div>
+                                                }
+                                            }}
                                         </div>
 
                                         <div class="space-y-4">
