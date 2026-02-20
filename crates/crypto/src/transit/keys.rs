@@ -406,7 +406,9 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
@@ -446,7 +448,9 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
+                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
@@ -486,14 +490,18 @@ impl TransitKey {
                 let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
-                let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
+
+                let nonce_array: [u8; 24] = nonce_bytes.as_slice().try_into().map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 24 bytes)".to_string())
+                })?;
+                let nonce = chacha20poly1305::XNonce::from(nonce_array);
 
                 let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
                     CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())
                 })?;
 
                 let mut decrypted = cipher
-                    .decrypt(nonce, encrypted_bytes.as_slice())
+                    .decrypt(&nonce, encrypted_bytes.as_slice())
                     .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
 
                 // Remove context if present
