@@ -468,6 +468,45 @@ impl TransitKey {
                 decrypted
             }
 
+            KeyMaterial::XChaCha20Poly1305(key_bytes) => {
+                if parts.len() != 3 {
+                    return Err(CryptoError::InvalidCiphertext(
+                        "Invalid XChaCha20Poly1305 format".to_string(),
+                    ));
+                }
+
+                let cipher =
+                    XChaCha20Poly1305::new_from_slice(key_bytes.as_slice()).map_err(|_| {
+                        CryptoError::InvalidKeyLength {
+                            expected: 32,
+                            actual: key_bytes.len(),
+                        }
+                    })?;
+
+                let nonce_bytes = BASE64.decode(parts[1]).map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
+                })?;
+                let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
+
+                let encrypted_bytes = BASE64.decode(parts[2]).map_err(|_| {
+                    CryptoError::InvalidCiphertext("Invalid ciphertext encoding".to_string())
+                })?;
+
+                let mut decrypted = cipher
+                    .decrypt(nonce, encrypted_bytes.as_slice())
+                    .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))?;
+
+                // Remove context if present
+                if let Some(ctx) = context
+                    && decrypted.len() >= ctx.len()
+                    && decrypted.ends_with(ctx)
+                {
+                    decrypted.truncate(decrypted.len() - ctx.len());
+                }
+
+                decrypted
+            }
+
             KeyMaterial::X25519(private_key_bytes) => {
                 if parts.len() != 4 {
                     return Err(CryptoError::InvalidCiphertext(
