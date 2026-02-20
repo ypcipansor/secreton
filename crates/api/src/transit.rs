@@ -145,6 +145,22 @@ pub async fn create_key(
         _ => KeyOptions::default(),
     };
 
+    // If algorithm is not specified, try to infer it from key type for the response
+    let response_algorithm = if request.algorithm.is_none() {
+        if let Ok(key_info) = state.transit.engine.get_key_info(&key_name).await {
+            match key_info.key_type {
+                KeyType::Ed25519 => Some("ed25519".to_string()),
+                KeyType::EcdsaP256 => Some("ecdsa-p256".to_string()),
+                KeyType::EcdsaSecp256k1 => Some("ecdsa-secp256k1".to_string()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        request.algorithm.clone()
+    };
+
     match state
         .transit
         .engine
@@ -275,7 +291,7 @@ pub async fn sign_data(
             info!("Signed data with key: {}", key_name);
             Ok(Json(ApiResponse::success(SignResponse {
                 signature,
-                algorithm: request.algorithm,
+                algorithm: response_algorithm,
                 key_version: request.key_version,
             })))
         }
