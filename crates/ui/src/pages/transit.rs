@@ -128,10 +128,14 @@ pub fn TransitPage() -> impl IntoView {
             let path = format!("/transit/keys/{}", name);
             match api::get::<KeyInfo>(&path).await {
                 Ok(info) => {
-                    // Auto-switch tab based on capability
-                    match info.key_type {
                         KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
                             set_active_tab.set("sign".to_string());
+                            match info.key_type {
+                                KeyType::Ed25519 => set_selected_algo.set("ed25519".to_string()),
+                                KeyType::EcdsaP256 => set_selected_algo.set("ecdsa-p256".to_string()),
+                                KeyType::EcdsaSecp256k1 => set_selected_algo.set("ecdsa-secp256k1".to_string()),
+                                _ => {}
+                            }
                         },
                         _ => {
                             set_active_tab.set("encrypt".to_string());
