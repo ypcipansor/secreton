@@ -130,8 +130,17 @@ pub fn TransitPage() -> impl IntoView {
                 Ok(info) => {
                     // Auto-switch tab based on capability
                     match info.key_type {
-                        KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
+                        KeyType::Ed25519 => {
                             set_active_tab.set("sign".to_string());
+                            set_selected_algo.set("ed25519".to_string());
+                        },
+                        KeyType::EcdsaP256 => {
+                            set_active_tab.set("sign".to_string());
+                            set_selected_algo.set("ecdsa-p256".to_string());
+                        },
+                        KeyType::EcdsaSecp256k1 => {
+                            set_active_tab.set("sign".to_string());
+                            set_selected_algo.set("ecdsa-secp256k1".to_string());
                         },
                         _ => {
                             set_active_tab.set("encrypt".to_string());
