@@ -400,7 +400,8 @@ pub fn TransitPage() -> impl IntoView {
                                                 let info = key_info.get();
                                                 // X25519 supports encryption
                                                 let can_encrypt = info.as_ref().map(|i| matches!(i.key_type, KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 | KeyType::X25519 | KeyType::Rsa(_))).unwrap_or(true);
-                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 | KeyType::Rsa(_))).unwrap_or(true);
+                                                // RSA currently maps to X25519 material (placeholder) which does not support signing
+                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1)).unwrap_or(true);
 
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
