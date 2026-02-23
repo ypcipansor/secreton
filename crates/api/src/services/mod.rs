@@ -14,6 +14,9 @@ use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServi
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
 pub mod audit;
+pub mod audit_storage;
+#[cfg(test)]
+pub mod tests_audit_integration;
 pub mod crypto;
 pub mod seal;
 pub mod mfa_persistence;
