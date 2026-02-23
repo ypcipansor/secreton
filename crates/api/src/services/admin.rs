@@ -484,7 +484,30 @@ impl AdminService {
         let mut audit_logs: Vec<AuditLogEntry> = entries.into_iter()
             .filter_map(|entry| {
                 entry.metadata.get("log_data").and_then(|data| {
-                    serde_json::from_str(data).ok()
+                    // First deserialize to AuditEvent to match stored format
+                    if let Ok(event) = serde_json::from_str::<secreton_security::policies::audit::AuditEvent>(data) {
+                        // Map AuditEvent to AuditLogEntry
+                        Some(AuditLogEntry {
+                            id: event.id,
+                            timestamp: event.timestamp,
+                            user_id: event.user,
+                            action: event.operation,
+                            resource: event.resource,
+                            resource_id: None, // Not directly available in AuditEvent
+                            ip_address: event.client_ip.unwrap_or_default(),
+                            user_agent: String::new(), // Not available in AuditEvent
+                            success: match event.status {
+                                secreton_security::policies::audit::AuditStatus::Success => true,
+                                _ => false,
+                            },
+                            details: Some(serde_json::Value::Object(
+                                event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect()
+                            )),
+                        })
+                    } else {
+                        // Fallback: try direct deserialization if format changes or legacy data
+                        serde_json::from_str(data).ok()
+                    }
                 })
             })
             .collect();
