@@ -360,6 +360,15 @@ impl AuditService {
 
     /// Log audit event
     pub async fn log(&self, event: AuditEvent) {
+        // Log to devices immediately for critical events, without buffering
+        if matches!(event.status, AuditStatus::Denied | AuditStatus::Failure) {
+            let devices = self.devices.read().await;
+            for device in devices.iter() {
+                let _ = device.log(&event).await;
+            }
+            return;
+        }
+
         let mut buffer = self.buffer.write().await;
         buffer.push(event.clone());
 
@@ -367,16 +376,6 @@ impl AuditService {
         if buffer.len() >= self.buffer_size {
             drop(buffer);
             let _ = self.flush().await;
-        } else {
-            drop(buffer);
-
-            // Log to devices immediately for critical events
-            if matches!(event.status, AuditStatus::Denied | AuditStatus::Failure) {
-                let devices = self.devices.read().await;
-                for device in devices.iter() {
-                    let _ = device.log(&event).await;
-                }
-            }
         }
     }
 

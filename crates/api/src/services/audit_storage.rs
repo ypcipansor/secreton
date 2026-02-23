@@ -29,11 +29,12 @@ impl AuditDevice for StorageAuditDevice {
         let event_json = serde_json::to_string(event)?;
 
         // Construct storage path: sys/audit/YYYY/MM/DD/{timestamp}-{id}
+        let now = Utc::now();
         let path = format!(
             "sys/audit/{}/{:02}/{:02}/{}-{}",
-            event.timestamp.format("%Y"),
-            event.timestamp.format("%m"),
-            event.timestamp.format("%d"),
+            now.year(),
+            now.month(),
+            now.day(),
             event.timestamp.timestamp(),
             event.id
         );
