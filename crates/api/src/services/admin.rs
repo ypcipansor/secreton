@@ -473,8 +473,9 @@ impl AdminService {
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/audit/".to_string()),
             
-            limit,
+            limit: None,
             offset: Some(0),
+            ..Default::default()
             ..Default::default()
         };
         
