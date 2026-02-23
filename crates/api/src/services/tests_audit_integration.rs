@@ -33,16 +33,26 @@ async fn test_audit_log_persistence() {
     // We expect exactly one entry for the failure event
     assert_eq!(entries.len(), 1, "Storage should contain exactly one audit log for the failure event");
 
-    // Verify content
+    // Verify content and expiration
     let entry = &entries[0];
     assert!(entry.path.starts_with("sys/audit/"));
+    assert!(entry.expires_at.is_some(), "Audit entry should have expiration set");
+
     let log_json = entry.metadata.get("log_data").unwrap();
     assert!(log_json.contains("bad-user"));
     assert!(log_json.contains("failure"));
 
-    // 5. Force flush (should not duplicate)
-    // Access internal service if possible, but AuditLogger wraps it privately.
-    // However, if the event was buffered, it would be written again eventually or if we trigger flush logic.
-    // Since we can't easily trigger flush on private service, we rely on the implementation change:
-    // The code explicitly returns early for critical events, so it never hits buffer.push().
+    // 5. Test manual flush
+    let success_event = SecurityEventType::AuthenticationSuccess {
+        user: "good-user".to_string(),
+        method: "password".to_string(),
+    };
+    logger.log_event(success_event).await;
+
+    // Flush manually
+    logger.flush().await.expect("Flush failed");
+
+    // Verify persistence of flushed event
+    let entries_after = storage.list(&params).await.expect("Failed to list entries");
+    assert_eq!(entries_after.len(), 2, "Storage should contain both events after flush");
 }

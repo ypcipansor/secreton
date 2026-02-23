@@ -471,7 +471,7 @@ impl AdminService {
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
         let query_params = secreton_storage::QueryParams {
-            path_prefix: None,
+            path_prefix: Some("sys/audit/".to_string()),
             
             limit,
             offset: Some(0),

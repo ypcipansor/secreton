@@ -17,6 +17,10 @@ impl AuditLogger {
         Ok(Self { service })
     }
 
+    pub async fn flush(&self) -> Result<()> {
+        self.service.flush().await.map_err(|e| anyhow::anyhow!("Audit flush failed: {}", e))
+    }
+
     pub async fn log_event(&self, event: SecurityEventType) {
         let (core_type, status, user, resource, op, metadata) = match event {
             SecurityEventType::SecretAccess { secret_path, user, action } => 

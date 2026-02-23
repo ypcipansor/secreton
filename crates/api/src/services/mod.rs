@@ -260,7 +260,12 @@ impl ServiceContainer for ApiServiceContainer {
 
     async fn stop_services(&self) -> InitResult<()> {
         // Stop services in reverse dependency order
-        // Implementation would stop each service that implements the Service trait
+
+        // Flush audit logs
+        if let Err(e) = self.audit.flush().await {
+            tracing::warn!("Failed to flush audit logs on shutdown: {}", e);
+        }
+
         Ok(())
     }
 

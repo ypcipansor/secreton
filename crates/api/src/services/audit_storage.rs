@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use async_trait::async_trait;
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, Utc, Duration};
 use secreton_storage::{
     EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend,
 };
@@ -39,6 +39,9 @@ impl AuditDevice for StorageAuditDevice {
             event.id
         );
 
+        // Calculate expiration (default 365 days)
+        let expiration = now + Duration::days(365);
+
         // Create SecretEntry
         // Note: AdminService expects data in metadata["log_data"]
         let entry = SecretEntry::new(
@@ -48,6 +51,7 @@ impl AuditDevice for StorageAuditDevice {
             SecurityLevel::Internal,
             Uuid::nil(), // System owner
         )
+        .with_expiration(expiration)
         .add_metadata("log_data".to_string(), event_json)
         .add_metadata("event_type".to_string(), event.event_type.as_str().to_string())
         .add_metadata("user".to_string(), event.user.clone())
