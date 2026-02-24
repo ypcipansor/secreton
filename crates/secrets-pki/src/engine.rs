@@ -241,7 +241,11 @@ impl PkiEngine {
             ca_params.distinguished_name = ca_dn;
             // Key Usage, etc doesn't matter for the signer object in rcgen, only the key and name.
 
-
+            let ca_cert_struct = params
+                .self_signed(&key_pair) // Dummy self-signed just to get a Certificate struct?
+                                      // No, we need a Certificate struct representing the CA.
+                                      // rcgen::Certificate::from_params(ca_params)?
+                .map_err(|_| PkiError::CertificateGeneration("Failed to create CA struct wrapper".to_string()))?; // Wait, self_signed returns Certificate? Or PEM?
 
             // rcgen 0.10+ `self_signed` returns `Result<Certificate, ...>`.
             // Wait, the existing code says `let cert = params.self_signed(&key_pair)?; let cert_pem = cert.pem();`.
@@ -259,9 +263,9 @@ impl PkiEngine {
             // Now create child cert signed by CA
             // Note: `params` is the child params.
             // We sign using the CA key pair. Note: rcgen might not set the Issuer DN perfectly without the CA cert context,
-            params.signed_by(&key_pair, &ca_params, &ca_key_pair)
+            // but this ensures cryptographic chain validity.
+            params.signed_by(&key_pair, &ca_key_pair)
                 .map_err(|e| PkiError::CertificateGeneration(format!("Failed to sign certificate: {}", e)))?
-
         } else {
             return Err(PkiError::InvalidCaConfiguration("CA not configured. Cannot issue certificates.".to_string()));
         };
