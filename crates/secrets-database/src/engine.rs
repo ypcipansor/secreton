@@ -162,8 +162,18 @@ impl DatabaseEngine {
         data.insert("password".to_string(), Value::String(password));
         data.insert("role".to_string(), Value::String(role_name.to_string()));
         data.insert(
+        data.insert(
             "connection_string".to_string(),
-            Value::String(self.config.connection_url.clone()),
+            Value::String({
+                // Strip credentials from the connection URL before returning
+                if let Ok(mut url) = url::Url::parse(&self.config.connection_url) {
+                    url.set_username(username).ok();
+                    url.set_password(Some(&password)).ok();
+                    url.to_string()
+                } else {
+                    self.config.connection_url.clone()
+                }
+            }),
         );
         data.insert("expiration".to_string(), Value::String(expiration));
 
