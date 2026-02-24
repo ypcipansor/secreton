@@ -68,8 +68,17 @@ pub fn create_pki_router() -> Router<()> {
 #[axum::debug_handler]
 pub async fn issue_certificate(
     Extension(state): Extension<crate::ApiState>,
+    Extension(user): Extension<secreton_auth::User>,
     Json(request): Json<GenerateCertRequest>,
 ) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
+    // Authorization check: Only admin/root should be able to issue certificates
+    let is_authorized = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+
+    if !is_authorized {
+        error!("Unauthorized attempt to issue certificate by user: {}", user.username);
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Map request
