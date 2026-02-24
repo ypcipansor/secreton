@@ -33,6 +33,10 @@ impl DatabaseEngine {
         &self,
         role_name: &str,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
+        if !self.enabled {
+            return Err(DatabaseError::EngineDisabled);
+        }
+
         // Get role configuration
         let role = self.roles.get(role_name).ok_or_else(|| {
             DatabaseError::RoleNotFound(format!("Role '{}' not found", role_name))
@@ -44,7 +48,7 @@ impl DatabaseEngine {
         // Generate credentials based on database type
         match db_type {
             DatabaseType::PostgreSQL => {
-                self.generate_postgres_credentials(role_name, &role.sql)
+                self.generate_postgres_credentials(role_name, &role.sql, role.default_ttl)
                     .await
             }
             DatabaseType::MySQL => self.generate_mysql_credentials(role_name, &role.sql).await,
@@ -102,11 +106,12 @@ impl DatabaseEngine {
         &self,
         role_name: &str,
         role_sql: &str,
+        default_ttl: u64,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
         let password = self.generate_password();
         let expiration = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::seconds(3600)) // Default 1 hour TTL
+            .checked_add_signed(chrono::Duration::seconds(default_ttl as i64))
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
 
@@ -157,18 +162,8 @@ impl DatabaseEngine {
         data.insert("password".to_string(), Value::String(password));
         data.insert("role".to_string(), Value::String(role_name.to_string()));
         data.insert(
-        data.insert(
             "connection_string".to_string(),
-            Value::String({
-                // Strip credentials from the connection URL before returning
-                if let Ok(mut url) = url::Url::parse(&self.config.connection_url) {
-                    url.set_username(username).ok();
-                    url.set_password(Some(&password)).ok();
-                    url.to_string()
-                } else {
-                    self.config.connection_url.clone()
-                }
-            }),
+            Value::String(self.config.connection_url.clone()),
         );
         data.insert("expiration".to_string(), Value::String(expiration));
 
@@ -249,6 +244,7 @@ impl DatabaseEngine {
     }
 
     /// Generate a random username (prefixed with 's_' for safety)
+    /// Uses Alphanumeric charset to ensure safety in SQL string literals without escaping.
     fn generate_username(&self) -> String {
         use rand::{Rng, distributions::Alphanumeric};
         let suffix: String = rand::thread_rng()
