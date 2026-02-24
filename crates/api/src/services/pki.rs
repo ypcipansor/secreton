@@ -85,6 +85,9 @@ impl PkiPersistentService {
 
     /// Generate a new Root CA
     pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String)> {
+        // Ensure initialized to load any existing CA from storage before checking/generating
+        self.ensure_initialized().await?;
+
         // Acquire write lock immediately to prevent race conditions (TOCTOU)
         // We hold this lock for the entire duration of the check-generate-store sequence.
         let mut engine_lock = self.engine.write().await;
