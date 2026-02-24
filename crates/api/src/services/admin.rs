@@ -470,10 +470,35 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
+        // Optimize query by using a more specific prefix if time range allows
+        use chrono::Datelike;
+        let prefix = if let (Some(start), Some(end)) = (start_time, end_time) {
+            if start.year() == end.year() {
+                if start.month() == end.month() {
+                    if start.day() == end.day() {
+                        // Same day: sys/audit/YYYY/MM/DD/
+                        format!("sys/audit/{}/{:02}/{:02}/", start.year(), start.month(), start.day())
+                    } else {
+                        // Same month: sys/audit/YYYY/MM/
+                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
+                    }
+                } else {
+                    // Same year: sys/audit/YYYY/
+                    format!("sys/audit/{}/", start.year())
+                }
+            } else {
+                // Different years: fallback to root
+                "sys/audit/".to_string()
+            }
+        } else {
+            // No range specified
+            "sys/audit/".to_string()
+        };
+
         // Do not pass limit to storage because we filter in memory after fetching.
         // Storage limit would truncate results before filtering, leading to incomplete results.
         let query_params = secreton_storage::QueryParams {
-            path_prefix: Some("sys/audit/".to_string()),
+            path_prefix: Some(prefix),
             limit: None,
             offset: Some(0),
             ..Default::default()
