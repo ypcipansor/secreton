@@ -5,39 +5,27 @@ use axum::{
     extract::{Extension},
     http::StatusCode,
     response::Json,
-    routing::{post},
+    routing::{post, get},
 };
-use secreton_secrets::{PkiEngine, SecretEngine, PkiConfig};
+use secreton_secrets_pki::CertificateRequest;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, error};
 
 use crate::ApiResponse;
+use crate::services::pki::PkiPersistentService;
 
 /// API state for PKI engine
 #[derive(Clone)]
 pub struct PkiApiState {
-    pub engine: Arc<RwLock<PkiEngine>>,
+    pub service: Option<Arc<PkiPersistentService>>,
 }
 
 impl Default for PkiApiState {
     fn default() -> Self {
-        let config = PkiConfig {
-            default_lease_ttl: 3600,
-            max_lease_ttl: 86400,
-            ca_private_key: None,
-            ca_cert: None,
-            enable_acme: false,
-        };
-        let mut engine = PkiEngine::new(config);
-        // Manually enable it for now as init isn't called via standard flow here
-        engine.enable();
         Self {
-            engine: Arc::new(RwLock::new(engine)),
+            service: None,
         }
     }
 }
@@ -50,6 +38,13 @@ pub struct GenerateCertRequest {
     pub key_type: Option<String>,
     pub key_bits: Option<u64>,
     pub organization: Option<String>,
+}
+
+/// Request to generate Root CA
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenerateRootCaRequest {
+    pub common_name: String,
+    pub organization: String,
 }
 
 /// Response for certificate generation
@@ -65,6 +60,8 @@ pub struct CertResponse {
 pub fn create_pki_router() -> Router<()> {
     Router::new()
         .route("/issue", post(issue_certificate))
+        .route("/root/generate", post(generate_root_ca))
+        .route("/ca/pem", get(get_ca_pem))
 }
 
 /// Generate a certificate
@@ -73,42 +70,77 @@ pub async fn issue_certificate(
     Extension(state): Extension<crate::ApiState>,
     Json(request): Json<GenerateCertRequest>,
 ) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
-    let mut engine = state.pki.engine.write().await;
+    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    let mut data = HashMap::new();
-    data.insert("common_name".to_string(), Value::String(request.common_name));
-    if let Some(ttl) = request.ttl {
-        data.insert("ttl".to_string(), Value::Number(serde_json::Number::from(ttl)));
-    }
-    if let Some(kt) = request.key_type {
-        data.insert("key_type".to_string(), Value::String(kt));
-    }
-    if let Some(kb) = request.key_bits {
-        data.insert("key_bits".to_string(), Value::Number(serde_json::Number::from(kb)));
-    }
-    if let Some(org) = request.organization {
-        data.insert("organization".to_string(), Value::String(org));
-    }
+    // Map request
+    let cert_req = CertificateRequest {
+        common_name: request.common_name,
+        alt_names: vec![],
+        ip_addresses: vec![],
+        email_addresses: vec![],
+        organization: request.organization,
+        organizational_unit: None,
+        country: None,
+        state: None,
+        locality: None,
+        key_usages: vec![],
+        extended_key_usages: vec![],
+        ttl: request.ttl.map(|t| t as i64),
+    };
 
-    match engine.write("issue", data).await {
-        Ok(secret) => {
-            info!("Certificate issued");
-            // Extract from secret.data
-            let cert = secret.data.get("certificate").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let key = secret.data.get("private_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let serial = secret.data.get("serial_number").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let ttl = secret.data.get("ttl").and_then(|v| v.as_u64()).unwrap_or(0);
-            let expiration = Utc::now().timestamp() + ttl as i64;
-
+    match service.issue_certificate(cert_req).await {
+        Ok(res) => {
+            info!("Certificate issued: {}", res.serial_number);
             Ok(Json(ApiResponse::success(CertResponse {
-                certificate: cert,
-                private_key: key,
-                serial_number: serial,
-                expiration,
+                certificate: res.certificate,
+                private_key: res.private_key,
+                serial_number: res.serial_number,
+                expiration: res.expiration.timestamp(),
             })))
         }
         Err(e) => {
             error!("Failed to issue certificate: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Generate Root CA
+#[axum::debug_handler]
+pub async fn generate_root_ca(
+    Extension(state): Extension<crate::ApiState>,
+    Json(request): Json<GenerateRootCaRequest>,
+) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
+    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    match service.generate_root_ca(&request.common_name, &request.organization).await {
+        Ok((cert, key)) => {
+            Ok(Json(ApiResponse::success(CertResponse {
+                certificate: cert,
+                private_key: key, // Should probably only return this once!
+                serial_number: "ROOT".to_string(),
+                expiration: Utc::now().timestamp() + (3650 * 86400),
+            })))
+        },
+        Err(e) => {
+            error!("Failed to generate Root CA: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get CA PEM
+#[axum::debug_handler]
+pub async fn get_ca_pem(
+    Extension(state): Extension<crate::ApiState>,
+) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    match service.get_ca_pem().await {
+        Ok(Some(pem)) => Ok(Json(ApiResponse::success(pem))),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!("Failed to get CA PEM: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }

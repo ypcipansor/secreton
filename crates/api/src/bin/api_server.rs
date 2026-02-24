@@ -285,12 +285,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize Axum components for new engines
     use secreton_api::{ApiState, KVApiState, TransitApiState};
+    use secreton_api::services::pki::PkiPersistentService;
     use secreton_performance::OptimizationLevel;
+
+    // Initialize PKI Persistent Service
+    let pki_service = Arc::new(PkiPersistentService::new(storage.clone(), crypto.clone()));
+    if let Err(e) = pki_service.ensure_initialized().await {
+        warn!("Failed to initialize PKI service from storage: {}", e);
+    }
 
     // Use default in-memory states for now, matching ApiState::new implementation
     let api_state = ApiState::new(
         TransitApiState::default(),
         KVApiState::default(),
+        Some(pki_service),
         Arc::new(api_config.clone()),
         Arc::new(secreton_common::StandardServiceContainer::default()), // Fixed: No .container field
         auth.clone(),

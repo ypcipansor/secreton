@@ -405,23 +405,28 @@ impl PkiEngine {
         })
     }
 
-    /// Generate default CA info for development/testing
-    async fn generate_default_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
-        // Create default CA parameters
-        let mut params = CertificateParams::new(vec!["Secreton CA".to_string()])
+    /// Generate a new Root CA certificate
+    pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String), PkiError> {
+        // Create CA parameters
+        let mut params = CertificateParams::new(vec![common_name.to_string()])
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
         // Set CA distinguished name
         let mut dn = DistinguishedName::new();
-        dn.push(DnType::OrganizationName, "Secreton Security");
+        dn.push(DnType::OrganizationName, organization);
         dn.push(DnType::OrganizationalUnitName, "Certificate Authority");
-        dn.push(DnType::CountryName, "US");
-        dn.push(DnType::StateOrProvinceName, "CA");
-        dn.push(DnType::LocalityName, "San Francisco");
+        dn.push(DnType::CommonName, common_name);
         params.distinguished_name = dn;
 
         // Set as CA certificate
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+
+        // Set key usage for CA
+        params.key_usages = vec![
+            rcgen::KeyUsagePurpose::KeyCertSign,
+            rcgen::KeyUsagePurpose::CrlSign,
+            rcgen::KeyUsagePurpose::DigitalSignature,
+        ];
 
         // Set validity (10 years)
         let not_before = ::time::OffsetDateTime::now_utc();
@@ -438,9 +443,14 @@ impl PkiEngine {
             .self_signed(&key_pair)
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
-        // Parse the generated certificate
-        // This implicitly tests our parsing logic
-        self.parse_ca_cert(&cert.pem())
+        Ok((cert.pem(), key_pair.serialize_pem()))
+    }
+
+    /// Generate default CA info for development/testing
+    async fn generate_default_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
+        // reuse the new generate_root_ca logic but return CaInfo
+        let (cert_pem, _key_pem) = self.generate_root_ca("Secreton CA", "Secreton Security").await?;
+        self.parse_ca_cert(&cert_pem)
     }
 
     /// Extract DN from Name (RdnSequence)
