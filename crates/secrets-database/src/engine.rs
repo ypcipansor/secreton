@@ -89,6 +89,7 @@ impl DatabaseEngine {
         let mgr_config = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         };
+        // TODO: Implement TLS support (e.g. using rustls or native-tls)
         let mgr = Manager::from_config(pg_config, NoTls, mgr_config);
         let pool = Pool::builder(mgr)
             .max_size(self.config.max_open_connections.unwrap_or(10) as usize)
@@ -110,14 +111,10 @@ impl DatabaseEngine {
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
         let password = self.generate_password();
-        let ttl_seconds = i64::try_from(default_ttl).map_err(|_| {
-            DatabaseError::InvalidConfiguration(format!("default_ttl {} exceeds maximum", default_ttl))
-        })?;
         let expiration = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::seconds(ttl_seconds))
-            .ok_or_else(|| DatabaseError::InvalidConfiguration("TTL overflow when computing expiration".to_string()))?
+            .checked_add_signed(chrono::Duration::seconds(default_ttl as i64))
+            .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
-
 
         // Get connection
         let pool = self.get_pg_pool().await?;
@@ -165,19 +162,9 @@ impl DatabaseEngine {
         data.insert("username".to_string(), Value::String(username));
         data.insert("password".to_string(), Value::String(password));
         data.insert("role".to_string(), Value::String(role_name.to_string()));
-
         data.insert(
             "connection_string".to_string(),
-            Value::String({
-                // Strip credentials from the connection URL before returning
-                if let Ok(mut url) = url::Url::parse(&self.config.connection_url) {
-                    url.set_username(username).ok();
-                    url.set_password(Some(&password)).ok();
-                    url.to_string()
-                } else {
-                    self.config.connection_url.clone()
-                }
-            }),
+            Value::String(self.config.connection_url.clone()),
         );
         data.insert("expiration".to_string(), Value::String(expiration));
 
