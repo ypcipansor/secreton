@@ -346,7 +346,7 @@ impl DatabaseEngine {
         data.insert("role".to_string(), Value::String(role_name.to_string()));
         data.insert(
             "connection_string".to_string(),
-            Value::String(self.config.connection_url.clone()),
+            Value::String(self.sanitize_connection_url(&self.config.connection_url)),
         );
 
         Ok(data)
@@ -364,7 +364,7 @@ impl DatabaseEngine {
         data.insert("role".to_string(), Value::String(role_name.to_string()));
         data.insert(
             "connection_string".to_string(),
-            Value::String(self.config.connection_url.clone()),
+            Value::String(self.sanitize_connection_url(&self.config.connection_url)),
         );
 
         Ok(data)
