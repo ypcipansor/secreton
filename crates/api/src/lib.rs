@@ -1148,6 +1148,7 @@ impl ApiState {
     pub async fn new(
         transit_state: TransitApiState,
         kv_state: KVApiState,
+        pki_service: Option<std::sync::Arc<crate::services::pki::PkiPersistentService>>,
         config: std::sync::Arc<crate::config::ApiConfig>,
         secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
         auth: std::sync::Arc<crate::services::auth::AuthenticationService>,
@@ -1158,7 +1159,7 @@ impl ApiState {
             kv: kv_state,
             transit: transit_state,
             database: DatabaseApiState::default(),
-            pki: PkiApiState::default(),
+            pki: PkiApiState { service: pki_service },
             ssh: SshApiState::default(),
             totp: TotpApiState::default(),
             config,
@@ -1203,7 +1204,11 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => {
             match state.auth.validate_token(token).await {
-                Ok(_) => Ok(next.run(req).await),
+                Ok(user) => {
+                    let mut req = req;
+                    req.extensions_mut().insert(user);
+                    Ok(next.run(req).await)
+                },
                 Err(_) => Err(axum::http::StatusCode::UNAUTHORIZED),
             }
         }

@@ -7,6 +7,7 @@ pub mod auth;
 pub mod secret;
 pub mod admin;
 pub mod config;
+pub mod pki;
 
 use std::sync::Arc;
 use anyhow::Result;
