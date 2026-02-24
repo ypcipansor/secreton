@@ -109,9 +109,13 @@ impl DatabaseEngine {
         default_ttl: u64,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
-        let password = self.generate_password();
+        let ttl_seconds = i64::try_from(default_ttl).map_err(|_| {
+            DatabaseError::InvalidConfiguration(format!("default_ttl {} exceeds maximum", default_ttl))
+        })?;
         let expiration = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::seconds(default_ttl as i64))
+            .checked_add_signed(chrono::Duration::seconds(ttl_seconds))
+            .ok_or_else(|| DatabaseError::InvalidConfiguration("TTL overflow when computing expiration".to_string()))?
+            .to_rfc3339();
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
 
