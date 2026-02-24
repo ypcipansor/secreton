@@ -93,6 +93,7 @@ pub struct LeaseResponse {
     pub username: String,
     pub role: String,
     pub created_at: String,
+    pub lease_duration: u64,
 }
 
 /// Create the Database router with all endpoints
@@ -100,10 +101,10 @@ pub fn create_database_router() -> Router<()> {
     Router::new()
         .route("/config", post(configure_database))
         .route("/roles", get(list_roles))
-        .route("/roles/{name}", post(create_role))
-        .route("/creds/{name}", get(get_credentials))
+        .route("/roles/:name", post(create_role))
+        .route("/creds/:name", get(get_credentials))
         .route("/leases", get(list_leases))
-        .route("/leases/{id}", delete(revoke_lease))
+        .route("/leases/:id", delete(revoke_lease))
 }
 
 /// Configure the database engine
@@ -253,6 +254,7 @@ pub async fn list_leases(
         username: l.username,
         role: l.role,
         created_at: l.created_at,
+        lease_duration: l.lease_duration,
     }).collect();
 
     Ok(Json(ApiResponse::success(leases)))

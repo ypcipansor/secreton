@@ -45,6 +45,7 @@ pub struct Lease {
     pub username: String,
     pub role: String,
     pub created_at: String,
+    pub lease_duration: u64,
 }
 
 #[component]
@@ -399,6 +400,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
                                                                     <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">"Lease ID"</th>
                                                                     <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Username"</th>
                                                                     <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Role"</th>
+                                                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Duration"</th>
                                                                     <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Created At"</th>
                                                                     <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6">
                                                                         <span class="sr-only">"Actions"</span>
@@ -416,6 +418,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
                                                                                 <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{lease.lease_id}</td>
                                                                                 <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500 font-mono">{lease.username}</td>
                                                                                 <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{lease.role}</td>
+                                                                                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{format!("{}s", lease.lease_duration)}</td>
                                                                                 <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{lease.created_at}</td>
                                                                                 <td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                                                                                     <Button

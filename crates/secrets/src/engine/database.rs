@@ -32,6 +32,7 @@ pub struct LeaseInfo {
     pub username: String,
     pub role: String,
     pub created_at: String,
+    pub lease_duration: u64,
 }
 
 /// Database secret engine for dynamic credentials
@@ -225,12 +226,18 @@ impl SecretEngine for DatabaseEngine {
                 .unwrap_or("unknown")
                 .to_string();
 
+            // Determine lease duration from role config
+            let lease_duration = self.roles.get(role_name)
+                .map(|r| r.default_ttl)
+                .unwrap_or(3600); // Default to 1 hour if role config missing (should rely on generate_credentials check though)
+
             // Store Lease Info
             let lease_info = LeaseInfo {
                 lease_id: lease_id.clone(),
                 username,
                 role: role_name.to_string(),
                 created_at: chrono::Utc::now().to_rfc3339(),
+                lease_duration,
             };
 
             {
@@ -247,7 +254,7 @@ impl SecretEngine for DatabaseEngine {
                     created_by: "system".to_string(),
                     updated_by: "system".to_string(),
                     lease_id: Some(lease_id),
-                    lease_duration: Some(3600), // 1 hour default
+                    lease_duration: Some(lease_duration),
                     tags: HashMap::new(),
                 },
                 created_at: chrono::Utc::now(),
@@ -450,6 +457,7 @@ mod tests {
         // Create a role
         let mut role_data = HashMap::new();
         role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
+        role_data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(7200)));
         engine.write("roles/test_role", role_data).await?;
 
         // Generate credentials (creates lease)
@@ -462,6 +470,10 @@ mod tests {
         assert_eq!(leases[0].lease_id, lease_id);
         assert_eq!(leases[0].username, "test_user");
         assert_eq!(leases[0].role, "test_role");
+        assert_eq!(leases[0].lease_duration, 7200);
+
+        // Verify secret metadata lease duration
+        assert_eq!(secret.metadata.lease_duration, Some(7200));
 
         // Revoke lease
         engine.revoke_lease(&lease_id).await?;
