@@ -4,8 +4,10 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Database type
 #[derive(Debug, Clone, PartialEq)]
@@ -23,11 +25,22 @@ pub struct DatabaseRole {
     pub default_ttl: u64,
 }
 
+/// Lease information for tracking active credentials
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaseInfo {
+    pub lease_id: String,
+    pub username: String,
+    pub role: String,
+    pub created_at: String,
+}
+
 /// Database secret engine for dynamic credentials
 pub struct DatabaseEngine {
     config: DatabaseConfig,
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
+    // Use Mutex for interior mutability since SecretEngine::read is &self
+    leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
 }
 
@@ -52,6 +65,7 @@ impl DatabaseEngine {
             config,
             enabled: false,
             roles: HashMap::new(),
+            leases: Mutex::new(HashMap::new()),
             backend: None,
         }
     }
@@ -122,6 +136,39 @@ impl DatabaseEngine {
             }
         }
     }
+
+    /// Revoke a lease
+    pub async fn revoke_lease(&self, lease_id: &str) -> SecretResult<()> {
+        // Need to find username first
+        let username = {
+            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            leases.get(lease_id).map(|l| l.username.clone())
+        };
+
+        if let Some(username) = username {
+            if let Some(backend) = &self.backend {
+                // Call backend to revoke (DROP USER)
+                backend.revoke_credentials(&username).await?;
+
+                // Remove from map
+                let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+                leases.remove(lease_id);
+                Ok(())
+            } else {
+                Err(SecretError::InvalidConfiguration("Backend not initialized".to_string()))
+            }
+        } else {
+            Err(SecretError::SecretNotFound(format!("Lease '{}' not found", lease_id)))
+        }
+    }
+
+    /// List active leases
+    pub fn list_leases(&self) -> Vec<LeaseInfo> {
+        match self.leases.lock() {
+            Ok(leases) => leases.values().cloned().collect(),
+            Err(_) => vec![],
+        }
+    }
 }
 
 #[async_trait]
@@ -169,6 +216,28 @@ impl SecretEngine for DatabaseEngine {
         if let Some(role_name) = path.strip_prefix("creds/") {
             let data = self.generate_credentials(role_name).await?;
 
+            // Generate Lease ID
+            let lease_id = uuid::Uuid::new_v4().to_string();
+
+            // Extract username for tracking
+            let username = data.get("username")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Store Lease Info
+            let lease_info = LeaseInfo {
+                lease_id: lease_id.clone(),
+                username,
+                role: role_name.to_string(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            };
+
+            {
+                let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+                leases.insert(lease_id.clone(), lease_info);
+            }
+
             let secret = Secret {
                 id: uuid::Uuid::new_v4(),
                 path: path.to_string(),
@@ -177,7 +246,7 @@ impl SecretEngine for DatabaseEngine {
                     version: 1,
                     created_by: "system".to_string(),
                     updated_by: "system".to_string(),
-                    lease_id: Some(uuid::Uuid::new_v4().to_string()),
+                    lease_id: Some(lease_id),
                     lease_duration: Some(3600), // 1 hour default
                     tags: HashMap::new(),
                 },
@@ -264,6 +333,8 @@ impl SecretEngine for DatabaseEngine {
         if let Some(role_name) = path.strip_prefix("roles/") {
             self.roles.remove(role_name);
             Ok(())
+        } else if let Some(lease_id) = path.strip_prefix("leases/") {
+            self.revoke_lease(lease_id).await
         } else {
             Err(SecretError::InvalidConfiguration(
                 "Invalid database path".to_string(),
@@ -279,6 +350,9 @@ impl SecretEngine for DatabaseEngine {
         if path == "roles" || path == "roles/" {
             // Return list of role names
             Ok(self.roles.keys().cloned().collect())
+        } else if path == "leases" || path == "leases/" {
+             // Return list of lease IDs
+             Ok(self.list_leases().iter().map(|l| l.lease_id.clone()).collect())
         } else {
             Ok(vec![])
         }
@@ -318,5 +392,84 @@ impl SecretEngine for DatabaseEngine {
         // Given the Bug 1 concern about "wasteful resource allocation", dropping it makes sense?
         // But pooling libraries handle idle connections well.
         // Let's keep it to avoid thrashing if toggled often.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::database::DatabaseBackend;
+
+    struct MockBackend;
+
+    #[async_trait]
+    impl DatabaseBackend for MockBackend {
+        async fn generate_credentials(
+            &self,
+            _role_name: &str,
+            _role_sql: &str,
+        ) -> SecretResult<HashMap<String, Value>> {
+            let mut data = HashMap::new();
+            data.insert("username".to_string(), Value::String("test_user".to_string()));
+            data.insert("password".to_string(), Value::String("test_pass".to_string()));
+            Ok(data)
+        }
+
+        async fn test_connection(&self) -> SecretResult<()> {
+            Ok(())
+        }
+
+        async fn revoke_credentials(&self, username: &str) -> SecretResult<()> {
+            if username == "test_user" {
+                Ok(())
+            } else {
+                Err(SecretError::SecretNotFound("User not found".to_string()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lease_lifecycle() -> SecretResult<()> {
+        let config = DatabaseConfig {
+            connection_url: "postgresql://localhost:5432/db".to_string(),
+            plugin_name: "test".to_string(),
+            allowed_roles: vec![],
+            username: None,
+            password: None,
+            max_open_connections: None,
+            max_idle_connections: None,
+            max_connection_lifetime: None,
+        };
+
+        let mut engine = DatabaseEngine::new(config);
+
+        // Inject mock backend
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Create a role
+        let mut role_data = HashMap::new();
+        role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
+        engine.write("roles/test_role", role_data).await?;
+
+        // Generate credentials (creates lease)
+        let secret = engine.read("creds/test_role").await?.unwrap();
+        let lease_id = secret.metadata.lease_id.unwrap();
+
+        // Verify lease exists
+        let leases = engine.list_leases();
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].lease_id, lease_id);
+        assert_eq!(leases[0].username, "test_user");
+        assert_eq!(leases[0].role, "test_role");
+
+        // Revoke lease
+        engine.revoke_lease(&lease_id).await?;
+
+        // Verify lease removed
+        let leases = engine.list_leases();
+        assert_eq!(leases.len(), 0);
+
+        Ok(())
     }
 }
