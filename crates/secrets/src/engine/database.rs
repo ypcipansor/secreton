@@ -4,10 +4,11 @@ use crate::error::*;
 use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Database type
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +19,7 @@ pub enum DatabaseType {
 }
 
 /// Database role configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseRole {
     pub sql: String,
     pub max_ttl: u64,
@@ -45,6 +46,7 @@ pub struct DatabaseEngine {
     // Currently, leases are only tracked for manual revocation.
     leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
+    storage: Arc<dyn StorageBackend>,
 }
 
 impl DatabaseEngine {
@@ -63,14 +65,136 @@ impl DatabaseEngine {
         }
     }
 
-    pub fn new(config: DatabaseConfig) -> Self {
+    pub fn new(config: DatabaseConfig, storage: Arc<dyn StorageBackend>) -> Self {
         Self {
             config,
             enabled: false,
             roles: HashMap::new(),
             leases: Mutex::new(HashMap::new()),
             backend: None,
+            storage,
         }
+    }
+
+    /// Load roles and leases from storage
+    pub async fn load_state(&mut self) -> SecretResult<()> {
+        // Load roles
+        let roles_path = "sys/database/roles/";
+        let params = secreton_storage::QueryParams::new().with_path_prefix(roles_path.to_string());
+        let entries = self
+            .storage
+            .list(&params)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list roles: {}", e)))?;
+
+        for entry in entries {
+            let role_name = entry
+                .path
+                .strip_prefix(roles_path)
+                .unwrap_or(&entry.path)
+                .to_string();
+
+            // We store data as JSON in encrypted_data (plaintext for now)
+            // TODO: Implement proper encryption using CryptoService or KMS
+            let role: DatabaseRole = serde_json::from_slice(&entry.encrypted_data)
+                .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
+
+            self.roles.insert(role_name, role);
+        }
+
+        // Load leases
+        let leases_path = "sys/database/leases/";
+        let params = secreton_storage::QueryParams::new().with_path_prefix(leases_path.to_string());
+        let entries = self
+            .storage
+            .list(&params)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
+
+        let mut leases = self.leases.lock().unwrap();
+        for entry in entries {
+            let lease_id = entry
+                .path
+                .strip_prefix(leases_path)
+                .unwrap_or(&entry.path)
+                .to_string();
+
+            let lease: LeaseInfo = serde_json::from_slice(&entry.encrypted_data)
+                .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e)))?;
+
+            leases.insert(lease_id, lease);
+        }
+
+        Ok(())
+    }
+
+    async fn save_role(&self, name: &str, role: &DatabaseRole) -> SecretResult<()> {
+        let path = format!("sys/database/roles/{}", name);
+        let data = serde_json::to_vec(role)
+            .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
+
+        // Create SecretEntry
+        // TODO: Encrypt data properly
+        let entry = SecretEntry::new(
+            path,
+            data,
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(), // Mark as plaintext
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(), // System owned
+        );
+
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to store role: {}", e)))
+    }
+
+    async fn delete_role_storage(&self, name: &str) -> SecretResult<()> {
+        let path = format!("sys/database/roles/{}", name);
+        self.storage
+            .delete_by_path(&path)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to delete role: {}", e)))?;
+        Ok(())
+    }
+
+    async fn save_lease(&self, id: &str, lease: &LeaseInfo) -> SecretResult<()> {
+        let path = format!("sys/database/leases/{}", id);
+        let data = serde_json::to_vec(lease)
+            .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
+
+        // NOTE: LeaseInfo contains metadata (username, role, lease_id) but NOT the actual password.
+        // The password is returned to the client and not stored here.
+        // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
+        // If the storage backend supports encryption at rest, it will be encrypted there.
+        // TODO: Implement application-level encryption using CryptoService for defense-in-depth.
+        let entry = SecretEntry::new(
+            path,
+            data,
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(),
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to store lease: {}", e)))
+    }
+
+    async fn delete_lease_storage(&self, id: &str) -> SecretResult<()> {
+        let path = format!("sys/database/leases/{}", id);
+        self.storage
+            .delete_by_path(&path)
+            .await
+            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to delete lease: {}", e)))?;
+        Ok(())
     }
 
     /// Generate database credentials
@@ -152,6 +276,9 @@ impl DatabaseEngine {
             if let Some(backend) = &self.backend {
                 // Call backend to revoke (DROP USER)
                 backend.revoke_credentials(&username).await?;
+
+                // Delete from storage
+                self.delete_lease_storage(lease_id).await?;
 
                 // Remove from map
                 let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
@@ -242,7 +369,16 @@ impl SecretEngine for DatabaseEngine {
                 lease_duration,
             };
 
-            // Attempt to store the lease. If lock fails (poisoned), rollback creation to avoid orphans.
+            // Persist lease first
+            if let Err(e) = self.save_lease(&lease_id, &lease_info).await {
+                 // Revoke credentials if persistence fails
+                 if let Some(backend) = &self.backend {
+                     let _ = backend.revoke_credentials(&username).await;
+                 }
+                 return Err(e);
+            }
+
+            // Update memory
             let lock_result = self.leases.lock();
             match lock_result {
                 Ok(mut leases) => {
@@ -250,12 +386,10 @@ impl SecretEngine for DatabaseEngine {
                 }
                 Err(_) => {
                     // Critical failure: Mutex is poisoned.
-                    // Drop the poisoned guard/error explicitly before await
                     drop(lock_result);
-
-                    // Attempt to rollback (revoke) the credentials we just created.
+                    // Attempt rollback
+                    self.delete_lease_storage(&lease_id).await.ok();
                     if let Some(backend) = &self.backend {
-                        // Best effort revocation
                         let _ = backend.revoke_credentials(&username).await;
                     }
                     return Err(SecretError::BackendOperationFailed("Failed to lock leases registry (poisoned). Credentials revoked.".to_string()));
@@ -322,7 +456,10 @@ impl SecretEngine for DatabaseEngine {
                 default_ttl,
             };
 
-            // Store the role (this would typically be persisted to storage)
+            // Persist role
+            self.save_role(role_name, &role).await?;
+
+            // Store the role in memory
             self.roles.insert(role_name.to_string(), role);
 
             let secret = Secret {
@@ -355,6 +492,7 @@ impl SecretEngine for DatabaseEngine {
         }
 
         if let Some(role_name) = path.strip_prefix("roles/") {
+            self.delete_role_storage(role_name).await?;
             self.roles.remove(role_name);
             Ok(())
         } else if let Some(lease_id) = path.strip_prefix("leases/") {
@@ -465,7 +603,8 @@ mod tests {
             max_connection_lifetime: None,
         };
 
-        let mut engine = DatabaseEngine::new(config);
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(config, storage);
 
         // Inject mock backend
         engine.backend = Some(Box::new(MockBackend));

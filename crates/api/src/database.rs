@@ -24,8 +24,8 @@ pub struct DatabaseApiState {
     pub engine: Arc<RwLock<DatabaseEngine>>,
 }
 
-impl Default for DatabaseApiState {
-    fn default() -> Self {
+impl DatabaseApiState {
+    pub async fn new(storage: Arc<dyn secreton_storage::StorageBackend>) -> Self {
         // Create a default config
         let config = DatabaseConfig {
             plugin_name: "database".to_string(),
@@ -38,7 +38,10 @@ impl Default for DatabaseApiState {
             max_connection_lifetime: Some(30),
         };
         // Manually enable the engine since init isn't called via standard flow here
-        let mut engine = DatabaseEngine::new(config);
+        let mut engine = DatabaseEngine::new(config, storage);
+        if let Err(e) = engine.load_state().await {
+            tracing::error!("Failed to load database engine state: {}", e);
+        }
         engine.enable();
         Self {
             engine: Arc::new(RwLock::new(engine)),

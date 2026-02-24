@@ -23,7 +23,7 @@ use secreton_grpc::secreton::v1::secret_service_server::SecretServiceServer;
 use secreton_api::grpc::server::GrpcSecretService;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     // Initialize logging with simple tracing
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
@@ -293,13 +293,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = pki_service.ensure_initialized().await {
         // Elevate initialization failure to critical error to prevent running with potentially inconsistent state
         tracing::error!("Failed to initialize PKI service from storage: {}", e);
-        return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("PKI initialization failed: {}", e))));
+        return Err(anyhow::anyhow!("PKI initialization failed: {}", e));
     }
+
+    // Initialize DatabaseApiState
+    let database_state = secreton_api::database::DatabaseApiState::new(storage.clone()).await;
 
     // Use default in-memory states for now, matching ApiState::new implementation
     let api_state = ApiState::new(
         TransitApiState::default(),
         KVApiState::default(),
+        database_state,
         Some(pki_service),
         Arc::new(api_config.clone()),
         Arc::new(secreton_common::StandardServiceContainer::default()), // Fixed: No .container field
