@@ -100,10 +100,10 @@ pub fn create_database_router() -> Router<()> {
     Router::new()
         .route("/config", post(configure_database))
         .route("/roles", get(list_roles))
-        .route("/roles/:name", post(create_role))
-        .route("/creds/:name", get(get_credentials))
+        .route("/roles/{name}", post(create_role))
+        .route("/creds/{name}", get(get_credentials))
         .route("/leases", get(list_leases))
-        .route("/leases/:id", delete(revoke_lease))
+        .route("/leases/{id}", delete(revoke_lease))
 }
 
 /// Configure the database engine
