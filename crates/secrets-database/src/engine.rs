@@ -117,8 +117,7 @@ impl DatabaseEngine {
             .checked_add_signed(chrono::Duration::seconds(ttl_seconds))
             .ok_or_else(|| DatabaseError::InvalidConfiguration("TTL overflow when computing expiration".to_string()))?
             .to_rfc3339();
-            .unwrap_or_else(chrono::Utc::now)
-            .to_rfc3339();
+
 
         // Get connection
         let pool = self.get_pg_pool().await?;
