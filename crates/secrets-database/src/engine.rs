@@ -446,7 +446,7 @@ impl DatabaseEngine {
     /// Sanitize connection URL to remove credentials
     fn sanitize_connection_url(&self, url: &str) -> String {
         // Simple heuristic: if url contains @, replace user:pass section
-        if let Some(at_pos) = url.find('@') {
+        if let Some(at_pos) = url.rfind('@') {
             if let Some(scheme_end) = url.find("://") {
                 let prefix = &url[0..scheme_end + 3];
                 let suffix = &url[at_pos + 1..];
