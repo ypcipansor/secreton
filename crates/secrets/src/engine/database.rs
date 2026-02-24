@@ -41,6 +41,8 @@ pub struct DatabaseEngine {
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
     // Use Mutex for interior mutability since SecretEngine::read is &self
+    // TODO: Implement background task for TTL enforcement to automatically revoke expired leases.
+    // Currently, leases are only tracked for manual revocation.
     leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
 }
@@ -229,20 +231,35 @@ impl SecretEngine for DatabaseEngine {
             // Determine lease duration from role config
             let lease_duration = self.roles.get(role_name)
                 .map(|r| r.default_ttl)
-                .unwrap_or(3600); // Default to 1 hour if role config missing (should rely on generate_credentials check though)
+                .unwrap_or(3600); // Default to 1 hour if role config missing
 
             // Store Lease Info
             let lease_info = LeaseInfo {
                 lease_id: lease_id.clone(),
-                username,
+                username: username.clone(),
                 role: role_name.to_string(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 lease_duration,
             };
 
-            {
-                let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
-                leases.insert(lease_id.clone(), lease_info);
+            // Attempt to store the lease. If lock fails (poisoned), rollback creation to avoid orphans.
+            let lock_result = self.leases.lock();
+            match lock_result {
+                Ok(mut leases) => {
+                    leases.insert(lease_id.clone(), lease_info);
+                }
+                Err(_) => {
+                    // Critical failure: Mutex is poisoned.
+                    // Drop the poisoned guard/error explicitly before await
+                    drop(lock_result);
+
+                    // Attempt to rollback (revoke) the credentials we just created.
+                    if let Some(backend) = &self.backend {
+                        // Best effort revocation
+                        let _ = backend.revoke_credentials(&username).await;
+                    }
+                    return Err(SecretError::BackendOperationFailed("Failed to lock leases registry (poisoned). Credentials revoked.".to_string()));
+                }
             }
 
             let secret = Secret {
