@@ -109,6 +109,7 @@ impl DatabaseEngine {
         default_ttl: u64,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
+        let password = self.generate_password();
         let ttl_seconds = i64::try_from(default_ttl).map_err(|_| {
             DatabaseError::InvalidConfiguration(format!("default_ttl {} exceeds maximum", default_ttl))
         })?;
