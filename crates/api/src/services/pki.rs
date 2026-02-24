@@ -85,6 +85,11 @@ impl PkiPersistentService {
 
     /// Generate a new Root CA
     pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String)> {
+        // Guard: Check if CA already exists
+        if let Ok(Some(_)) = self.get_ca_pem().await {
+            return Err(anyhow!("Root CA already exists. Use force if you really intend to overwrite."));
+        }
+
         // Generate via engine (stateless call effectively, or uses engine logic)
         // We use the existing engine instance to generate logic
         let engine_read = self.engine.read().await;
@@ -135,6 +140,11 @@ impl PkiPersistentService {
     pub async fn get_ca_pem(&self) -> Result<Option<String>> {
         self.ensure_initialized().await?;
         let engine = self.engine.read().await;
+
+        if !engine.has_ca_configured() {
+            return Ok(None);
+        }
+
         let info = engine.get_ca_info().await;
 
         match info {
@@ -150,7 +160,7 @@ impl PkiPersistentService {
         let engine = self.engine.read().await;
 
         // Ensure CA is configured
-        if engine.get_ca_info().await.is_err() {
+        if !engine.has_ca_configured() {
             return Err(anyhow!("PKI Engine not initialized with a Root CA. Please generate one first."));
         }
 

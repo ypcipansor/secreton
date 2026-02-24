@@ -114,10 +114,10 @@ pub async fn generate_root_ca(
     let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     match service.generate_root_ca(&request.common_name, &request.organization).await {
-        Ok((cert, key)) => {
+        Ok((cert, _key)) => {
             Ok(Json(ApiResponse::success(CertResponse {
                 certificate: cert,
-                private_key: key, // Should probably only return this once!
+                private_key: String::new(), // Do not return private key in API response for security
                 serial_number: "ROOT".to_string(),
                 expiration: Utc::now().timestamp() + (3650 * 86400),
             })))
