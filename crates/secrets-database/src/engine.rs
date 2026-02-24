@@ -165,7 +165,7 @@ impl DatabaseEngine {
         data.insert("username".to_string(), Value::String(username));
         data.insert("password".to_string(), Value::String(password));
         data.insert("role".to_string(), Value::String(role_name.to_string()));
-        data.insert(
+
         data.insert(
             "connection_string".to_string(),
             Value::String({
