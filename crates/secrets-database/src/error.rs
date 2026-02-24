@@ -25,4 +25,7 @@ pub enum DatabaseError {
 
     #[error("Storage error: {0}")]
     Storage(#[from] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Database engine is disabled")]
+    EngineDisabled,
 }
