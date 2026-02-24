@@ -85,17 +85,18 @@ impl PkiPersistentService {
 
     /// Generate a new Root CA
     pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String)> {
-        // Guard: Check if CA already exists
-        if let Ok(Some(_)) = self.get_ca_pem().await {
-            return Err(anyhow!("Root CA already exists. Use force if you really intend to overwrite."));
+        // Acquire write lock immediately to prevent race conditions (TOCTOU)
+        // We hold this lock for the entire duration of the check-generate-store sequence.
+        let mut engine_lock = self.engine.write().await;
+
+        // Guard: Check if CA already exists in the engine config
+        if engine_lock.has_ca_configured() {
+             return Err(anyhow!("Root CA already exists. Use force if you really intend to overwrite."));
         }
 
-        // Generate via engine (stateless call effectively, or uses engine logic)
-        // We use the existing engine instance to generate logic
-        let engine_read = self.engine.read().await;
-        let (cert_pem, key_pem) = engine_read.generate_root_ca(common_name, organization).await
+        // Generate via engine logic
+        let (cert_pem, key_pem) = engine_lock.generate_root_ca(common_name, organization).await
             .map_err(|e| anyhow!("Failed to generate Root CA: {}", e))?;
-        drop(engine_read);
 
         // Store in storage
         let ca_data = json!({
@@ -117,9 +118,13 @@ impl PkiPersistentService {
             uuid::Uuid::new_v4(), // System owned
         );
 
-        self.storage.store(&entry).await?;
+        // This storage operation is async and outside the lock? No, we are holding the lock.
+        // This blocks other readers/writers which is what we want for correctness here.
+        if let Err(e) = self.storage.store(&entry).await {
+             return Err(anyhow!("Failed to persist Root CA: {}", e));
+        }
 
-        // Update in-memory engine
+        // Update in-memory engine configuration
         let config = PkiConfig {
             default_lease_ttl: 3600,
             max_lease_ttl: 86400 * 365,
@@ -128,7 +133,7 @@ impl PkiPersistentService {
             crl: None,
         };
 
-        let mut engine_lock = self.engine.write().await;
+        // Replace the engine instance with the new configured one
         *engine_lock = PkiEngine::new(config);
 
         info!("Generated and persisted new Root CA: {}", common_name);

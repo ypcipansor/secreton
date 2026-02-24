@@ -109,8 +109,17 @@ pub async fn issue_certificate(
 #[axum::debug_handler]
 pub async fn generate_root_ca(
     Extension(state): Extension<crate::ApiState>,
+    Extension(user): Extension<secreton_auth::User>,
     Json(request): Json<GenerateRootCaRequest>,
 ) -> Result<Json<ApiResponse<CertResponse>>, StatusCode> {
+    // Authorization check: Only admin/root should be able to generate Root CA
+    let is_authorized = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
+
+    if !is_authorized {
+        error!("Unauthorized attempt to generate Root CA by user: {}", user.username);
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     match service.generate_root_ca(&request.common_name, &request.organization).await {

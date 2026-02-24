@@ -1204,7 +1204,11 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => {
             match state.auth.validate_token(token).await {
-                Ok(_) => Ok(next.run(req).await),
+                Ok(user) => {
+                    let mut req = req;
+                    req.extensions_mut().insert(user);
+                    Ok(next.run(req).await)
+                },
                 Err(_) => Err(axum::http::StatusCode::UNAUTHORIZED),
             }
         }
