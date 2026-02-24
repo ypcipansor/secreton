@@ -39,8 +39,9 @@ impl AuditDevice for StorageAuditDevice {
             event.id
         );
 
-        // Calculate expiration (default 365 days)
-        let expiration = now + Duration::days(365);
+        // Calculate expiration (default 7 years to meet compliance standards like SOX/FedRAMP)
+        // TODO: Make this configurable via ApiConfig
+        let expiration = now + Duration::days(2555);
 
         // Create SecretEntry
         // Note: AdminService expects data in metadata["log_data"]

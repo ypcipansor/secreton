@@ -470,12 +470,12 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
+        // Do not pass limit to storage because we filter in memory after fetching.
+        // Storage limit would truncate results before filtering, leading to incomplete results.
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/audit/".to_string()),
-            
             limit: None,
             offset: Some(0),
-            ..Default::default()
             ..Default::default()
         };
         
@@ -530,6 +530,13 @@ impl AdminService {
         // Sort by timestamp descending
         audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         
+        // Apply limit after filtering and sorting
+        if let Some(l) = limit {
+            if audit_logs.len() > l as usize {
+                audit_logs.truncate(l as usize);
+            }
+        }
+
         Ok(audit_logs)
     }
 
