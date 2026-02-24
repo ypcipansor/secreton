@@ -5,7 +5,7 @@ use axum::{
     extract::{Extension, Path},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{get, post, delete},
 };
 use chrono::Utc;
 use secreton_secrets::{DatabaseEngine, SecretEngine, EngineConfig, DatabaseConfig, EngineType};
@@ -86,13 +86,25 @@ pub struct ListRolesResponse {
     pub roles: Vec<String>,
 }
 
+/// Response for lease information
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LeaseResponse {
+    pub lease_id: String,
+    pub username: String,
+    pub role: String,
+    pub created_at: String,
+    pub lease_duration: u64,
+}
+
 /// Create the Database router with all endpoints
 pub fn create_database_router() -> Router<()> {
     Router::new()
         .route("/config", post(configure_database))
         .route("/roles", get(list_roles))
-        .route("/roles/{name}", post(create_role))
-        .route("/creds/{name}", get(get_credentials))
+        .route("/roles/:name", post(create_role))
+        .route("/creds/:name", get(get_credentials))
+        .route("/leases", get(list_leases))
+        .route("/leases/:id", delete(revoke_lease))
 }
 
 /// Configure the database engine
@@ -224,6 +236,49 @@ pub async fn get_credentials(
         }
         Err(e) => {
             error!("Failed to generate credentials for role '{}': {:?}", name, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// List active leases
+#[axum::debug_handler]
+pub async fn list_leases(
+    Extension(state): Extension<crate::ApiState>,
+) -> Result<Json<ApiResponse<Vec<LeaseResponse>>>, StatusCode> {
+    let engine = state.database.engine.read().await;
+
+    // We use the new public method on DatabaseEngine
+    let leases = engine.list_leases().into_iter().map(|l| LeaseResponse {
+        lease_id: l.lease_id,
+        username: l.username,
+        role: l.role,
+        created_at: l.created_at,
+        lease_duration: l.lease_duration,
+    }).collect();
+
+    Ok(Json(ApiResponse::success(leases)))
+}
+
+/// Revoke a lease
+#[axum::debug_handler]
+pub async fn revoke_lease(
+    Extension(state): Extension<crate::ApiState>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<ConfigResponse>>, StatusCode> {
+    let engine = state.database.engine.read().await;
+
+    // We use the new public method on DatabaseEngine
+    match engine.revoke_lease(&id).await {
+        Ok(_) => {
+            info!("Lease '{}' revoked", id);
+            Ok(Json(ApiResponse::success(ConfigResponse {
+                success: true,
+                message: format!("Lease '{}' revoked", id),
+            })))
+        }
+        Err(e) => {
+            error!("Failed to revoke lease '{}': {:?}", id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }

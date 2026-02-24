@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use crate::components::{Button, Card, Input, ButtonVariant};
-use crate::api::{get, post};
+use crate::api::{get, post, delete};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigRequest {
@@ -39,6 +39,15 @@ pub struct CredsResponse {
     pub lease_duration: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lease {
+    pub lease_id: String,
+    pub username: String,
+    pub role: String,
+    pub created_at: String,
+    pub lease_duration: u64,
+}
+
 #[component]
 pub fn DatabaseSecrets() -> impl IntoView {
     let (active_tab, set_active_tab) = signal("config".to_string());
@@ -62,6 +71,17 @@ pub fn DatabaseSecrets() -> impl IntoView {
             roles_trigger.track();
             async move {
                 get::<ListRolesResponse>("/database/roles").await
+            }
+        }
+    );
+
+    // Leases List Resource
+    let leases_trigger = Trigger::new();
+    let leases_resource = LocalResource::new(
+        move || {
+            leases_trigger.track();
+            async move {
+                get::<Vec<Lease>>("/database/leases").await
             }
         }
     );
@@ -129,10 +149,26 @@ pub fn DatabaseSecrets() -> impl IntoView {
 
         spawn_local(async move {
             match get::<CredsResponse>(&format!("/database/creds/{}", role)).await {
-                Ok(res) => set_creds_result.set(Some(res)),
+                Ok(res) => {
+                    set_creds_result.set(Some(res));
+                    leases_trigger.notify(); // Refresh leases list
+                },
                 Err(e) => set_creds_error.set(Some(format!("Error: {}", e))),
             }
             set_creds_loading.set(false);
+        });
+    };
+
+    let revoke_lease = move |lease_id: String| {
+        spawn_local(async move {
+            // We use ConfigResponse as generic success response wrapper, ignoring message for now or logging it
+            match delete::<ConfigResponse>(&format!("/database/leases/{}", lease_id)).await {
+                Ok(_) => leases_trigger.notify(),
+                Err(e) => {
+                    tracing::error!("Failed to revoke lease: {}", e);
+                    // In a real app we'd set an error signal
+                }
+            }
         });
     };
 
@@ -168,6 +204,9 @@ pub fn DatabaseSecrets() -> impl IntoView {
                         </button>
                         <button class=tab_class("creds") on:click=move |_| set_active_tab.set("creds".to_string())>
                             "Credentials"
+                        </button>
+                        <button class=tab_class("leases") on:click=move |_| set_active_tab.set("leases".to_string())>
+                            "Leases"
                         </button>
                     </nav>
                 </div>
@@ -330,6 +369,80 @@ pub fn DatabaseSecrets() -> impl IntoView {
                                     }
                                 }}
                             </Show>
+                        </div>
+                    </Show>
+
+                    <Show when=move || active_tab.get() == "leases">
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center">
+                                <h3 class="text-lg font-medium text-gray-900">"Active Leases"</h3>
+                                <Button
+                                    variant=ButtonVariant::Outline
+                                    class="text-xs"
+                                    on_click=Box::new(move |_| leases_trigger.notify())
+                                >
+                                    "Refresh"
+                                </Button>
+                            </div>
+
+                            <Suspense fallback=|| view! { <div>"Loading leases..."</div> }>
+                                {move || {
+                                    leases_resource.get().map(|res| match res {
+                                        Ok(leases) => {
+                                            if leases.is_empty() {
+                                                view! { <div class="text-sm text-gray-500 italic">"No active leases found."</div> }.into_any()
+                                            } else {
+                                                view! {
+                                                    <div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
+                                                        <table class="min-w-full divide-y divide-gray-300">
+                                                            <thead class="bg-gray-50">
+                                                                <tr>
+                                                                    <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">"Lease ID"</th>
+                                                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Username"</th>
+                                                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Role"</th>
+                                                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Duration"</th>
+                                                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">"Created At"</th>
+                                                                    <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                                                                        <span class="sr-only">"Actions"</span>
+                                                                    </th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody class="divide-y divide-gray-200 bg-white">
+                                                                <For
+                                                                    each=move || leases.clone()
+                                                                    key=|lease| lease.lease_id.clone()
+                                                                    children=move |lease| {
+                                                                        let id = lease.lease_id.clone();
+                                                                        view! {
+                                                                            <tr>
+                                                                                <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{lease.lease_id}</td>
+                                                                                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500 font-mono">{lease.username}</td>
+                                                                                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{lease.role}</td>
+                                                                                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{format!("{}s", lease.lease_duration)}</td>
+                                                                                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{lease.created_at}</td>
+                                                                                <td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                                                                                    <Button
+                                                                                        variant=ButtonVariant::Destructive
+                                                                                        class="text-xs px-2 py-1"
+                                                                                        on_click=Box::new(move |_| revoke_lease(id.clone()))
+                                                                                    >
+                                                                                        "Revoke"
+                                                                                    </Button>
+                                                                                </td>
+                                                                            </tr>
+                                                                        }
+                                                                    }
+                                                                />
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }.into_any()
+                                            }
+                                        },
+                                        Err(e) => view! { <div class="text-red-500">{format!("Error loading leases: {}", e)}</div> }.into_any()
+                                    })
+                                }}
+                            </Suspense>
                         </div>
                     </Show>
                 </div>
