@@ -470,10 +470,36 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
+        // Optimize query by using a more specific prefix if time range allows
+        use chrono::Datelike;
+        let prefix = if let (Some(start), Some(end)) = (start_time, end_time) {
+            if start.year() == end.year() {
+                if start.month() == end.month() {
+                    if start.day() == end.day() {
+                        // Same day: sys/audit/YYYY/MM/DD/
+                        format!("sys/audit/{}/{:02}/{:02}/", start.year(), start.month(), start.day())
+                    } else {
+                        // Same month: sys/audit/YYYY/MM/
+                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
+                    }
+                } else {
+                    // Same year: sys/audit/YYYY/
+                    format!("sys/audit/{}/", start.year())
+                }
+            } else {
+                // Different years: fallback to root
+                "sys/audit/".to_string()
+            }
+        } else {
+            // No range specified
+            "sys/audit/".to_string()
+        };
+
+        // Do not pass limit to storage because we filter in memory after fetching.
+        // Storage limit would truncate results before filtering, leading to incomplete results.
         let query_params = secreton_storage::QueryParams {
-            path_prefix: None,
-            
-            limit,
+            path_prefix: Some(prefix),
+            limit: None,
             offset: Some(0),
             ..Default::default()
         };
@@ -484,7 +510,30 @@ impl AdminService {
         let mut audit_logs: Vec<AuditLogEntry> = entries.into_iter()
             .filter_map(|entry| {
                 entry.metadata.get("log_data").and_then(|data| {
-                    serde_json::from_str(data).ok()
+                    // First deserialize to AuditEvent to match stored format
+                    if let Ok(event) = serde_json::from_str::<secreton_security::policies::audit::AuditEvent>(data) {
+                        // Map AuditEvent to AuditLogEntry
+                        Some(AuditLogEntry {
+                            id: event.id,
+                            timestamp: event.timestamp,
+                            user_id: event.user,
+                            action: event.operation,
+                            resource: event.resource,
+                            resource_id: None, // Not directly available in AuditEvent
+                            ip_address: event.client_ip.unwrap_or_default(),
+                            user_agent: String::new(), // Not available in AuditEvent
+                            success: match event.status {
+                                secreton_security::policies::audit::AuditStatus::Success => true,
+                                _ => false,
+                            },
+                            details: Some(serde_json::Value::Object(
+                                event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect()
+                            )),
+                        })
+                    } else {
+                        // Fallback: try direct deserialization if format changes or legacy data
+                        serde_json::from_str(data).ok()
+                    }
                 })
             })
             .collect();
@@ -506,6 +555,13 @@ impl AdminService {
         // Sort by timestamp descending
         audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         
+        // Apply limit after filtering and sorting
+        if let Some(l) = limit {
+            if audit_logs.len() > l as usize {
+                audit_logs.truncate(l as usize);
+            }
+        }
+
         Ok(audit_logs)
     }
 

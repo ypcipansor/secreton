@@ -13,51 +13,66 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Audit event type
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum AuditEventType {
     /// Authentication events
+    #[serde(rename = "auth.login")]
     AuthLogin,
+    #[serde(rename = "auth.logout")]
     AuthLogout,
+    #[serde(rename = "auth.token.create")]
     AuthTokenCreate,
+    #[serde(rename = "auth.token.revoke")]
     AuthTokenRevoke,
+    #[serde(rename = "auth.token.renew")]
     AuthTokenRenew,
 
     /// Secret operations
+    #[serde(rename = "secret.read")]
     SecretRead,
+    #[serde(rename = "secret.write")]
     SecretWrite,
+    #[serde(rename = "secret.delete")]
     SecretDelete,
+    #[serde(rename = "secret.list")]
     SecretList,
 
     /// Policy operations
+    #[serde(rename = "policy.create")]
     PolicyCreate,
+    #[serde(rename = "policy.update")]
     PolicyUpdate,
+    #[serde(rename = "policy.delete")]
     PolicyDelete,
+    #[serde(rename = "policy.read")]
     PolicyRead,
 
     /// Lease operations
+    #[serde(rename = "lease.create")]
     LeaseCreate,
+    #[serde(rename = "lease.renew")]
     LeaseRenew,
+    #[serde(rename = "lease.revoke")]
     LeaseRevoke,
 
     /// System operations
+    #[serde(rename = "sys.mount")]
     SysMount,
+    #[serde(rename = "sys.unmount")]
     SysUnmount,
+    #[serde(rename = "sys.rekey")]
     SysRekey,
+    #[serde(rename = "sys.seal")]
     SysSeal,
+    #[serde(rename = "sys.unseal")]
     SysUnseal,
+    #[serde(rename = "sys.rotate")]
     SysRotate,
 
     /// Other
+    #[serde(untagged)]
     Custom(String),
-}
-
-impl serde::Serialize for AuditEventType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
 }
 
 impl AuditEventType {
@@ -360,6 +375,15 @@ impl AuditService {
 
     /// Log audit event
     pub async fn log(&self, event: AuditEvent) {
+        // Log to devices immediately for critical events, without buffering
+        if matches!(event.status, AuditStatus::Denied | AuditStatus::Failure) {
+            let devices = self.devices.read().await;
+            for device in devices.iter() {
+                let _ = device.log(&event).await;
+            }
+            return;
+        }
+
         let mut buffer = self.buffer.write().await;
         buffer.push(event.clone());
 
@@ -367,16 +391,6 @@ impl AuditService {
         if buffer.len() >= self.buffer_size {
             drop(buffer);
             let _ = self.flush().await;
-        } else {
-            drop(buffer);
-
-            // Log to devices immediately for critical events
-            if matches!(event.status, AuditStatus::Denied | AuditStatus::Failure) {
-                let devices = self.devices.read().await;
-                for device in devices.iter() {
-                    let _ = device.log(&event).await;
-                }
-            }
         }
     }
 

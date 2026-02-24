@@ -2,6 +2,7 @@ use std::sync::Arc;
 use secreton_storage::StorageBackend;
 use secreton_security::policies::audit::{AuditService, AuditEvent, AuditEventType as CoreAuditEventType, AuditStatus};
 use anyhow::Result;
+use crate::services::audit_storage::StorageAuditDevice;
 
 /// Audit logger service adapter
 pub struct AuditLogger {
@@ -9,12 +10,15 @@ pub struct AuditLogger {
 }
 
 impl AuditLogger {
-    pub async fn new(_storage: Arc<dyn StorageBackend + Send + Sync>) -> Result<Self> {
-        // storage is unused by AuditService directly here (it uses Devices), 
-        // but we keep signature compatible. 
-        // We initialize default AuditService (which might be memory only if no devices added)
+    pub async fn new(storage: Arc<dyn StorageBackend + Send + Sync>) -> Result<Self> {
         let service = Arc::new(AuditService::new(1000));
+        let device = StorageAuditDevice::new(storage);
+        service.add_device(Box::new(device)).await;
         Ok(Self { service })
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        self.service.flush().await.map_err(|e| anyhow::anyhow!("Audit flush failed: {}", e))
     }
 
     pub async fn log_event(&self, event: SecurityEventType) {

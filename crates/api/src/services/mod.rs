@@ -14,6 +14,9 @@ use secreton_common::{ServiceContainer, InitResult, ServiceHealth, StandardServi
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
 pub mod audit;
+pub mod audit_storage;
+#[cfg(test)]
+pub mod tests_audit_integration;
 pub mod crypto;
 pub mod seal;
 pub mod mfa_persistence;
@@ -257,7 +260,12 @@ impl ServiceContainer for ApiServiceContainer {
 
     async fn stop_services(&self) -> InitResult<()> {
         // Stop services in reverse dependency order
-        // Implementation would stop each service that implements the Service trait
+
+        // Flush audit logs
+        if let Err(e) = self.audit.flush().await {
+            tracing::warn!("Failed to flush audit logs on shutdown: {}", e);
+        }
+
         Ok(())
     }
 
