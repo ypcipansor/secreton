@@ -263,9 +263,9 @@ impl PkiEngine {
             // Now create child cert signed by CA
             // Note: `params` is the child params.
             // We sign using the CA key pair. Note: rcgen might not set the Issuer DN perfectly without the CA cert context,
-            // but this ensures cryptographic chain validity.
-            params.signed_by(&key_pair, &ca_key_pair)
+            params.signed_by(&key_pair, &ca_params, &ca_key_pair)
                 .map_err(|e| PkiError::CertificateGeneration(format!("Failed to sign certificate: {}", e)))?
+
         } else {
             return Err(PkiError::InvalidCaConfiguration("CA not configured. Cannot issue certificates.".to_string()));
         };
