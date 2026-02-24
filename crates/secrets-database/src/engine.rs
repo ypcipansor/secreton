@@ -2,7 +2,8 @@
 
 use crate::error::DatabaseError;
 use crate::model::{DatabaseConfig, DatabaseRole, DatabaseType};
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Manager, ManagerConfig, Pool as PgPool, RecyclingMethod};
+use mysql_async::{Opts, Pool as MySqlPool};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -15,7 +16,8 @@ pub struct DatabaseEngine {
     config: DatabaseConfig,
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
-    pg_pool: Mutex<Option<Pool>>,
+    pg_pool: Mutex<Option<PgPool>>,
+    mysql_pool: Mutex<Option<MySqlPool>>,
 }
 
 impl DatabaseEngine {
@@ -25,6 +27,7 @@ impl DatabaseEngine {
             enabled: false,
             roles: HashMap::new(),
             pg_pool: Mutex::new(None),
+            mysql_pool: Mutex::new(None),
         }
     }
 
@@ -61,7 +64,7 @@ impl DatabaseEngine {
     }
 
     /// Get or create PostgreSQL connection pool
-    async fn get_pg_pool(&self) -> Result<Pool, DatabaseError> {
+    async fn get_pg_pool(&self) -> Result<PgPool, DatabaseError> {
         let mut lock = self.pg_pool.lock().await;
         if let Some(pool) = &*lock {
             return Ok(pool.clone());
@@ -91,13 +94,44 @@ impl DatabaseEngine {
         };
         // TODO: Implement TLS support (e.g. using rustls or native-tls)
         let mgr = Manager::from_config(pg_config, NoTls, mgr_config);
-        let pool = Pool::builder(mgr)
+        let pool = PgPool::builder(mgr)
             .max_size(self.config.max_open_connections.unwrap_or(10) as usize)
             .build()
             .map_err(|e| {
                 DatabaseError::ConnectionFailed(format!("Failed to create PostgreSQL pool: {}", e))
             })?;
 
+        *lock = Some(pool.clone());
+        Ok(pool)
+    }
+
+    /// Get or create MySQL connection pool
+    async fn get_mysql_pool(&self) -> Result<MySqlPool, DatabaseError> {
+        let mut lock = self.mysql_pool.lock().await;
+        if let Some(pool) = &*lock {
+            return Ok(pool.clone());
+        }
+
+        let mut opts = Opts::from_url(&self.config.connection_url).map_err(|e| {
+            DatabaseError::InvalidConfiguration(format!("Invalid MySQL connection URL: {}", e))
+        })?;
+
+        // Manual overrides if provided in config
+        if self.config.username.is_some() || self.config.password.is_some() || self.config.database_name.is_some() {
+             let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+             if let Some(username) = &self.config.username {
+                 builder = builder.user(Some(username));
+             }
+             if let Some(password) = &self.config.password {
+                 builder = builder.pass(Some(password));
+             }
+             if let Some(dbname) = &self.config.database_name {
+                 builder = builder.db_name(Some(dbname));
+             }
+             opts = builder.into();
+        }
+
+        let pool = MySqlPool::new(opts);
         *lock = Some(pool.clone());
         Ok(pool)
     }
@@ -187,12 +221,62 @@ impl DatabaseEngine {
     async fn generate_mysql_credentials(
         &self,
         role_name: &str,
-        _role_sql: &str,
+        role_sql: &str,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
         let password = self.generate_password();
+        // MySQL doesn't strictly require valid until in CREATE USER, but we might want to handle expiration
+        // by a scheduled job or event scheduler. For now, we just create the user.
+        // If the role_sql contains expiration logic (e.g. event creation), it will be executed.
+        let expiration = chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::seconds(3600)) // Default fallback
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
 
-        // In a real implementation, this would create the user in MySQL
+        let pool = self.get_mysql_pool().await?;
+        let mut conn = pool.get_conn().await.map_err(|e| {
+            DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
+        })?;
+
+        // Create user
+        // We use % as host to allow connections from anywhere (standard for dynamic secrets)
+        // or we could make it configurable. Defaults to %.
+        // WARNING: Ensure username and password are safe from SQL injection.
+        // `generate_username` and `generate_password` use strictly Alphanumeric characters,
+        // so direct interpolation here is safe.
+        let create_user_sql = format!(
+            "CREATE USER '{}'@'%' IDENTIFIED BY '{}'",
+            username, password
+        );
+
+        use mysql_async::prelude::Queryable;
+
+        conn.query_drop(create_user_sql).await.map_err(|e| {
+             DatabaseError::QueryFailed(format!("Failed to create MySQL user: {}", e))
+        })?;
+
+        // Execute role SQL statements
+        let statements = self.replace_placeholders(role_sql, &username, &password, &expiration);
+
+        // Execute each statement
+        // Note: This split is naive and does not handle semicolons within string literals.
+        // Complex SQL should be avoided in role definitions or handled with a proper parser.
+        for statement in statements.split(';') {
+            let stmt = statement.trim();
+            if stmt.is_empty() {
+                continue;
+            }
+
+            if let Err(e) = conn.query_drop(stmt).await {
+                // Attempt cleanup
+                let _ = conn.query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+                return Err(DatabaseError::QueryFailed(format!(
+                    "Failed to execute role statement '{}': {}",
+                    stmt, e
+                )));
+            }
+        }
+
         let mut data = HashMap::new();
         data.insert("username".to_string(), Value::String(username));
         data.insert("password".to_string(), Value::String(password));
@@ -201,6 +285,7 @@ impl DatabaseEngine {
             "connection_string".to_string(),
             Value::String(self.config.connection_url.clone()),
         );
+        data.insert("expiration".to_string(), Value::String(expiration));
 
         Ok(data)
     }
@@ -258,6 +343,7 @@ impl DatabaseEngine {
 
     /// Generate a random password
     /// Uses Alphanumeric charset to ensure safety in SQL string literals without escaping.
+    /// This guarantees that passwords do not contain characters that could break SQL syntax or cause injection.
     fn generate_password(&self) -> String {
         use rand::{Rng, distributions::Alphanumeric};
         rand::thread_rng()
