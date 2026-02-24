@@ -120,145 +120,17 @@ impl PkiEngine {
         let key_pair = rcgen::KeyPair::generate()
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
+        // Use a consistent serial number
+        // Generate it ourselves so we can return it correctly in the response
+        let serial_number_u64 = rand::random::<u64>();
+        let serial_number = format!("{:x}", serial_number_u64);
+        params.serial_number = Some(serial_number_u64);
+
         // Determine signing method (Self-signed or CA-signed)
         let cert = if let (Some(ca_cert_pem), Some(ca_key_pem)) = (&self.config.ca_cert, &self.config.ca_key) {
             // Load CA KeyPair
             let ca_key_pair = rcgen::KeyPair::from_pem(ca_key_pem)
                 .map_err(|e| PkiError::CertificateGeneration(format!("Failed to load CA key: {}", e)))?;
-
-            // Load CA Certificate to get its params (needed for signing context if using rcgen < 0.12 or complex setup)
-            // Actually, rcgen's signed_by takes &KeyPair (of CA) and &CertificateParams (of CA) OR &Certificate (of CA).
-            // In modern rcgen, we can create a Certificate from params.
-            // But we have PEM. We need to parse PEM into params if we want full fidelity, or rely on `rcgen` ability.
-            // Wait, `params.signed_by` takes `&KeyPair` and `&Certificate`.
-            // We need to construct a `Certificate` object representing the CA.
-            // `Certificate::from_params` creates one.
-            // If we only have PEM, `rcgen` might not easily reconstitute a `Certificate` struct to pass to `signed_by`
-            // WITHOUT `x509-parser` to extract params first.
-            //
-            // HOWEVER, looking at `rcgen` docs, `Certificate::from_pem` is not standard.
-            // But `params.signed_by` signature is `fn signed_by(self, key_pair: &KeyPair, ca_cert: &Certificate, ca_key_pair: &KeyPair)`.
-            // Wait, no. `params.signed_by` uses `&self` (the child params) and `&KeyPair` (child key) and `&Certificate` (issuer) and `&KeyPair` (issuer key).
-            //
-            // Simpler approach supported by rcgen: `serialize_pem_signed_by`.
-            // `cert.serialize_pem_signed_by(&ca_key_pair, &ca_cert_struct)`?
-            //
-            // Let's assume standard rcgen usage:
-            // 1. Create `Certificate` for child from params.
-            // 2. Call `serialize_pem_signed_by` on the child certificate, passing CA key and CA cert.
-            //
-            // Problem: We need the CA `Certificate` struct. We only have PEM.
-            // If we cannot easily reconstruct `rcgen::Certificate` from PEM, we might be stuck.
-            //
-            // WORKAROUND: Use `CertificateParams::from_ca_cert_pem` (if available) or manual parsing.
-            // If `rcgen` doesn't support import from PEM, we can't use it to sign *unless* we keep the `Certificate` struct in memory/storage.
-            // But storage only has PEM.
-            //
-            // Alternative: `params.signed_by` might just need the DN of the issuer if we trust the key?
-            //
-            // Let's look at `rcgen` crate capabilities in memory or common knowledge.
-            // `rcgen` is a generator. It doesn't typically parse existing certs to sign new ones easily.
-            //
-            // Wait, `crates/secrets-pki/Cargo.toml` has `x509-parser` and `pem`.
-            // We can parse the CA PEM to get the Subject DN, then create a dummy `CertificateParams` for the CA,
-            // set the DN, generate a dummy key (or use the real one if compatible),
-            // create a `Certificate` from it, and then use that to sign?
-            // No, the `Certificate` struct contains the public key which must match the private key we sign with.
-            //
-            // If `rcgen` cannot load from PEM, this is a blocker for "stateless" persistence where we reload from string.
-            //
-            // Let's check `rcgen` docs or assume we can use `params.serialize_pem_with_signer(&key_pair, &ca_key_pair, &ca_cert_der_bytes)`. No.
-            //
-            // Let's look at the `generate_certificate` implementation again.
-            // If we can't sign with CA, we failed Bug 2.
-            //
-            // Use `x509_cert` crate (available in imports) to parse?
-            //
-            // If I can't solve `rcgen` import quickly, I will look for `serialize_pem_signed_by`.
-            // Actually, `rcgen` 0.11+ has `CertificateParams::from_ca_cert_pem`? No.
-            //
-            // Let's use `x509-parser` to extract the Subject from CA PEM.
-            // Then we manually construct the child cert's Issuer field to match CA Subject.
-            // Then we sign the child cert with CA Private Key.
-            // `rcgen` allows setting `distinguished_name` (Subject).
-            // Does it allow setting Issuer explicitly?
-            // `params.issuer_name = ...`?
-            //
-            // If `rcgen` is purely for self-signed or hierarchical generation where parent `Certificate` struct exists...
-            //
-            // Wait! `PkiPersistentService` re-initializes `PkiEngine` with config.
-            // If we simply stored the `CertificateParams` of the CA in `PkiConfig`, we could reconstruct it!
-            // But `PkiConfig` is serializable, `CertificateParams` is not (usually).
-            //
-            // Let's check if `rcgen` allows signing with just keypair and issuer name.
-            //
-            // If not, I will implement a "best effort" fix:
-            // 1. Load CA KeyPair.
-            // 2. Parse CA Cert to get Subject.
-            // 3. Create a dummy CA Certificate struct with that Subject and the loaded KeyPair.
-            // 4. Use that to sign.
-            //
-            // `rcgen::Certificate::from_params(params)` -> `Certificate`.
-            // `Certificate` has `serialize_pem_signed_by(&self, ca_cert: &Certificate, ca_key: &KeyPair)`.
-            //
-            // So:
-            // 1. `ca_params = CertificateParams::new(...)`. Set DN to CA's DN (parsed from PEM).
-            // 2. `ca_cert_struct = Certificate::from_params(ca_params)`.
-            // 3. `child_cert_struct = Certificate::from_params(child_params)`.
-            // 4. `child_pem = child_cert_struct.serialize_pem_signed_by(&ca_cert_struct, &ca_key_pair)`.
-            //
-            // This seems plausible. We need to parse CA PEM to get DN.
-
-            // Extract CA Subject DN
-            let (_rem, ca_x509) = x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes())
-                .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse CA PEM: {}", e)))?;
-            let ca_x509 = ca_x509.parse_x509()
-                .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse CA X509: {}", e)))?;
-
-            // Reconstruct CA Params for rcgen
-            // We only strictly need the DN to be correct for the Issuer field of the child.
-            // And the KeyPair must match the signer.
-
-            let mut ca_params = CertificateParams::default();
-            // We need to map x509_parser Name to rcgen DistinguishedName
-            let mut ca_dn = DistinguishedName::new();
-            for rdn in ca_x509.subject().iter_rdn() {
-                for attr in rdn.iter() {
-                    let val = attr.as_str().unwrap_or_default().to_string();
-                    let oid = attr.attr_type().to_string();
-                    // Basic mapping
-                    match oid.as_str() {
-                        "2.5.4.3" => ca_dn.push(DnType::CommonName, val),
-                        "2.5.4.10" => ca_dn.push(DnType::OrganizationName, val),
-                        "2.5.4.11" => ca_dn.push(DnType::OrganizationalUnitName, val),
-                        "2.5.4.6" => ca_dn.push(DnType::CountryName, val),
-                        "2.5.4.8" => ca_dn.push(DnType::StateOrProvinceName, val),
-                        "2.5.4.7" => ca_dn.push(DnType::LocalityName, val),
-                        _ => {}, // Ignore others for now or map generically if rcgen supports custom
-                    }
-                }
-            }
-            ca_params.distinguished_name = ca_dn;
-            // Key Usage, etc doesn't matter for the signer object in rcgen, only the key and name.
-
-            let ca_cert_struct = params
-                .self_signed(&key_pair) // Dummy self-signed just to get a Certificate struct?
-                                      // No, we need a Certificate struct representing the CA.
-                                      // rcgen::Certificate::from_params(ca_params)?
-                .map_err(|_| PkiError::CertificateGeneration("Failed to create CA struct wrapper".to_string()))?; // Wait, self_signed returns Certificate? Or PEM?
-
-            // rcgen 0.10+ `self_signed` returns `Result<Certificate, ...>`.
-            // Wait, the existing code says `let cert = params.self_signed(&key_pair)?; let cert_pem = cert.pem();`.
-            // So `cert` IS the `Certificate` struct.
-
-            // So we need to create the CA `Certificate` struct.
-            // But `Certificate::from_params` is consistent with `KeyPair`.
-            // We need to pass the CA `KeyPair` to `from_params` or `self_signed`?
-            // `params.self_signed(&ca_key_pair)` creates the CA cert struct.
-            //
-            // So:
-            let ca_cert_struct = ca_params.self_signed(&ca_key_pair)
-                 .map_err(|e| PkiError::CertificateGeneration(format!("Failed to recreate CA struct: {}", e)))?;
 
             // Now create child cert signed by CA
             // Note: `params` is the child params.
@@ -273,9 +145,6 @@ impl PkiEngine {
         // Convert to PEM format
         let cert_pem = cert.pem();
         let key_pem = key_pair.serialize_pem();
-
-        // Generate serial number (simplified)
-        let serial_number = format!("{:x}", rand::random::<u64>());
 
         // Store issued certificate for tracking
         let issued_cert = IssuedCertificate {

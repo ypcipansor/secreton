@@ -291,7 +291,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize PKI Persistent Service
     let pki_service = Arc::new(PkiPersistentService::new(storage.clone(), crypto.clone()));
     if let Err(e) = pki_service.ensure_initialized().await {
-        warn!("Failed to initialize PKI service from storage: {}", e);
+        // Elevate initialization failure to critical error to prevent running with potentially inconsistent state
+        tracing::error!("Failed to initialize PKI service from storage: {}", e);
+        return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("PKI initialization failed: {}", e))));
     }
 
     // Use default in-memory states for now, matching ApiState::new implementation
