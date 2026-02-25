@@ -278,6 +278,11 @@ impl SecretService {
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
         let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            // Check ownership first
+            if existing.owner_id != owner_id {
+                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+            }
+
             // Archive the existing version
             let archive_path = format!("sys/history/{}/v{}", existing.path, existing.version);
             let mut archive_entry = existing.clone();
@@ -292,13 +297,6 @@ impl SecretService {
         } else {
             (1, None)
         };
-
-        // Ensure we are not overwriting someone else's secret
-        if let Some(existing_owner_id) = existing_owner {
-            if existing_owner_id != owner_id {
-                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
-            }
-        }
 
         // Create SecretEntry
         let mut entry = secreton_storage::SecretEntry::new(
@@ -505,6 +503,11 @@ impl SecretService {
         // Convert entries to SecretData
         let mut accessible_secrets = Vec::new();
         for entry in entries {
+            // Skip archived history entries
+            if entry.path.starts_with("sys/history/") {
+                continue;
+            }
+
             if self.check_permission(user, &entry.path, "read").await.is_ok() {
                 // Decrypt the secret data
                 match self.crypto.decrypt(&entry.encrypted_data).await {

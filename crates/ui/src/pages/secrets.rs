@@ -72,7 +72,7 @@ pub fn SecretsList() -> impl IntoView {
 
                 // Try to get as secret first
                 let secret_url = if let Some(v) = version_opt {
-                    format!("/kv/secret/data/{}?version={}", current_path, v)
+                    format!("/kv/secrets/{}?version={}", current_path, v)
                 } else {
                     format!("/kv/secret/data/{}", current_path)
                 };
@@ -158,7 +158,7 @@ pub fn SecretsList() -> impl IntoView {
     let load_history = move || {
         spawn_local(async move {
             let path = path();
-            let url = format!("/secret/secret-versions/{}", path);
+            let url = format!("/kv/secret-versions/{}", path);
             if let Ok(res) = api::get::<Vec<SecretVersionInfo>>(&url).await {
                 set_history_versions.set(res);
                 set_show_history_modal.set(true);
