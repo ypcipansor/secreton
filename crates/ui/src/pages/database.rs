@@ -165,7 +165,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
             match delete::<ConfigResponse>(&format!("/database/leases/{}", lease_id)).await {
                 Ok(_) => leases_trigger.notify(),
                 Err(e) => {
-                    tracing::error!("Failed to revoke lease: {}", e);
+                    log::error!("Failed to revoke lease: {}", e);
                     // In a real app we'd set an error signal
                 }
             }
@@ -422,7 +422,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
                                                                                 <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{lease.created_at}</td>
                                                                                 <td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                                                                                     <Button
-                                                                                        variant=ButtonVariant::Destructive
+                                                                                        variant=ButtonVariant::Danger
                                                                                         class="text-xs px-2 py-1"
                                                                                         on_click=Box::new(move |_| revoke_lease(id.clone()))
                                                                                     >

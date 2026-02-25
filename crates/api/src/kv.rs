@@ -5,7 +5,7 @@
 use anyhow::Result;
 use axum::{
     Router,
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::StatusCode,
     response::Json,
     routing::{delete, get, post},
@@ -112,6 +112,11 @@ pub struct CreateSecretRequest {
     pub data: serde_json::Value,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListSecretsQuery {
+    pub path: Option<String>,
+}
+
 /// Response for secret creation
 #[derive(Debug, Serialize)]
 pub struct CreateSecretResponse {
@@ -159,12 +164,13 @@ pub fn create_kv_router() -> Router<()> {
 /// List all secret paths
 #[axum::debug_handler]
 pub async fn list_secrets(
+    Query(query): Query<ListSecretsQuery>,
     Extension(state): Extension<ApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    // For now, list all secrets from root
-    match state.kv.storage.list_secrets("").await {
+    let path = query.path.unwrap_or_default();
+    match state.kv.storage.list_secrets(&path).await {
         Ok(keys) => {
-            info!("Listed {} secret paths", keys.len());
+            info!("Listed {} secret paths in '{}'", keys.len(), path);
             Ok(Json(ListSecretsResponse { keys }))
         }
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
