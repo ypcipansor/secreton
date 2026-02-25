@@ -158,7 +158,7 @@ pub fn SecretsList() -> impl IntoView {
     let load_history = move || {
         spawn_local(async move {
             let path = path();
-            let url = format!("/api/v1/secret/secret-versions/{}", path);
+            let url = format!("/secret/secret-versions/{}", path);
             if let Ok(res) = api::get::<Vec<SecretVersionInfo>>(&url).await {
                 set_history_versions.set(res);
                 set_show_history_modal.set(true);
