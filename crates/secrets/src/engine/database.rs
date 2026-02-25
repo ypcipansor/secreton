@@ -111,7 +111,7 @@ impl DatabaseEngine {
             .await
             .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
 
-        let mut leases = self.leases.lock().unwrap();
+        let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases during state load".to_string()))?;
         for entry in entries {
             let lease_id = entry
                 .path
