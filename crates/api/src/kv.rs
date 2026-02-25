@@ -73,6 +73,8 @@ impl SecretStorage for InMemorySecretStorage {
                     .unwrap_or("")
                     .to_string()
             })
+            .collect::<std::collections::HashSet<String>>()
+            .into_iter()
             .collect();
         Ok(keys)
     }
