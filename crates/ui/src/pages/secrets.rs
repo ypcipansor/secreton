@@ -11,8 +11,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ListSecretsResponse {
-    keys: Vec<String>,
+struct SecretListItem {
+    path: String,
+    // Other fields ignored for now
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,8 +65,11 @@ pub fn SecretsList() -> impl IntoView {
                 // If root, always list
                 if current_path.is_empty() {
                     let url = "/secret/secrets";
-                    match api::get::<ListSecretsResponse>(url).await {
-                        Ok(res) => return SecretViewMode::List(res.keys),
+                    match api::get::<Vec<SecretListItem>>(url).await {
+                        Ok(res) => {
+                            let keys = res.into_iter().map(|item| item.path).collect();
+                            return SecretViewMode::List(keys);
+                        },
                         Err(e) => return SecretViewMode::Error(e.to_string()),
                     }
                 }
@@ -95,12 +99,13 @@ pub fn SecretsList() -> impl IntoView {
                         // Construct query param manually since api::get doesn't support query params helper yet
                         let list_url = format!("/secret/secrets?filter={}", list_path);
 
-                        match api::get::<ListSecretsResponse>(&list_url).await {
+                        match api::get::<Vec<SecretListItem>>(&list_url).await {
                             Ok(res) => {
-                                if res.keys.is_empty() {
+                                if res.is_empty() {
                                     SecretViewMode::NotFound
                                 } else {
-                                    SecretViewMode::List(res.keys)
+                                    let keys = res.into_iter().map(|item| item.path).collect();
+                                    SecretViewMode::List(keys)
                                 }
                             },
                             Err(e) => SecretViewMode::Error(format!("Error listing folder: {}", e)),

@@ -189,9 +189,9 @@ impl SecretService {
              return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
         }
 
-        // Try to get decrypted data from cache first (only if fetching current version)
-        // We consider it current if version is None OR if the fetched entry matches the path (meaning we reused the current entry)
-        let is_current = version.is_none() || encrypted_entry.path == path;
+        // Try to get decrypted data from cache first (only if fetching current version implicitly)
+        // To avoid race conditions where cache has newer data than our DB read, we only use cache if NO specific version was requested.
+        let is_current = version.is_none();
 
         if is_current {
             if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
