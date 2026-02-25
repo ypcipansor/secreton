@@ -166,7 +166,7 @@ pub fn SecretsList() -> impl IntoView {
             // If we are creating new, use input path. If editing, use current path.
             let target_path = if current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)) {
                 // If we are in a subfolder (List mode), we append the new secret name to current path
-                if !current_path.is_empty() && !matches!(secret_resource.get(), Some(SecretViewMode::NotFound)) {
+                if !current_path.is_empty() {
                      // Basic join logic
                      let suffix = new_secret_path.get();
                      if current_path.ends_with('/') {
