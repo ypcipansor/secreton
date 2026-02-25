@@ -172,7 +172,7 @@ impl SecretService {
 
             if !current_matches {
                 // Fetch from history
-                let history_path = format!("sys/history/{}:v{}", path, v);
+                let history_path = format!("sys/history/{}::v{}", path, v);
                 encrypted_entry = self.storage.get_by_path(&history_path).await
                     .map_err(SecretError::Storage)?;
             }
@@ -289,7 +289,7 @@ impl SecretService {
             }
 
             // Archive the existing version
-            let archive_path = format!("sys/history/{}:v{}", existing.path, existing.version);
+            let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
             let mut archive_entry = existing.clone();
             archive_entry.path = archive_path;
             // Ensure unique ID for the archived entry to avoid PK collisions
@@ -372,7 +372,7 @@ impl SecretService {
             .map_err(SecretError::Storage)?;
 
         // Delete history
-        let history_prefix = format!("sys/history/{}:v", path);
+        let history_prefix = format!("sys/history/{}::v", path);
         let query = secreton_storage::QueryParams::new()
             .with_path_prefix(history_prefix)
             .with_owner(Self::get_user_uuid(user));
@@ -464,7 +464,7 @@ impl SecretService {
         }
 
         // 2. Get history versions
-        let history_prefix = format!("sys/history/{}:v", path);
+        let history_prefix = format!("sys/history/{}::v", path);
         // We use query with owner to let backend filter, but we also double check
         let query = secreton_storage::QueryParams::new()
             .with_path_prefix(history_prefix)
