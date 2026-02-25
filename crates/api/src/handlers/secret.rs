@@ -28,10 +28,13 @@ pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
         .route("/secret-versions/{*path}", get(list_secret_versions))
-        .route("/secrets/{*path}", get(get_secret))
-        .route("/secrets/{*path}", post(create_secret))
-        .route("/secrets/{*path}", put(update_secret))
-        .route("/secrets/{*path}", delete(delete_secret))
+        // Specific path operations (CRUD)
+        .route("/secrets/{*path}", get(get_secret)
+            .post(create_secret)
+            .put(update_secret)
+            .delete(delete_secret)
+        )
+        // Root listing operation
         .route("/secrets", get(list_secrets))
         
         // Key operations
