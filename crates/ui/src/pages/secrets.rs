@@ -332,7 +332,7 @@ pub fn SecretsList() -> impl IntoView {
                                         view! {
                                             <div class="space-y-4">
                                                 <div class="flex justify-end text-xs text-gray-400 uppercase font-bold tracking-wider">
-                                                    format!("Version: {}", version)
+                                                    {format!("Version: {}", version)}
                                                 </div>
                                                 <div class="grid gap-4">
                                                     {map.iter().map(|(k, v)| {
