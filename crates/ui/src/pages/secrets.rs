@@ -63,7 +63,7 @@ pub fn SecretsList() -> impl IntoView {
             async move {
                 // If root, always list
                 if current_path.is_empty() {
-                    let url = "/kv/secrets";
+                    let url = "/api/v1/secret/secrets";
                     match api::get::<ListSecretsResponse>(url).await {
                         Ok(res) => return SecretViewMode::List(res.keys),
                         Err(e) => return SecretViewMode::Error(e.to_string()),
@@ -72,9 +72,9 @@ pub fn SecretsList() -> impl IntoView {
 
                 // Try to get as secret first
                 let secret_url = if let Some(v) = version_opt {
-                    format!("/kv/secrets/{}?version={}", current_path, v)
+                    format!("/api/v1/secret/secrets/{}?version={}", current_path, v)
                 } else {
-                    format!("/kv/secret/data/{}", current_path)
+                    format!("/api/v1/secret/secrets/{}", current_path)
                 };
 
                 match api::get::<GetSecretResponse>(&secret_url).await {
@@ -93,7 +93,7 @@ pub fn SecretsList() -> impl IntoView {
                         // We'll append / to be safe for directory listing
                         let list_path = if current_path.ends_with('/') { current_path.clone() } else { format!("{}/", current_path) };
                         // Construct query param manually since api::get doesn't support query params helper yet
-                        let list_url = format!("/kv/secrets?path={}", list_path);
+                        let list_url = format!("/api/v1/secret/secrets?filter={}", list_path);
 
                         match api::get::<ListSecretsResponse>(&list_url).await {
                             Ok(res) => {
@@ -158,7 +158,7 @@ pub fn SecretsList() -> impl IntoView {
     let load_history = move || {
         spawn_local(async move {
             let path = path();
-            let url = format!("/kv/secret-versions/{}", path);
+            let url = format!("/api/v1/secret/secret-versions/{}", path);
             if let Ok(res) = api::get::<Vec<SecretVersionInfo>>(&url).await {
                 set_history_versions.set(res);
                 set_show_history_modal.set(true);
@@ -325,12 +325,14 @@ pub fn SecretsList() -> impl IntoView {
                                 <Button variant=ButtonVariant::Secondary on_click=Box::new(move |_| load_history())>
                                     "History"
                                 </Button>
-                                <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
-                                    "Edit Secret"
-                                </Button>
-                                <Button variant=ButtonVariant::Danger on_click=Box::new(move |_| handle_delete())>
-                                    "Delete Secret"
-                                </Button>
+                                <Show when=move || view_version.get().is_none()>
+                                    <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
+                                        "Edit Secret"
+                                    </Button>
+                                    <Button variant=ButtonVariant::Danger on_click=Box::new(move |_| handle_delete())>
+                                        "Delete Secret"
+                                    </Button>
+                                </Show>
                             }.into_any()
                         } else {
                              view! {}.into_any()

@@ -1176,8 +1176,19 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
     use axum::middleware;
     use tower_http::cors::{CorsLayer, Any};
 
+    // Create services map for AppState
+    let app_state = crate::handlers::AppState {
+        storage: state.secreton.get_service("storage").cloned().expect("storage service required"),
+        auth: state.auth.clone(),
+        audit: state.secreton.get_service("audit").cloned().expect("audit service required"),
+        crypto: state.secreton.get_service("crypto").cloned().expect("crypto service required"),
+        secreton: state.secreton.get_service("secret").cloned().expect("secret service required"),
+        performance: state.secreton.get_service("performance").cloned().expect("performance service required"),
+    };
+
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
+        .nest("/api/v1/secret", crate::handlers::secret::create_routes().with_state(app_state)) // Add secret routes
         .nest("/api/v1/transit", transit::create_transit_router())
         .nest("/api/v1/database", database::create_database_router())
         .nest("/api/v1/pki", pki::create_pki_router())

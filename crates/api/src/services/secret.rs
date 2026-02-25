@@ -287,6 +287,8 @@ impl SecretService {
             let archive_path = format!("sys/history/{}/v{}", existing.path, existing.version);
             let mut archive_entry = existing.clone();
             archive_entry.path = archive_path;
+            // Ensure unique ID for the archived entry to avoid PK collisions
+            archive_entry.id = Uuid::new_v4();
 
             // Store the archived version
             if let Err(e) = self.storage.store(&archive_entry).await {
