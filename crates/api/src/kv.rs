@@ -117,6 +117,11 @@ pub struct ListSecretsQuery {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DestroySecretQuery {
+    pub version: u32,
+}
+
 /// Response for secret creation
 #[derive(Debug, Serialize)]
 pub struct CreateSecretResponse {
@@ -154,11 +159,11 @@ pub struct DeleteResponse {
 pub fn create_kv_router() -> Router<()> {
     Router::new()
         .route("/secrets", get(list_secrets))
-        .route("/secret/data/{path}", post(put_secret))
-        .route("/secret/data/{path}", get(get_secret))
-        .route("/secret/data/{path}", delete(delete_secret))
-        .route("/secret/metadata/{path}", get(get_metadata))
-        .route("/secret/destroy/{path}/{version}", delete(destroy_secret))
+        .route("/secret/data/*path", post(put_secret))
+        .route("/secret/data/*path", get(get_secret))
+        .route("/secret/data/*path", delete(delete_secret))
+        .route("/secret/metadata/*path", get(get_metadata))
+        .route("/secret/destroy/*path", delete(destroy_secret))
 }
 
 /// List all secret paths
@@ -272,25 +277,26 @@ pub async fn get_metadata(
 /// Permanently destroy a secret version
 #[axum::debug_handler]
 pub async fn destroy_secret(
+    Query(query): Query<DestroySecretQuery>,
     Extension(state): Extension<ApiState>,
-    Path((path, version)): Path<(String, u32)>,
+    Path(path): Path<String>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
-    match state.kv.storage.delete_secret_version(&path, version).await {
+    match state.kv.storage.delete_secret_version(&path, query.version).await {
         Ok(_) => {
             info!(
                 "Permanently destroyed secret '{}' version {}",
-                path, version
+                path, query.version
             );
             Ok(Json(DeleteResponse {
                 success: true,
                 message: format!(
                     "Secret '{}' version {} permanently destroyed",
-                    path, version
+                    path, query.version
                 ),
             }))
         }
         Err(_) => {
-            warn!("Failed to destroy secret '{}' version {}", path, version);
+            warn!("Failed to destroy secret '{}' version {}", path, query.version);
             Err(StatusCode::NOT_FOUND)
         }
     }
