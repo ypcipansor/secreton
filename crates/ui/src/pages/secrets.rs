@@ -63,7 +63,7 @@ pub fn SecretsList() -> impl IntoView {
             async move {
                 // If root, always list
                 if current_path.is_empty() {
-                    let url = "/api/v1/secret/secrets";
+                    let url = "/secret/secrets";
                     match api::get::<ListSecretsResponse>(url).await {
                         Ok(res) => return SecretViewMode::List(res.keys),
                         Err(e) => return SecretViewMode::Error(e.to_string()),
@@ -72,9 +72,9 @@ pub fn SecretsList() -> impl IntoView {
 
                 // Try to get as secret first
                 let secret_url = if let Some(v) = version_opt {
-                    format!("/api/v1/secret/secrets/{}?version={}", current_path, v)
+                    format!("/secret/secrets/{}?version={}", current_path, v)
                 } else {
-                    format!("/api/v1/secret/secrets/{}", current_path)
+                    format!("/secret/secrets/{}", current_path)
                 };
 
                 match api::get::<GetSecretResponse>(&secret_url).await {
@@ -93,7 +93,7 @@ pub fn SecretsList() -> impl IntoView {
                         // We'll append / to be safe for directory listing
                         let list_path = if current_path.ends_with('/') { current_path.clone() } else { format!("{}/", current_path) };
                         // Construct query param manually since api::get doesn't support query params helper yet
-                        let list_url = format!("/api/v1/secret/secrets?filter={}", list_path);
+                        let list_url = format!("/secret/secrets?filter={}", list_path);
 
                         match api::get::<ListSecretsResponse>(&list_url).await {
                             Ok(res) => {
@@ -255,7 +255,7 @@ pub fn SecretsList() -> impl IntoView {
                 "data": map
             });
 
-            let url = format!("/kv/secret/data/{}", target_path);
+            let url = format!("/secret/secrets/{}", target_path);
             if (api::post::<serde_json::Value, _>(&url, payload).await).is_ok() {
                 set_show_modal.set(false);
                 secret_resource.refetch();
@@ -278,7 +278,7 @@ pub fn SecretsList() -> impl IntoView {
 
         let navigate = navigate_delete.clone();
         spawn_local(async move {
-            let url = format!("/kv/secret/data/{}", current_path);
+            let url = format!("/secret/secrets/{}", current_path);
             let _ = api::delete::<serde_json::Value>(&url).await;
 
             // Navigate up one level
