@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
@@ -7,8 +8,7 @@ pub struct ApiResponse<T> {
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>,
+    pub timestamp: DateTime<Utc>,
 }
 
 impl<T> ApiResponse<T> {
@@ -17,7 +17,7 @@ impl<T> ApiResponse<T> {
             success: true,
             data: Some(data),
             error: None,
-            timestamp: Some(chrono::Utc::now().to_rfc3339()),
+            timestamp: Utc::now(),
         }
     }
 
@@ -26,7 +26,7 @@ impl<T> ApiResponse<T> {
             success: false,
             data: None,
             error: Some(message.into()),
-            timestamp: Some(chrono::Utc::now().to_rfc3339()),
+            timestamp: Utc::now(),
         }
     }
 }

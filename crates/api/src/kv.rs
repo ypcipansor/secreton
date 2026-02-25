@@ -55,14 +55,16 @@ impl SecretStorage for InMemorySecretStorage {
 
     async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
         let secrets = self.secrets.read().await;
-        let prefix = if path.ends_with('/') {
-            path
+        let prefix = if path.is_empty() {
+            "".to_string()
+        } else if path.ends_with('/') {
+            path.to_string()
         } else {
-            &format!("{}/", path)
+            format!("{}/", path)
         };
-        let keys: Vec<String> = secrets
+        let mut keys: Vec<String> = secrets
             .keys()
-            .filter(|k| k.starts_with(prefix))
+            .filter(|k| k.starts_with(&prefix))
             .map(|k| {
                 k[prefix.len()..]
                     .split('/')
@@ -71,6 +73,8 @@ impl SecretStorage for InMemorySecretStorage {
                     .to_string()
             })
             .collect();
+        keys.sort();
+        keys.dedup();
         Ok(keys)
     }
 
