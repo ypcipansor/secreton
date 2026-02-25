@@ -189,6 +189,7 @@ pub async fn put_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> Result<Json<CreateSecretResponse>, StatusCode> {
+    let path = path.trim_start_matches('/').to_string();
     match state
         .kv
         .storage
@@ -215,6 +216,7 @@ pub async fn get_secret(
     Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<GetSecretResponse>, StatusCode> {
+    let path = path.trim_start_matches('/').to_string();
     match state.kv.storage.get_latest_secret(&path).await {
         Ok(Some((data, version))) => {
             info!("Retrieved secret at path '{}'", path);
@@ -237,6 +239,7 @@ pub async fn delete_secret(
     Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
+    let path = path.trim_start_matches('/').to_string();
     match state.kv.storage.delete_secret(&path).await {
         Ok(_) => {
             info!("Deleted secret at path '{}'", path);
@@ -258,6 +261,7 @@ pub async fn get_metadata(
     Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<MetadataResponse>, StatusCode> {
+    let path = path.trim_start_matches('/').to_string();
     match state.kv.storage.get_latest_secret(&path).await {
         Ok(Some((_, version))) => {
             info!("Retrieved metadata for path '{}'", path);
@@ -281,6 +285,7 @@ pub async fn destroy_secret(
     Extension(state): Extension<ApiState>,
     Path(path): Path<String>,
 ) -> Result<Json<DeleteResponse>, StatusCode> {
+    let path = path.trim_start_matches('/').to_string();
     match state.kv.storage.delete_secret_version(&path, query.version).await {
         Ok(_) => {
             info!(
