@@ -77,6 +77,9 @@ impl DatabaseEngine {
     }
 
     /// Load roles and leases from storage
+    // TODO: Validate loaded leases against the backend when it is initialized.
+    // Currently, leases are loaded into memory but may be stale if the backend database state has changed (e.g., users dropped).
+    // Future work should include a reconciliation process.
     pub async fn load_state(&mut self) -> SecretResult<()> {
         // Load roles
         let roles_path = "sys/database/roles/";
@@ -111,7 +114,7 @@ impl DatabaseEngine {
             .await
             .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
 
-        let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases during state load".to_string()))?;
+        let mut leases = self.leases.lock().unwrap();
         for entry in entries {
             let lease_id = entry
                 .path
@@ -379,21 +382,26 @@ impl SecretEngine for DatabaseEngine {
             }
 
             // Update memory
-            let lock_result = self.leases.lock();
-            match lock_result {
-                Ok(mut leases) => {
-                    leases.insert(lease_id.clone(), lease_info);
-                }
-                Err(_) => {
-                    // Critical failure: Mutex is poisoned.
-                    drop(lock_result);
-                    // Attempt rollback
-                    self.delete_lease_storage(&lease_id).await.ok();
-                    if let Some(backend) = &self.backend {
-                        let _ = backend.revoke_credentials(&username).await;
+            // We need to drop the lock guard before awaiting on delete_lease_storage to ensure Send + Sync
+            let lock_failed = {
+                let lock_result = self.leases.lock();
+                match lock_result {
+                    Ok(mut leases) => {
+                        leases.insert(lease_id.clone(), lease_info);
+                        false
                     }
-                    return Err(SecretError::BackendOperationFailed("Failed to lock leases registry (poisoned). Credentials revoked.".to_string()));
+                    Err(_) => true,
                 }
+            };
+
+            if lock_failed {
+                // Critical failure: Mutex is poisoned.
+                // Attempt rollback
+                self.delete_lease_storage(&lease_id).await.ok();
+                if let Some(backend) = &self.backend {
+                    let _ = backend.revoke_credentials(&username).await;
+                }
+                return Err(SecretError::BackendOperationFailed("Failed to lock leases registry (poisoned). Credentials revoked.".to_string()));
             }
 
             let secret = Secret {
