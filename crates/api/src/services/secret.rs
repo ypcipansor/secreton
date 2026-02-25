@@ -158,25 +158,27 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
 
-        // Determine target path based on version
-        let target_path = if let Some(v) = version {
-            // First check if current version matches
-            if let Ok(Some(current)) = self.storage.get_by_path(path).await {
-                if current.version == v {
-                    path.to_string()
-                } else {
-                    format!("sys/history/{}:v{}", path, v)
-                }
-            } else {
-                format!("sys/history/{}:v{}", path, v)
-            }
-        } else {
-            path.to_string()
-        };
+        // Optimize fetch strategy:
+        // 1. Fetch from main path first (most likely case)
+        // 2. If version specified and doesn't match current, fetch from history
 
-        // Get encrypted secret from storage to verify ownership first (Fix Cache Bypass)
-        let encrypted_entry = self.storage.get_by_path(&target_path).await
-            .map_err(SecretError::Storage)?
+        let mut encrypted_entry = self.storage.get_by_path(path).await
+            .map_err(SecretError::Storage)?;
+
+        // If specific version requested
+        if let Some(v) = version {
+            // Check if we have a current entry and if it matches the version
+            let current_matches = encrypted_entry.as_ref().map_or(false, |e| e.version == v);
+
+            if !current_matches {
+                // Fetch from history
+                let history_path = format!("sys/history/{}:v{}", path, v);
+                encrypted_entry = self.storage.get_by_path(&history_path).await
+                    .map_err(SecretError::Storage)?;
+            }
+        }
+
+        let encrypted_entry = encrypted_entry
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
 
         // Strict Ownership Check
@@ -187,8 +189,11 @@ impl SecretService {
              return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
         }
 
-        // Try to get decrypted data from cache first (only for main path)
-        if version.is_none() && target_path == path {
+        // Try to get decrypted data from cache first (only if fetching current version)
+        // We consider it current if version is None OR if the fetched entry matches the path (meaning we reused the current entry)
+        let is_current = version.is_none() || encrypted_entry.path == path;
+
+        if is_current {
             if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
                 match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
                     Ok(secret_map) => {
@@ -224,8 +229,8 @@ impl SecretService {
         let secret_map: HashMap<String, String> = serde_json::from_slice(&decrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
 
-        // Cache the decrypted data (only if main path)
-        if version.is_none() && target_path == path {
+        // Cache the decrypted data (only if current)
+        if is_current {
             let _ = self.performance.put_cached(path.to_string(), decrypted_data.clone()).await;
         }
 
