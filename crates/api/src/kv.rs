@@ -11,14 +11,13 @@ use axum::{
     routing::{delete, get, post},
 };
 use secreton_core::storage::secret::SecretStorage;
+use secreton_common::models::api_response::ApiResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-
-use crate::ApiState;
 
 // Simple in-memory implementation of SecretStorage for KV operations
 #[derive(Debug, Clone)]
@@ -107,49 +106,49 @@ impl Default for KVApiState {
 }
 
 /// Request to create/update a secret
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSecretRequest {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListSecretsQuery {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DestroySecretQuery {
     pub version: u32,
 }
 
 /// Response for secret creation
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSecretResponse {
     pub version: u32,
     pub created_time: String,
 }
 
 /// Response for secret retrieval
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GetSecretResponse {
     pub data: serde_json::Value,
     pub version: u32,
 }
 
 /// Response for listing secrets
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListSecretsResponse {
     pub keys: Vec<String>,
 }
 
 /// Response for metadata
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetadataResponse {
     pub version: u32,
 }
 
 /// Response for delete operations
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DeleteResponse {
     pub success: bool,
     pub message: String,
@@ -170,8 +169,8 @@ pub fn create_kv_router() -> Router<()> {
 #[axum::debug_handler]
 pub async fn list_secrets(
     Query(query): Query<ListSecretsQuery>,
-    Extension(state): Extension<ApiState>,
-) -> Result<Json<ListSecretsResponse>, StatusCode> {
+    Extension(state): Extension<KVApiState>,
+) -> Result<Json<ApiResponse<ListSecretsResponse>>, StatusCode> {
     let mut path = query.path.unwrap_or_default();
 
     // Normalize path: strip leading slash if present (since query params might include it)
@@ -184,10 +183,10 @@ pub async fn list_secrets(
         path.push('/');
     }
 
-    match state.kv.storage.list_secrets(&path).await {
+    match state.storage.list_secrets(&path).await {
         Ok(keys) => {
             info!("Listed {} secret paths in '{}'", keys.len(), path);
-            Ok(Json(ListSecretsResponse { keys }))
+            Ok(Json(ApiResponse::success(ListSecretsResponse { keys })))
         }
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -196,23 +195,22 @@ pub async fn list_secrets(
 /// Create or update a secret
 #[axum::debug_handler]
 pub async fn put_secret(
-    Extension(state): Extension<ApiState>,
+    Extension(state): Extension<KVApiState>,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
-) -> Result<Json<CreateSecretResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<CreateSecretResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
     match state
-        .kv
         .storage
         .store_secret_versioned(&path, &request.data)
         .await
     {
         Ok(version) => {
             info!("Created secret at path '{}' version {}", path, version);
-            Ok(Json(CreateSecretResponse {
+            Ok(Json(ApiResponse::success(CreateSecretResponse {
                 version,
                 created_time: chrono::Utc::now().to_rfc3339(),
-            }))
+            })))
         }
         Err(e) => {
             warn!("Failed to create secret at path '{}': {:?}", path, e);
@@ -224,14 +222,14 @@ pub async fn put_secret(
 /// Get a secret
 #[axum::debug_handler]
 pub async fn get_secret(
-    Extension(state): Extension<ApiState>,
+    Extension(state): Extension<KVApiState>,
     Path(path): Path<String>,
-) -> Result<Json<GetSecretResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<GetSecretResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
-    match state.kv.storage.get_latest_secret(&path).await {
+    match state.storage.get_latest_secret(&path).await {
         Ok(Some((data, version))) => {
             info!("Retrieved secret at path '{}'", path);
-            Ok(Json(GetSecretResponse { data, version }))
+            Ok(Json(ApiResponse::success(GetSecretResponse { data, version })))
         }
         Ok(None) => {
             warn!("Secret not found at path '{}'", path);
@@ -247,17 +245,17 @@ pub async fn get_secret(
 /// Delete a secret (soft delete)
 #[axum::debug_handler]
 pub async fn delete_secret(
-    Extension(state): Extension<ApiState>,
+    Extension(state): Extension<KVApiState>,
     Path(path): Path<String>,
-) -> Result<Json<DeleteResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<DeleteResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
-    match state.kv.storage.delete_secret(&path).await {
+    match state.storage.delete_secret(&path).await {
         Ok(_) => {
             info!("Deleted secret at path '{}'", path);
-            Ok(Json(DeleteResponse {
+            Ok(Json(ApiResponse::success(DeleteResponse {
                 success: true,
                 message: format!("Secret '{}' deleted", path),
-            }))
+            })))
         }
         Err(_) => {
             warn!("Failed to delete secret at path '{}'", path);
@@ -269,14 +267,14 @@ pub async fn delete_secret(
 /// Get secret metadata
 #[axum::debug_handler]
 pub async fn get_metadata(
-    Extension(state): Extension<ApiState>,
+    Extension(state): Extension<KVApiState>,
     Path(path): Path<String>,
-) -> Result<Json<MetadataResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<MetadataResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
-    match state.kv.storage.get_latest_secret(&path).await {
+    match state.storage.get_latest_secret(&path).await {
         Ok(Some((_, version))) => {
             info!("Retrieved metadata for path '{}'", path);
-            Ok(Json(MetadataResponse { version }))
+            Ok(Json(ApiResponse::success(MetadataResponse { version })))
         }
         Ok(None) => {
             warn!("Secret metadata not found at path '{}'", path);
@@ -293,23 +291,23 @@ pub async fn get_metadata(
 #[axum::debug_handler]
 pub async fn destroy_secret(
     Query(query): Query<DestroySecretQuery>,
-    Extension(state): Extension<ApiState>,
+    Extension(state): Extension<KVApiState>,
     Path(path): Path<String>,
-) -> Result<Json<DeleteResponse>, StatusCode> {
+) -> Result<Json<ApiResponse<DeleteResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
-    match state.kv.storage.delete_secret_version(&path, query.version).await {
+    match state.storage.delete_secret_version(&path, query.version).await {
         Ok(_) => {
             info!(
                 "Permanently destroyed secret '{}' version {}",
                 path, query.version
             );
-            Ok(Json(DeleteResponse {
+            Ok(Json(ApiResponse::success(DeleteResponse {
                 success: true,
                 message: format!(
                     "Secret '{}' version {} permanently destroyed",
                     path, query.version
                 ),
-            }))
+            })))
         }
         Err(_) => {
             warn!("Failed to destroy secret '{}' version {}", path, query.version);

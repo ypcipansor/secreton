@@ -1189,6 +1189,7 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
             .allow_origin(Any)
             .allow_methods(Any)
             .allow_headers(Any))
+        .layer(axum::Extension(state.kv.clone()))
         .layer(axum::Extension(state))
 }
 
