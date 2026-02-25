@@ -139,7 +139,7 @@ impl DatabaseEngine {
         // Create SecretEntry
         // TODO: Encrypt data properly
         let entry = SecretEntry::new(
-            path,
+            path.clone(),
             data,
             EncryptionMetadata {
                 algorithm: "plaintext".to_string(), // Mark as plaintext
@@ -148,6 +148,9 @@ impl DatabaseEngine {
             SecurityLevel::Confidential,
             uuid::Uuid::nil(), // System owned
         );
+
+        // Delete any existing entry first to ensure idempotent upsert
+        let _ = self.storage.delete_by_path(&path).await;
 
         self.storage
             .store(&entry)
@@ -175,7 +178,7 @@ impl DatabaseEngine {
         // If the storage backend supports encryption at rest, it will be encrypted there.
         // TODO: Implement application-level encryption using CryptoService for defense-in-depth.
         let entry = SecretEntry::new(
-            path,
+            path.clone(),
             data,
             EncryptionMetadata {
                 algorithm: "plaintext".to_string(),
@@ -184,6 +187,9 @@ impl DatabaseEngine {
             SecurityLevel::Confidential,
             uuid::Uuid::nil(),
         );
+
+        // Delete any existing entry first to ensure idempotent upsert
+        let _ = self.storage.delete_by_path(&path).await;
 
         self.storage
             .store(&entry)
