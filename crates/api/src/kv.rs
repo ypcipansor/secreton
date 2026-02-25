@@ -172,7 +172,18 @@ pub async fn list_secrets(
     Query(query): Query<ListSecretsQuery>,
     Extension(state): Extension<ApiState>,
 ) -> Result<Json<ListSecretsResponse>, StatusCode> {
-    let path = query.path.unwrap_or_default();
+    let mut path = query.path.unwrap_or_default();
+
+    // Normalize path: strip leading slash if present (since query params might include it)
+    if path.starts_with('/') {
+        path = path.trim_start_matches('/').to_string();
+    }
+
+    // If listing a subfolder, ensure it ends with /
+    if !path.is_empty() && !path.ends_with('/') {
+        path.push('/');
+    }
+
     match state.kv.storage.list_secrets(&path).await {
         Ok(keys) => {
             info!("Listed {} secret paths in '{}'", keys.len(), path);

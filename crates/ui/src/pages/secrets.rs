@@ -163,6 +163,12 @@ pub fn SecretsList() -> impl IntoView {
         let current_path = path();
         let navigate = navigate_save.clone();
 
+        // Validate new secret name if creating
+        if (current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound))) && new_secret_path.get().is_empty() {
+            // TODO: Show error message
+            return;
+        }
+
         spawn_local(async move {
             // If we are creating new, use input path. If editing, use current path.
             let target_path = if current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)) {
@@ -170,6 +176,9 @@ pub fn SecretsList() -> impl IntoView {
                 if !current_path.is_empty() {
                      // Basic join logic
                      let suffix = new_secret_path.get();
+                     if suffix.is_empty() {
+                         return;
+                     }
                      if current_path.ends_with('/') {
                          format!("{}{}", current_path, suffix)
                      } else {
