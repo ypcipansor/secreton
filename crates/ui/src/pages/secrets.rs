@@ -21,6 +21,12 @@ struct GetSecretResponse {
     version: u32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SecretVersionInfo {
+    version: u32,
+    created_at: String,
+}
+
 #[derive(Clone, Debug)]
 enum SecretViewMode {
     List(Vec<String>),
@@ -46,9 +52,14 @@ pub fn SecretsList() -> impl IntoView {
         params.with(|p| p.get("path").unwrap_or_default())
     };
 
+    // View specific version state
+    let (view_version, set_view_version) = signal::<Option<u32>>(None);
+
     let secret_resource = LocalResource::new(
         move || {
             let current_path = path();
+            let version_opt = view_version.get();
+
             async move {
                 // If root, always list
                 if current_path.is_empty() {
@@ -60,13 +71,23 @@ pub fn SecretsList() -> impl IntoView {
                 }
 
                 // Try to get as secret first
-                let secret_url = format!("/kv/secret/data/{}", current_path);
+                let secret_url = if let Some(v) = version_opt {
+                    format!("/kv/secrets/{}?version={}", current_path, v)
+                } else {
+                    format!("/kv/secret/data/{}", current_path)
+                };
+
                 match api::get::<GetSecretResponse>(&secret_url).await {
                     Ok(secret) => {
                          SecretViewMode::View(secret.data, secret.version)
                     },
                     Err(api::ApiError::NotFound(_)) => {
-                        // Only if 404, try to list as folder
+                        // If specific version requested and not found, it's an error (or deleted history)
+                        if version_opt.is_some() {
+                            return SecretViewMode::Error("Version not found".to_string());
+                        }
+
+                        // Only if 404 and no version specified, try to list as folder
                         // Note: Backend expects prefix to end with / for folders if we want robust filtering,
                         // but let's see how the backend handles 'app' vs 'app/'
                         // We'll append / to be safe for directory listing
@@ -93,6 +114,8 @@ pub fn SecretsList() -> impl IntoView {
 
     // Modal State
     let (show_modal, set_show_modal) = signal(false);
+    let (show_history_modal, set_show_history_modal) = signal(false);
+    let (history_versions, set_history_versions) = signal::<Vec<SecretVersionInfo>>(vec![]);
     let (new_secret_path, set_new_secret_path) = signal("".to_string());
 
     // Editor State (KV pairs)
@@ -129,6 +152,31 @@ pub fn SecretsList() -> impl IntoView {
                 r.value = val;
             }
         });
+    };
+
+    // Helper to load history
+    let load_history = move || {
+        spawn_local(async move {
+            let path = path();
+            let url = format!("/kv/secret-versions/{}", path);
+            if let Ok(res) = api::get::<Vec<SecretVersionInfo>>(&url).await {
+                set_history_versions.set(res);
+                set_show_history_modal.set(true);
+            }
+        });
+    };
+
+    // Helper to load specific version
+    let load_specific_version = move |v: u32| {
+        set_view_version.set(Some(v));
+        set_show_history_modal.set(false);
+        secret_resource.refetch();
+    };
+
+    // Helper to clear version view (show latest)
+    let clear_version_view = move || {
+        set_view_version.set(None);
+        secret_resource.refetch();
     };
 
     // Open Modal for Create (New)
@@ -274,6 +322,9 @@ pub fn SecretsList() -> impl IntoView {
                         if let Some(SecretViewMode::View(_, _)) = secret_resource.get() {
                             let handle_delete = handle_delete.clone();
                             view! {
+                                <Button variant=ButtonVariant::Secondary on_click=Box::new(move |_| load_history())>
+                                    "History"
+                                </Button>
                                 <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
                                     "Edit Secret"
                                 </Button>
@@ -341,6 +392,22 @@ pub fn SecretsList() -> impl IntoView {
                                     serde_json::Value::Object(map) => {
                                         view! {
                                             <div class="space-y-4">
+                                                <Show when=move || view_version.get().is_some()>
+                                                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                                                        <div class="flex items-center justify-between">
+                                                            <div class="flex">
+                                                                <div class="ml-3">
+                                                                    <p class="text-sm text-yellow-700">
+                                                                        "You are viewing a past version of this secret (v" {version} ")."
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <button class="text-sm font-medium underline text-yellow-700 hover:text-yellow-600" on:click=move |_| clear_version_view()>
+                                                                "View Latest"
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </Show>
                                                 <div class="flex justify-end text-xs text-gray-400 uppercase font-bold tracking-wider">
                                                     {format!("Version: {}", version)}
                                                 </div>
@@ -399,6 +466,43 @@ pub fn SecretsList() -> impl IntoView {
                     })
                 }}
             </Suspense>
+
+            <Modal
+                show=show_history_modal
+                on_close=move || set_show_history_modal.set(false)
+                title="Secret History".to_string()
+            >
+                <div class="max-h-[60vh] overflow-y-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">"Version"</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">"Created At"</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">"Action"</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            {move || history_versions.get().into_iter().map(|v| {
+                                let ver = v.version;
+                                view! {
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{v.version}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{v.created_at}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            <button
+                                                class="text-blue-600 hover:text-blue-900"
+                                                on:click=move |_| load_specific_version(ver)
+                                            >
+                                                "View"
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            }).collect_view()}
+                        </tbody>
+                    </table>
+                </div>
+            </Modal>
 
             <Modal
                 show=show_modal

@@ -154,12 +154,28 @@ impl SecretService {
 
 
     /// Get secret by path
-    pub async fn get_secret(&self, path: &str, user: &secreton_auth::User) -> Result<SecretData, SecretError> {
+    pub async fn get_secret(&self, path: &str, user: &secreton_auth::User, version: Option<u32>) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
 
+        // Determine target path based on version
+        let target_path = if let Some(v) = version {
+            // First check if current version matches
+            if let Ok(Some(current)) = self.storage.get_by_path(path).await {
+                if current.version == v {
+                    path.to_string()
+                } else {
+                    format!("sys/history/{}/v{}", path, v)
+                }
+            } else {
+                format!("sys/history/{}/v{}", path, v)
+            }
+        } else {
+            path.to_string()
+        };
+
         // Get encrypted secret from storage to verify ownership first (Fix Cache Bypass)
-        let encrypted_entry = self.storage.get_by_path(path).await
+        let encrypted_entry = self.storage.get_by_path(&target_path).await
             .map_err(SecretError::Storage)?
             .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
 
@@ -171,29 +187,31 @@ impl SecretService {
              return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
         }
 
-        // Try to get decrypted data from cache first
-        if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
-            match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
-                Ok(secret_map) => {
-                    // Log access in performance optimizer (cache hit)
-                    self.performance.record_access(
-                        path,
-                        AccessType::Read,
-                        start_time.elapsed(),
-                        true
-                    ).await;
+        // Try to get decrypted data from cache first (only for main path)
+        if version.is_none() && target_path == path {
+            if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
+                match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
+                    Ok(secret_map) => {
+                        // Log access in performance optimizer (cache hit)
+                        self.performance.record_access(
+                            path,
+                            AccessType::Read,
+                            start_time.elapsed(),
+                            true
+                        ).await;
 
-                    return Ok(SecretData {
-                        path: path.to_string(),
-                        data: secret_map,
-                        version: encrypted_entry.version, // Use actual version from storage
-                        created_at: encrypted_entry.created_at,
-                        updated_at: encrypted_entry.updated_at,
-                    });
-                }
-                Err(_) => {
-                    // If cached data is invalid, remove it
-                    let _ = self.performance.invalidate_cached(path).await;
+                        return Ok(SecretData {
+                            path: path.to_string(),
+                            data: secret_map,
+                            version: encrypted_entry.version, // Use actual version from storage
+                            created_at: encrypted_entry.created_at,
+                            updated_at: encrypted_entry.updated_at,
+                        });
+                    }
+                    Err(_) => {
+                        // If cached data is invalid, remove it
+                        let _ = self.performance.invalidate_cached(path).await;
+                    }
                 }
             }
         }
@@ -206,8 +224,10 @@ impl SecretService {
         let secret_map: HashMap<String, String> = serde_json::from_slice(&decrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
 
-        // Cache the decrypted data
-        let _ = self.performance.put_cached(path.to_string(), decrypted_data.clone()).await;
+        // Cache the decrypted data (only if main path)
+        if version.is_none() && target_path == path {
+            let _ = self.performance.put_cached(path.to_string(), decrypted_data.clone()).await;
+        }
 
         // Log access in performance optimizer (cache miss)
         self.performance.record_access(
@@ -258,6 +278,16 @@ impl SecretService {
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
         let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            // Archive the existing version
+            let archive_path = format!("sys/history/{}/v{}", existing.path, existing.version);
+            let mut archive_entry = existing.clone();
+            archive_entry.path = archive_path;
+
+            // Store the archived version
+            if let Err(e) = self.storage.store(&archive_entry).await {
+                return Err(SecretError::Storage(e));
+            }
+
             (existing.version + 1, Some(existing.owner_id))
         } else {
             (1, None)
@@ -336,6 +366,18 @@ impl SecretService {
         self.storage.delete_by_path(path).await
             .map_err(SecretError::Storage)?;
 
+        // Delete history
+        let history_prefix = format!("sys/history/{}/v", path);
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(history_prefix)
+            .with_owner(Self::get_user_uuid(user));
+
+        if let Ok(entries) = self.storage.list(&query).await {
+            for entry in entries {
+                let _ = self.storage.delete_by_path(&entry.path).await;
+            }
+        }
+
         // Invalidate cache
         let _ = self.performance.invalidate_cached(path).await;
 
@@ -393,6 +435,50 @@ impl SecretService {
         self.check_permission(user, &format!("sys/policies/{}", name), "delete").await?;
         // Placeholder
         Ok(true)
+    }
+
+    pub async fn list_secret_versions(
+        &self,
+        path: &str,
+        user: &secreton_auth::User,
+    ) -> Result<Vec<SecretVersionInfo>, SecretError> {
+        self.check_permission(user, path, "read").await?;
+
+        let user_uuid = Self::get_user_uuid(user);
+        let mut versions = Vec::new();
+
+        // 1. Get current version
+        if let Ok(Some(current)) = self.storage.get_by_path(path).await {
+            // Check ownership
+            if current.owner_id == user_uuid {
+                versions.push(SecretVersionInfo {
+                    version: current.version,
+                    created_at: current.created_at,
+                });
+            }
+        }
+
+        // 2. Get history versions
+        let history_prefix = format!("sys/history/{}/v", path);
+        // We use query with owner to let backend filter, but we also double check
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(history_prefix)
+            .with_owner(user_uuid);
+
+        let history_entries = self.storage.list(&query).await
+            .map_err(SecretError::Storage)?;
+
+        for entry in history_entries {
+             versions.push(SecretVersionInfo {
+                version: entry.version,
+                created_at: entry.created_at,
+            });
+        }
+
+        // Sort descending
+        versions.sort_by(|a, b| b.version.cmp(&a.version));
+
+        Ok(versions)
     }
 
     pub async fn list_secrets(
@@ -1077,6 +1163,13 @@ pub struct SecretData {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Secret version info
+#[derive(Debug, Serialize)]
+pub struct SecretVersionInfo {
+    pub version: u32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// Key information
 #[derive(Debug, Serialize)]
 pub struct KeyInfo {
@@ -1225,7 +1318,7 @@ mod tests {
         let _ = storage.store(&secret_entry).await;
 
         let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
-        let secret = service.get_secret("app/config", &user).await.unwrap();
+        let secret = service.get_secret("app/config", &user, None).await.unwrap();
         assert_eq!(secret.path, "app/config");
         assert!(secret.data.contains_key("key1"));
     }
@@ -1433,6 +1526,52 @@ mod tests {
         let result = service.create_key("test_key_allowed", "aes256-gcm", &user).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_secret_versioning() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+
+        seed_admin_policy(&policy_service).await;
+
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let user = mock_user();
+
+        // 1. Create Secret (v1)
+        let mut data1 = HashMap::new();
+        data1.insert("k".to_string(), "v1".to_string());
+        let s1 = service.put_secret("app/ver", data1, &user).await.unwrap();
+        assert_eq!(s1.version, 1);
+
+        // 2. Update Secret (v2)
+        let mut data2 = HashMap::new();
+        data2.insert("k".to_string(), "v2".to_string());
+        let s2 = service.put_secret("app/ver", data2, &user).await.unwrap();
+        assert_eq!(s2.version, 2);
+
+        // 3. Get Current (v2)
+        let get_curr = service.get_secret("app/ver", &user, None).await.unwrap();
+        assert_eq!(get_curr.version, 2);
+        assert_eq!(get_curr.data.get("k").unwrap(), "v2");
+
+        // 4. Get Old (v1)
+        let get_v1 = service.get_secret("app/ver", &user, Some(1)).await.unwrap();
+        assert_eq!(get_v1.version, 1);
+        assert_eq!(get_v1.data.get("k").unwrap(), "v1");
+
+        // 5. List Versions
+        let versions = service.list_secret_versions("app/ver", &user).await.unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].version, 2); // Sorted desc
+        assert_eq!(versions[1].version, 1);
     }
 }
 

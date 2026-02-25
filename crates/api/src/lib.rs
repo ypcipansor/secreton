@@ -589,7 +589,7 @@ async fn handle_secret_get(
     secreton: Arc<crate::services::secret::SecretService>
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
-    let secret = secreton.get_secret(path_str, &user).await
+    let secret = secreton.get_secret(path_str, &user, None).await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Wrap in ApiResponse

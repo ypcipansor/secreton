@@ -27,6 +27,7 @@ use crate::extractors::AuthenticatedUser;
 pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
+        .route("/secret-versions/{*path}", get(list_secret_versions))
         .route("/secrets/{*path}", get(get_secret))
         .route("/secrets/{*path}", post(create_secret))
         .route("/secrets/{*path}", put(update_secret))
@@ -66,6 +67,11 @@ pub fn create_routes() -> Router<AppState> {
         .route("/backup/{backup_id}", get(get_backup))
         .route("/backup/{backup_id}/restore", post(restore_backup))
         .route("/backup/{backup_id}", delete(delete_backup))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetSecretParams {
+    pub version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -560,9 +566,10 @@ pub async fn get_secret(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
+    Query(params): Query<GetSecretParams>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // Get secret from secreton service - now passes full user
-    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user).await
+    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user, params.version).await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -640,7 +647,7 @@ pub async fn update_secret(
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // Get current secret to determine version
     // Use get_secret to ensure existence and initial permission check (though put_secret also checks)
-    let current_secret = match state.secreton.get_secret(&path, &user).await {
+    let current_secret = match state.secreton.get_secret(&path, &user, None).await {
         Ok(secret) => secret,
         Err(secret::SecretError::SecretNotFound { .. }) => {
             return Err(crate::ApiError::NotFound("Secret not found".to_string()));
@@ -706,6 +713,22 @@ pub async fn delete_secret(
     });
 
     Ok(Json(ApiResponse::success(data)))
+}
+
+/// List secret versions
+pub async fn list_secret_versions(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(path): Path<String>,
+) -> ApiResult<Json<ApiResponse<Vec<secret::SecretVersionInfo>>>> {
+    // List secret versions via secreton service
+    let versions = state.secreton.list_secret_versions(&path, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to list secret versions: {}", e))
+        })?;
+
+    Ok(Json(ApiResponse::success(versions)))
 }
 
 /// List secrets

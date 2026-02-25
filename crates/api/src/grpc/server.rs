@@ -47,7 +47,7 @@ impl SecretService for GrpcSecretService {
         let req = request.into_inner();
 
         // Call Core Service with the authenticated user
-        match self.core_service.get_secret(&req.path, &user).await {
+        match self.core_service.get_secret(&req.path, &user, None).await {
             Ok(secret) => {
                  Ok(Response::new(GetSecretResponse {
                     data: secret.data,
