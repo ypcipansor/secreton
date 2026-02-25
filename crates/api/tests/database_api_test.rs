@@ -32,10 +32,14 @@ async fn test_database_api_endpoints() {
     use secreton_api::ssh::SshApiState;
     use secreton_api::totp::TotpApiState;
 
+    // Use MockStorageBackend for DatabaseApiState
+    let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+    let database_state = DatabaseApiState::new(storage.clone()).await;
+
     let state = ApiState {
         kv: KVApiState::default(),
         transit: TransitApiState::default(),
-        database: DatabaseApiState::default(),
+        database: database_state,
         pki: PkiApiState::default(),
         ssh: SshApiState::default(),
         totp: TotpApiState::default(),
@@ -43,9 +47,9 @@ async fn test_database_api_endpoints() {
         secreton: Arc::new(secreton_common::StandardServiceContainer::default()),
         auth: auth.clone(),
         audit: Arc::new(secreton_api::services::admin::AdminService::new(
-             Arc::new(secreton_storage::MockStorageBackend::new()),
+             storage.clone(),
              auth.clone(),
-             Arc::new(secreton_api::services::audit::AuditLogger::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
+             Arc::new(secreton_api::services::audit::AuditLogger::new(storage.clone()).await.unwrap()),
              Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()))
         ).await.unwrap()),
     };

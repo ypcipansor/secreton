@@ -1148,6 +1148,7 @@ impl ApiState {
     pub async fn new(
         transit_state: TransitApiState,
         kv_state: KVApiState,
+        database_state: DatabaseApiState,
         pki_service: Option<std::sync::Arc<crate::services::pki::PkiPersistentService>>,
         config: std::sync::Arc<crate::config::ApiConfig>,
         secreton: std::sync::Arc<secreton_common::StandardServiceContainer>,
@@ -1158,7 +1159,7 @@ impl ApiState {
         Ok(Self {
             kv: kv_state,
             transit: transit_state,
-            database: DatabaseApiState::default(),
+            database: database_state,
             pki: PkiApiState { service: pki_service },
             ssh: SshApiState::default(),
             totp: TotpApiState::default(),
