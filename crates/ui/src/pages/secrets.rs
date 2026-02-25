@@ -65,8 +65,8 @@ pub fn SecretsList() -> impl IntoView {
                     Ok(secret) => {
                          SecretViewMode::View(secret.data, secret.version)
                     },
-                    Err(_) => {
-                        // If failed (e.g. 404), try to list as folder
+                    Err(api::ApiError::NotFound(_)) => {
+                        // Only if 404, try to list as folder
                         // Note: Backend expects prefix to end with / for folders if we want robust filtering,
                         // but let's see how the backend handles 'app' vs 'app/'
                         // We'll append / to be safe for directory listing
@@ -82,9 +82,10 @@ pub fn SecretsList() -> impl IntoView {
                                     SecretViewMode::List(res.keys)
                                 }
                             },
-                            Err(e) => SecretViewMode::Error(format!("Not found or error: {}", e)),
+                            Err(e) => SecretViewMode::Error(format!("Error listing folder: {}", e)),
                         }
-                    }
+                    },
+                    Err(e) => SecretViewMode::Error(e.to_string()),
                 }
             }
         },

@@ -56,9 +56,7 @@ impl SecretStorage for InMemorySecretStorage {
 
     async fn list_secrets(&self, path: &str) -> Result<Vec<String>> {
         let secrets = self.secrets.read().await;
-        let prefix = if path.is_empty() {
-            ""
-        } else if path.ends_with('/') {
+        let prefix = if path.ends_with('/') {
             path
         } else {
             &format!("{}/", path)
@@ -73,8 +71,6 @@ impl SecretStorage for InMemorySecretStorage {
                     .unwrap_or("")
                     .to_string()
             })
-            .collect::<std::collections::HashSet<String>>()
-            .into_iter()
             .collect();
         Ok(keys)
     }
