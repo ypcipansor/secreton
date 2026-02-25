@@ -72,7 +72,7 @@ pub fn SecretsList() -> impl IntoView {
 
                 // Try to get as secret first
                 let secret_url = if let Some(v) = version_opt {
-                    format!("/kv/secrets/{}?version={}", current_path, v)
+                    format!("/kv/secret/data/{}?version={}", current_path, v)
                 } else {
                     format!("/kv/secret/data/{}", current_path)
                 };
