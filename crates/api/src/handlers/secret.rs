@@ -266,7 +266,7 @@ mod tests {
         );
         services.storage.store(&user_entry).await.ok();
 
-        let app = create_routes().with_state(services);
+        let app = create_routes().with_state(services.into());
         use std::net::SocketAddr;
         let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("failed to start test server");
         (server, token)

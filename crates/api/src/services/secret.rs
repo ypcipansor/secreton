@@ -195,28 +195,40 @@ impl SecretService {
 
         if is_current {
             if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
-                match serde_json::from_slice::<HashMap<String, String>>(&cached_data) {
-                    Ok(secret_map) => {
-                        // Log access in performance optimizer (cache hit)
-                        self.performance.record_access(
-                            path,
-                            AccessType::Read,
-                            start_time.elapsed(),
-                            true
-                        ).await;
+                // Parse version from cache (first 4 bytes)
+                if cached_data.len() > 4 {
+                    let (ver_bytes, data_bytes) = cached_data.split_at(4);
+                    let cached_ver = u32::from_be_bytes(ver_bytes.try_into().unwrap_or([0; 4]));
 
-                        return Ok(SecretData {
-                            path: path.to_string(),
-                            data: secret_map,
-                            version: encrypted_entry.version, // Use actual version from storage
-                            created_at: encrypted_entry.created_at,
-                            updated_at: encrypted_entry.updated_at,
-                        });
+                    // Only use cache if version matches the Source of Truth (DB metadata)
+                    if cached_ver == encrypted_entry.version {
+                        match serde_json::from_slice::<HashMap<String, String>>(data_bytes) {
+                            Ok(secret_map) => {
+                                // Log access in performance optimizer (cache hit)
+                                self.performance.record_access(
+                                    path,
+                                    AccessType::Read,
+                                    start_time.elapsed(),
+                                    true
+                                ).await;
+
+                                return Ok(SecretData {
+                                    path: path.to_string(),
+                                    data: secret_map,
+                                    version: encrypted_entry.version, // Use actual version from storage
+                                    created_at: encrypted_entry.created_at,
+                                    updated_at: encrypted_entry.updated_at,
+                                });
+                            }
+                            Err(_) => {
+                                // If cached data is invalid, remove it
+                                let _ = self.performance.invalidate_cached(path).await;
+                            }
+                        }
                     }
-                    Err(_) => {
-                        // If cached data is invalid, remove it
-                        let _ = self.performance.invalidate_cached(path).await;
-                    }
+                } else {
+                     // Invalid cache format, remove it
+                     let _ = self.performance.invalidate_cached(path).await;
                 }
             }
         }
@@ -230,8 +242,11 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
 
         // Cache the decrypted data (only if current)
+        // Store version + data to allow validation on retrieval
         if is_current {
-            let _ = self.performance.put_cached(path.to_string(), decrypted_data.clone()).await;
+            let mut cache_payload = encrypted_entry.version.to_be_bytes().to_vec();
+            cache_payload.extend_from_slice(&decrypted_data);
+            let _ = self.performance.put_cached(path.to_string(), cache_payload).await;
         }
 
         // Log access in performance optimizer (cache miss)
@@ -319,8 +334,10 @@ impl SecretService {
         self.storage.store(&entry).await
             .map_err(SecretError::Storage)?;
 
-        // Update cache with plaintext data
-        let _ = self.performance.put_cached(path.to_string(), json_data).await;
+        // Update cache with plaintext data PREPENDED with version
+        let mut cache_payload = entry.version.to_be_bytes().to_vec();
+        cache_payload.extend_from_slice(&json_data);
+        let _ = self.performance.put_cached(path.to_string(), cache_payload).await;
 
         self.performance.record_access(
             path,
@@ -1582,6 +1599,51 @@ mod tests {
         assert_eq!(versions.len(), 2);
         assert_eq!(versions[0].version, 2); // Sorted desc
         assert_eq!(versions[1].version, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_version_mismatch() {
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
+        let storage = Arc::new(MockStorageBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+        let policy_service = Arc::new(secreton_auth::PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::default());
+
+        seed_admin_policy(&policy_service).await;
+
+        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let user = mock_user();
+
+        // 1. Create Secret (v1)
+        let mut data = HashMap::new();
+        data.insert("k".to_string(), "v1".to_string());
+        service.put_secret("app/race", data, &user).await.unwrap();
+
+        // 2. Pollute cache with "future" version (v2)
+        // We need to construct the cache payload: [v2_bytes] + [json_data]
+        let v2: u32 = 2;
+        let mut cache_payload = v2.to_be_bytes().to_vec();
+        let fake_data = serde_json::to_vec(&HashMap::from([("k".to_string(), "fake_v2".to_string())])).unwrap();
+        cache_payload.extend_from_slice(&fake_data);
+
+        service.performance.put_cached("app/race".to_string(), cache_payload).await.unwrap();
+
+        // 3. Get Secret (current). Storage still has v1.
+        let result = service.get_secret("app/race", &user, None).await.unwrap();
+
+        // 4. Assert we got v1 (from storage), NOT fake_v2 (from cache)
+        assert_eq!(result.version, 1);
+        assert_eq!(result.data.get("k").unwrap(), "v1");
+
+        // 5. Assert cache is now corrected to v1
+        let cached = service.performance.get_cached("app/race").await.unwrap().unwrap();
+        let (ver_bytes, _) = cached.split_at(4);
+        let cached_ver = u32::from_be_bytes(ver_bytes.try_into().unwrap());
+        assert_eq!(cached_ver, 1);
     }
 }
 

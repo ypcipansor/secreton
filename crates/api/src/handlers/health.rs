@@ -325,12 +325,13 @@ mod tests {
     use crate::services::ApiServiceContainer;
     use std::sync::Arc;
 
-    async fn create_state() -> Arc<ApiServiceContainer> {
+    async fn create_state() -> AppState {
         let mut config = ApiConfig::default();
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        ApiServiceContainer::new(&config).await.expect("Failed to create services").into()
+        let container = Arc::new(ApiServiceContainer::new(&config).await.expect("Failed to create services"));
+        container.into()
     }
 
     #[tokio::test]

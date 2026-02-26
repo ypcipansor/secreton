@@ -15,6 +15,7 @@ use axum::Json;
 
 use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
 use secreton_storage::StorageBackend;
+use secreton_common::ServiceContainer;
 
 pub mod services;
 pub mod middleware;
@@ -1184,6 +1185,11 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
         crypto: state.secreton.get_service("crypto").cloned().expect("crypto service required"),
         secreton: state.secreton.get_service("secret").cloned().expect("secret service required"),
         performance: state.secreton.get_service("performance").cloned().expect("performance service required"),
+        seal: state.secreton.get_service("seal").cloned().expect("seal service required"),
+        policy: state.secreton.get_service("policy").cloned().expect("policy service required"),
+        admin: state.audit.clone(),
+        mfa: state.secreton.get_service("mfa").cloned().expect("mfa service required"),
+        config: state.config.clone(),
     };
 
     axum::Router::new()
