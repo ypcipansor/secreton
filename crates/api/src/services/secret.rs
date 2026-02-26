@@ -306,7 +306,10 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+        // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
+        let existing_result = self.storage.get_by_path(path).await
+            .map_err(SecretError::Storage)?;
+        let (version, existing_owner) = if let Some(existing) = existing_result {
             // Check ownership first
             if existing.owner_id != owner_id {
                  return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
