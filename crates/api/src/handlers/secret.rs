@@ -648,14 +648,24 @@ pub async fn update_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Update secret via secreton service
-    // Note: To optimize, we assume the previous version is version - 1 if successful,
-    // or rely on service logic. But to be precise for auditing without double-read,
-    // we capture the new version. The previous version is implicitly new_version - 1 for existing secrets.
-    // However, if we need strict old version validation, we would need to read it.
-    // Bug 2 fix: avoid full get_secret.
-    // We can infer old version as new_version - 1 since versions increment monotonically.
+    // Verify secret exists before updating (as requested in PR review)
+    // We only read version info to minimize overhead if possible, but get_secret is the standard way.
+    // If we wanted to optimize, we'd need a head_secret or exists_secret method.
+    // For now, we perform the read check to ensure the resource exists (404 vs 200).
+    let current_version = match state.secreton.get_secret(&path, &user, None).await {
+        Ok(s) => s.version,
+        Err(secret::SecretError::SecretNotFound { .. }) => {
+            return Err(crate::ApiError::NotFound("Secret not found".to_string()));
+        }
+        Err(e) => {
+             match e {
+                 secret::SecretError::PermissionDenied(msg) => return Err(crate::ApiError::Authorization(msg)),
+                 _ => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
+             }
+        }
+    };
 
+    // Update secret via secreton service
     let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
         .map_err(|e| match e {
              secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -663,8 +673,8 @@ pub async fn update_secret(
              _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e))
         })?;
 
-    // Infer old version (only valid if version > 1, otherwise it was a create or first version)
-    let old_version = if secret_data.version > 1 { secret_data.version - 1 } else { 0 };
+    // Use the explicitly fetched old version for audit accuracy
+    let old_version = current_version;
 
     let response = SecretResponse {
         path: secret_data.path,
