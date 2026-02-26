@@ -132,7 +132,6 @@ where
     request(Method::POST, path, Some(body)).await
 }
 
-#[allow(dead_code)]
 pub async fn put<T, B>(path: &str, body: B) -> Result<T, ApiError>
 where
     T: for<'de> Deserialize<'de>,

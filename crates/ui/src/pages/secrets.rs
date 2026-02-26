@@ -261,7 +261,18 @@ pub fn SecretsList() -> impl IntoView {
             });
 
             let url = format!("/secret/secrets/{}", target_path);
-            if (api::post::<serde_json::Value, _>(&url, payload).await).is_ok() {
+
+            // Distinguish between create (POST) and update (PUT)
+            // If target_path matches current_path AND we are in View mode, it's an edit.
+            let is_edit = target_path == current_path && matches!(secret_resource.get(), Some(SecretViewMode::View(_, _)));
+
+            let result = if is_edit {
+                api::put::<serde_json::Value, _>(&url, payload).await
+            } else {
+                api::post::<serde_json::Value, _>(&url, payload).await
+            };
+
+            if result.is_ok() {
                 set_show_modal.set(false);
                 secret_resource.refetch();
 
@@ -326,15 +337,23 @@ pub fn SecretsList() -> impl IntoView {
                     {move || {
                         if let Some(SecretViewMode::View(_, _)) = secret_resource.get() {
                             let handle_delete = handle_delete.clone();
+                            let open_edit = open_edit.clone();
+                            let load_history = load_history.clone();
                             view! {
                                 <Button variant=ButtonVariant::Secondary on_click=Box::new(move |_| load_history())>
                                     "History"
                                 </Button>
                                 <Show when=move || view_version.get().is_none()>
-                                    <Button variant=ButtonVariant::Primary on_click=Box::new(open_edit)>
+                                    <Button variant=ButtonVariant::Primary on_click=Box::new({
+                                        let open_edit = open_edit.clone();
+                                        move |_| open_edit(())
+                                    })>
                                         "Edit Secret"
                                     </Button>
-                                    <Button variant=ButtonVariant::Danger on_click=Box::new(move |_| handle_delete())>
+                                    <Button variant=ButtonVariant::Danger on_click=Box::new({
+                                        let handle_delete = handle_delete.clone();
+                                        move |_| handle_delete()
+                                    })>
                                         "Delete Secret"
                                     </Button>
                                 </Show>

@@ -212,15 +212,6 @@ impl SecretService {
                                     true
                                 ).await;
 
-                                // Log audit trail (cache hit)
-                                let _ = self.audit.log_event(
-                                    SecurityEventType::SecretAccess {
-                                        secret_path: path.to_string(),
-                                        user: user.id.to_string(),
-                                        action: "read".to_string(),
-                                    },
-                                ).await;
-
                                 return Ok(SecretData {
                                     path: path.to_string(),
                                     data: secret_map,
@@ -306,10 +297,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let existing_result = self.storage.get_by_path(path).await
-            .map_err(SecretError::Storage)?;
-        let (version, existing_owner) = if let Some(existing) = existing_result {
+        let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
             // Check ownership first
             if existing.owner_id != owner_id {
                  return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
