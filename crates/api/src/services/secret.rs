@@ -212,6 +212,15 @@ impl SecretService {
                                     true
                                 ).await;
 
+                                // Log audit trail (cache hit)
+                                let _ = self.audit.log_event(
+                                    SecurityEventType::SecretAccess {
+                                        secret_path: path.to_string(),
+                                        user: user.id.to_string(),
+                                        action: "read".to_string(),
+                                    },
+                                ).await;
+
                                 return Ok(SecretData {
                                     path: path.to_string(),
                                     data: secret_map,
