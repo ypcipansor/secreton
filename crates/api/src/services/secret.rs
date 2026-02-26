@@ -285,6 +285,11 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
 
+        // Validate path for reserved delimiter
+        if path.contains("::v") {
+            return Err(SecretError::InvalidOperation("Secret path cannot contain the reserved delimiter '::v'".to_string()));
+        }
+
         // Serialize data to JSON for storage
         let json_data = serde_json::to_vec(&data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to serialize secret data: {}", e)))?;
@@ -396,7 +401,9 @@ impl SecretService {
 
         if let Ok(entries) = self.storage.list(&query).await {
             for entry in entries {
-                let _ = self.storage.delete_by_path(&entry.path).await;
+                if let Err(e) = self.storage.delete_by_path(&entry.path).await {
+                    warn!("Failed to delete history entry {}: {}", entry.path, e);
+                }
             }
         }
 

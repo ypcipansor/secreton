@@ -648,19 +648,23 @@ pub async fn update_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Get current secret to determine version
-    // Use get_secret to ensure existence and initial permission check (though put_secret also checks)
-    let current_secret = match state.secreton.get_secret(&path, &user, None).await {
-        Ok(secret) => secret,
-        Err(secret::SecretError::SecretNotFound { .. }) => {
-            return Err(crate::ApiError::NotFound("Secret not found".to_string()));
-        }
-        Err(e) => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
-    };
-
     // Update secret via secreton service
+    // Note: To optimize, we assume the previous version is version - 1 if successful,
+    // or rely on service logic. But to be precise for auditing without double-read,
+    // we capture the new version. The previous version is implicitly new_version - 1 for existing secrets.
+    // However, if we need strict old version validation, we would need to read it.
+    // Bug 2 fix: avoid full get_secret.
+    // We can infer old version as new_version - 1 since versions increment monotonically.
+
     let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to update secret: {}", e)))?;
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+             _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e))
+        })?;
+
+    // Infer old version (only valid if version > 1, otherwise it was a create or first version)
+    let old_version = if secret_data.version > 1 { secret_data.version - 1 } else { 0 };
 
     let response = SecretResponse {
         path: secret_data.path,
@@ -677,17 +681,12 @@ pub async fn update_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
-    // Audit: SecretVersionChange - Handled by service? Service handles SecretCreation.
-    // VersionChange is specific. Let's keep it here or move to service.
-    // Service audit logic is simpler (Creation/Deletion).
-    // Let's keep handler audit for now as service doesn't differentiate update vs create easily in log event types yet.
-    // Actually service logs "SecretCreation".
-
+    // Audit: SecretVersionChange
     let _ = state
         .audit
         .log_event(SecurityEventType::SecretVersionChange {
                 secret_path: path,
-                old_version: current_secret.version,
+                old_version,
                 new_version: secret_data.version,
                 user: user.username,
             })
