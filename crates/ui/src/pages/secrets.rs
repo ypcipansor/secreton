@@ -56,6 +56,12 @@ pub fn SecretsList() -> impl IntoView {
     // View specific version state
     let (view_version, set_view_version) = signal::<Option<u32>>(None);
 
+    let path_for_reset = path.clone();
+    Effect::new(move || {
+        let _ = path_for_reset(); // subscribe to path changes
+        set_view_version.set(None);
+    });
+
     let secret_resource = LocalResource::new(
         move || {
             let current_path = path();
