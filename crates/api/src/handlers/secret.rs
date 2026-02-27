@@ -616,6 +616,11 @@ pub async fn create_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    // Check if secret already exists (POST should only create, not update)
+    if let Ok(Some(_)) = state.storage.get_by_path(&path).await {
+        return Err(crate::ApiError::BadRequest(format!("Secret already exists at path '{}'. Use PUT to update.", path)));
+    }
+
     // Create secret via secreton service
     let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
         .map_err(|e: crate::services::secret::SecretError| match e {
