@@ -216,6 +216,7 @@ impl SecretService {
                                     path: path.to_string(),
                                     data: secret_map,
                                     version: encrypted_entry.version, // Use actual version from storage
+                                    previous_version: None,
                                     created_at: encrypted_entry.created_at,
                                     updated_at: encrypted_entry.updated_at,
                                 });
@@ -270,6 +271,7 @@ impl SecretService {
             path: path.to_string(),
             data: secret_map,
             version: encrypted_entry.version,
+            previous_version: None,
             created_at: encrypted_entry.created_at,
             updated_at: encrypted_entry.updated_at,
         })
@@ -302,7 +304,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, existing_owner) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+        let (version, existing_owner, previous_version) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
             // Check ownership first
             if existing.owner_id != owner_id {
                  return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
@@ -320,9 +322,9 @@ impl SecretService {
                 return Err(SecretError::Storage(e));
             }
 
-            (existing.version + 1, Some(existing.owner_id))
+            (existing.version + 1, Some(existing.owner_id), Some(existing.version))
         } else {
-            (1, None)
+            (1, None, None)
         };
 
         // Create SecretEntry
@@ -363,6 +365,7 @@ impl SecretService {
             path: path.to_string(),
             data,
             version: entry.version,
+            previous_version,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
         })
@@ -550,6 +553,7 @@ impl SecretService {
                                     path: entry.path.clone(),
                                     data: secret_map,
                                     version: entry.version,
+                                    previous_version: None,
                                     created_at: entry.created_at,
                                     updated_at: entry.updated_at,
                                 });
@@ -1193,6 +1197,7 @@ pub struct SecretData {
     pub path: String,
     pub data: HashMap<String, String>,
     pub version: u32,
+    pub previous_version: Option<u32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

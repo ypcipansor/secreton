@@ -673,8 +673,8 @@ pub async fn update_secret(
              _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e))
         })?;
 
-    // Use the explicitly fetched old version for audit accuracy
-    let old_version = current_version;
+    // Use the authoritative previous version from put_secret for audit accuracy
+    let old_version = secret_data.previous_version.unwrap_or(0);
 
     let response = SecretResponse {
         path: secret_data.path,
