@@ -173,7 +173,16 @@ pub fn SecretsList() -> impl IntoView {
 
     // Helper to load specific version
     let load_specific_version = move |v: u32| {
-        set_view_version.set(Some(v));
+        // If the requested version is the latest version, clear the view_version
+        // so it's treated as the current (editable) version.
+        // The history list is sorted descending, so first is latest.
+        let is_latest = history_versions.get().first().map_or(false, |latest| latest.version == v);
+
+        if is_latest {
+            set_view_version.set(None);
+        } else {
+            set_view_version.set(Some(v));
+        }
         set_show_history_modal.set(false);
         secret_resource.refetch();
     };
