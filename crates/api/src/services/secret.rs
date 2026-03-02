@@ -518,10 +518,15 @@ impl SecretService {
                         version: current.version,
                         created_at: current.created_at,
                     });
+                } else {
+                    return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
                 }
             }
             Err(e) => return Err(SecretError::Storage(e)),
-            Ok(None) => { /* No current version, might only have history */ }
+            Ok(None) => {
+                // No current version, but we still need to check history.
+                // If history is also empty, we will return SecretNotFound below.
+            }
         }
 
         // 2. Get history versions
@@ -539,6 +544,11 @@ impl SecretService {
                 version: entry.version,
                 created_at: entry.created_at,
             });
+        }
+
+        // If we found absolutely nothing (no current, no history), the secret does not exist
+        if versions.is_empty() {
+             return Err(SecretError::SecretNotFound { path: path.to_string() });
         }
 
         // Sort descending
