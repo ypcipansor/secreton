@@ -113,7 +113,7 @@ mod tests {
             Err(e) => panic!("Failed to setup test user: {}", e),
         }
 
-        let app = create_routes().with_state(services.clone());
+        let app = create_routes().with_state(services.clone().into());
         use std::net::SocketAddr;
         (
             TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to create test server"),

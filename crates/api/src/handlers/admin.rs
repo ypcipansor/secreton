@@ -155,7 +155,7 @@ mod tests {
         );
         services.storage.store(&entry).await.expect("Failed to store seeded user");
 
-        let app = create_routes().with_state(services);
+        let app = create_routes().with_state(services.into());
         use std::net::SocketAddr;
         TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to start test server")
     }

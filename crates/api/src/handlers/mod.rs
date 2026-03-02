@@ -29,11 +29,54 @@ use tower_http::{
 use crate::middleware::{auth::AuthMiddleware, seal::SealMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
 use crate::{ApiResponse, ApiResult};
 use axum::middleware::{self};
-use secreton_config::ApiConfig;
+use crate::config::ApiConfig;
 use crate::services::ApiServiceContainer;
+use secreton_storage::StorageBackend;
+use crate::services::{
+    audit::AuditLogger,
+    auth::AuthenticationService,
+    crypto::CryptoService,
+    secret::SecretService,
+    admin::AdminService,
+    seal::SealService,
+};
+use secreton_performance::SecretPerformanceOptimizer;
+use secreton_auth::policies::service::PolicyService;
+use secreton_auth::mfa::CombinedMfaService;
 
 /// Application state shared across handlers
-pub type AppState = Arc<ApiServiceContainer>;
+#[derive(Clone)]
+pub struct AppState {
+    pub storage: Arc<dyn StorageBackend + Send + Sync>,
+    pub crypto: Arc<CryptoService>,
+    pub seal: Arc<SealService>,
+    pub audit: Arc<AuditLogger>,
+    pub auth: Arc<AuthenticationService>,
+    pub policy: Arc<PolicyService>,
+    pub secreton: Arc<SecretService>,
+    pub admin: Arc<AdminService>,
+    pub performance: Arc<SecretPerformanceOptimizer>,
+    pub mfa: Arc<CombinedMfaService>,
+    pub config: Arc<ApiConfig>,
+}
+
+impl From<Arc<ApiServiceContainer>> for AppState {
+    fn from(container: Arc<ApiServiceContainer>) -> Self {
+        Self {
+            storage: container.storage.clone(),
+            crypto: container.crypto.clone(),
+            seal: container.seal.clone(),
+            audit: container.audit.clone(),
+            auth: container.auth.clone(),
+            policy: container.policy.clone(),
+            secreton: container.secreton.clone(),
+            admin: container.admin.clone(),
+            performance: container.performance.clone(),
+            mfa: container.mfa.clone(),
+            config: Arc::new(container.config.clone()),
+        }
+    }
+}
 
 /// Create the main application router
 pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
@@ -120,13 +163,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_root_endpoint() {
-        use secreton_config::ApiConfig as SharedApiConfig;
-        
         let mut config = ApiConfig::default();
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        let shared_config = SharedApiConfig::default();
         
         let services = Arc::new(
             ApiServiceContainer::new(&config)
@@ -134,7 +174,7 @@ mod tests {
                 .expect("Failed to create services")
         );
         
-        let app = create_router(&shared_config, services);
+        let app = create_router(&config, services.into());
         let server = TestServer::new(app.into_make_service()).unwrap();
         
         let response = server.get("/").await;
@@ -147,13 +187,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_endpoint() {
-        use secreton_config::ApiConfig as SharedApiConfig;
-
         let mut config = ApiConfig::default();
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        let shared_config = SharedApiConfig::default();
 
         let services = Arc::new(
             ApiServiceContainer::new(&config)
@@ -161,7 +198,7 @@ mod tests {
                 .expect("Failed to create services")
         );
         
-        let app = create_router(&shared_config, services);
+        let app = create_router(&config, services.into());
         let server = TestServer::new(app.into_make_service()).unwrap();
         
         let response = server.get("/api/v1/version").await;

@@ -27,10 +27,14 @@ use crate::extractors::AuthenticatedUser;
 pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
-        .route("/secrets/{*path}", get(get_secret))
-        .route("/secrets/{*path}", post(create_secret))
-        .route("/secrets/{*path}", put(update_secret))
-        .route("/secrets/{*path}", delete(delete_secret))
+        .route("/secret-versions/{*path}", get(list_secret_versions))
+        // Specific path operations (CRUD)
+        .route("/secrets/{*path}", get(get_secret)
+            .post(create_secret)
+            .put(update_secret)
+            .delete(delete_secret)
+        )
+        // Root listing operation
         .route("/secrets", get(list_secrets))
         
         // Key operations
@@ -66,6 +70,11 @@ pub fn create_routes() -> Router<AppState> {
         .route("/backup/{backup_id}", get(get_backup))
         .route("/backup/{backup_id}/restore", post(restore_backup))
         .route("/backup/{backup_id}", delete(delete_backup))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetSecretParams {
+    pub version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,7 +266,7 @@ mod tests {
         );
         services.storage.store(&user_entry).await.ok();
 
-        let app = create_routes().with_state(services);
+        let app = create_routes().with_state(services.into());
         use std::net::SocketAddr;
         let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("failed to start test server");
         (server, token)
@@ -560,9 +569,10 @@ pub async fn get_secret(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
+    Query(params): Query<GetSecretParams>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // Get secret from secreton service - now passes full user
-    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user).await
+    let secret_data: secret::SecretData = state.secreton.get_secret(&path, &user, params.version).await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => crate::ApiError::NotFound("Secret not found".to_string()),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -638,19 +648,44 @@ pub async fn update_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Get current secret to determine version
-    // Use get_secret to ensure existence and initial permission check (though put_secret also checks)
-    let current_secret = match state.secreton.get_secret(&path, &user).await {
-        Ok(secret) => secret,
-        Err(secret::SecretError::SecretNotFound { .. }) => {
-            return Err(crate::ApiError::NotFound("Secret not found".to_string()));
+    // Verify secret exists before updating using the lightweight method
+    // This avoids unnecessary decryption overhead and spurious audit logs.
+    // We check for "update" intent here.
+    match state.secreton.exists_secret(&path, &user, "write").await {
+        Ok(true) => { /* Exists, proceed with update */ },
+        Ok(false) => return Err(crate::ApiError::NotFound("Secret not found".to_string())),
+        Err(e) => {
+            match e {
+                secret::SecretError::PermissionDenied(msg) => return Err(crate::ApiError::Authorization(msg)),
+                _ => return Err(crate::ApiError::Internal(format!("Failed to verify secret existence: {}", e))),
+            }
         }
-        Err(e) => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
     };
 
     // Update secret via secreton service
     let secret_data: secret::SecretData = state.secreton.put_secret(&path, request.data, &user).await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to update secret: {}", e)))?;
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+             _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e))
+        })?;
+
+    // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
+    if secret_data.previous_version.is_none() && secret_data.version == 1 {
+        // Rollback creation. Use delete_secret_internal to preserve any pre-existing history
+        // that may not have been cleaned up during the concurrent deletion.
+        // We pass check_perms=false because this is an internal compensating action,
+        // and the user may only have "write" permission, not "delete".
+        if let Err(e) = state.secreton.delete_secret_internal(&path, &user, false, false).await {
+            // If the rollback fails, log a warning. The system is left with an accidental creation,
+            // but we still return NotFound so the client doesn't falsely think the update succeeded.
+            tracing::warn!("Failed to rollback accidentally created secret {}: {}", path, e);
+        }
+        return Err(crate::ApiError::NotFound("Secret not found (deleted during update)".to_string()));
+    }
+
+    // Use the authoritative previous version from put_secret for audit accuracy
+    let old_version = secret_data.previous_version.unwrap_or(0);
 
     let response = SecretResponse {
         path: secret_data.path,
@@ -667,17 +702,12 @@ pub async fn update_secret(
         expires_at: request.ttl.map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
     };
 
-    // Audit: SecretVersionChange - Handled by service? Service handles SecretCreation.
-    // VersionChange is specific. Let's keep it here or move to service.
-    // Service audit logic is simpler (Creation/Deletion).
-    // Let's keep handler audit for now as service doesn't differentiate update vs create easily in log event types yet.
-    // Actually service logs "SecretCreation".
-
+    // Audit: SecretVersionChange
     let _ = state
         .audit
         .log_event(SecurityEventType::SecretVersionChange {
                 secret_path: path,
-                old_version: current_secret.version,
+                old_version,
                 new_version: secret_data.version,
                 user: user.username,
             })
@@ -706,6 +736,22 @@ pub async fn delete_secret(
     });
 
     Ok(Json(ApiResponse::success(data)))
+}
+
+/// List secret versions
+pub async fn list_secret_versions(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(path): Path<String>,
+) -> ApiResult<Json<ApiResponse<Vec<secret::SecretVersionInfo>>>> {
+    // List secret versions via secreton service
+    let versions = state.secreton.list_secret_versions(&path, &user).await
+        .map_err(|e| match e {
+             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+             _ => crate::ApiError::Internal(format!("Failed to list secret versions: {}", e))
+        })?;
+
+    Ok(Json(ApiResponse::success(versions)))
 }
 
 /// List secrets

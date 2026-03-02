@@ -33,8 +33,59 @@ async fn test_database_api_endpoints() {
     use secreton_api::totp::TotpApiState;
 
     // Use MockStorageBackend for DatabaseApiState
-    let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+    let storage: Arc<dyn secreton_storage::StorageBackend + Send + Sync> = Arc::new(secreton_storage::MockStorageBackend::new());
     let database_state = DatabaseApiState::new(storage.clone()).await;
+
+    // Create remaining services for container
+    let crypto = Arc::new(secreton_api::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
+    let audit = Arc::new(secreton_api::services::audit::AuditLogger::new(storage.clone()).await.unwrap());
+    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()));
+    let policy = Arc::new(secreton_auth::policies::service::PolicyService::new());
+    let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
+    let secret = Arc::new(secreton_api::services::secret::SecretService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+        identity.clone(),
+        policy.clone(),
+        performance.clone()
+    ).await.unwrap());
+    let seal = Arc::new(secreton_api::services::seal::SealService::new(
+        storage.clone(),
+        crypto.clone(),
+        "test-secret".to_string(),
+        "iss".to_string(),
+        "aud".to_string()
+    ));
+    let admin = Arc::new(secreton_api::services::admin::AdminService::new(
+             storage.clone(),
+             auth.clone(),
+             audit.clone(),
+             performance.clone()
+        ).await.unwrap());
+
+    // Mock MFA
+    let mfa = Arc::new(secreton_auth::mfa::CombinedMfaService::new(
+        Arc::new(secreton_auth::mfa::InMemoryTotpService::new("test".to_string())),
+        Arc::new(secreton_auth::mfa::InMemorySmsService::new(secreton_auth::mfa::SmsConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(secreton_auth::mfa::EmailConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryHardwareService::new()),
+        Arc::new(secreton_auth::mfa::DefaultPushService::new_mock()),
+        Arc::new(secreton_auth::mfa::DefaultWebAuthnService::new_default()),
+        Arc::new(secreton_auth::mfa::DefaultRecoveryCodeService::new()),
+    ));
+
+    use secreton_common::{ServiceContainer, StandardServiceContainer};
+    let mut container = StandardServiceContainer::default();
+    container.register_service("storage".to_string(), storage.clone());
+    container.register_service("crypto".to_string(), crypto.clone());
+    container.register_service("audit".to_string(), audit.clone());
+    container.register_service("auth".to_string(), auth.clone());
+    container.register_service("secret".to_string(), secret.clone());
+    container.register_service("performance".to_string(), performance.clone());
+    container.register_service("seal".to_string(), seal.clone());
+    container.register_service("policy".to_string(), policy.clone());
+    container.register_service("mfa".to_string(), mfa.clone());
 
     let state = ApiState {
         kv: KVApiState::default(),
@@ -44,14 +95,9 @@ async fn test_database_api_endpoints() {
         ssh: SshApiState::default(),
         totp: TotpApiState::default(),
         config: config.clone(),
-        secreton: Arc::new(secreton_common::StandardServiceContainer::default()),
+        secreton: Arc::new(container),
         auth: auth.clone(),
-        audit: Arc::new(secreton_api::services::admin::AdminService::new(
-             storage.clone(),
-             auth.clone(),
-             Arc::new(secreton_api::services::audit::AuditLogger::new(storage.clone()).await.unwrap()),
-             Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()))
-        ).await.unwrap()),
+        audit: admin.clone(),
     };
 
     // Create router using the main factory to include middleware

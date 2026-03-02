@@ -15,6 +15,7 @@ use axum::Json;
 
 use secreton_security::{AuditLog, ComplianceProfile, PolicySet, QuotaConfig, audit};
 use secreton_storage::StorageBackend;
+use secreton_common::ServiceContainer;
 
 pub mod services;
 pub mod middleware;
@@ -589,7 +590,7 @@ async fn handle_secret_get(
     secreton: Arc<crate::services::secret::SecretService>
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
-    let secret = secreton.get_secret(path_str, &user).await
+    let secret = secreton.get_secret(path_str, &user, None).await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Wrap in ApiResponse
@@ -1176,8 +1177,24 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
     use axum::middleware;
     use tower_http::cors::{CorsLayer, Any};
 
+    // Create services map for AppState
+    let app_state = crate::handlers::AppState {
+        storage: state.secreton.get_service("storage").cloned().expect("storage service required"),
+        auth: state.auth.clone(),
+        audit: state.secreton.get_service("audit").cloned().expect("audit service required"),
+        crypto: state.secreton.get_service("crypto").cloned().expect("crypto service required"),
+        secreton: state.secreton.get_service("secret").cloned().expect("secret service required"),
+        performance: state.secreton.get_service("performance").cloned().expect("performance service required"),
+        seal: state.secreton.get_service("seal").cloned().expect("seal service required"),
+        policy: state.secreton.get_service("policy").cloned().expect("policy service required"),
+        admin: state.audit.clone(),
+        mfa: state.secreton.get_service("mfa").cloned().expect("mfa service required"),
+        config: state.config.clone(),
+    };
+
     axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
+        .nest("/api/v1/secret", crate::handlers::secret::create_routes().with_state(app_state)) // Add secret routes
         .nest("/api/v1/transit", transit::create_transit_router())
         .nest("/api/v1/database", database::create_database_router())
         .nest("/api/v1/pki", pki::create_pki_router())

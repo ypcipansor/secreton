@@ -258,7 +258,8 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // Initialize Secret Service components
-    let identity = Arc::new(InMemoryIdentityService::new());
+    use secreton_auth::IdentityService;
+    let identity: Arc<dyn IdentityService + Send + Sync> = Arc::new(InMemoryIdentityService::new());
     let policy_service = Arc::new(PolicyService::new());
     let performance = Arc::new(SecretPerformanceOptimizer::new(SecretPerformanceConfig::default()));
 
@@ -266,8 +267,8 @@ async fn main() -> anyhow::Result<()> {
         storage.clone(),
         crypto.clone(),
         audit.clone(),
-        identity,
-        policy_service,
+        identity.clone(),
+        policy_service.clone(),
         performance.clone()
     ).await?);
 
@@ -299,6 +300,30 @@ async fn main() -> anyhow::Result<()> {
     // Initialize DatabaseApiState
     let database_state = secreton_api::database::DatabaseApiState::new(storage.clone()).await;
 
+    let admin = Arc::new(secreton_api::services::admin::AdminService::new(
+        storage.clone(),
+        auth.clone(),
+        audit.clone(),
+        performance.clone(),
+    ).await.unwrap());
+
+    // Populate Service Container
+    use secreton_common::{ServiceContainer, StandardServiceContainer};
+    use secreton_storage::StorageBackend;
+    let mut container = StandardServiceContainer::default();
+    // Explicitly type the service registration to match the AppState definitions
+    container.register_service::<Arc<dyn StorageBackend + Send + Sync>>("storage".to_string(), storage.clone());
+    container.register_service::<Arc<CryptoService>>("crypto".to_string(), crypto.clone());
+    container.register_service::<Arc<SealService>>("seal".to_string(), seal.clone());
+    container.register_service::<Arc<AuditLogger>>("audit".to_string(), audit.clone());
+    container.register_service::<Arc<AuthenticationService>>("auth".to_string(), auth.clone());
+    container.register_service::<Arc<PolicyService>>("policy".to_string(), policy_service.clone());
+    container.register_service::<Arc<secreton_auth::mfa::CombinedMfaService>>("mfa".to_string(), mfa.clone());
+    container.register_service::<Arc<SecretService>>("secret".to_string(), secreton.clone());
+    container.register_service::<Arc<secreton_api::services::admin::AdminService>>("admin".to_string(), admin.clone());
+    container.register_service::<Arc<SecretPerformanceOptimizer>>("performance".to_string(), performance.clone());
+    // container.register_service("identity".to_string(), identity.clone()); // Assuming identity not strictly needed by handlers yet, but good practice
+
     // Use default in-memory states for now, matching ApiState::new implementation
     let api_state = ApiState::new(
         TransitApiState::default(),
@@ -306,14 +331,9 @@ async fn main() -> anyhow::Result<()> {
         database_state,
         Some(pki_service),
         Arc::new(api_config.clone()),
-        Arc::new(secreton_common::StandardServiceContainer::default()), // Fixed: No .container field
+        Arc::new(container), // Fixed: Pass populated container
         auth.clone(),
-        Arc::new(secreton_api::services::admin::AdminService::new(
-            storage.clone(),
-            auth.clone(),
-            audit.clone(),
-            performance.clone(),
-        ).await.unwrap()), // Fixed: .await.unwrap() for async new
+        admin.clone(),
         OptimizationLevel::default(),
     ).await?;
 
