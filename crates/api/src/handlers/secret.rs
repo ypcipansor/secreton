@@ -649,8 +649,9 @@ pub async fn update_secret(
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // Verify secret exists before updating using the lightweight method
-    // This avoids unnecessary decryption overhead and spurious audit logs
-    match state.secreton.exists_secret(&path, &user).await {
+    // This avoids unnecessary decryption overhead and spurious audit logs.
+    // We check for "update" intent here.
+    match state.secreton.exists_secret(&path, &user, "write").await {
         Ok(true) => { /* Exists, proceed with update */ },
         Ok(false) => return Err(crate::ApiError::NotFound("Secret not found".to_string())),
         Err(e) => {
@@ -668,6 +669,13 @@ pub async fn update_secret(
              secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
              _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e))
         })?;
+
+    // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
+    if secret_data.previous_version.is_none() && secret_data.version == 1 {
+        // Rollback creation
+        let _ = state.secreton.delete_secret(&path, &user).await;
+        return Err(crate::ApiError::NotFound("Secret not found (deleted during update)".to_string()));
+    }
 
     // Use the authoritative previous version from put_secret for audit accuracy
     let old_version = secret_data.previous_version.unwrap_or(0);

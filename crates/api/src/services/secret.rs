@@ -154,8 +154,8 @@ impl SecretService {
 
 
     /// Check if a secret exists without decrypting or logging audit access
-    pub async fn exists_secret(&self, path: &str, user: &secreton_auth::User) -> Result<bool, SecretError> {
-        self.check_permission(user, path, "read").await?;
+    pub async fn exists_secret(&self, path: &str, user: &secreton_auth::User, action: &str) -> Result<bool, SecretError> {
+        self.check_permission(user, path, action).await?;
 
         let entry = self.storage.get_by_path(path).await
             .map_err(SecretError::Storage)?;
