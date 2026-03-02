@@ -673,7 +673,9 @@ pub async fn update_secret(
     // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
     if secret_data.previous_version.is_none() && secret_data.version == 1 {
         // Rollback creation
-        let _ = state.secreton.delete_secret(&path, &user).await;
+        if let Err(e) = state.secreton.delete_secret(&path, &user).await {
+            tracing::error!("TOCTOU rollback failed for path '{}': {}. Orphaned secret may exist.", path, e);
+        }
         return Err(crate::ApiError::NotFound("Secret not found (deleted during update)".to_string()));
     }
 
