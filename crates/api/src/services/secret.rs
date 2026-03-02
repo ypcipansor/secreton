@@ -184,6 +184,21 @@ impl SecretService {
         let mut encrypted_entry = self.storage.get_by_path(path).await
             .map_err(SecretError::Storage)?;
 
+        // Always check ownership against the CURRENT secret if it exists.
+        // This prevents access to orphaned history entries by previous owners
+        // or access if the secret was deleted.
+        let user_uuid = Self::get_user_uuid(user);
+
+        if let Some(current_entry) = &encrypted_entry {
+            if current_entry.owner_id != user_uuid {
+                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+            }
+        } else {
+             // If the current secret doesn't exist, we should not allow fetching history.
+             // This prevents access to orphaned history entries from failed deletions.
+             return Err(SecretError::SecretNotFound { path: path.to_string() });
+        }
+
         // If specific version requested
         if let Some(v) = version {
             // Check if we have a current entry and if it matches the version
@@ -194,19 +209,15 @@ impl SecretService {
                 let history_path = format!("sys/history/{}::v{}", path, v);
                 encrypted_entry = self.storage.get_by_path(&history_path).await
                     .map_err(SecretError::Storage)?;
+
+                // Re-verify that the history entry exists
+                if encrypted_entry.is_none() {
+                     return Err(SecretError::SecretNotFound { path: format!("{} (version {})", path, v) });
+                }
             }
         }
 
-        let encrypted_entry = encrypted_entry
-            .ok_or_else(|| SecretError::SecretNotFound { path: path.to_string() })?;
-
-        // Strict Ownership Check
-        // "User satu sama lain tidak dapat mengakses secret user yang lain... user root dan admin tidak bisa melihat"
-        let user_uuid = Self::get_user_uuid(user);
-        if encrypted_entry.owner_id != user_uuid {
-             // Deny access even if RBAC allowed it (unless it's a shared secret system, but prompt implies strict isolation)
-             return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
-        }
+        let encrypted_entry = encrypted_entry.unwrap();
 
         // Try to get decrypted data from cache first (only if fetching current version implicitly)
         // To avoid race conditions where cache has newer data than our DB read, we only use cache if NO specific version was requested.
