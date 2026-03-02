@@ -493,7 +493,7 @@ impl SecretService {
         path: &str,
         user: &secreton_auth::User,
     ) -> Result<Vec<SecretVersionInfo>, SecretError> {
-        self.check_permission(user, path, "read").await?;
+        self.check_permission(user, path, "list_versions").await?;
 
         let user_uuid = Self::get_user_uuid(user);
         let mut versions = Vec::new();
