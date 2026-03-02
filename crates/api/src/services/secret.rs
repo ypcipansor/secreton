@@ -317,9 +317,17 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
 
-        // Validate path for reserved delimiter
-        if path.contains("::v") {
-            return Err(SecretError::InvalidOperation("Secret path cannot contain the reserved delimiter '::v'".to_string()));
+        // Validate path for reserved delimiter. We only block paths that end with ::v followed by digits
+        // or paths that attempt to write directly into the sys/history/ namespace.
+        if path.starts_with("sys/history/") {
+            return Err(SecretError::InvalidOperation("Cannot write directly to reserved sys/history/ namespace".to_string()));
+        }
+
+        if let Some(idx) = path.rfind("::v") {
+            let suffix = &path[idx + 3..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return Err(SecretError::InvalidOperation("Secret path cannot end with '::v' followed by a version number".to_string()));
+            }
         }
 
         // Serialize data to JSON for storage
