@@ -153,6 +153,25 @@ impl SecretService {
     }
 
 
+    /// Check if a secret exists without decrypting or logging audit access
+    pub async fn exists_secret(&self, path: &str, user: &secreton_auth::User) -> Result<bool, SecretError> {
+        self.check_permission(user, path, "read").await?;
+
+        let entry = self.storage.get_by_path(path).await
+            .map_err(SecretError::Storage)?;
+
+        if let Some(encrypted_entry) = entry {
+            // Strict Ownership Check
+            let user_uuid = Self::get_user_uuid(user);
+            if encrypted_entry.owner_id != user_uuid {
+                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+            }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Get secret by path
     pub async fn get_secret(&self, path: &str, user: &secreton_auth::User, version: Option<u32>) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
@@ -487,8 +506,6 @@ impl SecretService {
                     version: current.version,
                     created_at: current.created_at,
                 });
-            } else {
-                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
             }
         }
 

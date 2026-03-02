@@ -648,20 +648,16 @@ pub async fn update_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Verify secret exists before updating (as requested in PR review)
-    // We only read version info to minimize overhead if possible, but get_secret is the standard way.
-    // If we wanted to optimize, we'd need a head_secret or exists_secret method.
-    // For now, we perform the read check to ensure the resource exists (404 vs 200).
-    let current_version = match state.secreton.get_secret(&path, &user, None).await {
-        Ok(s) => s.version,
-        Err(secret::SecretError::SecretNotFound { .. }) => {
-            return Err(crate::ApiError::NotFound("Secret not found".to_string()));
-        }
+    // Verify secret exists before updating using the lightweight method
+    // This avoids unnecessary decryption overhead and spurious audit logs
+    match state.secreton.exists_secret(&path, &user).await {
+        Ok(true) => { /* Exists, proceed with update */ },
+        Ok(false) => return Err(crate::ApiError::NotFound("Secret not found".to_string())),
         Err(e) => {
-             match e {
-                 secret::SecretError::PermissionDenied(msg) => return Err(crate::ApiError::Authorization(msg)),
-                 _ => return Err(crate::ApiError::Internal(format!("Failed to retrieve current secret: {}", e))),
-             }
+            match e {
+                secret::SecretError::PermissionDenied(msg) => return Err(crate::ApiError::Authorization(msg)),
+                _ => return Err(crate::ApiError::Internal(format!("Failed to verify secret existence: {}", e))),
+            }
         }
     };
 
