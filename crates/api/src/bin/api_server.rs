@@ -309,17 +309,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Populate Service Container
     use secreton_common::{ServiceContainer, StandardServiceContainer};
+    use secreton_storage::StorageBackend;
     let mut container = StandardServiceContainer::default();
-    container.register_service("storage".to_string(), storage.clone());
-    container.register_service("crypto".to_string(), crypto.clone());
-    container.register_service("seal".to_string(), seal.clone());
-    container.register_service("audit".to_string(), audit.clone());
-    container.register_service("auth".to_string(), auth.clone());
-    container.register_service("policy".to_string(), policy_service.clone());
-    container.register_service("mfa".to_string(), mfa.clone());
-    container.register_service("secret".to_string(), secreton.clone());
-    container.register_service("admin".to_string(), admin.clone());
-    container.register_service("performance".to_string(), performance.clone());
+    // Explicitly type the service registration to match the AppState definitions
+    container.register_service::<Arc<dyn StorageBackend + Send + Sync>>("storage".to_string(), storage.clone());
+    container.register_service::<Arc<CryptoService>>("crypto".to_string(), crypto.clone());
+    container.register_service::<Arc<SealService>>("seal".to_string(), seal.clone());
+    container.register_service::<Arc<AuditLogger>>("audit".to_string(), audit.clone());
+    container.register_service::<Arc<AuthenticationService>>("auth".to_string(), auth.clone());
+    container.register_service::<Arc<PolicyService>>("policy".to_string(), policy_service.clone());
+    container.register_service::<Arc<secreton_auth::mfa::CombinedMfaService>>("mfa".to_string(), mfa.clone());
+    container.register_service::<Arc<SecretService>>("secret".to_string(), secreton.clone());
+    container.register_service::<Arc<secreton_api::services::admin::AdminService>>("admin".to_string(), admin.clone());
+    container.register_service::<Arc<SecretPerformanceOptimizer>>("performance".to_string(), performance.clone());
     // container.register_service("identity".to_string(), identity.clone()); // Assuming identity not strictly needed by handlers yet, but good practice
 
     // Use default in-memory states for now, matching ApiState::new implementation
