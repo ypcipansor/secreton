@@ -1,8 +1,8 @@
+use crate::api::{get, post};
+use crate::components::{Button, Card, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
-use crate::components::{Button, Card, Input};
-use crate::api::{post, get};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GenerateCertRequest {
@@ -57,7 +57,7 @@ pub fn PkiPage() -> impl IntoView {
                 Ok(pem) => {
                     set_ca_pem.set(pem);
                     set_has_ca.set(true);
-                },
+                }
                 Err(_) => {
                     set_has_ca.set(false);
                 }
@@ -83,7 +83,7 @@ pub fn PkiPage() -> impl IntoView {
                 Ok(res) => {
                     set_ca_pem.set(res.certificate);
                     set_has_ca.set(true);
-                },
+                }
                 Err(e) => set_ca_error.set(Some(format!("Error: {}", e))),
             }
             set_ca_loading.set(false);

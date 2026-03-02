@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::sync::Mutex;
 #[cfg(feature = "postgres")]
-use tokio_postgres::{Config, NoTls};
-#[cfg(feature = "postgres")]
 use tokio_postgres::types::ToSql;
+#[cfg(feature = "postgres")]
+use tokio_postgres::{Config, NoTls};
 
 /// Database secret engine for dynamic credentials
 pub struct DatabaseEngine {
@@ -64,12 +64,19 @@ impl DatabaseEngine {
                     .await
             }
             #[cfg(not(feature = "postgres"))]
-            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration("PostgreSQL feature disabled".to_string())),
+            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
+                "PostgreSQL feature disabled".to_string(),
+            )),
 
             #[cfg(feature = "mysql")]
-            DatabaseType::MySQL => self.generate_mysql_credentials(role_name, &role.sql, role.default_ttl).await,
+            DatabaseType::MySQL => {
+                self.generate_mysql_credentials(role_name, &role.sql, role.default_ttl)
+                    .await
+            }
             #[cfg(not(feature = "mysql"))]
-            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration("MySQL feature disabled".to_string())),
+            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
+                "MySQL feature disabled".to_string(),
+            )),
 
             DatabaseType::MongoDB => {
                 self.generate_mongodb_credentials(role_name, &role.sql)
@@ -135,38 +142,51 @@ impl DatabaseEngine {
         })?;
 
         // Manual overrides if provided in config
-        if self.config.username.is_some() || self.config.password.is_some() || self.config.database_name.is_some() {
-             let mut builder = mysql_async::OptsBuilder::from_opts(opts);
-             if let Some(username) = &self.config.username {
-                 builder = builder.user(Some(username));
-             }
-             if let Some(password) = &self.config.password {
-                 builder = builder.pass(Some(password));
-             }
-             if let Some(dbname) = &self.config.database_name {
-                 builder = builder.db_name(Some(dbname));
-             }
-             // Apply pool limits
-             if self.config.max_open_connections.is_some() || self.config.max_idle_connections.is_some() {
-                 let min = self.config.max_idle_connections.unwrap_or(5) as usize;
-                 let max = self.config.max_open_connections.unwrap_or(10) as usize;
-                 let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
-                     DatabaseError::InvalidConfiguration("Invalid pool constraints: min > max".to_string())
-                 })?;
-                 builder = builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
-             }
+        if self.config.username.is_some()
+            || self.config.password.is_some()
+            || self.config.database_name.is_some()
+        {
+            let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+            if let Some(username) = &self.config.username {
+                builder = builder.user(Some(username));
+            }
+            if let Some(password) = &self.config.password {
+                builder = builder.pass(Some(password));
+            }
+            if let Some(dbname) = &self.config.database_name {
+                builder = builder.db_name(Some(dbname));
+            }
+            // Apply pool limits
+            if self.config.max_open_connections.is_some()
+                || self.config.max_idle_connections.is_some()
+            {
+                let min = self.config.max_idle_connections.unwrap_or(5) as usize;
+                let max = self.config.max_open_connections.unwrap_or(10) as usize;
+                let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
+                    DatabaseError::InvalidConfiguration(
+                        "Invalid pool constraints: min > max".to_string(),
+                    )
+                })?;
+                builder = builder
+                    .pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+            }
 
-             opts = builder.into();
-        } else if self.config.max_open_connections.is_some() || self.config.max_idle_connections.is_some() {
-             // Even if no overrides, we might need to apply pool options to the base opts
-             let mut builder = mysql_async::OptsBuilder::from_opts(opts);
-             let min = self.config.max_idle_connections.unwrap_or(5) as usize;
-             let max = self.config.max_open_connections.unwrap_or(10) as usize;
-             let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
-                 DatabaseError::InvalidConfiguration("Invalid pool constraints: min > max".to_string())
-             })?;
-             builder = builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
-             opts = builder.into();
+            opts = builder.into();
+        } else if self.config.max_open_connections.is_some()
+            || self.config.max_idle_connections.is_some()
+        {
+            // Even if no overrides, we might need to apply pool options to the base opts
+            let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+            let min = self.config.max_idle_connections.unwrap_or(5) as usize;
+            let max = self.config.max_open_connections.unwrap_or(10) as usize;
+            let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
+                DatabaseError::InvalidConfiguration(
+                    "Invalid pool constraints: min > max".to_string(),
+                )
+            })?;
+            builder =
+                builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+            opts = builder.into();
         }
 
         let pool = MySqlPool::new(opts);
@@ -293,7 +313,7 @@ impl DatabaseEngine {
         use mysql_async::prelude::Queryable;
 
         conn.query_drop(create_user_sql).await.map_err(|e| {
-             DatabaseError::QueryFailed(format!("Failed to create MySQL user: {}", e))
+            DatabaseError::QueryFailed(format!("Failed to create MySQL user: {}", e))
         })?;
 
         // Execute role SQL statements
@@ -310,7 +330,9 @@ impl DatabaseEngine {
 
             if let Err(e) = conn.query_drop(stmt).await {
                 // Attempt cleanup
-                let _ = conn.query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+                let _ = conn
+                    .query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username))
+                    .await;
                 return Err(DatabaseError::QueryFailed(format!(
                     "Failed to execute role statement '{}': {}",
                     stmt, e
@@ -466,7 +488,8 @@ mod tests {
         let config = DatabaseConfig::default();
         let engine = DatabaseEngine::new(config);
 
-        let sql = "CREATE ROLE \"{{name}}\" WITH PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';";
+        let sql =
+            "CREATE ROLE \"{{name}}\" WITH PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';";
         let username = "user123";
         let password = "secretPassWord";
         let expiration = "2025-01-01T00:00:00Z";

@@ -3,11 +3,11 @@
 //! High-performance, secure cryptographic primitives and protocols
 //! with comprehensive RustCrypto integration and transit engine support.
 
+use pkcs8::EncodePrivateKey;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use pkcs8::EncodePrivateKey;
 
 pub mod advanced_key_manager;
 pub mod authenticated_key_operations;
@@ -176,26 +176,36 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
     match algorithm {
         AlgorithmId::Rsa2048 | AlgorithmId::Rsa4096 => {
             let bit_size = params.key_size * 8;
-            let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bit_size)
-                .map_err(|e| CryptoError::KeyGenerationFailed(format!("RSA generation failed: {}", e)))?;
+            let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bit_size).map_err(|e| {
+                CryptoError::KeyGenerationFailed(format!("RSA generation failed: {}", e))
+            })?;
 
-            let doc = private_key.to_pkcs8_der()
-                .map_err(|e| CryptoError::KeyGenerationFailed(format!("RSA PKCS8 encoding failed: {}", e)))?;
+            let doc = private_key.to_pkcs8_der().map_err(|e| {
+                CryptoError::KeyGenerationFailed(format!("RSA PKCS8 encoding failed: {}", e))
+            })?;
 
             Ok(doc.as_bytes().to_vec())
-        },
+        }
         AlgorithmId::EcdsaP256 => {
             let secret_key = p256::SecretKey::random(&mut OsRng);
-            let doc = secret_key.to_pkcs8_der()
-                .map_err(|e| CryptoError::KeyGenerationFailed(format!("ECDSA P-256 PKCS8 encoding failed: {}", e)))?;
+            let doc = secret_key.to_pkcs8_der().map_err(|e| {
+                CryptoError::KeyGenerationFailed(format!(
+                    "ECDSA P-256 PKCS8 encoding failed: {}",
+                    e
+                ))
+            })?;
             Ok(doc.as_bytes().to_vec())
-        },
+        }
         AlgorithmId::EcdsaP384 => {
             let secret_key = p384::SecretKey::random(&mut OsRng);
-            let doc = secret_key.to_pkcs8_der()
-                .map_err(|e| CryptoError::KeyGenerationFailed(format!("ECDSA P-384 PKCS8 encoding failed: {}", e)))?;
+            let doc = secret_key.to_pkcs8_der().map_err(|e| {
+                CryptoError::KeyGenerationFailed(format!(
+                    "ECDSA P-384 PKCS8 encoding failed: {}",
+                    e
+                ))
+            })?;
             Ok(doc.as_bytes().to_vec())
-        },
+        }
         AlgorithmId::Ed25519 => {
             // ed25519-dalek might not have 'rand' or 'pkcs8' feature enabled in workspace
             // Use explicit random generation and from_bytes
@@ -205,7 +215,7 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
             // We return the raw 32-byte seed as the private key for Ed25519.
             // This avoids dependency on the 'pkcs8' feature of ed25519-dalek which might be missing.
             Ok(seed.to_vec())
-        },
+        }
         _ => generate_random_bytes(params.key_size),
     }
 }

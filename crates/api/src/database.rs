@@ -5,16 +5,16 @@ use axum::{
     extract::{Extension, Path},
     http::StatusCode,
     response::Json,
-    routing::{get, post, delete},
+    routing::{delete, get, post},
 };
 use chrono::Utc;
-use secreton_secrets::{DatabaseEngine, SecretEngine, EngineConfig, DatabaseConfig, EngineType};
+use secreton_secrets::{DatabaseConfig, DatabaseEngine, EngineConfig, EngineType, SecretEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::ApiResponse;
 
@@ -120,7 +120,9 @@ pub async fn configure_database(
 
     // Construct EngineConfig
     let db_config = DatabaseConfig {
-        plugin_name: request.plugin_name.unwrap_or_else(|| "database".to_string()),
+        plugin_name: request
+            .plugin_name
+            .unwrap_or_else(|| "database".to_string()),
         connection_url: request.connection_url,
         allowed_roles: request.allowed_roles.unwrap_or_default(),
         username: request.username,
@@ -169,9 +171,7 @@ pub async fn list_roles(
 ) -> Result<Json<ApiResponse<ListRolesResponse>>, StatusCode> {
     let engine = state.database.engine.read().await;
     match engine.list("roles").await {
-        Ok(roles) => {
-            Ok(Json(ApiResponse::success(ListRolesResponse { roles })))
-        }
+        Ok(roles) => Ok(Json(ApiResponse::success(ListRolesResponse { roles }))),
         Err(e) => {
             error!("Failed to list roles: {:?}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -191,10 +191,16 @@ pub async fn create_role(
     let mut data = HashMap::new();
     data.insert("sql".to_string(), Value::String(request.sql));
     if let Some(ttl) = request.max_ttl {
-        data.insert("max_ttl".to_string(), Value::Number(serde_json::Number::from(ttl)));
+        data.insert(
+            "max_ttl".to_string(),
+            Value::Number(serde_json::Number::from(ttl)),
+        );
     }
     if let Some(ttl) = request.default_ttl {
-        data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(ttl)));
+        data.insert(
+            "default_ttl".to_string(),
+            Value::Number(serde_json::Number::from(ttl)),
+        );
     }
 
     match engine.write(&format!("roles/{}", name), data).await {
@@ -223,8 +229,18 @@ pub async fn get_credentials(
     match engine.read(&format!("creds/{}", name)).await {
         Ok(Some(secret)) => {
             // Extract username/password from secret.data
-            let username = secret.data.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let password = secret.data.get("password").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let username = secret
+                .data
+                .get("username")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let password = secret
+                .data
+                .get("password")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             Ok(Json(ApiResponse::success(CredsResponse {
                 username,
@@ -238,7 +254,10 @@ pub async fn get_credentials(
             Err(StatusCode::NOT_FOUND)
         }
         Err(e) => {
-            error!("Failed to generate credentials for role '{}': {:?}", name, e);
+            error!(
+                "Failed to generate credentials for role '{}': {:?}",
+                name, e
+            );
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
@@ -252,13 +271,17 @@ pub async fn list_leases(
     let engine = state.database.engine.read().await;
 
     // We use the new public method on DatabaseEngine
-    let leases = engine.list_leases().into_iter().map(|l| LeaseResponse {
-        lease_id: l.lease_id,
-        username: l.username,
-        role: l.role,
-        created_at: l.created_at,
-        lease_duration: l.lease_duration,
-    }).collect();
+    let leases = engine
+        .list_leases()
+        .into_iter()
+        .map(|l| LeaseResponse {
+            lease_id: l.lease_id,
+            username: l.username,
+            role: l.role,
+            created_at: l.created_at,
+            lease_duration: l.lease_duration,
+        })
+        .collect();
 
     Ok(Json(ApiResponse::success(leases)))
 }

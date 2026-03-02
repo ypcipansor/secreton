@@ -10,10 +10,13 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 // Import the actual transit engine from the main crypto crate
-use secreton_crypto::transit::{KeyType, TransitEngine, keys::{KeyOptions, KeyInfo}, SignatureAlgorithm, KeyUsage};
+use secreton_crypto::transit::{
+    KeyType, KeyUsage, SignatureAlgorithm, TransitEngine,
+    keys::{KeyInfo, KeyOptions},
+};
 
 // Import ApiState from the parent module
-use crate::{ApiState, ApiResponse};
+use crate::{ApiResponse, ApiState};
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -102,7 +105,9 @@ pub fn create_transit_router() -> Router<()> {
         .route("/verify/{key_name}", post(verify_data))
 }
 
-pub async fn list_keys(Extension(state): Extension<ApiState>) -> Json<ApiResponse<ListKeysResponse>> {
+pub async fn list_keys(
+    Extension(state): Extension<ApiState>,
+) -> Json<ApiResponse<ListKeysResponse>> {
     let keys = state.transit.engine.list_keys().await;
     Json(ApiResponse::success(ListKeysResponse { keys }))
 }
@@ -344,7 +349,7 @@ pub async fn verify_data(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secreton_crypto::transit::{KeyType, TransitEngine, keys::KeyOptions, SignatureAlgorithm};
+    use secreton_crypto::transit::{KeyType, SignatureAlgorithm, TransitEngine, keys::KeyOptions};
 
     #[tokio::test]
     async fn test_transit_engine_integration() {
@@ -367,12 +372,7 @@ mod tests {
         // 2. Sign Data
         let data = b"Hello World";
         let signature = engine
-            .sign(
-                &key_name,
-                data,
-                Some(SignatureAlgorithm::Ed25519),
-                None,
-            )
+            .sign(&key_name, data, Some(SignatureAlgorithm::Ed25519), None)
             .await
             .expect("Failed to sign data");
 

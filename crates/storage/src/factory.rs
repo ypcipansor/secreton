@@ -338,96 +338,105 @@ impl StorageFactory {
                 let backend = MongoDBStorage::new(mongodb_config).await?;
                 Ok(Arc::new(backend))
             }
-              StorageBackendType::Aerospike => {
-                  let aerospike_config = config.aerospike_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "Aerospike configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = AerospikeStorage::new(aerospike_config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::AliCloudOSS => {
-                  let config = config.alicloud_oss_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "AliCloud OSS configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = AliCloudOSSStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::CouchDB => {
-                  let config = config.couchdb_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "CouchDB configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = CouchDBStorage::new(config).await?;
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::FoundationDB => {
-                  let config = config.foundationdb_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "FoundationDB configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = FoundationDBStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::Manta => {
-                  let config = config.manta_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "Manta configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = MantaStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::MSSQL => {
-                  let config = config.mssql_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "MSSQL configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = MSSQLStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::OCI => {
-                  let config = config.oci_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "OCI configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = OCIStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::Spanner => {
-                  let config = config.spanner_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "Spanner configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = SpannerStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::Swift => {
-                  let config = config.swift_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "Swift configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = SwiftStorage::new(config);
-                  Ok(Arc::new(backend))
-              }
-              StorageBackendType::ZooKeeper => {
-                  let config = config.zookeeper_config.ok_or_else(|| {
-                      StorageError::ConfigurationError {
-                          message: "ZooKeeper configuration is required".to_string(),
-                      }
-                  })?;
-                  let backend = ZooKeeperStorage::new(config).await?;
-                  Ok(Arc::new(backend))
-              }
+            StorageBackendType::Aerospike => {
+                let aerospike_config =
+                    config
+                        .aerospike_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Aerospike configuration is required".to_string(),
+                        })?;
+                let backend = AerospikeStorage::new(aerospike_config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::AliCloudOSS => {
+                let config =
+                    config
+                        .alicloud_oss_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "AliCloud OSS configuration is required".to_string(),
+                        })?;
+                let backend = AliCloudOSSStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::CouchDB => {
+                let config =
+                    config
+                        .couchdb_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "CouchDB configuration is required".to_string(),
+                        })?;
+                let backend = CouchDBStorage::new(config).await?;
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::FoundationDB => {
+                let config =
+                    config
+                        .foundationdb_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "FoundationDB configuration is required".to_string(),
+                        })?;
+                let backend = FoundationDBStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::Manta => {
+                let config =
+                    config
+                        .manta_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Manta configuration is required".to_string(),
+                        })?;
+                let backend = MantaStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::MSSQL => {
+                let config =
+                    config
+                        .mssql_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "MSSQL configuration is required".to_string(),
+                        })?;
+                let backend = MSSQLStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::OCI => {
+                let config = config
+                    .oci_config
+                    .ok_or_else(|| StorageError::ConfigurationError {
+                        message: "OCI configuration is required".to_string(),
+                    })?;
+                let backend = OCIStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::Spanner => {
+                let config =
+                    config
+                        .spanner_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Spanner configuration is required".to_string(),
+                        })?;
+                let backend = SpannerStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::Swift => {
+                let config =
+                    config
+                        .swift_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "Swift configuration is required".to_string(),
+                        })?;
+                let backend = SwiftStorage::new(config);
+                Ok(Arc::new(backend))
+            }
+            StorageBackendType::ZooKeeper => {
+                let config =
+                    config
+                        .zookeeper_config
+                        .ok_or_else(|| StorageError::ConfigurationError {
+                            message: "ZooKeeper configuration is required".to_string(),
+                        })?;
+                let backend = ZooKeeperStorage::new(config).await?;
+                Ok(Arc::new(backend))
+            }
         }
     }
 

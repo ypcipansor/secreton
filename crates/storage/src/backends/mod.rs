@@ -51,13 +51,13 @@ pub use s3::{S3Storage, S3StorageConfig};
 // pub use gcs::{GcsConfig, GoogleCloudStorage};
 
 // Export additional backends
-pub use aerospike::{AerospikeStorage, AerospikeConfig};
-pub use alicloud_oss::{AliCloudOSSStorage, AliCloudOSSConfig};
-pub use couchdb::{CouchDBStorage, CouchDBConfig};
-pub use foundationdb::{FoundationDBStorage, FoundationDBConfig};
-pub use manta::{MantaStorage, MantaConfig};
-pub use mssql::{MSSQLStorage, MSSQLConfig};
-pub use oci::{OCIStorage, OCIConfig};
-pub use spanner::{SpannerStorage, SpannerConfig};
-pub use swift::{SwiftStorage, SwiftConfig};
-pub use zookeeper::{ZooKeeperStorage, ZooKeeperConfig};
+pub use aerospike::{AerospikeConfig, AerospikeStorage};
+pub use alicloud_oss::{AliCloudOSSConfig, AliCloudOSSStorage};
+pub use couchdb::{CouchDBConfig, CouchDBStorage};
+pub use foundationdb::{FoundationDBConfig, FoundationDBStorage};
+pub use manta::{MantaConfig, MantaStorage};
+pub use mssql::{MSSQLConfig, MSSQLStorage};
+pub use oci::{OCIConfig, OCIStorage};
+pub use spanner::{SpannerConfig, SpannerStorage};
+pub use swift::{SwiftConfig, SwiftStorage};
+pub use zookeeper::{ZooKeeperConfig, ZooKeeperStorage};

@@ -180,7 +180,8 @@ impl Token {
         if let Some(max_ttl) = max_ttl {
             let max_expiry = self.creation_time + max_ttl;
             if let Some(current_expiry) = self.expiry_time
-                && current_expiry > max_expiry {
+                && current_expiry > max_expiry
+            {
                 self.expiry_time = Some(max_expiry);
             }
         }

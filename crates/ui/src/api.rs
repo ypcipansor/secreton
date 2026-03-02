@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use gloo_storage::{LocalStorage, Storage};
 use reqwest::{Client, Method, StatusCode};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 const API_BASE_URL: &str = "/api/v1";
 
@@ -35,11 +35,7 @@ pub struct ApiResponse<T> {
     pub timestamp: Option<String>,
 }
 
-pub async fn request<T, B>(
-    method: Method,
-    path: &str,
-    body: Option<B>,
-) -> Result<T, ApiError>
+pub async fn request<T, B>(method: Method, path: &str, body: Option<B>) -> Result<T, ApiError>
 where
     T: for<'de> Deserialize<'de>,
     B: Serialize,
@@ -47,7 +43,8 @@ where
     let client = Client::new();
     let url = format!("{}{}", API_BASE_URL, path);
 
-    let mut builder = client.request(method, &url)
+    let mut builder = client
+        .request(method, &url)
         .header("Content-Type", "application/json");
 
     if let Ok(token) = LocalStorage::get::<String>("secreton_token") {
@@ -82,12 +79,15 @@ where
                         // If T is (), return it. Hacky way to check?
                         // Actually, if T is deserializable from Null/None, we can try that.
                         // But usually we expect data.
-                        serde_json::from_value(serde_json::Value::Null)
-                            .map_err(|_| ApiError::ServerError("No data in successful response".to_string()))
+                        serde_json::from_value(serde_json::Value::Null).map_err(|_| {
+                            ApiError::ServerError("No data in successful response".to_string())
+                        })
                     }
                 }
             } else {
-                let msg = api_response.error.unwrap_or_else(|| "Unknown API error".to_string());
+                let msg = api_response
+                    .error
+                    .unwrap_or_else(|| "Unknown API error".to_string());
                 match status {
                     s if s == StatusCode::FORBIDDEN => Err(ApiError::Forbidden(msg)),
                     s if s == StatusCode::NOT_FOUND => Err(ApiError::NotFound(msg)),
@@ -95,23 +95,27 @@ where
                     _ => Err(ApiError::ClientError(msg)),
                 }
             }
-        },
+        }
         Err(_e) => {
             // Fallback: If parsing ApiResponse failed, maybe it's a raw error or legacy endpoint?
             // Or maybe the T structure didn't match.
             // Check if status implies error
             if !status.is_success() {
-                 match status {
+                match status {
                     StatusCode::FORBIDDEN => Err(ApiError::Forbidden("Access denied".to_string())),
-                    StatusCode::NOT_FOUND => Err(ApiError::NotFound("Resource not found".to_string())),
-                    _ => Err(ApiError::ServerError(format!("Request failed with status {}: {}", status, text))),
+                    StatusCode::NOT_FOUND => {
+                        Err(ApiError::NotFound("Resource not found".to_string()))
+                    }
+                    _ => Err(ApiError::ServerError(format!(
+                        "Request failed with status {}: {}",
+                        status, text
+                    ))),
                 }
             } else {
                 // It was success 200 OK but failed to parse ApiResponse wrapper.
                 // Maybe it returned raw T?
-                 serde_json::from_str::<T>(&text).map_err(|de| {
-                    ApiError::Deserialization(format!("{} (Raw: {})", de, text))
-                 })
+                serde_json::from_str::<T>(&text)
+                    .map_err(|de| ApiError::Deserialization(format!("{} (Raw: {})", de, text)))
             }
         }
     }

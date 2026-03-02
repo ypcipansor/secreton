@@ -1,8 +1,8 @@
-use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
-use gloo_storage::{LocalStorage, Storage};
 use crate::api;
+use gloo_storage::{LocalStorage, Storage};
+use leptos::prelude::*;
 use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -53,22 +53,29 @@ pub fn provide_auth() {
                 }
 
                 // Call /auth/verify endpoint
-                match api::post::<UserInfo, _>("/auth/verify", VerifyRequest { token: token.clone() }).await {
+                match api::post::<UserInfo, _>(
+                    "/auth/verify",
+                    VerifyRequest {
+                        token: token.clone(),
+                    },
+                )
+                .await
+                {
                     Ok(user) => {
-                         state.update(|s| {
+                        state.update(|s| {
                             s.user = Some(user);
                             s.token = Some(token);
                             s.loading = false;
                         });
-                    },
+                    }
                     Err(_) => {
-                         // Token invalid or network error
-                         LocalStorage::delete("secreton_token");
-                         state.update(|s| {
+                        // Token invalid or network error
+                        LocalStorage::delete("secreton_token");
+                        state.update(|s| {
                             s.user = None;
                             s.token = None;
                             s.loading = false;
-                         });
+                        });
                     }
                 }
             } else {
@@ -79,7 +86,9 @@ pub fn provide_auth() {
 }
 
 pub fn use_auth() -> RwSignal<AuthState> {
-    use_context::<AuthContext>().expect("AuthContext not found").0
+    use_context::<AuthContext>()
+        .expect("AuthContext not found")
+        .0
 }
 
 pub fn logout() {

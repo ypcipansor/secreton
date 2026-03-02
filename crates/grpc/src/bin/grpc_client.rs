@@ -1,4 +1,3 @@
-
 use secreton_grpc::secreton::v1::secret_service_client::SecretServiceClient;
 use secreton_grpc::secreton::v1::{GetSecretRequest, PutSecretRequest};
 use tonic::metadata::MetadataValue;
@@ -12,10 +11,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token: MetadataValue<_> = "Bearer admin-token".parse()?;
 
-    let mut client = SecretServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        req.metadata_mut().insert("authorization", token.clone());
-        Ok(req)
-    });
+    let mut client =
+        SecretServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+            req.metadata_mut().insert("authorization", token.clone());
+            Ok(req)
+        });
 
     println!("Putting secret...");
     let mut data = std::collections::HashMap::new();

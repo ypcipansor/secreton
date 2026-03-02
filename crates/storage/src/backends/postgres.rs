@@ -472,12 +472,13 @@ impl StorageBackend for PostgresBackend {
             .map(|b| &**b as &(dyn tokio_postgres::types::ToSql + Sync))
             .collect();
 
-        let rows_affected = client
-            .execute(&query, &bind_refs)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to delete expired entries: {}", e),
-            })?;
+        let rows_affected =
+            client
+                .execute(&query, &bind_refs)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete expired entries: {}", e),
+                })?;
 
         Ok(rows_affected)
     }
@@ -609,11 +610,13 @@ impl StorageBackend for PostgresBackend {
 
         let query = "DELETE FROM oauth_state WHERE expires_at < NOW()";
 
-        let rows_affected = client.execute(query, &[]).await.map_err(|e| {
-            StorageError::QueryFailed {
-                message: format!("Failed to delete expired OAuth states: {}", e),
-            }
-        })?;
+        let rows_affected =
+            client
+                .execute(query, &[])
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete expired OAuth states: {}", e),
+                })?;
 
         Ok(rows_affected)
     }

@@ -1,20 +1,15 @@
 //! Health check and system status handlers.
-//! 
+//!
 //! Provides endpoints for monitoring system health,
 //! readiness, and liveness checks.
 
-use axum::{
-    extract::State,
-    response::Json,
-};
+use axum::{extract::State, response::Json};
 
 use serde::Serialize;
 use std::collections::HashMap;
 
 use crate::{
-    handlers::AppState,
-    ApiResponse, ApiResult,
-    HealthCheckResponse, HealthCheckDependencies,
+    ApiResponse, ApiResult, HealthCheckDependencies, HealthCheckResponse, handlers::AppState,
 };
 
 /// Basic health check response
@@ -78,7 +73,7 @@ pub async fn health_check(
         uptime: get_uptime_seconds(),
         dependencies: HealthCheckDependencies {
             database: database_status.to_string(),
-            cache: "healthy".to_string(), // No dedicated cache service
+            cache: "healthy".to_string(),  // No dedicated cache service
             crypto: "healthy".to_string(), // Crypto service is initialized
         },
     };
@@ -141,9 +136,7 @@ pub async fn detailed_health_check(
 }
 
 /// Readiness check - determines if the service is ready to accept traffic
-pub async fn readiness_check(
-    State(state): State<AppState>,
-) -> ApiResult<Json<ReadinessResponse>> {
+pub async fn readiness_check(State(state): State<AppState>) -> ApiResult<Json<ReadinessResponse>> {
     let mut checks = HashMap::new();
 
     // Check if database is ready
@@ -172,9 +165,7 @@ pub async fn readiness_check(
 }
 
 /// Liveness check - determines if the service is alive and should not be restarted
-pub async fn liveness_check(
-    State(_state): State<AppState>,
-) -> ApiResult<Json<LivenessResponse>> {
+pub async fn liveness_check(State(_state): State<AppState>) -> ApiResult<Json<LivenessResponse>> {
     // Simple liveness check - if we can respond, we're alive
     let liveness = LivenessResponse {
         alive: true,
@@ -200,16 +191,34 @@ async fn check_cache_health(state: &AppState) -> HealthCheck {
     let cache_info = match state.storage.get_stats().await {
         Ok(stats) => {
             let mut details = HashMap::new();
-            details.insert("cache_type".to_string(), serde_json::Value::String("storage_backend".to_string()));
-            details.insert("total_entries".to_string(), serde_json::Value::Number(stats.total_entries.into()));
-            details.insert("total_size_bytes".to_string(), serde_json::Value::Number(stats.total_size_bytes.into()));
-            details.insert("cache_status".to_string(), serde_json::Value::String("active".to_string()));
+            details.insert(
+                "cache_type".to_string(),
+                serde_json::Value::String("storage_backend".to_string()),
+            );
+            details.insert(
+                "total_entries".to_string(),
+                serde_json::Value::Number(stats.total_entries.into()),
+            );
+            details.insert(
+                "total_size_bytes".to_string(),
+                serde_json::Value::Number(stats.total_size_bytes.into()),
+            );
+            details.insert(
+                "cache_status".to_string(),
+                serde_json::Value::String("active".to_string()),
+            );
             Some(details)
         }
         Err(_) => {
             let mut details = HashMap::new();
-            details.insert("cache_type".to_string(), serde_json::Value::String("storage_backend".to_string()));
-            details.insert("cache_status".to_string(), serde_json::Value::String("unavailable".to_string()));
+            details.insert(
+                "cache_type".to_string(),
+                serde_json::Value::String("storage_backend".to_string()),
+            );
+            details.insert(
+                "cache_status".to_string(),
+                serde_json::Value::String("unavailable".to_string()),
+            );
             Some(details)
         }
     };
@@ -237,8 +246,14 @@ async fn check_crypto_health(_state: &AppState) -> HealthCheck {
         last_check: chrono::Utc::now(),
         details: Some({
             let mut details = HashMap::new();
-            details.insert("service_initialized".to_string(), serde_json::Value::Bool(true));
-            details.insert("security_params".to_string(), serde_json::Value::String("configured".to_string()));
+            details.insert(
+                "service_initialized".to_string(),
+                serde_json::Value::Bool(true),
+            );
+            details.insert(
+                "security_params".to_string(),
+                serde_json::Value::String("configured".to_string()),
+            );
             details
         }),
     }
@@ -251,20 +266,39 @@ async fn check_storage_health(state: &AppState) -> HealthCheck {
     match state.storage.health_check().await {
         Ok(health_status) => {
             let response_time = start_time.elapsed().as_millis() as u64;
-            let status = if health_status.is_healthy { "healthy" } else { "unhealthy" };
+            let status = if health_status.is_healthy {
+                "healthy"
+            } else {
+                "unhealthy"
+            };
 
             HealthCheck {
                 status: status.to_string(),
-                message: health_status.last_error.clone().or_else(|| Some("Storage backend healthy".to_string())),
+                message: health_status
+                    .last_error
+                    .clone()
+                    .or_else(|| Some("Storage backend healthy".to_string())),
                 response_time_ms: response_time,
                 last_check: chrono::Utc::now(),
                 details: Some({
                     let mut details = HashMap::new();
-                    details.insert("connections_active".to_string(), serde_json::Value::Number(health_status.connections_active.into()));
-                    details.insert("connections_idle".to_string(), serde_json::Value::Number(health_status.connections_idle.into()));
-                    details.insert("uptime_seconds".to_string(), serde_json::Value::Number(health_status.uptime_seconds.into()));
+                    details.insert(
+                        "connections_active".to_string(),
+                        serde_json::Value::Number(health_status.connections_active.into()),
+                    );
+                    details.insert(
+                        "connections_idle".to_string(),
+                        serde_json::Value::Number(health_status.connections_idle.into()),
+                    );
+                    details.insert(
+                        "uptime_seconds".to_string(),
+                        serde_json::Value::Number(health_status.uptime_seconds.into()),
+                    );
                     if let Some(error) = &health_status.last_error {
-                        details.insert("last_error".to_string(), serde_json::Value::String(error.clone()));
+                        details.insert(
+                            "last_error".to_string(),
+                            serde_json::Value::String(error.clone()),
+                        );
                     }
                     details
                 }),
@@ -330,7 +364,10 @@ mod tests {
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        ApiServiceContainer::new(&config).await.expect("Failed to create services").into()
+        ApiServiceContainer::new(&config)
+            .await
+            .expect("Failed to create services")
+            .into()
     }
 
     #[tokio::test]
@@ -339,7 +376,7 @@ mod tests {
 
         let result = simple_health_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().0;
         assert_eq!(response.status, "ok");
     }
@@ -350,7 +387,7 @@ mod tests {
 
         let result = liveness_check(axum::extract::State(services)).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap().0;
         assert!(response.alive);
     }
@@ -393,6 +430,11 @@ mod tests {
         let payload = response.data.expect("detailed data");
         assert_eq!(payload.status, "healthy");
         assert_eq!(payload.checks.len(), 4);
-        assert!(payload.checks.values().all(|check| check.status == "healthy"));
+        assert!(
+            payload
+                .checks
+                .values()
+                .all(|check| check.status == "healthy")
+        );
     }
 }

@@ -295,7 +295,8 @@ impl CertificateRevocationService {
         // Update CRL if auto-rebuild enabled
         let configs = self.crl_config.read().await;
         if let Some(_config) = configs.get(&issuer)
-            && _config.auto_rebuild {
+            && _config.auto_rebuild
+        {
             drop(configs);
             self.rebuild_crl(&issuer).await?;
         }

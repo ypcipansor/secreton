@@ -1,8 +1,8 @@
+use crate::api;
+use crate::components::{Button, Card, Input};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::api;
-use crate::components::{Button, Input, Card};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 // API Structures
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -112,12 +112,10 @@ pub fn TransitPage() -> impl IntoView {
     let (selected_algo, set_selected_algo) = signal("ed25519".to_string());
 
     // Fetch Keys
-    let fetch_keys = Action::new_local(move |_: &()| {
-        async move {
-            match api::get::<ListKeysResponse>("/transit/keys").await {
-                Ok(res) => set_keys.set(res.keys),
-                Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
-            }
+    let fetch_keys = Action::new_local(move |_: &()| async move {
+        match api::get::<ListKeysResponse>("/transit/keys").await {
+            Ok(res) => set_keys.set(res.keys),
+            Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
         }
     });
 
@@ -133,24 +131,24 @@ pub fn TransitPage() -> impl IntoView {
                         KeyType::Ed25519 => {
                             set_active_tab.set("sign".to_string());
                             set_selected_algo.set("ed25519".to_string());
-                        },
+                        }
                         KeyType::EcdsaP256 => {
                             set_active_tab.set("sign".to_string());
                             set_selected_algo.set("ecdsa-p256".to_string());
-                        },
+                        }
                         KeyType::EcdsaSecp256k1 => {
                             set_active_tab.set("sign".to_string());
                             set_selected_algo.set("ecdsa-secp256k1".to_string());
-                        },
+                        }
                         _ => {
                             set_active_tab.set("encrypt".to_string());
                         }
                     }
                     set_key_info.set(Some(info));
-                },
+                }
                 Err(e) => {
-                     set_error_msg.set(Some(format!("Failed to fetch key info: {:?}", e)));
-                     set_key_info.set(None);
+                    set_error_msg.set(Some(format!("Failed to fetch key info: {:?}", e)));
+                    set_key_info.set(None);
                 }
             }
         }
@@ -170,14 +168,16 @@ pub fn TransitPage() -> impl IntoView {
                 set_create_status.set(Some("Key name required".to_string()));
                 return;
             }
-            let req = CreateKeyRequest { key_type: Some(k_type) };
+            let req = CreateKeyRequest {
+                key_type: Some(k_type),
+            };
             let path = format!("/transit/keys/{}", name);
             match api::post::<CreateKeyResponse, _>(&path, req).await {
                 Ok(res) => {
                     set_create_status.set(Some(res.message));
                     set_new_key_name.set(String::new());
                     fetch_keys.dispatch(()); // Refresh list
-                },
+                }
                 Err(e) => set_create_status.set(Some(format!("Error: {:?}", e))),
             }
         }
@@ -190,17 +190,20 @@ pub fn TransitPage() -> impl IntoView {
         async move {
             if let Some(k) = key {
                 let b64_text = BASE64.encode(text.as_bytes());
-                let req = EncryptRequest { plaintext: b64_text, context: None };
+                let req = EncryptRequest {
+                    plaintext: b64_text,
+                    context: None,
+                };
                 let path = format!("/transit/encrypt/{}", k);
                 match api::post::<EncryptResponse, _>(&path, req).await {
                     Ok(res) => {
                         set_output_result.set(res.ciphertext);
                         set_error_msg.set(None);
-                    },
+                    }
                     Err(e) => {
                         set_output_result.set(String::new());
                         set_error_msg.set(Some(format!("Encryption failed: {:?}", e)));
-                    },
+                    }
                 }
             }
         }
@@ -212,26 +215,28 @@ pub fn TransitPage() -> impl IntoView {
         let ciphertext = input_text.get();
         async move {
             if let Some(k) = key {
-                let req = DecryptRequest { ciphertext, context: None };
+                let req = DecryptRequest {
+                    ciphertext,
+                    context: None,
+                };
                 let path = format!("/transit/decrypt/{}", k);
                 match api::post::<DecryptResponse, _>(&path, req).await {
-                    Ok(res) => {
-                        match BASE64.decode(&res.plaintext) {
-                            Ok(bytes) => {
-                                let s = String::from_utf8_lossy(&bytes).to_string();
-                                set_output_result.set(s);
-                                set_error_msg.set(None);
-                            },
-                            Err(_) => {
-                                set_output_result.set(String::new());
-                                set_error_msg.set(Some("Failed to decode plaintext result".to_string()));
-                            },
+                    Ok(res) => match BASE64.decode(&res.plaintext) {
+                        Ok(bytes) => {
+                            let s = String::from_utf8_lossy(&bytes).to_string();
+                            set_output_result.set(s);
+                            set_error_msg.set(None);
+                        }
+                        Err(_) => {
+                            set_output_result.set(String::new());
+                            set_error_msg
+                                .set(Some("Failed to decode plaintext result".to_string()));
                         }
                     },
                     Err(e) => {
                         set_output_result.set(String::new());
                         set_error_msg.set(Some(format!("Decryption failed: {:?}", e)));
-                    },
+                    }
                 }
             }
         }
@@ -248,14 +253,14 @@ pub fn TransitPage() -> impl IntoView {
                 let req = SignRequest {
                     input: b64_input,
                     algorithm: Some(algo),
-                    key_version: None
+                    key_version: None,
                 };
                 let path = format!("/transit/sign/{}", k);
                 match api::post::<SignResponse, _>(&path, req).await {
                     Ok(res) => {
                         set_output_result.set(res.signature);
                         set_error_msg.set(None);
-                    },
+                    }
                     Err(e) => {
                         set_output_result.set(String::new());
                         set_error_msg.set(Some(format!("Signing failed: {:?}", e)));
@@ -281,14 +286,14 @@ pub fn TransitPage() -> impl IntoView {
                 let req = VerifyRequest {
                     input: b64_input,
                     signature: sig_trimmed.to_string(),
-                    algorithm: Some(algo)
+                    algorithm: Some(algo),
                 };
                 let path = format!("/transit/verify/{}", k);
                 match api::post::<VerifyResponse, _>(&path, req).await {
                     Ok(res) => {
                         set_verify_result.set(Some(res.valid));
                         set_error_msg.set(None);
-                    },
+                    }
                     Err(e) => {
                         set_verify_result.set(None);
                         set_error_msg.set(Some(format!("Verification failed: {:?}", e)));
