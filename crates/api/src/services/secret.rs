@@ -524,8 +524,9 @@ impl SecretService {
             }
             Err(e) => return Err(SecretError::Storage(e)),
             Ok(None) => {
-                // No current version, but we still need to check history.
-                // If history is also empty, we will return SecretNotFound below.
+                // Consistent with get_secret: if the current secret doesn't exist,
+                // deny access to history (prevents leaking info about deleted secrets).
+                return Err(SecretError::SecretNotFound { path: path.to_string() });
             }
         }
 
