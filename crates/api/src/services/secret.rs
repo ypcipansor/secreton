@@ -416,7 +416,7 @@ impl SecretService {
 
     /// Delete secret with option to preserve history (used for rollbacks)
     /// `check_perms`: If true, checks the "delete" permission. If false, bypasses RBAC (e.g. for internal rollback).
-    pub async fn delete_secret_internal(
+    pub(crate) async fn delete_secret_internal(
         &self,
         path: &str,
         user: &secreton_auth::User,
@@ -549,8 +549,9 @@ impl SecretService {
             }
             Err(e) => return Err(SecretError::Storage(e)),
             Ok(None) => {
-                // No current version, but we still need to check history.
-                // If history is also empty, we will return SecretNotFound below.
+                // If the current secret doesn't exist, block access to history
+                // to prevent leaking orphaned history metadata. This matches the behavior of get_secret.
+                return Err(SecretError::SecretNotFound { path: path.to_string() });
             }
         }
 
