@@ -487,6 +487,8 @@ impl SecretService {
                     version: current.version,
                     created_at: current.created_at,
                 });
+            } else {
+                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
             }
         }
 
