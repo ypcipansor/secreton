@@ -510,7 +510,8 @@ impl SecretService {
         let mut versions = Vec::new();
 
         // 1. Get current version
-        match self.storage.get_by_path(path).await {
+        // 1. Get current version
+        let current_exists = match self.storage.get_by_path(path).await {
             Ok(Some(current)) => {
                 // Check ownership
                 if current.owner_id == user_uuid {
@@ -519,9 +520,11 @@ impl SecretService {
                         created_at: current.created_at,
                     });
                 }
+                true
             }
             Err(e) => return Err(SecretError::Storage(e)),
-            Ok(None) => { /* No current version, might only have history */ }
+            Ok(None) => false,
+        };
         }
 
         // 2. Get history versions
