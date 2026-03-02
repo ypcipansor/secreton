@@ -403,13 +403,23 @@ impl SecretService {
 
     /// Delete secret
     pub async fn delete_secret(&self, path: &str, user: &secreton_auth::User) -> Result<(), SecretError> {
-        self.delete_secret_internal(path, user, true).await
+        self.delete_secret_internal(path, user, true, true).await
     }
 
     /// Delete secret with option to preserve history (used for rollbacks)
-    pub async fn delete_secret_internal(&self, path: &str, user: &secreton_auth::User, delete_history: bool) -> Result<(), SecretError> {
+    /// `check_perms`: If true, checks the "delete" permission. If false, bypasses RBAC (e.g. for internal rollback).
+    pub async fn delete_secret_internal(
+        &self,
+        path: &str,
+        user: &secreton_auth::User,
+        delete_history: bool,
+        check_perms: bool
+    ) -> Result<(), SecretError> {
         let start_time = std::time::Instant::now();
-        self.check_permission(user, path, "delete").await?;
+
+        if check_perms {
+            self.check_permission(user, path, "delete").await?;
+        }
 
         // Check if secret exists and check ownership
         let entry = self.storage.get_by_path(path).await

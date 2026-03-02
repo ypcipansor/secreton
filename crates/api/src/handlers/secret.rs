@@ -674,7 +674,9 @@ pub async fn update_secret(
     if secret_data.previous_version.is_none() && secret_data.version == 1 {
         // Rollback creation. Use delete_secret_internal to preserve any pre-existing history
         // that may not have been cleaned up during the concurrent deletion.
-        if let Err(e) = state.secreton.delete_secret_internal(&path, &user, false).await {
+        // We pass check_perms=false because this is an internal compensating action,
+        // and the user may only have "write" permission, not "delete".
+        if let Err(e) = state.secreton.delete_secret_internal(&path, &user, false, false).await {
             // If the rollback fails, log a warning. The system is left with an accidental creation,
             // but we still return NotFound so the client doesn't falsely think the update succeeded.
             tracing::warn!("Failed to rollback accidentally created secret {}: {}", path, e);
