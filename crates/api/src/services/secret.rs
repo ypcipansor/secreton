@@ -403,6 +403,11 @@ impl SecretService {
 
     /// Delete secret
     pub async fn delete_secret(&self, path: &str, user: &secreton_auth::User) -> Result<(), SecretError> {
+        self.delete_secret_internal(path, user, true).await
+    }
+
+    /// Delete secret with option to preserve history (used for rollbacks)
+    pub async fn delete_secret_internal(&self, path: &str, user: &secreton_auth::User, delete_history: bool) -> Result<(), SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "delete").await?;
 
@@ -426,16 +431,18 @@ impl SecretService {
         self.storage.delete_by_path(path).await
             .map_err(SecretError::Storage)?;
 
-        // Delete history
-        let history_prefix = format!("sys/history/{}::v", path);
-        let query = secreton_storage::QueryParams::new()
-            .with_path_prefix(history_prefix)
-            .with_owner(Self::get_user_uuid(user));
+        // Delete history if requested
+        if delete_history {
+            let history_prefix = format!("sys/history/{}::v", path);
+            let query = secreton_storage::QueryParams::new()
+                .with_path_prefix(history_prefix)
+                .with_owner(Self::get_user_uuid(user));
 
-        if let Ok(entries) = self.storage.list(&query).await {
-            for entry in entries {
-                if let Err(e) = self.storage.delete_by_path(&entry.path).await {
-                    warn!("Failed to delete history entry {}: {}", entry.path, e);
+            if let Ok(entries) = self.storage.list(&query).await {
+                for entry in entries {
+                    if let Err(e) = self.storage.delete_by_path(&entry.path).await {
+                        warn!("Failed to delete history entry {}: {}", entry.path, e);
+                    }
                 }
             }
         }
@@ -524,9 +531,8 @@ impl SecretService {
             }
             Err(e) => return Err(SecretError::Storage(e)),
             Ok(None) => {
-                // Consistent with get_secret: if the current secret doesn't exist,
-                // deny access to history (prevents leaking info about deleted secrets).
-                return Err(SecretError::SecretNotFound { path: path.to_string() });
+                // No current version, but we still need to check history.
+                // If history is also empty, we will return SecretNotFound below.
             }
         }
 

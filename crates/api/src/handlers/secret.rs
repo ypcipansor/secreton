@@ -672,8 +672,13 @@ pub async fn update_secret(
 
     // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
     if secret_data.previous_version.is_none() && secret_data.version == 1 {
-        // Rollback creation
-        let _ = state.secreton.delete_secret(&path, &user).await;
+        // Rollback creation. Use delete_secret_internal to preserve any pre-existing history
+        // that may not have been cleaned up during the concurrent deletion.
+        if let Err(e) = state.secreton.delete_secret_internal(&path, &user, false).await {
+            // If the rollback fails, log a warning. The system is left with an accidental creation,
+            // but we still return NotFound so the client doesn't falsely think the update succeeded.
+            tracing::warn!("Failed to rollback accidentally created secret {}: {}", path, e);
+        }
         return Err(crate::ApiError::NotFound("Secret not found (deleted during update)".to_string()));
     }
 
