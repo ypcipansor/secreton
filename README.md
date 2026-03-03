@@ -73,6 +73,12 @@ cargo fmt --all
 cargo clippy --workspace -- -D warnings
 ```
 
+## Security Policy
+
+**DO NOT** open public GitHub issues for security vulnerabilities.
+
+Please report them privately using the GitHub Security Advisory tab ("Report a vulnerability") or email the security contact in `Cargo.toml`. See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+
 ## License
 
 This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
