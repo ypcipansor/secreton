@@ -48,14 +48,51 @@ cargo run -p secreton-api --release --bin api_server
 
 The primary API server will start, alongside other configured services (like gRPC).
 
-## Features
+## Features & APIs
 
-- **Storage Backends**: Support for multiple backends including PostgreSQL, Redis, and File-based storage.
-- **Cryptography**: Utilizes `RustCrypto` for secure encryption (AES-GCM, ChaCha20-Poly1305).
-- **Authentication**: JWT/Token-based authentication, with extensible MFA support.
-- **REST API**: Fully-featured HTTP API using Axum and Warp.
-- **Web UI**: Optional Leptos-based front-end interface.
-- **CLI**: Command-line tools for interacting with the platform.
+The API Server serves several categories of RESTful endpoints under the `/api/v1` path prefix:
+
+### Authentication & Identity (`/auth`)
+Handles user logins, token verification, and multi-factor authentication.
+- **POST `/auth/login`**: Authenticate and retrieve a token.
+- **POST `/auth/logout`**: Invalidate the current token.
+- **POST `/auth/refresh`**: Refresh an existing authentication token.
+- **POST `/auth/verify`**: Verify the validity of a token.
+- **MFA Endpoints**: `/auth/mfa/setup`, `/auth/mfa/verify`, `/auth/mfa/disable` for managing two-factor authentication.
+- **OAuth Endpoints**: `/auth/oauth/{provider}` for third-party logins.
+
+### Secret Management (`/secret`)
+The core functionality for creating, retrieving, and managing encrypted secrets and cryptographic keys.
+- **GET/POST/PUT/DELETE `/secret/secrets/{path}`**: CRUD operations for individual secrets.
+- **GET `/secret/secrets`**: List all available secrets in the root namespace.
+- **GET `/secret/secret-versions/{path}`**: View the history and past versions of a secret.
+- **GET/POST/PUT/DELETE `/secret/keys`**: Manage cryptographic keys.
+- **POST `/secret/keys/{key_id}/rotate`**: Rotate a specific cryptographic key.
+
+### Administration (`/admin`)
+Endpoints for system administrators to manage users, roles, and access controls.
+- **GET/POST/PUT/DELETE `/admin/users`**: Manage user accounts.
+- **GET/POST `/admin/users/{user_id}/roles`**: Assign and retrieve roles for a user.
+- **GET/POST `/admin/roles`**: Manage roles and policies.
+
+### System & Health (`/sys`, `/health`)
+Operations for system maintenance, monitoring, and configurations.
+- **GET `/sys/config`**: Retrieve current system configuration.
+- **GET `/health`**: Check the health and status of the Secreton server.
+- **GET `/metrics`**: Export prometheus metrics for monitoring.
+
+## Supported Storage Backends
+Secreton abstracts the persistence layer, supporting multiple storage backends:
+- **PostgreSQL**: Fully supported (recommended)
+- **Redis**: Working backend with caching support
+- **In-Memory/File**: For development and testing environments
+- **Raft Consensus**: Built-in distributed consensus backend
+
+## Cryptography & Security
+- **Encryption**: Utilizes `RustCrypto` (AES-256-GCM, ChaCha20-Poly1305) for secure encryption of secrets at rest.
+- **Memory Safety**: Uses `zeroize` to securely wipe sensitive data from memory after use.
+- **Role-Based Access Control (RBAC)**: Fine-grained permissions and policy enforcement.
+- **Audit Logging**: Comprehensive tracking of all security events and access logs.
 
 ## Development
 
