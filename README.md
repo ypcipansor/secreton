@@ -104,14 +104,14 @@ Secreton abstracts the persistence layer, supporting multiple storage backends:
 
 ```bash
 # Run all tests
-cargo test --workspace
+cargo test --workspace --all-features
 ```
 
 ### Formatting and Linting
 
 ```bash
 cargo fmt --all
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 ## Security Policy
