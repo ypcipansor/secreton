@@ -1,5 +1,9 @@
 # Secreton
 
+> **⚠️ Project Status: Alpha / Early Development**
+>
+> Secreton is in active development and is **not yet production-ready**. Some features are partially implemented, and APIs or storage schemas may be subject to breaking changes. Use only in development or testing environments.
+
 Secreton is a Rust-based secrets management platform. It provides secure storage, encryption, and access control for sensitive data.
 
 ## Overview
