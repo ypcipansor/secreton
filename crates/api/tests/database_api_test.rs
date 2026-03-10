@@ -60,7 +60,6 @@ async fn test_database_api_endpoints() {
     let admin = Arc::new(secreton_api::services::admin::AdminService::new(
              storage.clone(),
              auth.clone(),
-             audit.clone(),
              performance.clone()
         ).await.unwrap());
 

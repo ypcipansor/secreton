@@ -11,7 +11,6 @@ use thiserror::Error;
 use uuid;
 // sha2::Digest is imported locally where needed (e.g., create_backup)
 
-use crate::services::audit::AuditLogger;
 use crate::services::crypto::CryptoService;
 use secreton_storage::{StorageBackend, QueryParams};
 use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
@@ -119,13 +118,7 @@ pub struct UpdateUserRequest {
 pub struct AdminService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     auth: Arc<AuthenticationService>,
-    #[allow(dead_code)] // Reserved for future audit integration
-    _audit: Arc<AuditLogger>,
     performance: Arc<SecretPerformanceOptimizer>,
-    #[allow(dead_code)] // Reserved for request metrics  
-    _request_count: Arc<std::sync::Mutex<u64>>,
-    #[allow(dead_code)] // Reserved for rate calculation
-    _last_request_time: Arc<std::sync::Mutex<std::time::Instant>>,
     crypto: Option<Arc<CryptoService>>,
 }
 
@@ -134,16 +127,12 @@ impl AdminService {
     pub async fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
         auth: Arc<AuthenticationService>,
-        audit: Arc<AuditLogger>,
         performance: Arc<SecretPerformanceOptimizer>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             auth,
-            _audit: audit,
             performance,
-            _request_count: Arc::new(std::sync::Mutex::new(0)),
-            _last_request_time: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
             crypto: None,
         })
     }
@@ -1672,10 +1661,9 @@ mod tests {
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let admin_service = AdminService::new(storage, auth, audit, performance).await;
+        let admin_service = AdminService::new(storage, auth, performance).await;
         assert!(admin_service.is_ok());
     }
 
@@ -1688,9 +1676,8 @@ mod tests {
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, performance).await.unwrap();
 
         let stats = service.get_system_stats().await.expect("stats should be retrieved");
         assert!(stats.uptime_seconds >= 0);
@@ -1708,9 +1695,8 @@ mod tests {
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, performance).await.unwrap();
 
         let backup = service.create_backup().await.expect("backup");
         assert!(backup.encrypted);
@@ -1726,9 +1712,8 @@ mod tests {
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, performance).await.unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");
@@ -1771,9 +1756,8 @@ mod tests {
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage.clone(), auth, audit, performance).await.unwrap();
+        let service = AdminService::new(storage.clone(), auth, performance).await.unwrap();
 
         // Run cleanup
         let cleaned_bytes = service.storage_cleanup().await.unwrap();

@@ -303,9 +303,9 @@ async fn main() -> anyhow::Result<()> {
     let admin = Arc::new(secreton_api::services::admin::AdminService::new(
         storage.clone(),
         auth.clone(),
-        audit.clone(),
         performance.clone(),
-    ).await.unwrap());
+    ).await?
+    .with_crypto(crypto.clone()));
 
     // Populate Service Container
     use secreton_common::{ServiceContainer, StandardServiceContainer};

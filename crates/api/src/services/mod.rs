@@ -186,7 +186,6 @@ impl ApiServiceContainer {
         let admin = Arc::new(admin::AdminService::new(
             storage.clone(),
             auth.clone(),
-            audit.clone(),
             performance.clone(),
         ).await?
         .with_crypto(crypto.clone()));
