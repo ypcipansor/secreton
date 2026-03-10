@@ -2080,3 +2080,27 @@ impl Config for SlackConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cors_config_validate_valid() {
+        let mut config = CorsConfig::default();
+        config.allowed_origins = vec!["https://example.com".to_string()];
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_cors_config_validate_empty_origins() {
+        let mut config = CorsConfig::default();
+        config.allowed_origins = vec![];
+        match config.validate() {
+            Err(SecretonError::Configuration { message }) => {
+                assert_eq!(message, "At least one allowed origin must be specified");
+            }
+            _ => panic!("Expected Configuration error"),
+        }
+    }
+}
