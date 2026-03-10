@@ -88,7 +88,7 @@ async fn test_audit_log_persistence() {
     let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
     let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-    let admin_service = AdminService::new(storage.clone(), auth, logger.clone(), performance).await.unwrap();
+    let admin_service = AdminService::new(storage.clone(), auth, performance).await.unwrap();
 
     // Fetch logs via AdminService with limit applied AFTER filtering
     // Case 1: Limit larger than result set
