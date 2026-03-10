@@ -14,7 +14,6 @@ use chrono::{DateTime, Utc};
 // use kube::{Client, Config}; // Temporarily disabled due to kube compatibility issues
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -230,12 +229,10 @@ impl RuntimeSecurityValidator {
 
     /// Check filesystem security
     async fn check_filesystem_security(&self) -> SecurityCheckResult {
-        use std::fs;
-
         let critical_paths = ["/tmp", "/var/tmp", "/dev/shm"];
 
         for path in &critical_paths {
-            if let Ok(metadata) = fs::metadata(path) {
+            if let Ok(metadata) = tokio::fs::metadata(path).await {
                 if metadata.permissions().readonly() {
                     return SecurityCheckResult {
                         status: SecurityStatus::Warning,
@@ -258,7 +255,10 @@ impl RuntimeSecurityValidator {
     /// Check network security configuration
     async fn check_network_security(&self) -> SecurityCheckResult {
         // Check if we're listening on secure ports only
-        let output = Command::new("ss").arg("-tuln").output();
+        let output = tokio::process::Command::new("ss")
+            .arg("-tuln")
+            .output()
+            .await;
 
         match output {
             Ok(result) => {
@@ -332,7 +332,7 @@ impl RuntimeSecurityValidator {
 
     /// Check system resource usage
     async fn check_system_resources(&self) -> SecurityCheckResult {
-        let output = Command::new("uptime").output();
+        let output = tokio::process::Command::new("uptime").output().await;
 
         match output {
             Ok(result) => {
