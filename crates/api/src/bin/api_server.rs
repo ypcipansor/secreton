@@ -304,7 +304,7 @@ async fn main() -> anyhow::Result<()> {
         storage.clone(),
         auth.clone(),
         performance.clone(),
-    ).await.unwrap());
+    ).await?);
 
     // Populate Service Container
     use secreton_common::{ServiceContainer, StandardServiceContainer};
