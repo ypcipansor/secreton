@@ -165,15 +165,17 @@ impl RuntimeSecurityValidator {
 
     /// Check memory safety and corruption
     async fn check_memory_safety(&self) -> SecurityCheckResult {
-        // Check for memory leaks and corruption indicators
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg("cat /proc/meminfo | grep -E '(MemFree|Buffers|Cached)'")
-            .output();
+        // Check for memory leaks and corruption indicators by reading /proc/meminfo directly
+        // to avoid command injection vulnerabilities from shell execution.
+        match tokio::fs::read_to_string("/proc/meminfo").await {
+            Ok(meminfo) => {
+                let has_metrics = meminfo.lines().any(|line| {
+                    line.starts_with("MemFree:")
+                        || line.starts_with("Buffers:")
+                        || line.starts_with("Cached:")
+                });
 
-        match output {
-            Ok(result) => {
-                if result.status.success() {
+                if has_metrics {
                     SecurityCheckResult {
                         status: SecurityStatus::Healthy,
                         message: "Memory usage within normal parameters".to_string(),
@@ -183,11 +185,9 @@ impl RuntimeSecurityValidator {
                 } else {
                     SecurityCheckResult {
                         status: SecurityStatus::Warning,
-                        message: "Unable to check memory information".to_string(),
+                        message: "Unable to find memory metrics in /proc/meminfo".to_string(),
                         last_checked: Utc::now(),
-                        remediation: Some(
-                            "Verify system memory monitoring is available".to_string(),
-                        ),
+                        remediation: Some("Verify system memory monitoring is available".to_string()),
                     }
                 }
             }
@@ -195,7 +195,7 @@ impl RuntimeSecurityValidator {
                 status: SecurityStatus::Warning,
                 message: "Memory check unavailable".to_string(),
                 last_checked: Utc::now(),
-                remediation: Some("Install procps for memory monitoring".to_string()),
+                remediation: Some("Ensure /proc/meminfo is accessible".to_string()),
             },
         }
     }
