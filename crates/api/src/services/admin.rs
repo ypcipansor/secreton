@@ -411,6 +411,20 @@ impl AdminService {
             .get("data")
             .ok_or_else(|| AdminError::Internal(anyhow::anyhow!("Backup data not found")))?;
 
+        // Verify checksum
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(backup_data.as_bytes());
+        let computed_checksum = format!("sha256:{:x}", hasher.finalize());
+
+        if let Some(stored_checksum) = backup_entry.metadata.get("checksum") {
+            if stored_checksum != &computed_checksum {
+                return Err(AdminError::Internal(anyhow::anyhow!(
+                    "Backup data integrity check failed: checksum mismatch"
+                )));
+            }
+        }
+
         // Parse entries
         let entries: Vec<secreton_storage::SecretEntry> =
             serde_json::from_str(backup_data).map_err(|e| AdminError::Internal(e.into()))?;
