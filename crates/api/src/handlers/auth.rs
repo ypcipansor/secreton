@@ -1363,11 +1363,11 @@ pub async fn oauth_callback(
     // Extract OAuth parameters
     let code: &String = params
         .get("code")
-        .ok_or_else(|| crate::ApiError::BadRequest("Missing authorization code".to_string()))?;
+        .ok_or_else(|| crate::ApiError::BadRequest("OAuth state mismatch".to_string()))?;
 
     let state_param: &String = params
         .get("state")
-        .ok_or_else(|| crate::ApiError::BadRequest("Missing OAuth state parameter".to_string()))?;
+        .ok_or_else(|| crate::ApiError::BadRequest("Missing authorization code".to_string()))?;
 
     // Verify state parameter against stored state for CSRF protection
     let stored_state = state

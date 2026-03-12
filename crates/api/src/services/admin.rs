@@ -279,11 +279,14 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self
+        let entries: Vec<_> = self
             .storage
             .list(&query_params)
             .await
-            .map_err(AdminError::Storage)?;
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .filter(|e| !e.path.starts_with("backups/"))
+            .collect();
 
         // Serialize all entries
         let backup_data =
@@ -351,18 +354,21 @@ impl AdminService {
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
         let query_params = secreton_storage::QueryParams {
-            path_prefix: Some("backups/".to_string()),
+            path_prefix: None,
 
             limit: None,
             offset: Some(0),
             ..Default::default()
         };
 
-        let entries = self
+        let entries: Vec<_> = self
             .storage
             .list(&query_params)
             .await
-            .map_err(AdminError::Storage)?;
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .filter(|e| !e.path.starts_with("backups/"))
+            .collect();
 
         let backups = entries
             .into_iter()
@@ -599,11 +605,14 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self
+        let entries: Vec<_> = self
             .storage
             .list(&query_params)
             .await
-            .map_err(AdminError::Storage)?;
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .filter(|e| !e.path.starts_with("backups/"))
+            .collect();
 
         let mut audit_logs: Vec<AuditLogEntry> = entries
             .into_iter()
@@ -1564,11 +1573,14 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self
+        let entries: Vec<_> = self
             .storage
             .list(&query_params)
             .await
-            .map_err(AdminError::Storage)?;
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .filter(|e| !e.path.starts_with("backups/"))
+            .collect();
 
         let mut users = Vec::new();
         for entry in entries {
@@ -1806,11 +1818,14 @@ impl AdminService {
             ..Default::default()
         };
 
-        let entries = self
+        let entries: Vec<_> = self
             .storage
             .list(&query_params)
             .await
-            .map_err(AdminError::Storage)?;
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .filter(|e| !e.path.starts_with("backups/"))
+            .collect();
 
         for entry in entries {
             // Check if the secret has an expires_at field
