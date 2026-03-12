@@ -385,7 +385,11 @@ impl AdminService {
                     compressed: true,
                     encrypted: true,
                     checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
-                    metadata: entry.metadata,
+                    metadata: {
+                        let mut m = entry.metadata;
+                        m.remove("data");
+                        m
+                    },
                 })
             })
             .collect();
