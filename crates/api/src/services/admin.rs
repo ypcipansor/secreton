@@ -337,8 +337,8 @@ impl AdminService {
             id: backup_id,
             created_at: chrono::Utc::now(),
             size_bytes,
-            compressed: true,
-            encrypted: true,
+            compressed: false,
+            encrypted: false,
             checksum,
             metadata: {
                 let mut m = HashMap::new();
@@ -382,8 +382,8 @@ impl AdminService {
                         .get("data")
                         .map(|d| d.len() as u64)
                         .unwrap_or(0),
-                    compressed: true,
-                    encrypted: true,
+                    compressed: false,
+                    encrypted: false,
                     checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
                     metadata: {
                         let mut m = entry.metadata;
@@ -528,8 +528,8 @@ impl AdminService {
             id: backup_id.to_string(),
             created_at: entry.created_at,
             size_bytes,
-            compressed: true,
-            encrypted: true,
+            compressed: false,
+            encrypted: false,
             checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
             metadata: {
                 let mut m = entry.metadata;
