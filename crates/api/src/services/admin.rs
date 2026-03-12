@@ -1844,7 +1844,6 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
             .into_iter()
-            .filter(|e| !e.path.starts_with("backups/"))
             .collect();
 
         for entry in entries {
