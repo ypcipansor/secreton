@@ -304,6 +304,7 @@ impl AdminService {
         metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
+        metadata.insert("checksum".to_string(), checksum.clone());
         metadata.insert("data".to_string(), backup_data);
 
         let backup_entry = secreton_storage::SecretEntry {
