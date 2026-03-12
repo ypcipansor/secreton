@@ -54,9 +54,9 @@ pub fn create_routes() -> Router<AppState> {
         // Backup operations
         .route("/backups", post(create_backup))
         .route("/backups", get(list_backups))
-        .route("/backups/:backup_id", get(get_backup))
-        .route("/backups/:backup_id/restore", post(restore_backup))
-        .route("/backups/:backup_id", delete(delete_backup))
+        .route("/backups/{backup_id}", get(get_backup))
+        .route("/backups/{backup_id}/restore", post(restore_backup))
+        .route("/backups/{backup_id}", delete(delete_backup))
         // Security operations
         .route("/security/scan", post(run_security_scan))
         .route("/security/reports", get(get_security_reports))
