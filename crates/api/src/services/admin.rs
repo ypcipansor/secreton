@@ -351,7 +351,7 @@ impl AdminService {
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
         let query_params = secreton_storage::QueryParams {
-            path_prefix: None,
+            path_prefix: Some("backups/".to_string()),
 
             limit: None,
             offset: Some(0),
