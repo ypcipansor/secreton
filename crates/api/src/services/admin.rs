@@ -633,7 +633,6 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
             .into_iter()
-            .filter(|e| !e.path.starts_with("backups/"))
             .collect();
 
         let mut audit_logs: Vec<AuditLogEntry> = entries
@@ -1601,7 +1600,6 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
             .into_iter()
-            .filter(|e| !e.path.starts_with("backups/"))
             .collect();
 
         let mut users = Vec::new();
