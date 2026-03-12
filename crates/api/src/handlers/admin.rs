@@ -1122,8 +1122,17 @@ pub async fn get_security_incident(
 
 pub async fn create_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
-    crate::extractors::AuthenticatedUser(_user): crate::extractors::AuthenticatedUser,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+
     let backup_info = state
         .admin
         .create_backup()
@@ -1135,8 +1144,17 @@ pub async fn create_backup(
 
 pub async fn list_backups(
     axum::extract::State(state): axum::extract::State<AppState>,
-    crate::extractors::AuthenticatedUser(_user): crate::extractors::AuthenticatedUser,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::BackupInfo>>>> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+
     let backups = state
         .admin
         .list_backups()
@@ -1148,9 +1166,18 @@ pub async fn list_backups(
 
 pub async fn get_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
-    crate::extractors::AuthenticatedUser(_user): crate::extractors::AuthenticatedUser,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+
     let backup = state
         .admin
         .get_backup(&backup_id)
@@ -1167,9 +1194,18 @@ pub async fn get_backup(
 
 pub async fn restore_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
-    crate::extractors::AuthenticatedUser(_user): crate::extractors::AuthenticatedUser,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::MaintenanceResult>>> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+
     let result = state
         .admin
         .restore_backup(&backup_id)
@@ -1181,9 +1217,18 @@ pub async fn restore_backup(
 
 pub async fn delete_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
-    crate::extractors::AuthenticatedUser(_user): crate::extractors::AuthenticatedUser,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+
     state
         .admin
         .delete_backup(&backup_id)
