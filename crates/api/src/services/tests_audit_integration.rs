@@ -1,13 +1,12 @@
-
-use std::sync::Arc;
-use crate::services::audit::{AuditLogger, SecurityEventType};
-use secreton_storage::{MockStorageBackend, QueryParams, StorageBackend};
-use secreton_security::policies::audit::{AuditEventType, AuditStatus};
-use crate::services::admin::AdminService;
-use secreton_performance::SecretPerformanceOptimizer;
 use crate::config::AuthConfig;
+use crate::services::admin::AdminService;
+use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::auth::AuthenticationService;
 use crate::services::crypto::CryptoService;
+use secreton_performance::SecretPerformanceOptimizer;
+use secreton_security::policies::audit::{AuditEventType, AuditStatus};
+use secreton_storage::{MockStorageBackend, QueryParams, StorageBackend};
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_audit_log_persistence() {
@@ -15,7 +14,11 @@ async fn test_audit_log_persistence() {
     let storage = Arc::new(MockStorageBackend::new());
 
     // 2. Setup Logger
-    let logger = Arc::new(AuditLogger::new(storage.clone()).await.expect("Failed to create logger"));
+    let logger = Arc::new(
+        AuditLogger::new(storage.clone())
+            .await
+            .expect("Failed to create logger"),
+    );
 
     // 3. Log a critical event (failure - should flush immediately and NOT buffer)
     let fail_event = SecurityEventType::AuthenticationFailure {
@@ -36,18 +39,28 @@ async fn test_audit_log_persistence() {
     let entries = storage.list(&params).await.expect("Failed to list entries");
 
     // We expect exactly one entry for the failure event
-    assert_eq!(entries.len(), 1, "Storage should contain exactly one audit log for the failure event");
+    assert_eq!(
+        entries.len(),
+        1,
+        "Storage should contain exactly one audit log for the failure event"
+    );
 
     // Verify content and expiration
     let entry = &entries[0];
     assert!(entry.path.starts_with("sys/audit/"));
-    assert!(entry.expires_at.is_some(), "Audit entry should have expiration set");
+    assert!(
+        entry.expires_at.is_some(),
+        "Audit entry should have expiration set"
+    );
 
     // Verify expiration is roughly 7 years in the future
     let now = chrono::Utc::now();
     let expiry = entry.expires_at.unwrap();
     let days_diff = (expiry - now).num_days();
-    assert!(days_diff >= 2550 && days_diff <= 2560, "Expiration should be approx 7 years");
+    assert!(
+        days_diff >= 2550 && days_diff <= 2560,
+        "Expiration should be approx 7 years"
+    );
 
     let log_json = entry.metadata.get("log_data").unwrap();
     assert!(log_json.contains("bad-user"));
@@ -76,7 +89,11 @@ async fn test_audit_log_persistence() {
 
     // Verify persistence of flushed event
     let entries_after = storage.list(&params).await.expect("Failed to list entries");
-    assert_eq!(entries_after.len(), 2, "Storage should contain both events after flush");
+    assert_eq!(
+        entries_after.len(),
+        2,
+        "Storage should contain both events after flush"
+    );
 
     // 6. Verify AdminService Retrieval (End-to-End Test)
     // Setup minimal AdminService dependencies
@@ -85,27 +102,45 @@ async fn test_audit_log_persistence() {
     config.jwt.secret = Some("test_secret".to_string());
     config.jwt.issuer = "secreton".to_string();
     config.jwt.audience = "secreton-api".to_string();
-    let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto, &config).await.unwrap());
+    let auth = Arc::new(
+        AuthenticationService::new(storage.clone(), crypto, &config)
+            .await
+            .unwrap(),
+    );
     let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-    let admin_service = AdminService::new(storage.clone(), auth, performance).await.unwrap();
+    let admin_service = AdminService::new(storage.clone(), auth, performance)
+        .await
+        .unwrap();
 
     // Fetch logs via AdminService with limit applied AFTER filtering
     // Case 1: Limit larger than result set
-    let logs = admin_service.get_audit_logs(None, None, None, None, Some(10)).await.expect("Failed to fetch audit logs");
+    let logs = admin_service
+        .get_audit_logs(None, None, None, None, Some(10))
+        .await
+        .expect("Failed to fetch audit logs");
     assert_eq!(logs.len(), 2, "AdminService should retrieve both logs");
 
     // Case 2: Limit smaller than result set
-    let logs_limited = admin_service.get_audit_logs(None, None, None, None, Some(1)).await.expect("Failed to fetch audit logs");
+    let logs_limited = admin_service
+        .get_audit_logs(None, None, None, None, Some(1))
+        .await
+        .expect("Failed to fetch audit logs");
     assert_eq!(logs_limited.len(), 1, "AdminService should respect limit");
 
     // Case 3: Filtering
-    let logs_filtered = admin_service.get_audit_logs(None, None, Some("bad-user"), None, None).await.expect("Failed to fetch audit logs");
+    let logs_filtered = admin_service
+        .get_audit_logs(None, None, Some("bad-user"), None, None)
+        .await
+        .expect("Failed to fetch audit logs");
     assert_eq!(logs_filtered.len(), 1);
     assert_eq!(logs_filtered[0].user_id, "bad-user");
 
     // Verify mapped fields
-    let fail_log = logs.iter().find(|l| l.user_id == "bad-user").expect("Should find failure log");
+    let fail_log = logs
+        .iter()
+        .find(|l| l.user_id == "bad-user")
+        .expect("Should find failure log");
     assert!(!fail_log.success);
     // AuthenticationFailure maps to AuthLogin which is "login" in AuditEventType::as_str()
     // BUT we changed AuditEventType to use serde rename "auth.login".
@@ -115,7 +150,10 @@ async fn test_audit_log_persistence() {
     // So action should be "login".
     assert_eq!(fail_log.action, "login");
 
-    let success_log = logs.iter().find(|l| l.user_id == "good-user").expect("Should find success log");
+    let success_log = logs
+        .iter()
+        .find(|l| l.user_id == "good-user")
+        .expect("Should find success log");
     assert!(success_log.success);
     assert_eq!(success_log.action, "login");
 }

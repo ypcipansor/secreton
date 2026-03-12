@@ -10,8 +10,8 @@ use axum::{
     response::Json,
     routing::{delete, get, post},
 };
-use secreton_core::storage::secret::SecretStorage;
 use secreton_common::models::api_response::ApiResponse;
+use secreton_core::storage::secret::SecretStorage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -233,7 +233,10 @@ pub async fn get_secret(
     match state.storage.get_latest_secret(&path).await {
         Ok(Some((data, version))) => {
             info!("Retrieved secret at path '{}'", path);
-            Ok(Json(ApiResponse::success(GetSecretResponse { data, version })))
+            Ok(Json(ApiResponse::success(GetSecretResponse {
+                data,
+                version,
+            })))
         }
         Ok(None) => {
             warn!("Secret not found at path '{}'", path);
@@ -299,7 +302,11 @@ pub async fn destroy_secret(
     Path(path): Path<String>,
 ) -> Result<Json<ApiResponse<DeleteResponse>>, StatusCode> {
     let path = path.trim_start_matches('/').to_string();
-    match state.storage.delete_secret_version(&path, query.version).await {
+    match state
+        .storage
+        .delete_secret_version(&path, query.version)
+        .await
+    {
         Ok(_) => {
             info!(
                 "Permanently destroyed secret '{}' version {}",
@@ -314,7 +321,10 @@ pub async fn destroy_secret(
             })))
         }
         Err(_) => {
-            warn!("Failed to destroy secret '{}' version {}", path, query.version);
+            warn!(
+                "Failed to destroy secret '{}' version {}",
+                path, query.version
+            );
             Err(StatusCode::NOT_FOUND)
         }
     }

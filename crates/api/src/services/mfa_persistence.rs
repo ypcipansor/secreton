@@ -1,15 +1,15 @@
-use std::sync::Arc;
-use async_trait::async_trait;
-use uuid::Uuid;
-use chrono::Utc;
-use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
-use secreton_auth::mfa::{TotpService, TotpEnrollment, TotpValidationRequest, TotpConfig};
-use secreton_errors::SecretonError;
 use crate::services::crypto::CryptoService;
+use async_trait::async_trait;
+use chrono::Utc;
 use rand::Rng;
-use totp_rs::{Algorithm, TOTP};
+use secreton_auth::mfa::{TotpConfig, TotpEnrollment, TotpService, TotpValidationRequest};
+use secreton_errors::SecretonError;
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
+use totp_rs::{Algorithm, TOTP};
+use uuid::Uuid;
 
 pub struct PersistentTotpService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -22,7 +22,11 @@ pub struct PersistentTotpService {
 const TOTP_PREFIX: &str = "sys/mfa/totp/";
 
 impl PersistentTotpService {
-    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>, issuer: String) -> Self {
+    pub fn new(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        crypto: Arc<CryptoService>,
+        issuer: String,
+    ) -> Self {
         Self {
             storage,
             crypto,
@@ -47,7 +51,9 @@ impl PersistentTotpService {
     // Internal helper to create TOTP instance
     fn create_totp_instance(&self, secret: &str) -> Result<TOTP, SecretonError> {
         let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret)
-            .ok_or_else(|| SecretonError::Configuration { message: "Invalid base32 secret".to_string() })?;
+            .ok_or_else(|| SecretonError::Configuration {
+                message: "Invalid base32 secret".to_string(),
+            })?;
 
         let algorithm = match self.config.algorithm.as_str() {
             "SHA1" => Algorithm::SHA1,
@@ -64,13 +70,17 @@ impl PersistentTotpService {
             secret_bytes,
             Some(self.config.issuer.clone()),
             "".to_string(), // account_name not strictly needed for validation logic
-        ).map_err(|e| SecretonError::Configuration { message: format!("Failed to create TOTP instance: {}", e) })
+        )
+        .map_err(|e| SecretonError::Configuration {
+            message: format!("Failed to create TOTP instance: {}", e),
+        })
     }
 
     // Helper to acquire a lock for a specific user
     async fn acquire_user_lock(&self, user_id: Uuid) -> Arc<Mutex<()>> {
         let mut locks = self.user_locks.lock().await;
-        locks.entry(user_id)
+        locks
+            .entry(user_id)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
@@ -109,12 +119,18 @@ impl TotpService for PersistentTotpService {
         };
 
         // Serialize
-        let data = serde_json::to_vec(&enrollment)
-            .map_err(|e| SecretonError::Internal { message: format!("Failed to serialize enrollment: {}", e) })?;
+        let data = serde_json::to_vec(&enrollment).map_err(|e| SecretonError::Internal {
+            message: format!("Failed to serialize enrollment: {}", e),
+        })?;
 
         // Encrypt data
-        let encrypted_data = self.crypto.encrypt_data(&data).await
-            .map_err(|e| SecretonError::Encryption { message: format!("Failed to encrypt TOTP data: {}", e) })?;
+        let encrypted_data =
+            self.crypto
+                .encrypt_data(&data)
+                .await
+                .map_err(|e| SecretonError::Encryption {
+                    message: format!("Failed to encrypt TOTP data: {}", e),
+                })?;
 
         let path = format!("{}{}", TOTP_PREFIX, entity_id);
 
@@ -126,8 +142,12 @@ impl TotpService for PersistentTotpService {
             entity_id,
         );
 
-        self.storage.store(&entry).await
-            .map_err(|e| SecretonError::Database { message: format!("Failed to store enrollment: {}", e) })?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(|e| SecretonError::Database {
+                message: format!("Failed to store enrollment: {}", e),
+            })?;
 
         Ok(enrollment)
     }
@@ -139,13 +159,27 @@ impl TotpService for PersistentTotpService {
 
         let path = format!("{}{}", TOTP_PREFIX, request.entity_id);
 
-        if let Some(entry) = self.storage.get_by_path(&path).await.map_err(|e| SecretonError::Database { message: e.to_string() })? {
+        if let Some(entry) =
+            self.storage
+                .get_by_path(&path)
+                .await
+                .map_err(|e| SecretonError::Database {
+                    message: e.to_string(),
+                })?
+        {
             // Decrypt data
-            let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await
-                .map_err(|e| SecretonError::Decryption { message: format!("Failed to decrypt TOTP data: {}", e) })?;
+            let decrypted_data = self
+                .crypto
+                .decrypt(&entry.encrypted_data)
+                .await
+                .map_err(|e| SecretonError::Decryption {
+                    message: format!("Failed to decrypt TOTP data: {}", e),
+                })?;
 
-            let mut enrollment: TotpEnrollment = serde_json::from_slice(&decrypted_data)
-                .map_err(|e| SecretonError::Internal { message: format!("Failed to deserialize enrollment: {}", e) })?;
+            let mut enrollment: TotpEnrollment =
+                serde_json::from_slice(&decrypted_data).map_err(|e| SecretonError::Internal {
+                    message: format!("Failed to deserialize enrollment: {}", e),
+                })?;
 
             let current_time = Utc::now();
             let current_timestamp = current_time.timestamp() as u64;
@@ -173,21 +207,30 @@ impl TotpService for PersistentTotpService {
             let is_valid = totp.check(&request.code, current_timestamp);
 
             if is_valid {
-                 // Update last used time
+                // Update last used time
                 enrollment.last_used = Some(current_time);
 
-                let data = serde_json::to_vec(&enrollment)
-                    .map_err(|e| SecretonError::Internal { message: format!("Failed to serialize enrollment: {}", e) })?;
+                let data =
+                    serde_json::to_vec(&enrollment).map_err(|e| SecretonError::Internal {
+                        message: format!("Failed to serialize enrollment: {}", e),
+                    })?;
 
                 // Encrypt again
-                let encrypted_data = self.crypto.encrypt_data(&data).await
-                    .map_err(|e| SecretonError::Encryption { message: format!("Failed to encrypt updated TOTP data: {}", e) })?;
+                let encrypted_data = self.crypto.encrypt_data(&data).await.map_err(|e| {
+                    SecretonError::Encryption {
+                        message: format!("Failed to encrypt updated TOTP data: {}", e),
+                    }
+                })?;
 
                 let mut updated_entry = entry.clone();
                 updated_entry.encrypted_data = encrypted_data;
 
-                self.storage.store(&updated_entry).await
-                    .map_err(|e| SecretonError::Database { message: format!("Failed to update enrollment: {}", e) })?;
+                self.storage
+                    .store(&updated_entry)
+                    .await
+                    .map_err(|e| SecretonError::Database {
+                        message: format!("Failed to update enrollment: {}", e),
+                    })?;
 
                 return Ok(true);
             }
@@ -196,7 +239,9 @@ impl TotpService for PersistentTotpService {
         } else {
             // Enrollment not found
             // Return error to distinguish from invalid code, as suggested by review
-            Err(SecretonError::NotFound { resource: format!("MFA enrollment for user {}", request.entity_id) })
+            Err(SecretonError::NotFound {
+                resource: format!("MFA enrollment for user {}", request.entity_id),
+            })
         }
     }
 
@@ -206,13 +251,27 @@ impl TotpService for PersistentTotpService {
     ) -> Result<Option<TotpEnrollment>, SecretonError> {
         let path = format!("{}{}", TOTP_PREFIX, entity_id);
 
-        if let Some(entry) = self.storage.get_by_path(&path).await.map_err(|e| SecretonError::Database { message: e.to_string() })? {
+        if let Some(entry) =
+            self.storage
+                .get_by_path(&path)
+                .await
+                .map_err(|e| SecretonError::Database {
+                    message: e.to_string(),
+                })?
+        {
             // Decrypt data
-            let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await
-                .map_err(|e| SecretonError::Decryption { message: format!("Failed to decrypt TOTP data: {}", e) })?;
+            let decrypted_data = self
+                .crypto
+                .decrypt(&entry.encrypted_data)
+                .await
+                .map_err(|e| SecretonError::Decryption {
+                    message: format!("Failed to decrypt TOTP data: {}", e),
+                })?;
 
-            let enrollment: TotpEnrollment = serde_json::from_slice(&decrypted_data)
-                .map_err(|e| SecretonError::Internal { message: format!("Failed to deserialize enrollment: {}", e) })?;
+            let enrollment: TotpEnrollment =
+                serde_json::from_slice(&decrypted_data).map_err(|e| SecretonError::Internal {
+                    message: format!("Failed to deserialize enrollment: {}", e),
+                })?;
             Ok(Some(enrollment))
         } else {
             Ok(None)
@@ -224,8 +283,12 @@ impl TotpService for PersistentTotpService {
         let _guard = _user_lock.lock().await;
 
         let path = format!("{}{}", TOTP_PREFIX, entity_id);
-        self.storage.delete_by_path(&path).await
-            .map_err(|e| SecretonError::Database { message: format!("Failed to delete enrollment: {}", e) })?;
+        self.storage
+            .delete_by_path(&path)
+            .await
+            .map_err(|e| SecretonError::Database {
+                message: format!("Failed to delete enrollment: {}", e),
+            })?;
         Ok(())
     }
 }

@@ -2,18 +2,18 @@
 
 use axum::{
     Router,
-    extract::{Extension},
+    extract::Extension,
     http::StatusCode,
     response::Json,
-    routing::{post, get},
+    routing::{get, post},
 };
-use secreton_secrets::{SshEngine, SecretEngine, SshConfig};
+use secreton_secrets::{SecretEngine, SshConfig, SshEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::ApiResponse;
 
@@ -81,22 +81,29 @@ pub async fn sign_key(
     data.insert("public_key".to_string(), Value::String(request.public_key));
 
     if let Some(principals) = request.valid_principals {
-        let principals_json = serde_json::to_value(principals).map_err(|_| StatusCode::BAD_REQUEST)?;
+        let principals_json =
+            serde_json::to_value(principals).map_err(|_| StatusCode::BAD_REQUEST)?;
         data.insert("valid_principals".to_string(), principals_json);
     }
 
     if let Some(ttl) = request.ttl {
-        data.insert("ttl".to_string(), Value::Number(serde_json::Number::from(ttl)));
+        data.insert(
+            "ttl".to_string(),
+            Value::Number(serde_json::Number::from(ttl)),
+        );
     }
 
     match engine.write("sign", data).await {
         Ok(secret) => {
             info!("SSH Key signed");
-            let signed_key = secret.data.get("signed_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let signed_key = secret
+                .data
+                .get("signed_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
-            Ok(Json(ApiResponse::success(SignedKeyResponse {
-                signed_key,
-            })))
+            Ok(Json(ApiResponse::success(SignedKeyResponse { signed_key })))
         }
         Err(e) => {
             error!("Failed to sign key: {:?}", e);
@@ -116,7 +123,12 @@ pub async fn generate_ca(
     match engine.write("config/ca", data).await {
         Ok(secret) => {
             info!("SSH CA generated");
-            let pub_key = secret.data.get("public_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pub_key = secret
+                .data
+                .get("public_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             Ok(Json(ApiResponse::success(CaResponse {
                 public_key: pub_key,
@@ -138,14 +150,17 @@ pub async fn get_ca(
 
     match engine.read("config/ca").await {
         Ok(Some(secret)) => {
-            let pub_key = secret.data.get("public_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pub_key = secret
+                .data
+                .get("public_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             Ok(Json(ApiResponse::success(CaResponse {
                 public_key: pub_key,
             })))
         }
-        Ok(None) => {
-            Err(StatusCode::NOT_FOUND)
-        }
+        Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(e) => {
             error!("Failed to get CA: {:?}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)

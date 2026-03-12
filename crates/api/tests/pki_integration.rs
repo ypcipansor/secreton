@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use secreton_storage::{MockStorageBackend, StorageBackend};
     use secreton_api::services::crypto::CryptoService;
     use secreton_api::services::pki::PkiPersistentService;
     use secreton_secrets_pki::CertificateRequest;
+    use secreton_storage::{MockStorageBackend, StorageBackend};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_pki_persistent_flow() {
@@ -25,7 +25,10 @@ mod tests {
         assert!(ca_pem.is_none());
 
         // 4. Generate Root CA
-        let (cert, key) = service.generate_root_ca("Test Root CA", "Test Org").await.unwrap();
+        let (cert, key) = service
+            .generate_root_ca("Test Root CA", "Test Org")
+            .await
+            .unwrap();
         assert!(!cert.is_empty());
         assert!(!key.is_empty());
 

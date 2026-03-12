@@ -1,20 +1,20 @@
 //! Authentication and authorization handlers.
-//! 
+//!
 //! Provides endpoints for user login, token management, MFA,
 //! and OAuth2 integration.
 
+use crate::extractors::AuthenticatedUser;
 use axum::{
+    Router,
     extract::{Path, Query, State},
     http::HeaderMap,
     response::Json,
-    routing::{get, post, delete},
-    Router,
+    routing::{delete, get, post},
 };
-use crate::extractors::AuthenticatedUser;
 
+use secreton_common::models::oauth_state::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use secreton_common::models::oauth_state::OAuthState;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
@@ -31,14 +31,10 @@ pub struct SessionInfo {
 }
 
 // Use types from secreton_auth
-use secreton_auth::{LoginRequest, RefreshTokenRequest, UserInfo, MfaService};
+use secreton_auth::{LoginRequest, MfaService, RefreshTokenRequest, UserInfo};
 
-use crate::{
-    handlers::AppState,
-    ApiResponse, ApiResult,
-    services::auth::AuthError,
-};
 use crate::services::audit::SecurityEventType;
+use crate::{ApiResponse, ApiResult, handlers::AppState, services::auth::AuthError};
 
 // Import Claims from auth service for JWT decoding
 use crate::services::auth::Claims;
@@ -101,23 +97,28 @@ mod tests {
         );
 
         // Register test user "alice" for login tests
-        match services.auth.register_user(
-            "alice",
-            "password123",
-            Some("alice@example.com".to_string()),
-            vec!["user".to_string()],
-            vec![] // permissions
-        ).await {
-            Ok(_) => {},
-            Err(AuthError::UserAlreadyExists) => {},
+        match services
+            .auth
+            .register_user(
+                "alice",
+                "password123",
+                Some("alice@example.com".to_string()),
+                vec!["user".to_string()],
+                vec![], // permissions
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(AuthError::UserAlreadyExists) => {}
             Err(e) => panic!("Failed to setup test user: {}", e),
         }
 
         let app = create_routes().with_state(services.clone().into());
         use std::net::SocketAddr;
         (
-            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>()).expect("Failed to create test server"),
-            services
+            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+                .expect("Failed to create test server"),
+            services,
         )
     }
 
@@ -191,8 +192,9 @@ mod tests {
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &token_claims,
-            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes())
-        ).expect("Failed to create token");
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .expect("Failed to create token");
 
         let request = MfaSetupRequest {
             method: "totp".to_string(),
@@ -200,7 +202,8 @@ mod tests {
             email: None,
         };
 
-        let response = server.post("/mfa/setup")
+        let response = server
+            .post("/mfa/setup")
             .add_header("Authorization", format!("Bearer {}", token))
             .json(&request)
             .await;
@@ -209,16 +212,16 @@ mod tests {
         // If token is rejected (wrong secret), we get 401.
         // Let's print status to debug if it fails.
         if response.status_code() == StatusCode::UNAUTHORIZED {
-             println!("Token was rejected. Secret mismatch?");
-             // If we can't easily generate a valid token, we can at least assert that
-             // it requires authentication (401) or if we manage to auth, it returns 400.
-             // But the original test was checking "unsupported method".
+            println!("Token was rejected. Secret mismatch?");
+            // If we can't easily generate a valid token, we can at least assert that
+            // it requires authentication (401) or if we manage to auth, it returns 400.
+            // But the original test was checking "unsupported method".
         } else {
-             response.assert_status(StatusCode::BAD_REQUEST);
-             let body: ApiResponse<serde_json::Value> = response.json();
-             assert!(!body.success);
-             let error = body.error.expect("error payload");
-             assert!(error.contains("Only TOTP is currently supported"));
+            response.assert_status(StatusCode::BAD_REQUEST);
+            let body: ApiResponse<serde_json::Value> = response.json();
+            assert!(!body.success);
+            let error = body.error.expect("error payload");
+            assert!(error.contains("Only TOTP is currently supported"));
         }
     }
 
@@ -264,7 +267,11 @@ mod tests {
         };
 
         // Use service to generate token (this ensures valid JWT and session creation)
-        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
+        let token = services
+            .auth
+            .generate_token(&user)
+            .await
+            .expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "sms".to_string(),
@@ -272,7 +279,8 @@ mod tests {
             email: None,
         };
 
-        let response = server.post("/mfa/setup")
+        let response = server
+            .post("/mfa/setup")
             .add_header("Authorization", format!("Bearer {}", token))
             .json(&request)
             .await;
@@ -314,7 +322,11 @@ mod tests {
             locked_until: None,
         };
 
-        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
+        let token = services
+            .auth
+            .generate_token(&user)
+            .await
+            .expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "email".to_string(),
@@ -322,7 +334,8 @@ mod tests {
             email: Some("test@example.com".to_string()),
         };
 
-        let response = server.post("/mfa/setup")
+        let response = server
+            .post("/mfa/setup")
             .add_header("Authorization", format!("Bearer {}", token))
             .json(&request)
             .await;
@@ -364,7 +377,11 @@ mod tests {
             locked_until: None,
         };
 
-        let token = services.auth.generate_token(&user).await.expect("Failed to generate token");
+        let token = services
+            .auth
+            .generate_token(&user)
+            .await
+            .expect("Failed to generate token");
 
         let request = MfaSetupRequest {
             method: "webauthn".to_string(),
@@ -372,7 +389,8 @@ mod tests {
             email: None,
         };
 
-        let response = server.post("/mfa/setup")
+        let response = server
+            .post("/mfa/setup")
             .add_header("Authorization", format!("Bearer {}", token))
             .json(&request)
             .await;
@@ -387,7 +405,7 @@ mod tests {
 
         // Complete setup
         let challenge = data.webauthn_challenge.unwrap();
-        use secreton_auth::mfa::webauthn::{RegistrationResponse, CredentialType};
+        use secreton_auth::mfa::webauthn::{CredentialType, RegistrationResponse};
         let completion_request = MfaSetupCompleteRequest {
             method: "webauthn".to_string(),
             webauthn_response: Some(RegistrationResponse {
@@ -401,7 +419,8 @@ mod tests {
             code: None,
         };
 
-        let response = server.post("/mfa/setup/complete")
+        let response = server
+            .post("/mfa/setup/complete")
             .add_header("Authorization", format!("Bearer {}", token))
             .json(&completion_request)
             .await;
@@ -445,7 +464,7 @@ pub struct MfaSetupRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfaSetupResponse {
     pub method: String,
-    pub secret: Option<String>, // For TOTP
+    pub secret: Option<String>,  // For TOTP
     pub qr_code: Option<String>, // For TOTP
     pub webauthn_challenge: Option<secreton_auth::mfa::webauthn::RegistrationChallenge>, // For WebAuthn
     pub backup_codes: Vec<String>,
@@ -501,10 +520,13 @@ pub struct OAuthProvidersConfig {
 impl OAuthProvider {
     fn new(provider: &str, config: Option<&crate::config::OAuth2Config>) -> Option<Self> {
         let config = config?;
-        
+
         // Find the provider in the providers vector
-        let provider_config = config.providers.iter().find(|p| p.name.to_lowercase() == provider.to_lowercase())?;
-        
+        let provider_config = config
+            .providers
+            .iter()
+            .find(|p| p.name.to_lowercase() == provider.to_lowercase())?;
+
         // Build URLs based on provider type
         let (token_url, user_info_url) = match provider {
             "google" => (
@@ -528,14 +550,14 @@ impl OAuthProvider {
                 provider_config.user_info_url.clone(),
             ),
         };
-        
+
         // Build redirect URI - use provider-specific if available, otherwise use config default
         let redirect_uri = if provider_config.auth_url.is_empty() {
             config.redirect_url.clone()
         } else {
             format!("{}/{}/callback", config.redirect_url, provider)
         };
-        
+
         Some(Self {
             client_id: provider_config.client_id.clone(),
             client_secret: provider_config.client_secret.clone(),
@@ -545,7 +567,10 @@ impl OAuthProvider {
         })
     }
 
-    async fn exchange_code_for_token(&self, code: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn exchange_code_for_token(
+        &self,
+        code: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
         let params = [
             ("client_id", &self.client_id),
@@ -570,7 +595,10 @@ impl OAuthProvider {
         Ok(token_data)
     }
 
-    async fn get_user_info(&self, access_token: &str) -> Result<OAuthUserInfo, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_user_info(
+        &self,
+        access_token: &str,
+    ) -> Result<OAuthUserInfo, Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
         let response = client
             .get(&self.user_info_url)
@@ -589,29 +617,66 @@ impl OAuthProvider {
             url if url.contains("googleapis.com") => OAuthUserInfo {
                 id: user_data["id"].as_str().unwrap_or("google_id").to_string(),
                 email: user_data["email"].as_str().unwrap_or("").to_string(),
-                username: user_data["email"].as_str().unwrap_or("").split('@').next().unwrap_or("google_user").to_string(),
-                name: user_data["name"].as_str().unwrap_or("Google User").to_string(),
+                username: user_data["email"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split('@')
+                    .next()
+                    .unwrap_or("google_user")
+                    .to_string(),
+                name: user_data["name"]
+                    .as_str()
+                    .unwrap_or("Google User")
+                    .to_string(),
                 provider: "google".to_string(),
             },
             url if url.contains("api.github.com") => OAuthUserInfo {
                 id: user_data["id"].to_string(),
                 email: user_data["email"].as_str().unwrap_or("").to_string(),
-                username: user_data["login"].as_str().unwrap_or("github_user").to_string(),
-                name: user_data["name"].as_str().unwrap_or("GitHub User").to_string(),
+                username: user_data["login"]
+                    .as_str()
+                    .unwrap_or("github_user")
+                    .to_string(),
+                name: user_data["name"]
+                    .as_str()
+                    .unwrap_or("GitHub User")
+                    .to_string(),
                 provider: "github".to_string(),
             },
             url if url.contains("graph.microsoft.com") => OAuthUserInfo {
-                id: user_data["id"].as_str().unwrap_or("microsoft_id").to_string(),
-                email: user_data["userPrincipalName"].as_str().or(user_data["mail"].as_str()).unwrap_or("").to_string(),
-                username: user_data["userPrincipalName"].as_str().unwrap_or("").split('@').next().unwrap_or("microsoft_user").to_string(),
-                name: user_data["displayName"].as_str().unwrap_or("Microsoft User").to_string(),
+                id: user_data["id"]
+                    .as_str()
+                    .unwrap_or("microsoft_id")
+                    .to_string(),
+                email: user_data["userPrincipalName"]
+                    .as_str()
+                    .or(user_data["mail"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                username: user_data["userPrincipalName"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split('@')
+                    .next()
+                    .unwrap_or("microsoft_user")
+                    .to_string(),
+                name: user_data["displayName"]
+                    .as_str()
+                    .unwrap_or("Microsoft User")
+                    .to_string(),
                 provider: "microsoft".to_string(),
             },
             url if url.contains("okta.com") => OAuthUserInfo {
                 id: user_data["sub"].as_str().unwrap_or("okta_id").to_string(),
                 email: user_data["email"].as_str().unwrap_or("").to_string(),
-                username: user_data["preferred_username"].as_str().unwrap_or("okta_user").to_string(),
-                name: user_data["name"].as_str().unwrap_or("Okta User").to_string(),
+                username: user_data["preferred_username"]
+                    .as_str()
+                    .unwrap_or("okta_user")
+                    .to_string(),
+                name: user_data["name"]
+                    .as_str()
+                    .unwrap_or("Okta User")
+                    .to_string(),
                 provider: "okta".to_string(),
             },
             _ => return Err("Unsupported OAuth provider".into()),
@@ -654,9 +719,10 @@ pub async fn login(
         Ok(auth_token) => {
             // AuthResult.token is Option<String>, use it as access_token
             let access_token = auth_token.token.clone().unwrap_or_default();
-            let user_info = auth_token.user_info.as_ref()
-                .ok_or_else(|| crate::ApiError::Authentication("User info not available".to_string()))?;
-            
+            let user_info = auth_token.user_info.as_ref().ok_or_else(|| {
+                crate::ApiError::Authentication("User info not available".to_string())
+            })?;
+
             let response = LoginResponse {
                 access_token: Some(access_token.clone()),
                 refresh_token: auth_token.refresh_token.clone(),
@@ -678,11 +744,10 @@ pub async fn login(
             // Audit: authentication success
             let _ = state
                 .audit
-                .log_event(
-                    SecurityEventType::AuthenticationSuccess {
-                        user: response.user.username.clone(),
-                        method: "password".to_string(),
-                    })
+                .log_event(SecurityEventType::AuthenticationSuccess {
+                    user: response.user.username.clone(),
+                    method: "password".to_string(),
+                })
                 .await;
 
             Ok(Json(ApiResponse::success(response)))
@@ -692,10 +757,10 @@ pub async fn login(
             let _ = state
                 .audit
                 .log_event(SecurityEventType::AuthenticationFailure {
-                        user: request.username.clone(),
-                        method: "password".to_string(),
-                        reason: e.to_string(),
-                    })
+                    user: request.username.clone(),
+                    method: "password".to_string(),
+                    reason: e.to_string(),
+                })
                 .await;
 
             Err(crate::ApiError::Authentication(e.to_string()))
@@ -714,7 +779,9 @@ pub async fn logout(
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+        })?;
 
     // Extract session ID from token for accurate auditing
     let session_id = extract_jti_from_token(token, &state).unwrap_or_else(|| "unknown".to_string());
@@ -736,10 +803,10 @@ pub async fn logout(
     let _ = state
         .audit
         .log_event(SecurityEventType::SessionTerminated {
-                user: user.username,
-                session_id,
-                reason: "logout".to_string(),
-            })
+            user: user.username,
+            session_id,
+            reason: "logout".to_string(),
+        })
         .await;
 
     Ok(Json(ApiResponse::success(data)))
@@ -751,11 +818,17 @@ pub async fn refresh_token(
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Validate refresh token and get new tokens
-    let auth_token = state.auth.refresh_token(&request.refresh_token).await
+    let auth_token = state
+        .auth
+        .refresh_token(&request.refresh_token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Fetch user info using the new token
-    let user = state.auth.validate_token(&auth_token.access_token).await
+    let user = state
+        .auth
+        .validate_token(&auth_token.access_token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     let response = LoginResponse {
@@ -779,12 +852,11 @@ pub async fn refresh_token(
     // Audit: token refresh
     let _ = state
         .audit
-        .log_event(
-            SecurityEventType::AuthenticationSuccess {
-                user: response.user.username.clone(),
-                method: "refresh_token".to_string(),
-                // ip_address removed from variant
-            })
+        .log_event(SecurityEventType::AuthenticationSuccess {
+            user: response.user.username.clone(),
+            method: "refresh_token".to_string(),
+            // ip_address removed from variant
+        })
         .await;
 
     Ok(Json(ApiResponse::success(response)))
@@ -796,7 +868,10 @@ pub async fn verify_token(
     Json(request): Json<VerifyTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
     // Validate token and get user information
-    let user: secreton_core::User = state.auth.validate_token(&request.token).await
+    let user: secreton_core::User = state
+        .auth
+        .validate_token(&request.token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     let user_info = UserInfo {
@@ -833,12 +908,11 @@ pub async fn setup_mfa(
 
     match request.method.as_str() {
         "totp" => {
-            let totp_config = state.mfa.enable_totp(
-                user_id,
-                user.username.clone(),
-            ).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to setup MFA: {}", e))
-            })?;
+            let totp_config = state
+                .mfa
+                .enable_totp(user_id, user.username.clone())
+                .await
+                .map_err(|e| crate::ApiError::Internal(format!("Failed to setup MFA: {}", e)))?;
 
             response.secret = Some(totp_config.secret);
             response.qr_code = Some(totp_config.url);
@@ -848,9 +922,13 @@ pub async fn setup_mfa(
                 crate::ApiError::BadRequest("Phone number is required for SMS MFA".to_string())
             })?;
 
-            state.mfa.enable_sms(user_id, phone_number).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to setup SMS MFA: {}", e))
-            })?;
+            state
+                .mfa
+                .enable_sms(user_id, phone_number)
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to setup SMS MFA: {}", e))
+                })?;
         }
         "email" => {
             let email = request.email.ok_or_else(|| {
@@ -862,24 +940,39 @@ pub async fn setup_mfa(
             })?;
         }
         "webauthn" => {
-            let challenge = state.mfa.start_webauthn_registration(
-                user_id,
-                &user.username,
-                &user.display_name.unwrap_or_else(|| user.username.clone()),
-            ).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to start WebAuthn registration: {}", e))
-            })?;
+            let challenge = state
+                .mfa
+                .start_webauthn_registration(
+                    user_id,
+                    &user.username,
+                    &user.display_name.unwrap_or_else(|| user.username.clone()),
+                )
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!(
+                        "Failed to start WebAuthn registration: {}",
+                        e
+                    ))
+                })?;
 
             response.webauthn_challenge = Some(challenge);
         }
-        _ => return Err(crate::ApiError::BadRequest("Unsupported MFA method".to_string())),
+        _ => {
+            return Err(crate::ApiError::BadRequest(
+                "Unsupported MFA method".to_string(),
+            ));
+        }
     }
 
     // Generate backup codes if not just starting webauthn
     if request.method != "webauthn" {
-        let codes = state.mfa.regenerate_recovery_codes(user_id).await.map_err(|e| {
-            crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
-        })?;
+        let codes = state
+            .mfa
+            .regenerate_recovery_codes(user_id)
+            .await
+            .map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
+            })?;
         response.backup_codes = codes;
     }
 
@@ -887,9 +980,9 @@ pub async fn setup_mfa(
     let _ = state
         .audit
         .log_event(SecurityEventType::MfaSetup {
-                user: user.username,
-                method: request.method,
-            })
+            user: user.username,
+            method: request.method,
+        })
         .await;
 
     Ok(Json(ApiResponse::success(response)))
@@ -908,38 +1001,69 @@ pub async fn complete_mfa_setup(
     match request.method.as_str() {
         "webauthn" => {
             if let Some(response) = request.webauthn_response {
-                state.mfa.complete_webauthn_registration(response).await.map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to complete WebAuthn registration: {}", e))
-                })?;
+                state
+                    .mfa
+                    .complete_webauthn_registration(response)
+                    .await
+                    .map_err(|e| {
+                        crate::ApiError::Internal(format!(
+                            "Failed to complete WebAuthn registration: {}",
+                            e
+                        ))
+                    })?;
             } else {
-                return Err(crate::ApiError::BadRequest("Missing WebAuthn response".to_string()));
+                return Err(crate::ApiError::BadRequest(
+                    "Missing WebAuthn response".to_string(),
+                ));
             }
         }
         "sms" => {
-            let code = request.code.ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
-            let valid = state.mfa.verify_and_enable_sms(user_id, code).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to verify SMS code: {}", e))
-            })?;
+            let code = request
+                .code
+                .ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+            let valid = state
+                .mfa
+                .verify_and_enable_sms(user_id, code)
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to verify SMS code: {}", e))
+                })?;
             if !valid {
                 return Err(crate::ApiError::BadRequest("Invalid SMS code".to_string()));
             }
         }
         "email" => {
-            let code = request.code.ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
-            let valid = state.mfa.verify_and_enable_email(user_id, code).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to verify Email code: {}", e))
-            })?;
+            let code = request
+                .code
+                .ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+            let valid = state
+                .mfa
+                .verify_and_enable_email(user_id, code)
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to verify Email code: {}", e))
+                })?;
             if !valid {
-                return Err(crate::ApiError::BadRequest("Invalid Email code".to_string()));
+                return Err(crate::ApiError::BadRequest(
+                    "Invalid Email code".to_string(),
+                ));
             }
         }
-        _ => return Err(crate::ApiError::BadRequest("Unsupported MFA method for completion".to_string())),
+        _ => {
+            return Err(crate::ApiError::BadRequest(
+                "Unsupported MFA method for completion".to_string(),
+            ));
+        }
     }
 
     // Generate backup codes
-    let codes = state.mfa.regenerate_recovery_codes(user_id).await.map_err(|e| {
-        crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
-    })?;
+    let codes = state
+        .mfa
+        .regenerate_recovery_codes(user_id)
+        .await
+        .map_err(|e| {
+            crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
+        })?;
 
     let response = MfaSetupResponse {
         method: request.method.clone(),
@@ -953,9 +1077,9 @@ pub async fn complete_mfa_setup(
     let _ = state
         .audit
         .log_event(SecurityEventType::MfaSetup {
-                user: user.username,
-                method: request.method,
-            })
+            user: user.username,
+            method: request.method,
+        })
         .await;
 
     Ok(Json(ApiResponse::success(response)))
@@ -972,10 +1096,15 @@ pub async fn verify_mfa(
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+        })?;
 
     // Get user from token
-    let user = state.auth.validate_token(token).await
+    let user = state
+        .auth
+        .validate_token(token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Parse user ID to UUID
@@ -1003,15 +1132,24 @@ pub async fn verify_mfa(
             push_response: None,
             webauthn_response: None,
         },
-        _ => return Err(crate::ApiError::BadRequest("Unsupported MFA method for verification".to_string())),
+        _ => {
+            return Err(crate::ApiError::BadRequest(
+                "Unsupported MFA method for verification".to_string(),
+            ));
+        }
     };
 
     // Validate using the MFA service
-    let is_valid = state.mfa.validate(validation_request).await
+    let is_valid = state
+        .mfa
+        .validate(validation_request)
+        .await
         .map_err(|e| crate::ApiError::Internal(format!("MFA validation failed: {}", e)))?;
 
     if !is_valid {
-        return Err(crate::ApiError::Authentication("Invalid MFA code".to_string()));
+        return Err(crate::ApiError::Authentication(
+            "Invalid MFA code".to_string(),
+        ));
     }
 
     let data = serde_json::json!({
@@ -1023,9 +1161,9 @@ pub async fn verify_mfa(
     let _ = state
         .audit
         .log_event(SecurityEventType::MFASuccess {
-                user: user.username,
-                method: request.method,
-            })
+            user: user.username,
+            method: request.method,
+        })
         .await;
 
     Ok(Json(ApiResponse::success(data)))
@@ -1042,18 +1180,28 @@ pub async fn disable_mfa(
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+        })?;
 
     // Get user from token
-    let user = state.auth.validate_token(token).await
+    let user = state
+        .auth
+        .validate_token(token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Verify password for additional security
-    let password_valid: bool = state.auth.verify_password(&user.username, &request.password).await
+    let password_valid: bool = state
+        .auth
+        .verify_password(&user.username, &request.password)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     if !password_valid {
-        return Err(crate::ApiError::Authentication("Invalid password".to_string()));
+        return Err(crate::ApiError::Authentication(
+            "Invalid password".to_string(),
+        ));
     }
 
     // Parse UUID
@@ -1061,14 +1209,18 @@ pub async fn disable_mfa(
         .map_err(|_| crate::ApiError::Internal("Invalid user ID format".to_string()))?;
 
     // Disable MFA (specific logic from mfa-integration tailored to use user_uuid)
-    state.mfa.disable_totp(user_uuid).await.map_err(|e| {
-        crate::ApiError::Internal(format!("Failed to disable MFA: {}", e))
-    })?;
+    state
+        .mfa
+        .disable_totp(user_uuid)
+        .await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to disable MFA: {}", e)))?;
 
     // Remove MFA enrollment (disables all methods)
-    state.mfa.remove_enrollment(user_uuid).await.map_err(|e| {
-        crate::ApiError::Internal(format!("Failed to disable MFA: {}", e))
-    })?;
+    state
+        .mfa
+        .remove_enrollment(user_uuid)
+        .await
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to disable MFA: {}", e)))?;
 
     let method = "all"; // All MFA methods disabled
 
@@ -1081,9 +1233,9 @@ pub async fn disable_mfa(
     let _ = state
         .audit
         .log_event(SecurityEventType::MFARemoval {
-                user: user.username,
-                method: method.to_string(),
-            })
+            user: user.username,
+            method: method.to_string(),
+        })
         .await;
 
     Ok(Json(ApiResponse::success(data)))
@@ -1097,12 +1249,15 @@ pub async fn oauth_login(
     // Validate supported providers
     let supported_providers = ["google", "github", "microsoft", "okta"];
     if !supported_providers.contains(&provider.as_str()) {
-        return Err(crate::ApiError::BadRequest(format!("Unsupported OAuth provider: {}", provider)));
+        return Err(crate::ApiError::BadRequest(format!(
+            "Unsupported OAuth provider: {}",
+            provider
+        )));
     }
 
     // Generate secure random state
-    use rand::{thread_rng, Rng};
     use rand::distributions::Alphanumeric;
+    use rand::{Rng, thread_rng};
     let oauth_state_str: String = thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
@@ -1133,9 +1288,13 @@ pub async fn oauth_login(
     // Build authorization URL based on provider
     let auth_url = if let Some(oauth2_config) = state.config.auth.oauth2.as_ref() {
         // Find the provider in the providers vector
-        let provider_config = oauth2_config.providers.iter()
+        let provider_config = oauth2_config
+            .providers
+            .iter()
             .find(|p| p.name.to_lowercase() == provider.to_lowercase())
-            .ok_or_else(|| crate::ApiError::BadRequest(format!("OAuth provider '{}' not configured", provider)))?;
+            .ok_or_else(|| {
+                crate::ApiError::BadRequest(format!("OAuth provider '{}' not configured", provider))
+            })?;
 
         // Build redirect URI
         let redirect_uri = format!("{}/{}/callback", oauth2_config.redirect_url, provider);
@@ -1149,23 +1308,15 @@ pub async fn oauth_login(
             match provider.as_str() {
                 "google" => format!(
                     "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
-                    provider_config.client_id,
-                    redirect_uri,
-                    scopes,
-                    oauth_state_str
+                    provider_config.client_id, redirect_uri, scopes, oauth_state_str
                 ),
                 "github" => format!(
                     "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=user:email&state={}",
-                    provider_config.client_id,
-                    redirect_uri,
-                    oauth_state_str
+                    provider_config.client_id, redirect_uri, oauth_state_str
                 ),
                 "microsoft" => format!(
                     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
-                    provider_config.client_id,
-                    redirect_uri,
-                    scopes,
-                    oauth_state_str
+                    provider_config.client_id, redirect_uri, scopes, oauth_state_str
                 ),
                 _ => format!(
                     "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
@@ -1188,7 +1339,9 @@ pub async fn oauth_login(
             )
         }
     } else {
-        return Err(crate::ApiError::BadRequest("OAuth providers not configured".to_string()));
+        return Err(crate::ApiError::BadRequest(
+            "OAuth providers not configured".to_string(),
+        ));
     };
 
     let data = serde_json::json!({
@@ -1208,13 +1361,13 @@ pub async fn oauth_callback(
     Query(params): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Extract OAuth parameters
-    let code: &String = params.get("code").ok_or_else(|| {
-        crate::ApiError::BadRequest("OAuth state mismatch".to_string())
-    })?;
+    let code: &String = params
+        .get("code")
+        .ok_or_else(|| crate::ApiError::BadRequest("OAuth state mismatch".to_string()))?;
 
-    let state_param: &String = params.get("state").ok_or_else(|| {
-        crate::ApiError::BadRequest("Missing authorization code".to_string())
-    })?;
+    let state_param: &String = params
+        .get("state")
+        .ok_or_else(|| crate::ApiError::BadRequest("Missing authorization code".to_string()))?;
 
     // Verify state parameter against stored state for CSRF protection
     let stored_state = state
@@ -1222,47 +1375,70 @@ pub async fn oauth_callback(
         .get_oauth_state(state_param)
         .await
         .map_err(|e| crate::ApiError::Internal(format!("Failed to get OAuth state: {}", e)))?
-        .ok_or_else(|| crate::ApiError::Authentication("Invalid or expired OAuth state".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Invalid or expired OAuth state".to_string())
+        })?;
 
     // Verify the state matches the expected provider
     if stored_state.provider != provider {
-        return Err(crate::ApiError::Authentication("OAuth state provider mismatch".to_string()));
+        return Err(crate::ApiError::Authentication(
+            "OAuth state provider mismatch".to_string(),
+        ));
     }
 
     if let Some(error) = params.get("error") {
-        return Err(crate::ApiError::Authentication(format!("OAuth error: {}", error)));
+        return Err(crate::ApiError::Authentication(format!(
+            "OAuth error: {}",
+            error
+        )));
     }
 
     // Get OAuth provider configuration
-    let oauth2_config = state.config.auth.oauth2.as_ref()
-        .ok_or_else(|| crate::ApiError::BadRequest("OAuth providers not configured".to_string()))?;
+    let oauth2_config =
+        state.config.auth.oauth2.as_ref().ok_or_else(|| {
+            crate::ApiError::BadRequest("OAuth providers not configured".to_string())
+        })?;
 
-    let oauth_provider = OAuthProvider::new(&provider, Some(oauth2_config))
-        .ok_or_else(|| crate::ApiError::BadRequest(format!("Unsupported OAuth provider: {}", provider)))?;
+    let oauth_provider = OAuthProvider::new(&provider, Some(oauth2_config)).ok_or_else(|| {
+        crate::ApiError::BadRequest(format!("Unsupported OAuth provider: {}", provider))
+    })?;
 
     // Exchange authorization code for access token
-    let token_data: serde_json::Value = oauth_provider.exchange_code_for_token(code)
+    let token_data: serde_json::Value = oauth_provider
+        .exchange_code_for_token(code)
         .await
         .map_err(|e| crate::ApiError::Authentication(format!("Token exchange failed: {}", e)))?;
 
-    let access_token = token_data["access_token"].as_str()
-        .ok_or_else(|| crate::ApiError::Authentication("No access token in response".to_string()))?;
+    let access_token = token_data["access_token"].as_str().ok_or_else(|| {
+        crate::ApiError::Authentication("No access token in response".to_string())
+    })?;
 
     // Fetch user information from provider
-    let oauth_user: OAuthUserInfo = oauth_provider.get_user_info(access_token)
+    let oauth_user: OAuthUserInfo = oauth_provider
+        .get_user_info(access_token)
         .await
         .map_err(|e| crate::ApiError::Authentication(format!("User info fetch failed: {}", e)))?;
 
     // Create or update user account
-    let user = state.auth.oauth_login(&oauth_user).await
+    let user = state
+        .auth
+        .oauth_login(&oauth_user)
+        .await
         .map_err(|e| crate::ApiError::Authentication(format!("OAuth login failed: {}", e)))?;
 
     // Generate JWT tokens
-    let jwt_access_token = state.auth.generate_token(&user).await
-        .map_err(|e| crate::ApiError::Authentication(format!("Token generation failed: {}", e)))?;
+    let jwt_access_token =
+        state.auth.generate_token(&user).await.map_err(|e| {
+            crate::ApiError::Authentication(format!("Token generation failed: {}", e))
+        })?;
 
-    let refresh_token = state.auth.generate_refresh_token(&user).await
-        .map_err(|e| crate::ApiError::Authentication(format!("Refresh token generation failed: {}", e)))?;
+    let refresh_token = state
+        .auth
+        .generate_refresh_token(&user)
+        .await
+        .map_err(|e| {
+            crate::ApiError::Authentication(format!("Refresh token generation failed: {}", e))
+        })?;
 
     let response = LoginResponse {
         access_token: Some(jwt_access_token),
@@ -1285,12 +1461,11 @@ pub async fn oauth_callback(
     // Audit: OAuth login success
     let _ = state
         .audit
-        .log_event(
-            SecurityEventType::LoginSuccess {
-                user: user.username.clone(),
-                method: format!("oauth_{}", provider),
-                ip_address: Some(extract_client_ip(&headers)),
-            })
+        .log_event(SecurityEventType::LoginSuccess {
+            user: user.username.clone(),
+            method: format!("oauth_{}", provider),
+            ip_address: Some(extract_client_ip(&headers)),
+        })
         .await;
 
     Ok(Json(ApiResponse::success(response)))
@@ -1306,34 +1481,48 @@ pub async fn list_sessions(
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+        })?;
 
     // Get user from token
-    let user = state.auth.validate_token(token).await
+    let user = state
+        .auth
+        .validate_token(token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Extract JTI from current token to identify current session
     let current_jti = extract_jti_from_token(token, &state);
 
     // Get all sessions for the user from backend storage
-    let sessions = state.auth.list_user_sessions(&user.id).await
+    let sessions = state
+        .auth
+        .list_user_sessions(&user.id)
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Mark the current session based on JTI match
-    let sessions_info: Vec<SessionInfo> = sessions.into_iter().map(|session| {
-        let is_current = current_jti.as_ref().map(|jti| jti == &session.id).unwrap_or(false);
-        SessionInfo {
-             id: session.id,
-             user_id: session.user_id,
-             ip_address: session.ip_address,
-             user_agent: session.user_agent,
-             last_accessed: session.last_accessed,
-             created_at: session.created_at,
-             expires_at: session.expires_at,
-             is_current,
-             metadata: HashMap::new(), // Service Session currently doesn't export metadata publicly, using empty
-        }
-    }).collect();
+    let sessions_info: Vec<SessionInfo> = sessions
+        .into_iter()
+        .map(|session| {
+            let is_current = current_jti
+                .as_ref()
+                .map(|jti| jti == &session.id)
+                .unwrap_or(false);
+            SessionInfo {
+                id: session.id,
+                user_id: session.user_id,
+                ip_address: session.ip_address,
+                user_agent: session.user_agent,
+                last_accessed: session.last_accessed,
+                created_at: session.created_at,
+                expires_at: session.expires_at,
+                is_current,
+                metadata: HashMap::new(), // Service Session currently doesn't export metadata publicly, using empty
+            }
+        })
+        .collect();
 
     Ok(Json(ApiResponse::success(sessions_info)))
 }
@@ -1349,16 +1538,26 @@ pub async fn revoke_session(
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| crate::ApiError::Authentication("Missing or invalid authorization header".to_string()))?;
+        .ok_or_else(|| {
+            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+        })?;
 
     // Get user from token
-    let user = state.auth.validate_token(token).await
+    let user = state
+        .auth
+        .validate_token(token)
+        .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
     // Revoke the session via service
-    state.auth.revoke_user_session(&session_id, &user.id).await
+    state
+        .auth
+        .revoke_user_session(&session_id, &user.id)
+        .await
         .map_err(|e| match e {
-            AuthError::PermissionDenied => crate::ApiError::Authorization("Access denied".to_string()),
+            AuthError::PermissionDenied => {
+                crate::ApiError::Authorization("Access denied".to_string())
+            }
             _ => crate::ApiError::NotFound("Session not found".to_string()),
         })?;
 
@@ -1371,11 +1570,11 @@ pub async fn revoke_session(
     let _ = state
         .audit
         .log_event(SecurityEventType::Logout {
-                user: user.username,
-                session_id: session_id.clone(),
-                ip_address: Some(extract_client_ip(&headers)),
-                user_agent: Some(extract_user_agent(&headers)),
-            })
+            user: user.username,
+            session_id: session_id.clone(),
+            ip_address: Some(extract_client_ip(&headers)),
+            user_agent: Some(extract_user_agent(&headers)),
+        })
         .await;
 
     Ok(Json(ApiResponse::success(data)))
@@ -1388,18 +1587,27 @@ pub async fn create_user(
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
     // Check permissions
-    if !admin_user.is_superuser && !admin_user.roles.contains(&"admin".to_string()) && !admin_user.roles.contains(&"root".to_string()) {
-         return Err(crate::ApiError::Authorization("Insufficient permissions".to_string()));
+    if !admin_user.is_superuser
+        && !admin_user.roles.contains(&"admin".to_string())
+        && !admin_user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
     }
 
     // Create user
-    let user = state.auth.register_user(
-        &request.username,
-        &request.password,
-        request.email,
-        request.roles,
-        request.permissions,
-    ).await.map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+    let user = state
+        .auth
+        .register_user(
+            &request.username,
+            &request.password,
+            request.email,
+            request.roles,
+            request.permissions,
+        )
+        .await
+        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
     // Return info
     let user_info = UserInfo {
@@ -1419,23 +1627,26 @@ pub async fn create_user(
 fn extract_client_ip(headers: &HeaderMap) -> String {
     // Try X-Forwarded-For first (for proxies/load balancers)
     if let Some(x_forwarded_for) = headers.get("x-forwarded-for")
-        && let Ok(value) = x_forwarded_for.to_str() {
-            // X-Forwarded-For can contain multiple IPs, take the first one
-            if let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Ok(value) = x_forwarded_for.to_str()
+    {
+        // X-Forwarded-For can contain multiple IPs, take the first one
+        if let Some(first_ip) = value.split(',').next() {
+            return first_ip.trim().to_string();
+        }
     }
 
     // Try X-Real-IP (for nginx)
     if let Some(x_real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = x_real_ip.to_str() {
-            return value.to_string();
+        && let Ok(value) = x_real_ip.to_str()
+    {
+        return value.to_string();
     }
 
     // Try X-Client-IP (for some proxies)
     if let Some(x_client_ip) = headers.get("x-client-ip")
-        && let Ok(value) = x_client_ip.to_str() {
-            return value.to_string();
+        && let Ok(value) = x_client_ip.to_str()
+    {
+        return value.to_string();
     }
 
     // Fallback to unknown
@@ -1453,7 +1664,7 @@ fn extract_user_agent(headers: &HeaderMap) -> String {
 
 /// Extract JTI from JWT token
 fn extract_jti_from_token(token: &str, state: &AppState) -> Option<String> {
-    use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     let secret = state.config.auth.jwt.secret.as_ref()?;
     let decoding_key = DecodingKey::from_secret(secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);

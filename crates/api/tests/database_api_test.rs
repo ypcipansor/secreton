@@ -1,14 +1,16 @@
 use axum::Extension;
 use axum_test::TestServer;
 use secreton_api::ApiState;
-use secreton_api::database::{self, DatabaseApiState, ConfigRequest, ConfigResponse, ListRolesResponse, CreateRoleRequest};
-use secreton_api::pki::PkiApiState;
-use secreton_api::kv::KVApiState;
-use secreton_api::transit::TransitApiState;
 use secreton_api::config::ApiConfig;
+use secreton_api::database::{
+    self, ConfigRequest, ConfigResponse, CreateRoleRequest, DatabaseApiState, ListRolesResponse,
+};
+use secreton_api::kv::KVApiState;
+use secreton_api::pki::PkiApiState;
+use secreton_api::transit::TransitApiState;
 use secreton_performance::OptimizationLevel;
+use secreton_secrets::{DatabaseConfig, DatabaseEngine};
 use std::sync::Arc;
-use secreton_secrets::{DatabaseEngine, DatabaseConfig};
 
 #[tokio::test]
 async fn test_database_api_endpoints() {
@@ -19,11 +21,21 @@ async fn test_database_api_endpoints() {
     config_inner.auth.jwt.audience = "secreton-api".to_string();
     let config = Arc::new(config_inner);
 
-    let auth = Arc::new(secreton_api::services::auth::AuthenticationService::new(
-        Arc::new(secreton_storage::MockStorageBackend::new()),
-        Arc::new(secreton_api::services::crypto::CryptoService::new(Arc::new(secreton_storage::MockStorageBackend::new())).await.unwrap()),
-        &config.auth
-    ).await.unwrap());
+    let auth = Arc::new(
+        secreton_api::services::auth::AuthenticationService::new(
+            Arc::new(secreton_storage::MockStorageBackend::new()),
+            Arc::new(
+                secreton_api::services::crypto::CryptoService::new(Arc::new(
+                    secreton_storage::MockStorageBackend::new(),
+                ))
+                .await
+                .unwrap(),
+            ),
+            &config.auth,
+        )
+        .await
+        .unwrap(),
+    );
 
     // We can use a simplified ApiState construction for tests or the public new() method
     // Since new() requires many dependencies, constructing struct directly is easier if fields are public.
@@ -33,41 +45,66 @@ async fn test_database_api_endpoints() {
     use secreton_api::totp::TotpApiState;
 
     // Use MockStorageBackend for DatabaseApiState
-    let storage: Arc<dyn secreton_storage::StorageBackend + Send + Sync> = Arc::new(secreton_storage::MockStorageBackend::new());
+    let storage: Arc<dyn secreton_storage::StorageBackend + Send + Sync> =
+        Arc::new(secreton_storage::MockStorageBackend::new());
     let database_state = DatabaseApiState::new(storage.clone()).await;
 
     // Create remaining services for container
-    let crypto = Arc::new(secreton_api::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
-    let audit = Arc::new(secreton_api::services::audit::AuditLogger::new(storage.clone()).await.unwrap());
-    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(secreton_performance::SecretPerformanceConfig::default()));
+    let crypto = Arc::new(
+        secreton_api::services::crypto::CryptoService::new(storage.clone())
+            .await
+            .unwrap(),
+    );
+    let audit = Arc::new(
+        secreton_api::services::audit::AuditLogger::new(storage.clone())
+            .await
+            .unwrap(),
+    );
+    let performance = Arc::new(secreton_performance::SecretPerformanceOptimizer::new(
+        secreton_performance::SecretPerformanceConfig::default(),
+    ));
     let policy = Arc::new(secreton_auth::policies::service::PolicyService::new());
     let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
-    let secret = Arc::new(secreton_api::services::secret::SecretService::new(
-        storage.clone(),
-        crypto.clone(),
-        audit.clone(),
-        identity.clone(),
-        policy.clone(),
-        performance.clone()
-    ).await.unwrap());
+    let secret = Arc::new(
+        secreton_api::services::secret::SecretService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
+            identity.clone(),
+            policy.clone(),
+            performance.clone(),
+        )
+        .await
+        .unwrap(),
+    );
     let seal = Arc::new(secreton_api::services::seal::SealService::new(
         storage.clone(),
         crypto.clone(),
         "test-secret".to_string(),
         "iss".to_string(),
-        "aud".to_string()
+        "aud".to_string(),
     ));
-    let admin = Arc::new(secreton_api::services::admin::AdminService::new(
-             storage.clone(),
-             auth.clone(),
-             performance.clone()
-        ).await.unwrap());
+    let admin = Arc::new(
+        secreton_api::services::admin::AdminService::new(
+            storage.clone(),
+            auth.clone(),
+            performance.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     // Mock MFA
     let mfa = Arc::new(secreton_auth::mfa::CombinedMfaService::new(
-        Arc::new(secreton_auth::mfa::InMemoryTotpService::new("test".to_string())),
-        Arc::new(secreton_auth::mfa::InMemorySmsService::new(secreton_auth::mfa::SmsConfig::default())),
-        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(secreton_auth::mfa::EmailConfig::default())),
+        Arc::new(secreton_auth::mfa::InMemoryTotpService::new(
+            "test".to_string(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemorySmsService::new(
+            secreton_auth::mfa::SmsConfig::default(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(
+            secreton_auth::mfa::EmailConfig::default(),
+        )),
         Arc::new(secreton_auth::mfa::InMemoryHardwareService::new()),
         Arc::new(secreton_auth::mfa::DefaultPushService::new_mock()),
         Arc::new(secreton_auth::mfa::DefaultWebAuthnService::new_default()),
@@ -118,7 +155,8 @@ async fn test_database_api_endpoints() {
     // However, this verifies the router structure and middleware presence.
     // To properly test success, we would need to mock the AuthenticationService validation logic.
 
-    let _response = server.post("/api/v1/database/config")
+    let _response = server
+        .post("/api/v1/database/config")
         .json(&config_req)
         .await;
 
@@ -145,7 +183,8 @@ async fn test_database_api_endpoints() {
         default_ttl: Some(600),
     };
 
-    let response = server.post("/api/v1/database/roles/test-role")
+    let response = server
+        .post("/api/v1/database/roles/test-role")
         .json(&role_req)
         .await;
 

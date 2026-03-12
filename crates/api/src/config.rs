@@ -6,8 +6,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
 use secreton_storage::StorageFactoryConfig;
+use serde::{Deserialize, Serialize};
 
 /// Main API configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -512,7 +512,7 @@ impl Default for JwtConfig {
     fn default() -> Self {
         Self {
             secret: None,
-            expiration: 3600, // 1 hour
+            expiration: 3600,              // 1 hour
             refresh_expiration: 86400 * 7, // 7 days
             algorithm: "HS256".to_string(),
             issuer: "secreton".to_string(),
