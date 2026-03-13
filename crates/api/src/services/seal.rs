@@ -1,13 +1,13 @@
+use crate::services::crypto::CryptoService;
+use anyhow::{Result, anyhow};
+use jsonwebtoken::{EncodingKey, Header, encode};
+use secreton_crypto::shamir::{self, Share};
+use secreton_crypto::{AlgorithmId, EncryptedData};
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
-use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
 use uuid::Uuid;
-use crate::services::crypto::CryptoService;
-use secreton_crypto::{AlgorithmId, EncryptedData};
-use secreton_crypto::shamir::{self, Share};
-use jsonwebtoken::{encode, Header, EncodingKey};
 
 /// Seal/Unseal Service
 /// Manages the initialization and sealing status of the vault.
@@ -25,7 +25,7 @@ pub struct SealService {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitResponse {
-    pub keys: Vec<String>, // Hex encoded shares
+    pub keys: Vec<String>,        // Hex encoded shares
     pub keys_base64: Vec<String>, // Base64 encoded shares
     // Root token removed for security
     pub root_totp_uri: String,
@@ -91,7 +91,11 @@ impl SealService {
     pub async fn is_initialized(&self) -> bool {
         // We use list instead of get to check existence without reading full data if possible,
         // but get is safer.
-        self.storage.get_by_path(INIT_PATH).await.unwrap_or(None).is_some()
+        self.storage
+            .get_by_path(INIT_PATH)
+            .await
+            .unwrap_or(None)
+            .is_some()
     }
 
     /// Check if the system is sealed
@@ -104,9 +108,9 @@ impl SealService {
         let sealed = self.is_sealed().await;
 
         let (t, n) = if let Ok(Some(entry)) = self.storage.get_by_path(INIT_PATH).await {
-             let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)
+            let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)
                 .map_err(|_| anyhow!("Failed to parse init config"))?;
-             (config.threshold as usize, config.shares as usize)
+            (config.threshold as usize, config.shares as usize)
         } else {
             (0, 0)
         };
@@ -136,7 +140,7 @@ impl SealService {
         threshold: u8,
         root_username: &str,
         auth: &crate::services::auth::AuthenticationService,
-        mfa: &secreton_auth::mfa::CombinedMfaService
+        mfa: &secreton_auth::mfa::CombinedMfaService,
     ) -> Result<InitResponse> {
         if self.is_initialized().await {
             return Err(anyhow!("System already initialized"));
@@ -146,7 +150,7 @@ impl SealService {
             return Err(anyhow!("Threshold cannot be greater than shares"));
         }
         if threshold < 2 {
-             return Err(anyhow!("Threshold must be at least 2"));
+            return Err(anyhow!("Threshold must be at least 2"));
         }
 
         // 1. Generate Master Key (32 bytes)
@@ -168,31 +172,46 @@ impl SealService {
         let config = InitConfig { shares, threshold };
         let config_bytes = serde_json::to_vec(&config)?;
 
-        self.storage.store(&SecretEntry::new(
-            INIT_PATH.to_string(),
-            config_bytes,
-            EncryptionMetadata::default(),
-            SecurityLevel::Public,
-            Uuid::nil()
-        )).await.map_err(|e| anyhow!("Failed to store init config: {}", e))?;
+        self.storage
+            .store(&SecretEntry::new(
+                INIT_PATH.to_string(),
+                config_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Public,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
 
         // 6. Store Encrypted Root Key
-        let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey { data: encrypted_root })?;
-        self.storage.store(&SecretEntry::new(
-            ROOT_KEY_PATH.to_string(),
-            enc_root_bytes,
-            EncryptionMetadata::default(),
-            SecurityLevel::TopSecret,
-            Uuid::nil()
-        )).await.map_err(|e| anyhow!("Failed to store root key: {}", e))?;
+        let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey {
+            data: encrypted_root,
+        })?;
+        self.storage
+            .store(&SecretEntry::new(
+                ROOT_KEY_PATH.to_string(),
+                enc_root_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::TopSecret,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
         // 7. Format Response
-        let keys_hex: Vec<String> = splits.iter()
+        let keys_hex: Vec<String> = splits
+            .iter()
             .map(|s| hex::encode(serde_json::to_vec(s).unwrap())) // We encode the whole Share struct
             .collect();
 
-        let keys_base64: Vec<String> = splits.iter()
-            .map(|s| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, serde_json::to_vec(s).unwrap()))
+        let keys_base64: Vec<String> = splits
+            .iter()
+            .map(|s| {
+                base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    serde_json::to_vec(s).unwrap(),
+                )
+            })
             .collect();
 
         // 8. Create Root User and Enable MFA
@@ -207,22 +226,28 @@ impl SealService {
         // We need to ensure clear_root_key is called even if this fails.
         // Explicitly annotate result type to avoid inference issues with the error type.
         let result: Result<secreton_auth::mfa::TotpEnrollment, anyhow::Error> = async {
-            let root_user = auth.register_user(
-                root_username,
-                &random_password,
-                Some("root@system.local".to_string()),
-                vec!["root".to_string(), "admin".to_string()],
-                vec!["*".to_string()]
-            ).await.map_err(|e| anyhow!("Failed to create root user: {}", e))?;
+            let root_user = auth
+                .register_user(
+                    root_username,
+                    &random_password,
+                    Some("root@system.local".to_string()),
+                    vec!["root".to_string(), "admin".to_string()],
+                    vec!["*".to_string()],
+                )
+                .await
+                .map_err(|e| anyhow!("Failed to create root user: {}", e))?;
 
             // Enable TOTP for Root
             // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
             let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
-            let totp_config = mfa.enable_totp(user_uuid, root_user.username.clone()).await
+            let totp_config = mfa
+                .enable_totp(user_uuid, root_user.username.clone())
+                .await
                 .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
 
             Ok(totp_config)
-        }.await;
+        }
+        .await;
 
         // Clear root key immediately after use, regardless of success/failure
         self.crypto.clear_root_key().await;
@@ -252,12 +277,12 @@ impl SealService {
         let share_bytes = if let Ok(b) = hex::decode(share_str) {
             b
         } else {
-             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
                 .map_err(|_| anyhow!("Invalid share format (expected hex or base64)"))?
         };
 
-        let share: Share = serde_json::from_slice(&share_bytes)
-            .map_err(|_| anyhow!("Invalid share structure"))?;
+        let share: Share =
+            serde_json::from_slice(&share_bytes).map_err(|_| anyhow!("Invalid share structure"))?;
 
         let mut buffer = self.unseal_buffer.write().await;
 
@@ -268,11 +293,14 @@ impl SealService {
 
         // Check threshold
         let (threshold, _) = {
-             let entry = self.storage.get_by_path(INIT_PATH).await
+            let entry = self
+                .storage
+                .get_by_path(INIT_PATH)
+                .await
                 .map_err(|e| anyhow!("Storage error: {}", e))?
                 .ok_or(anyhow!("Init config missing"))?;
-             let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)?;
-             (config.threshold as usize, config.shares as usize)
+            let config: InitConfig = serde_json::from_slice(&entry.encrypted_data)?;
+            (config.threshold as usize, config.shares as usize)
         };
 
         if buffer.len() >= threshold {
@@ -290,7 +318,10 @@ impl SealService {
             };
 
             // Get Encrypted Root Key
-            let entry = self.storage.get_by_path(ROOT_KEY_PATH).await
+            let entry = self
+                .storage
+                .get_by_path(ROOT_KEY_PATH)
+                .await
                 .map_err(|e| anyhow!("Storage error: {}", e))?
                 .ok_or(anyhow!("Root key missing"))?;
 
@@ -327,7 +358,8 @@ impl SealService {
                         &Header::default(),
                         &claims,
                         &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-                    ).map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+                    )
+                    .map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
 
                     return Ok(UnsealResponse {
                         sealed: false,
@@ -336,10 +368,15 @@ impl SealService {
                         progress: 0,
                         root_token: Some(root_token),
                     });
-                },
+                }
                 Err(e) => {
-                    tracing::error!("Failed to decrypt root key with reconstructed master key. Wrong shares?");
-                    return Err(anyhow!("Failed to decrypt root key. Invalid shares? Error: {}", e));
+                    tracing::error!(
+                        "Failed to decrypt root key with reconstructed master key. Wrong shares?"
+                    );
+                    return Err(anyhow!(
+                        "Failed to decrypt root key. Invalid shares? Error: {}",
+                        e
+                    ));
                 }
             }
         }
@@ -363,11 +400,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_seal_flow() {
-        use crate::services::auth::AuthenticationService;
         use crate::config::AuthConfig;
+        use crate::services::auth::AuthenticationService;
         // Updated test to use PersistentTotpService instead of InMemoryTotpService to match production config
         use crate::services::mfa_persistence::PersistentTotpService;
-        use secreton_auth::mfa::{CombinedMfaService, InMemorySmsService, InMemoryEmailService, InMemoryHardwareService, DefaultPushService, DefaultWebAuthnService, DefaultRecoveryCodeService, SmsConfig, EmailConfig};
+        use secreton_auth::mfa::{
+            CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService,
+            DefaultWebAuthnService, EmailConfig, InMemoryEmailService, InMemoryHardwareService,
+            InMemorySmsService, SmsConfig,
+        };
 
         let storage = Arc::new(MockStorageBackend::new());
         // Clean env to ensure sealed start
@@ -382,7 +423,11 @@ mod tests {
         let mut config = config;
         config.jwt.secret = Some("test-secret-1234567890".to_string());
 
-        let persistent_totp = Arc::new(PersistentTotpService::new(storage.clone(), crypto.clone(), "secreton-test".to_string()));
+        let persistent_totp = Arc::new(PersistentTotpService::new(
+            storage.clone(),
+            crypto.clone(),
+            "secreton-test".to_string(),
+        ));
 
         let mfa = Arc::new(CombinedMfaService::new(
             persistent_totp,
@@ -394,15 +439,19 @@ mod tests {
             Arc::new(DefaultRecoveryCodeService::new()),
         ));
 
-        let auth = Arc::new(AuthenticationService::new(storage.clone(), crypto.clone(), &config).await.unwrap()
-            .with_mfa(mfa.clone()));
+        let auth = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto.clone(), &config)
+                .await
+                .unwrap()
+                .with_mfa(mfa.clone()),
+        );
 
         let seal_service = SealService::new(
             storage.clone(),
             crypto.clone(),
             "test-secret".to_string(),
             "secreton".to_string(),
-            "secreton-api".to_string()
+            "secreton-api".to_string(),
         );
 
         // 1. Check initial state
@@ -411,7 +460,10 @@ mod tests {
 
         // 2. Initialize
         // Root password removed from init
-        let init_res = seal_service.init(5, 3, "root", &auth, &mfa).await.expect("Init failed");
+        let init_res = seal_service
+            .init(5, 3, "root", &auth, &mfa)
+            .await
+            .expect("Init failed");
         assert_eq!(init_res.keys.len(), 5);
         // Root token was removed, check TOTP secret instead
         // assert!(!init_res.root_totp_secret.is_empty()); // Removed
@@ -420,17 +472,26 @@ mod tests {
         assert!(seal_service.is_sealed().await); // Still sealed
 
         // 3. Unseal (partial)
-        let status = seal_service.unseal(&init_res.keys[0]).await.expect("Unseal 1 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[0])
+            .await
+            .expect("Unseal 1 failed");
         assert!(status.sealed);
         assert_eq!(status.progress, 1);
 
         // 4. Unseal (partial)
-        let status = seal_service.unseal(&init_res.keys[1]).await.expect("Unseal 2 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[1])
+            .await
+            .expect("Unseal 2 failed");
         assert!(status.sealed);
         assert_eq!(status.progress, 2);
 
         // 5. Unseal (complete)
-        let status = seal_service.unseal(&init_res.keys[2]).await.expect("Unseal 3 failed");
+        let status = seal_service
+            .unseal(&init_res.keys[2])
+            .await
+            .expect("Unseal 3 failed");
         assert!(!status.sealed);
         assert!(!seal_service.is_sealed().await);
 

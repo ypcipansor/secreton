@@ -2,16 +2,16 @@
 
 use axum::{
     Router,
-    extract::{Extension},
+    extract::Extension,
     http::StatusCode,
     response::Json,
-    routing::{post, get},
+    routing::{get, post},
 };
-use secreton_secrets_pki::CertificateRequest;
 use chrono::Utc;
+use secreton_secrets_pki::CertificateRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::ApiResponse;
 use crate::services::pki::PkiPersistentService;
@@ -24,9 +24,7 @@ pub struct PkiApiState {
 
 impl Default for PkiApiState {
     fn default() -> Self {
-        Self {
-            service: None,
-        }
+        Self { service: None }
     }
 }
 
@@ -75,11 +73,18 @@ pub async fn issue_certificate(
     let is_authorized = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
 
     if !is_authorized {
-        error!("Unauthorized attempt to issue certificate by user: {}", user.username);
+        error!(
+            "Unauthorized attempt to issue certificate by user: {}",
+            user.username
+        );
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let service = state
+        .pki
+        .service
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Map request
     let cert_req = CertificateRequest {
@@ -125,13 +130,23 @@ pub async fn generate_root_ca(
     let is_authorized = user.roles.iter().any(|r| r == "admin" || r == "root") || user.is_superuser;
 
     if !is_authorized {
-        error!("Unauthorized attempt to generate Root CA by user: {}", user.username);
+        error!(
+            "Unauthorized attempt to generate Root CA by user: {}",
+            user.username
+        );
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let service = state
+        .pki
+        .service
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    match service.generate_root_ca(&request.common_name, &request.organization).await {
+    match service
+        .generate_root_ca(&request.common_name, &request.organization)
+        .await
+    {
         Ok((cert, _key)) => {
             Ok(Json(ApiResponse::success(CertResponse {
                 certificate: cert,
@@ -139,7 +154,7 @@ pub async fn generate_root_ca(
                 serial_number: "ROOT".to_string(),
                 expiration: Utc::now().timestamp() + (3650 * 86400),
             })))
-        },
+        }
         Err(e) => {
             error!("Failed to generate Root CA: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -152,7 +167,11 @@ pub async fn generate_root_ca(
 pub async fn get_ca_pem(
     Extension(state): Extension<crate::ApiState>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
-    let service = state.pki.service.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let service = state
+        .pki
+        .service
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     match service.get_ca_pem().await {
         Ok(Some(pem)) => Ok(Json(ApiResponse::success(pem))),

@@ -1,12 +1,10 @@
-use std::sync::Arc;
 use async_trait::async_trait;
-use chrono::{Datelike, Utc, Duration};
-use secreton_storage::{
-    EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend,
-};
+use chrono::{Datelike, Duration, Utc};
 use secreton_security::policies::audit::{AuditDevice, AuditEvent};
-use uuid::Uuid;
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+use std::sync::Arc;
 use tracing::error;
+use uuid::Uuid;
 
 /// Storage-backed audit device that persists audit events as SecretEntry records
 pub struct StorageAuditDevice {
@@ -54,7 +52,10 @@ impl AuditDevice for StorageAuditDevice {
         )
         .with_expiration(expiration)
         .add_metadata("log_data".to_string(), event_json)
-        .add_metadata("event_type".to_string(), event.event_type.as_str().to_string())
+        .add_metadata(
+            "event_type".to_string(),
+            event.event_type.as_str().to_string(),
+        )
         .add_metadata("user".to_string(), event.user.clone())
         .add_metadata("status".to_string(), event.status.as_str().to_string());
 

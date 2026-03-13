@@ -1,21 +1,21 @@
 //! Secret service for business logic operations.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::Result;
+use hex;
 use serde::{Deserialize, Serialize};
-use tracing::{warn, error};
-use thiserror::Error;
 use sha2::{Digest, Sha256, Sha512};
 use sha3::Sha3_256;
-use hex;
+use std::collections::HashMap;
+use std::sync::Arc;
+use thiserror::Error;
+use tracing::{error, warn};
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_auth::{IdentityService, policies::model::EvaluationContext};
-use secreton_performance::{SecretPerformanceOptimizer, AccessType};
 use secreton_crypto::EncryptedData;
+use secreton_performance::{AccessType, SecretPerformanceOptimizer};
 use secreton_storage::StorageBackend;
 use uuid::Uuid;
 
@@ -126,17 +126,17 @@ impl SecretService {
         // Resolve role IDs
         let mut role_ids = Vec::new();
         for role_name in &user.roles {
-             if let Some(role_id) = self.policy_service.get_role_id_by_name(role_name).await {
-                 role_ids.push(role_id);
-             }
+            if let Some(role_id) = self.policy_service.get_role_id_by_name(role_name).await {
+                role_ids.push(role_id);
+            }
         }
 
         // Resolve policy IDs
         let mut policy_ids = Vec::new();
         for policy_name in &user.policies {
-             if let Some(policy_id) = self.policy_service.get_policy_id_by_name(policy_name).await {
-                 policy_ids.push(policy_id);
-             }
+            if let Some(policy_id) = self.policy_service.get_policy_id_by_name(policy_name).await {
+                policy_ids.push(policy_id);
+            }
         }
 
         let context = EvaluationContext {
@@ -146,25 +146,42 @@ impl SecretService {
             environment: HashMap::new(),
         };
 
-        match self.policy_service.evaluate_access(&context, &role_ids, &policy_ids).await {
+        match self
+            .policy_service
+            .evaluate_access(&context, &role_ids, &policy_ids)
+            .await
+        {
             Ok(result) if result.allowed => Ok(()),
-            _ => Err(SecretError::PermissionDenied(format!("Action '{}' denied on '{}'", action, path))),
+            _ => Err(SecretError::PermissionDenied(format!(
+                "Action '{}' denied on '{}'",
+                action, path
+            ))),
         }
     }
 
-
     /// Check if a secret exists without decrypting or logging audit access
-    pub async fn exists_secret(&self, path: &str, user: &secreton_auth::User, action: &str) -> Result<bool, SecretError> {
+    pub async fn exists_secret(
+        &self,
+        path: &str,
+        user: &secreton_auth::User,
+        action: &str,
+    ) -> Result<bool, SecretError> {
         self.check_permission(user, path, action).await?;
 
-        let entry = self.storage.get_by_path(path).await
+        let entry = self
+            .storage
+            .get_by_path(path)
+            .await
             .map_err(SecretError::Storage)?;
 
         if let Some(encrypted_entry) = entry {
             // Strict Ownership Check
             let user_uuid = Self::get_user_uuid(user);
             if encrypted_entry.owner_id != user_uuid {
-                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+                return Err(SecretError::PermissionDenied(format!(
+                    "Access restricted: User is not the owner of '{}'",
+                    path
+                )));
             }
             Ok(true)
         } else {
@@ -173,7 +190,12 @@ impl SecretService {
     }
 
     /// Get secret by path
-    pub async fn get_secret(&self, path: &str, user: &secreton_auth::User, version: Option<u32>) -> Result<SecretData, SecretError> {
+    pub async fn get_secret(
+        &self,
+        path: &str,
+        user: &secreton_auth::User,
+        version: Option<u32>,
+    ) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "read").await?;
 
@@ -181,7 +203,10 @@ impl SecretService {
         // 1. Fetch from main path first (most likely case)
         // 2. If version specified and doesn't match current, fetch from history
 
-        let mut encrypted_entry = self.storage.get_by_path(path).await
+        let mut encrypted_entry = self
+            .storage
+            .get_by_path(path)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Always check ownership against the CURRENT secret if it exists.
@@ -191,12 +216,17 @@ impl SecretService {
 
         if let Some(current_entry) = &encrypted_entry {
             if current_entry.owner_id != user_uuid {
-                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+                return Err(SecretError::PermissionDenied(format!(
+                    "Access restricted: User is not the owner of '{}'",
+                    path
+                )));
             }
         } else {
-             // If the current secret doesn't exist, we should not allow fetching history.
-             // This prevents access to orphaned history entries from failed deletions.
-             return Err(SecretError::SecretNotFound { path: path.to_string() });
+            // If the current secret doesn't exist, we should not allow fetching history.
+            // This prevents access to orphaned history entries from failed deletions.
+            return Err(SecretError::SecretNotFound {
+                path: path.to_string(),
+            });
         }
 
         // If specific version requested
@@ -207,12 +237,17 @@ impl SecretService {
             if !current_matches {
                 // Fetch from history
                 let history_path = format!("sys/history/{}::v{}", path, v);
-                encrypted_entry = self.storage.get_by_path(&history_path).await
+                encrypted_entry = self
+                    .storage
+                    .get_by_path(&history_path)
+                    .await
                     .map_err(SecretError::Storage)?;
 
                 // Re-verify that the history entry exists
                 if encrypted_entry.is_none() {
-                     return Err(SecretError::SecretNotFound { path: format!("{} (version {})", path, v) });
+                    return Err(SecretError::SecretNotFound {
+                        path: format!("{} (version {})", path, v),
+                    });
                 }
             }
         }
@@ -235,12 +270,14 @@ impl SecretService {
                         match serde_json::from_slice::<HashMap<String, String>>(data_bytes) {
                             Ok(secret_map) => {
                                 // Log access in performance optimizer (cache hit)
-                                self.performance.record_access(
-                                    path,
-                                    AccessType::Read,
-                                    start_time.elapsed(),
-                                    true
-                                ).await;
+                                self.performance
+                                    .record_access(
+                                        path,
+                                        AccessType::Read,
+                                        start_time.elapsed(),
+                                        true,
+                                    )
+                                    .await;
 
                                 return Ok(SecretData {
                                     path: path.to_string(),
@@ -258,44 +295,50 @@ impl SecretService {
                         }
                     }
                 } else {
-                     // Invalid cache format, remove it
-                     let _ = self.performance.invalidate_cached(path).await;
+                    // Invalid cache format, remove it
+                    let _ = self.performance.invalidate_cached(path).await;
                 }
             }
         }
 
         // Decrypt the secret data
-        let decrypted_data = self.crypto.decrypt(&encrypted_entry.encrypted_data).await
+        let decrypted_data = self
+            .crypto
+            .decrypt(&encrypted_entry.encrypted_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse the decrypted data as JSON
-        let secret_map: HashMap<String, String> = serde_json::from_slice(&decrypted_data)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e)))?;
+        let secret_map: HashMap<String, String> =
+            serde_json::from_slice(&decrypted_data).map_err(|e| {
+                SecretError::Internal(anyhow::anyhow!("Failed to parse secret data: {}", e))
+            })?;
 
         // Cache the decrypted data (only if current)
         // Store version + data to allow validation on retrieval
         if is_current {
             let mut cache_payload = encrypted_entry.version.to_be_bytes().to_vec();
             cache_payload.extend_from_slice(&decrypted_data);
-            let _ = self.performance.put_cached(path.to_string(), cache_payload).await;
+            let _ = self
+                .performance
+                .put_cached(path.to_string(), cache_payload)
+                .await;
         }
 
         // Log access in performance optimizer (cache miss)
-        self.performance.record_access(
-            path,
-            AccessType::Read,
-            start_time.elapsed(),
-            true
-        ).await;
+        self.performance
+            .record_access(path, AccessType::Read, start_time.elapsed(), true)
+            .await;
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::SecretAccess {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SecretAccess {
                 secret_path: path.to_string(),
                 user: user.id.to_string(),
                 action: "read".to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(SecretData {
             path: path.to_string(),
@@ -320,50 +363,66 @@ impl SecretService {
         // Validate path for reserved delimiter. We only block paths that end with ::v followed by digits
         // or paths that attempt to write directly into the sys/history/ namespace.
         if path.starts_with("sys/history/") {
-            return Err(SecretError::InvalidOperation("Cannot write directly to reserved sys/history/ namespace".to_string()));
+            return Err(SecretError::InvalidOperation(
+                "Cannot write directly to reserved sys/history/ namespace".to_string(),
+            ));
         }
 
         if let Some(idx) = path.rfind("::v") {
             let suffix = &path[idx + 3..];
             if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
-                return Err(SecretError::InvalidOperation("Secret path cannot end with '::v' followed by a version number".to_string()));
+                return Err(SecretError::InvalidOperation(
+                    "Secret path cannot end with '::v' followed by a version number".to_string(),
+                ));
             }
         }
 
         // Serialize data to JSON for storage
-        let json_data = serde_json::to_vec(&data)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to serialize secret data: {}", e)))?;
+        let json_data = serde_json::to_vec(&data).map_err(|e| {
+            SecretError::Internal(anyhow::anyhow!("Failed to serialize secret data: {}", e))
+        })?;
 
         // Encrypt the data
-        let encrypted_data = self.crypto.encrypt_data(&json_data).await
+        let encrypted_data = self
+            .crypto
+            .encrypt_data(&json_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, existing_owner, previous_version) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
-            // Check ownership first
-            if existing.owner_id != owner_id {
-                 return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
-            }
+        let (version, existing_owner, previous_version) =
+            if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+                // Check ownership first
+                if existing.owner_id != owner_id {
+                    return Err(SecretError::PermissionDenied(format!(
+                        "Access restricted: User is not the owner of '{}'",
+                        path
+                    )));
+                }
 
-            // Archive the existing version
-            let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
-            let mut archive_entry = existing.clone();
-            archive_entry.path = archive_path;
-            // Ensure unique ID for the archived entry to avoid PK collisions
-            archive_entry.id = Uuid::new_v4();
+                // Archive the existing version
+                let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
+                let mut archive_entry = existing.clone();
+                archive_entry.path = archive_path;
+                // Ensure unique ID for the archived entry to avoid PK collisions
+                archive_entry.id = Uuid::new_v4();
 
-            // Store the archived version
-            if let Err(e) = self.storage.store(&archive_entry).await {
-                return Err(SecretError::Storage(e));
-            }
+                // Store the archived version
+                if let Err(e) = self.storage.store(&archive_entry).await {
+                    return Err(SecretError::Storage(e));
+                }
 
-            (existing.version + 1, Some(existing.owner_id), Some(existing.version))
-        } else {
-            (1, None, None)
-        };
+                (
+                    existing.version + 1,
+                    Some(existing.owner_id),
+                    Some(existing.version),
+                )
+            } else {
+                (1, None, None)
+            };
 
         // Create SecretEntry
         let mut entry = secreton_storage::SecretEntry::new(
@@ -376,28 +435,31 @@ impl SecretService {
         entry.version = version;
 
         // Store encrypted data
-        self.storage.store(&entry).await
+        self.storage
+            .store(&entry)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Update cache with plaintext data PREPENDED with version
         let mut cache_payload = entry.version.to_be_bytes().to_vec();
         cache_payload.extend_from_slice(&json_data);
-        let _ = self.performance.put_cached(path.to_string(), cache_payload).await;
+        let _ = self
+            .performance
+            .put_cached(path.to_string(), cache_payload)
+            .await;
 
-        self.performance.record_access(
-            path,
-            AccessType::Write,
-            start_time.elapsed(),
-            true
-        ).await;
+        self.performance
+            .record_access(path, AccessType::Write, start_time.elapsed(), true)
+            .await;
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::SecretCreation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SecretCreation {
                 secret_path: path.to_string(),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(SecretData {
             path: path.to_string(),
@@ -410,7 +472,11 @@ impl SecretService {
     }
 
     /// Delete secret
-    pub async fn delete_secret(&self, path: &str, user: &secreton_auth::User) -> Result<(), SecretError> {
+    pub async fn delete_secret(
+        &self,
+        path: &str,
+        user: &secreton_auth::User,
+    ) -> Result<(), SecretError> {
         self.delete_secret_internal(path, user, true, true).await
     }
 
@@ -421,7 +487,7 @@ impl SecretService {
         path: &str,
         user: &secreton_auth::User,
         delete_history: bool,
-        check_perms: bool
+        check_perms: bool,
     ) -> Result<(), SecretError> {
         let start_time = std::time::Instant::now();
 
@@ -430,7 +496,10 @@ impl SecretService {
         }
 
         // Check if secret exists and check ownership
-        let entry = self.storage.get_by_path(path).await
+        let entry = self
+            .storage
+            .get_by_path(path)
+            .await
             .map_err(SecretError::Storage)?;
 
         if let Some(e) = entry {
@@ -439,14 +508,21 @@ impl SecretService {
             // But prompt says "root/admin cannot... delete... unless deleting user data".
             // So direct secret deletion must be owner-only.
             if e.owner_id != user_uuid {
-                return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+                return Err(SecretError::PermissionDenied(format!(
+                    "Access restricted: User is not the owner of '{}'",
+                    path
+                )));
             }
         } else {
-            return Err(SecretError::SecretNotFound { path: path.to_string() });
+            return Err(SecretError::SecretNotFound {
+                path: path.to_string(),
+            });
         }
 
         // Delete from storage using delete_by_path
-        self.storage.delete_by_path(path).await
+        self.storage
+            .delete_by_path(path)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Delete history if requested
@@ -468,20 +544,18 @@ impl SecretService {
         // Invalidate cache
         let _ = self.performance.invalidate_cached(path).await;
 
-        self.performance.record_access(
-            path,
-            AccessType::Delete,
-            start_time.elapsed(),
-            true
-        ).await;
+        self.performance
+            .record_access(path, AccessType::Delete, start_time.elapsed(), true)
+            .await;
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::SecretDeletion {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SecretDeletion {
                 secret_path: path.to_string(),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(())
     }
@@ -495,13 +569,19 @@ impl SecretService {
         user: &secreton_auth::User,
     ) -> Result<Policy, SecretError> {
         // Self-permission check (can user create policy?)
-        self.check_permission(user, &format!("sys/policies/{}", name), "create").await?;
+        self.check_permission(user, &format!("sys/policies/{}", name), "create")
+            .await?;
         self.update_policy(name, rules, metadata, user).await
     }
 
     /// Get policy by name
-    pub async fn get_policy(&self, name: &str, user: &secreton_auth::User) -> Result<Policy, SecretError> {
-        self.check_permission(user, &format!("sys/policies/{}", name), "read").await?;
+    pub async fn get_policy(
+        &self,
+        name: &str,
+        user: &secreton_auth::User,
+    ) -> Result<Policy, SecretError> {
+        self.check_permission(user, &format!("sys/policies/{}", name), "read")
+            .await?;
         // Placeholder
         Ok(Policy {
             name: name.to_string(),
@@ -518,8 +598,13 @@ impl SecretService {
     }
 
     /// Delete policy
-    pub async fn delete_policy(&self, name: &str, user: &secreton_auth::User) -> Result<bool, SecretError> {
-        self.check_permission(user, &format!("sys/policies/{}", name), "delete").await?;
+    pub async fn delete_policy(
+        &self,
+        name: &str,
+        user: &secreton_auth::User,
+    ) -> Result<bool, SecretError> {
+        self.check_permission(user, &format!("sys/policies/{}", name), "delete")
+            .await?;
         // Placeholder
         Ok(true)
     }
@@ -544,14 +629,19 @@ impl SecretService {
                         created_at: current.created_at,
                     });
                 } else {
-                    return Err(SecretError::PermissionDenied(format!("Access restricted: User is not the owner of '{}'", path)));
+                    return Err(SecretError::PermissionDenied(format!(
+                        "Access restricted: User is not the owner of '{}'",
+                        path
+                    )));
                 }
             }
             Err(e) => return Err(SecretError::Storage(e)),
             Ok(None) => {
                 // If the current secret doesn't exist, block access to history
                 // to prevent leaking orphaned history metadata. This matches the behavior of get_secret.
-                return Err(SecretError::SecretNotFound { path: path.to_string() });
+                return Err(SecretError::SecretNotFound {
+                    path: path.to_string(),
+                });
             }
         }
 
@@ -562,11 +652,14 @@ impl SecretService {
             .with_path_prefix(history_prefix)
             .with_owner(user_uuid);
 
-        let history_entries = self.storage.list(&query).await
+        let history_entries = self
+            .storage
+            .list(&query)
+            .await
             .map_err(SecretError::Storage)?;
 
         for entry in history_entries {
-             versions.push(SecretVersionInfo {
+            versions.push(SecretVersionInfo {
                 version: entry.version,
                 created_at: entry.created_at,
             });
@@ -574,7 +667,9 @@ impl SecretService {
 
         // If we found absolutely nothing (no current, no history), the secret does not exist
         if versions.is_empty() {
-             return Err(SecretError::SecretNotFound { path: path.to_string() });
+            return Err(SecretError::SecretNotFound {
+                path: path.to_string(),
+            });
         }
 
         // Sort descending
@@ -592,8 +687,7 @@ impl SecretService {
         let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
         // Strict isolation: always filter by owner ID
-        let mut query = secreton_storage::QueryParams::new()
-            .with_owner(user_uuid);
+        let mut query = secreton_storage::QueryParams::new().with_owner(user_uuid);
 
         if let Some(p) = prefix {
             query = query.with_path_prefix(p.to_string());
@@ -601,7 +695,10 @@ impl SecretService {
 
         // Get secrets from storage
         // The storage backend handles filtering by owner_id if set in query
-        let entries = self.storage.list(&query).await
+        let entries = self
+            .storage
+            .list(&query)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Convert entries to SecretData
@@ -612,7 +709,11 @@ impl SecretService {
                 continue;
             }
 
-            if self.check_permission(user, &entry.path, "read").await.is_ok() {
+            if self
+                .check_permission(user, &entry.path, "read")
+                .await
+                .is_ok()
+            {
                 // Decrypt the secret data
                 match self.crypto.decrypt(&entry.encrypted_data).await {
                     Ok(decrypted_data) => {
@@ -662,7 +763,12 @@ impl SecretService {
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
-            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type: {}", key_type))),
+            _ => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Unsupported key type: {}",
+                    key_type
+                )));
+            }
         };
 
         // Generate key using crypto service
@@ -673,8 +779,7 @@ impl SecretService {
         let key_id = format!("key_{}", Uuid::new_v4().simple());
 
         // Parse user_id as UUID
-        let owner_id = Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| Uuid::new_v4());
+        let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
 
         // Store key metadata as SecretEntry
         let key_metadata = serde_json::json!({
@@ -686,8 +791,9 @@ impl SecretService {
             "version": 1
         });
 
-        let metadata_bytes = serde_json::to_vec(&key_metadata)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e)))?;
+        let metadata_bytes = serde_json::to_vec(&key_metadata).map_err(|e| {
+            SecretError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e))
+        })?;
 
         let metadata_entry = secreton_storage::SecretEntry::new(
             key_path.clone(),
@@ -697,13 +803,18 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage.store(&metadata_entry).await
+        self.storage
+            .store(&metadata_entry)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Encrypt the key data before storing
-        let encrypted_key_data = self.crypto.encrypt_data(&key_data).await
+        let encrypted_key_data = self
+            .crypto
+            .encrypt_data(&key_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-        
+
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
         let key_data_entry = secreton_storage::SecretEntry::new(
             key_data_path,
@@ -713,18 +824,21 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage.store(&key_data_entry).await
+        self.storage
+            .store(&key_data_entry)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::KeyGeneration {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::KeyGeneration {
                 key_id: key_id.clone(),
                 key_type: key_type.to_string(),
                 algorithm: key_type.to_string(),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(KeyInfo {
             id: key_id,
@@ -737,35 +851,50 @@ impl SecretService {
     }
 
     /// Get key information
-    pub async fn get_key(&self, key_id: &str, user: &secreton_auth::User) -> Result<KeyInfo, SecretError> {
+    pub async fn get_key(
+        &self,
+        key_id: &str,
+        user: &secreton_auth::User,
+    ) -> Result<KeyInfo, SecretError> {
         let key_path = format!("keys/{}/{}", user.id, key_id);
         self.check_permission(user, &key_path, "read").await?;
 
         // Retrieve key metadata from storage
-        let entry = self.storage.get_by_path(&key_path).await
+        let entry = self
+            .storage
+            .get_by_path(&key_path)
+            .await
             .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_id.to_string() })?;
+            .ok_or_else(|| SecretError::KeyNotFound {
+                key_id: key_id.to_string(),
+            })?;
 
-        let metadata: serde_json::Value = serde_json::from_slice(&entry.encrypted_data)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to deserialize key metadata: {}", e)))?;
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&entry.encrypted_data).map_err(|e| {
+                SecretError::Internal(anyhow::anyhow!("Failed to deserialize key metadata: {}", e))
+            })?;
 
         // Extract key information
-        let name = metadata.get("key_id")
+        let name = metadata
+            .get("key_id")
             .and_then(|v| v.as_str())
             .unwrap_or(key_id)
             .to_string();
 
-        let key_type = metadata.get("key_type")
+        let key_type = metadata
+            .get("key_type")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
 
-        let version = metadata.get("version")
+        let version = metadata
+            .get("version")
             .and_then(|v| v.as_u64())
             .unwrap_or(1) as u32;
 
         let default_time = chrono::Utc::now().to_rfc3339();
-        let created_at_str = metadata.get("created_at")
+        let created_at_str = metadata
+            .get("created_at")
             .and_then(|v| v.as_str())
             .unwrap_or(&default_time);
 
@@ -785,15 +914,22 @@ impl SecretService {
 
     /// List keys for a user
     #[allow(clippy::collapsible_if)]
-    pub async fn list_keys(&self, user: &secreton_auth::User, filter: Option<&str>) -> Result<Vec<KeyInfo>, SecretError> {
-        self.check_permission(user, &format!("keys/{}/", user.id), "list").await?;
+    pub async fn list_keys(
+        &self,
+        user: &secreton_auth::User,
+        filter: Option<&str>,
+    ) -> Result<Vec<KeyInfo>, SecretError> {
+        self.check_permission(user, &format!("keys/{}/", user.id), "list")
+            .await?;
 
         // Build query params for keys
         let keys_prefix = format!("keys/{}/", user.id);
-        let query = secreton_storage::QueryParams::new()
-            .with_path_prefix(keys_prefix.clone());
+        let query = secreton_storage::QueryParams::new().with_path_prefix(keys_prefix.clone());
 
-        let entries = self.storage.list(&query).await
+        let entries = self
+            .storage
+            .list(&query)
+            .await
             .map_err(SecretError::Storage)?;
 
         let mut keys = Vec::new();
@@ -802,29 +938,34 @@ impl SecretService {
             if let Some(key_name) = entry.path.strip_prefix(&keys_prefix) {
                 // Apply filter if provided
                 if let Some(filter_str) = filter
-                    && !key_name.contains(filter_str) {
+                    && !key_name.contains(filter_str)
+                {
                     continue;
                 }
 
                 // Parse key metadata
                 match serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data) {
                     Ok(metadata) => {
-                        let key_id = metadata.get("key_id")
+                        let key_id = metadata
+                            .get("key_id")
                             .and_then(|v| v.as_str())
                             .unwrap_or(key_name)
                             .to_string();
 
-                        let key_type = metadata.get("key_type")
+                        let key_type = metadata
+                            .get("key_type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown")
                             .to_string();
 
-                        let version = metadata.get("version")
+                        let version = metadata
+                            .get("version")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(1) as u32;
 
                         let default_time = chrono::Utc::now().to_rfc3339();
-                        let created_at_str = metadata.get("created_at")
+                        let created_at_str = metadata
+                            .get("created_at")
                             .and_then(|v| v.as_str())
                             .unwrap_or(&default_time);
 
@@ -842,7 +983,10 @@ impl SecretService {
                         });
                     }
                     Err(e) => {
-                        warn!("Failed to deserialize key metadata for {}: {}", entry.path, e);
+                        warn!(
+                            "Failed to deserialize key metadata for {}: {}",
+                            entry.path, e
+                        );
                         continue;
                     }
                 }
@@ -853,7 +997,11 @@ impl SecretService {
     }
 
     /// Rotate a key (create new version)
-    pub async fn rotate_key(&self, key_id: &str, user: &secreton_auth::User) -> Result<KeyInfo, SecretError> {
+    pub async fn rotate_key(
+        &self,
+        key_id: &str,
+        user: &secreton_auth::User,
+    ) -> Result<KeyInfo, SecretError> {
         let key_path = format!("keys/{}/{}", user.id, key_id);
         self.check_permission(user, &key_path, "rotate").await?;
 
@@ -869,7 +1017,12 @@ impl SecretService {
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
-            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type: {}", current_key.key_type))),
+            _ => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Unsupported key type: {}",
+                    current_key.key_type
+                )));
+            }
         };
 
         // Generate new key data
@@ -877,8 +1030,7 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
-        let owner_id = Uuid::parse_str(&user.id)
-            .unwrap_or_else(|_| Uuid::new_v4());
+        let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
 
         // Update metadata with new version
         let new_version = current_key.version + 1;
@@ -893,8 +1045,9 @@ impl SecretService {
             "rotated_at": chrono::Utc::now().to_rfc3339()
         });
 
-        let metadata_bytes = serde_json::to_vec(&key_metadata)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e)))?;
+        let metadata_bytes = serde_json::to_vec(&key_metadata).map_err(|e| {
+            SecretError::Internal(anyhow::anyhow!("Failed to serialize key metadata: {}", e))
+        })?;
 
         let metadata_entry = secreton_storage::SecretEntry::new(
             key_path,
@@ -904,7 +1057,9 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage.store(&metadata_entry).await
+        self.storage
+            .store(&metadata_entry)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Store new key data with version
@@ -917,18 +1072,21 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage.store(&key_data_entry).await
+        self.storage
+            .store(&key_data_entry)
+            .await
             .map_err(SecretError::Storage)?;
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::KeyRotation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::KeyRotation {
                 old_key_id: key_id.to_string(),
                 new_key_id: format!("{}_v{}", key_id, new_version),
                 algorithm: current_key.key_type.clone(),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(KeyInfo {
             id: key_id.to_string(),
@@ -947,13 +1105,14 @@ impl SecretService {
         _metadata: &HashMap<String, String>,
         user: &secreton_auth::User,
     ) -> Result<KeyInfo, SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "update").await?;
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "update")
+            .await?;
         // Retrieve current key info
         let key_info = self.get_key(key_id, user).await?;
 
         // In a real implementation we would update the metadata in storage
         // For now, we just return the existing key info since we can't easily modify the mock storage
-        
+
         Ok(key_info)
     }
 
@@ -965,7 +1124,8 @@ impl SecretService {
         _metadata: PolicyMetadata,
         user: &secreton_auth::User,
     ) -> Result<Policy, SecretError> {
-        self.check_permission(user, &format!("sys/policies/{}", name), "update").await?;
+        self.check_permission(user, &format!("sys/policies/{}", name), "update")
+            .await?;
         // Placeholder implementation
         Ok(Policy {
             name: name.to_string(),
@@ -981,10 +1141,7 @@ impl SecretService {
         })
     }
 
-    pub async fn list_policies(
-        &self,
-        _filter: Option<&str>,
-    ) -> Result<Vec<Policy>, SecretError> {
+    pub async fn list_policies(&self, _filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
         // Placeholder: in real implementation, fetch from storage.
         // For now, return empty so check_permission defaults to allow.
         Ok(vec![])
@@ -997,25 +1154,35 @@ impl SecretService {
         user: &secreton_auth::User,
     ) -> Result<Vec<KeyInfo>, SecretError> {
         let key_path = format!("keys/{}/{}", user.id, key_id);
-        self.check_permission(user, &key_path, "list_versions").await?;
+        self.check_permission(user, &key_path, "list_versions")
+            .await?;
 
         // Check if key exists
         self.get_key(key_id, user).await?;
-        
+
         // Return just the current version for now
         self.get_key(key_id, user).await.map(|k| vec![k])
     }
 
     /// Delete a key
-    pub async fn delete_key(&self, key_id: &str, user: &secreton_auth::User) -> Result<bool, SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "delete").await?;
+    pub async fn delete_key(
+        &self,
+        key_id: &str,
+        user: &secreton_auth::User,
+    ) -> Result<bool, SecretError> {
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "delete")
+            .await?;
         // Placeholder
         Ok(true)
     }
 
     /// Delete a backup
-    pub async fn delete_backup(&self, _backup_id: &str, user: &secreton_auth::User) -> Result<bool, SecretError> {
-         self.check_permission(user, "sys/backups", "delete").await?;
+    pub async fn delete_backup(
+        &self,
+        _backup_id: &str,
+        user: &secreton_auth::User,
+    ) -> Result<bool, SecretError> {
+        self.check_permission(user, "sys/backups", "delete").await?;
         // Placeholder
         Ok(true)
     }
@@ -1027,19 +1194,28 @@ impl SecretService {
         plaintext: &[u8],
         user: &secreton_auth::User,
     ) -> Result<(EncryptedData, u32), SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "encrypt").await?;
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "encrypt")
+            .await?;
 
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self.storage.get_by_path(&key_data_path).await
+        let key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
             .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
+            .ok_or_else(|| SecretError::KeyNotFound {
+                key_id: key_name.to_string(),
+            })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self
+            .crypto
+            .decrypt(&key_entry.encrypted_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Generate nonce/IV
@@ -1047,9 +1223,11 @@ impl SecretService {
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Encrypt data using crypto engine
-        let ciphertext = self.crypto.encrypt(&key_data, plaintext, None)
+        let ciphertext = self
+            .crypto
+            .encrypt(&key_data, plaintext, None)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-        
+
         let encrypted_data = EncryptedData {
             algorithm: secreton_crypto::AlgorithmId::Aes256Gcm,
             nonce: nonce.clone(),
@@ -1061,13 +1239,14 @@ impl SecretService {
         let key_id = format!("{}/{}", user.id, key_name);
 
         // Log audit trail
-        let _ = self.audit.log_event(
-            SecurityEventType::EncryptionOperation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::EncryptionOperation {
                 key_id: key_id.clone(),
                 data_size: plaintext.len().try_into().unwrap_or(0),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok((encrypted_data, key_info.version))
     }
@@ -1079,34 +1258,51 @@ impl SecretService {
         encrypted_data: &EncryptedData,
         user: &secreton_auth::User,
     ) -> Result<(Vec<u8>, u32), SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "decrypt").await?;
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "decrypt")
+            .await?;
 
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self.storage.get_by_path(&key_data_path).await
+        let key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
             .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
+            .ok_or_else(|| SecretError::KeyNotFound {
+                key_id: key_name.to_string(),
+            })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self
+            .crypto
+            .decrypt(&key_entry.encrypted_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Decrypt the user data using the key
-        let plaintext = self.crypto.decrypt_full(&key_data, &encrypted_data.nonce, &encrypted_data.ciphertext, None)
+        let plaintext = self
+            .crypto
+            .decrypt_full(
+                &key_data,
+                &encrypted_data.nonce,
+                &encrypted_data.ciphertext,
+                None,
+            )
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Log audit trail
         let key_id = format!("{}/{}", user.id, key_name);
-        let _ = self.audit.log_event(
-            SecurityEventType::DecryptionOperation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::DecryptionOperation {
                 key_id: key_id.clone(),
                 data_size: plaintext.len().try_into().unwrap_or(0),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok((plaintext, key_info.version))
     }
@@ -1118,8 +1314,9 @@ impl SecretService {
         data: &[u8],
         user: &secreton_auth::User,
     ) -> Result<SignResult, SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "sign").await?;
-        
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "sign")
+            .await?;
+
         let key_info = self.get_key(key_name, user).await?;
 
         // Map key type to algorithm
@@ -1131,21 +1328,36 @@ impl SecretService {
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
-            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type for signing: {}", key_info.key_type))),
+            _ => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Unsupported key type for signing: {}",
+                    key_info.key_type
+                )));
+            }
         };
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self.storage.get_by_path(&key_data_path).await
+        let key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
             .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
+            .ok_or_else(|| SecretError::KeyNotFound {
+                key_id: key_name.to_string(),
+            })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self
+            .crypto
+            .decrypt(&key_entry.encrypted_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Sign data using crypto engine
-        let signature = self.crypto.sign_data(&key_data, data, algorithm)
+        let signature = self
+            .crypto
+            .sign_data(&key_data, data, algorithm)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Return base64 encoded signature
@@ -1154,13 +1366,14 @@ impl SecretService {
 
         // Log audit trail
         let key_id = format!("{}/{}", user.id, key_name);
-        let _ = self.audit.log_event(
-            SecurityEventType::SigningOperation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SigningOperation {
                 key_id: key_id.clone(),
                 data_size: data.len().try_into().unwrap_or(0),
                 user: user.id.to_string(),
-            },
-        ).await;
+            })
+            .await;
 
         Ok(SignResult {
             signature: signature_str,
@@ -1176,12 +1389,13 @@ impl SecretService {
         signature_b64: &[u8],
         user: &secreton_auth::User,
     ) -> Result<(bool, u32), SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "verify").await?;
+        self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "verify")
+            .await?;
 
         // Get key info to retrieve version and algorithm
         let key_info = self.get_key(key_name, user).await?;
 
-         // Map key type to algorithm
+        // Map key type to algorithm
         let algorithm = match key_info.key_type.as_str() {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
@@ -1190,38 +1404,57 @@ impl SecretService {
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
-            _ => return Err(SecretError::InvalidOperation(format!("Unsupported key type for verification: {}", key_info.key_type))),
+            _ => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Unsupported key type for verification: {}",
+                    key_info.key_type
+                )));
+            }
         };
 
         // Decode base64 signature
         use base64::Engine;
-        let signature = base64::engine::general_purpose::STANDARD.decode(signature_b64)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e)))?;
+        let signature = base64::engine::general_purpose::STANDARD
+            .decode(signature_b64)
+            .map_err(|e| {
+                SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e))
+            })?;
 
         // Retrieve key from storage
         let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self.storage.get_by_path(&key_data_path).await
+        let key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
             .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound { key_id: key_name.to_string() })?;
+            .ok_or_else(|| SecretError::KeyNotFound {
+                key_id: key_name.to_string(),
+            })?;
 
         // Decrypt the stored key data
-        let key_data = self.crypto.decrypt(&key_entry.encrypted_data).await
+        let key_data = self
+            .crypto
+            .decrypt(&key_entry.encrypted_data)
+            .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
         // Verify signature
-        let is_valid = self.crypto.verify_signature(&key_data, data, &signature, algorithm)
+        let is_valid = self
+            .crypto
+            .verify_signature(&key_data, data, &signature, algorithm)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Log audit trail
         let key_id = format!("{}/{}", user.id, key_name);
-        let _ = self.audit.log_event(
-            SecurityEventType::VerificationOperation {
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::VerificationOperation {
                 key_id: key_id.clone(),
                 data_size: data.len().try_into().unwrap_or(0),
                 user: user.id.to_string(),
                 valid: is_valid,
-            },
-        ).await;
+            })
+            .await;
 
         Ok((is_valid, key_info.version))
     }
@@ -1253,7 +1486,10 @@ impl SecretService {
                 hex::encode(hasher.finalize())
             }
             _ => {
-                return Err(SecretError::InvalidOperation(format!("Unsupported hash algorithm: {}", algorithm)));
+                return Err(SecretError::InvalidOperation(format!(
+                    "Unsupported hash algorithm: {}",
+                    algorithm
+                )));
             }
         };
 
@@ -1309,11 +1545,13 @@ pub struct DecryptResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
+    use secreton_storage::{
+        EncryptionMetadata, MockStorageBackend, SecretEntry, SecurityLevel, StorageBackend,
+    };
 
     use crate::services::audit::AuditLogger;
-    use secreton_core::storage::secure::types::KeyEntry;
-    use base64::Engine; // Import Engine trait for encoding
+    use base64::Engine;
+    use secreton_core::storage::secure::types::KeyEntry; // Import Engine trait for encoding
 
     // Mock user helper
     fn mock_user() -> secreton_auth::User {
@@ -1344,7 +1582,7 @@ mod tests {
     }
 
     async fn seed_admin_policy(policy_service: &secreton_auth::PolicyService) {
-        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+        use secreton_auth::policies::model::{Policy, PolicyEffect, PolicyRule, PolicyType, Role};
 
         let policy = Policy {
             id: Uuid::new_v4(),
@@ -1355,8 +1593,28 @@ mod tests {
                 id: Uuid::new_v4(),
                 name: "allow_all".to_string(),
                 conditions: vec![],
-                actions: vec!["create".to_string(), "read".to_string(), "update".to_string(), "delete".to_string(), "list".to_string(), "list_versions".to_string(), "rotate".to_string(), "encrypt".to_string(), "decrypt".to_string(), "sign".to_string(), "verify".to_string(), "hash".to_string(), "write".to_string()],
-                resources: vec!["app/".to_string(), "keys/".to_string(), "sys/".to_string(), "key_data/".to_string(), "users/".to_string()],
+                actions: vec![
+                    "create".to_string(),
+                    "read".to_string(),
+                    "update".to_string(),
+                    "delete".to_string(),
+                    "list".to_string(),
+                    "list_versions".to_string(),
+                    "rotate".to_string(),
+                    "encrypt".to_string(),
+                    "decrypt".to_string(),
+                    "sign".to_string(),
+                    "verify".to_string(),
+                    "hash".to_string(),
+                    "write".to_string(),
+                ],
+                resources: vec![
+                    "app/".to_string(),
+                    "keys/".to_string(),
+                    "sys/".to_string(),
+                    "key_data/".to_string(),
+                    "users/".to_string(),
+                ],
             }],
             metadata: HashMap::new(),
             created_at: chrono::Utc::now(),
@@ -1391,7 +1649,15 @@ mod tests {
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let secreton_service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await;
+        let secreton_service = SecretService::new(
+            storage,
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await;
         assert!(secreton_service.is_ok());
     }
 
@@ -1413,20 +1679,32 @@ mod tests {
         // Seed secret
         let mut data = HashMap::new();
         data.insert("key1".to_string(), "value1".to_string());
-        
+
         let user = mock_user();
         let user_uuid = Uuid::parse_str(&user.id).unwrap();
 
         let secret_entry = SecretEntry::new(
             "app/config".to_string(),
-            crypto.encrypt_data(&serde_json::to_vec(&data).unwrap()).await.unwrap(),
+            crypto
+                .encrypt_data(&serde_json::to_vec(&data).unwrap())
+                .await
+                .unwrap(),
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             user_uuid,
         );
         let _ = storage.store(&secret_entry).await;
 
-        let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage,
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
         let secret = service.get_secret("app/config", &user, None).await.unwrap();
         assert_eq!(secret.path, "app/config");
         assert!(secret.data.contains_key("key1"));
@@ -1447,7 +1725,16 @@ mod tests {
         // Seed policy
         seed_admin_policy(&policy_service).await;
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
 
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
@@ -1487,7 +1774,10 @@ mod tests {
 
         // Encrypt the raw key data using CryptoService
         let raw_key = vec![0u8; 32];
-        let encrypted_key = crypto.encrypt_data(&raw_key).await.expect("failed to encrypt key data");
+        let encrypted_key = crypto
+            .encrypt_data(&raw_key)
+            .await
+            .expect("failed to encrypt key data");
 
         let user = mock_user();
 
@@ -1510,8 +1800,20 @@ mod tests {
         );
         let _ = storage.store(&key_storage_entry).await;
 
-        let service = SecretService::new(storage, crypto, audit, identity, policy_service, performance).await.unwrap();
-        let (result, key_version) = service.encrypt("key1", "plaintext".as_bytes(), &user).await.unwrap();
+        let service = SecretService::new(
+            storage,
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
+        let (result, key_version) = service
+            .encrypt("key1", "plaintext".as_bytes(), &user)
+            .await
+            .unwrap();
         assert!(!result.ciphertext.is_empty());
         assert_eq!(key_version, 1);
     }
@@ -1528,7 +1830,16 @@ mod tests {
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
 
         let user = secreton_auth::User {
             id: "user_no_role".to_string(),
@@ -1564,7 +1875,7 @@ mod tests {
         unsafe {
             std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         }
-        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+        use secreton_auth::policies::model::{Policy, PolicyEffect, PolicyRule, PolicyType, Role};
 
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
@@ -1573,7 +1884,16 @@ mod tests {
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service.clone(), performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto,
+            audit,
+            identity,
+            policy_service.clone(),
+            performance,
+        )
+        .await
+        .unwrap();
 
         let policy = Policy {
             id: Uuid::new_v4(),
@@ -1632,7 +1952,9 @@ mod tests {
             metadata: HashMap::new(),
         };
 
-        let result = service.create_key("test_key_allowed", "aes256-gcm", &user).await;
+        let result = service
+            .create_key("test_key_allowed", "aes256-gcm", &user)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -1651,7 +1973,16 @@ mod tests {
 
         seed_admin_policy(&policy_service).await;
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
         let user = mock_user();
 
         // 1. Create Secret (v1)
@@ -1677,7 +2008,10 @@ mod tests {
         assert_eq!(get_v1.data.get("k").unwrap(), "v1");
 
         // 5. List Versions
-        let versions = service.list_secret_versions("app/ver", &user).await.unwrap();
+        let versions = service
+            .list_secret_versions("app/ver", &user)
+            .await
+            .unwrap();
         assert_eq!(versions.len(), 2);
         assert_eq!(versions[0].version, 2); // Sorted desc
         assert_eq!(versions[1].version, 1);
@@ -1697,7 +2031,16 @@ mod tests {
 
         seed_admin_policy(&policy_service).await;
 
-        let service = SecretService::new(storage.clone(), crypto, audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto,
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
         let user = mock_user();
 
         // 1. Create Secret (v1)
@@ -1709,10 +2052,15 @@ mod tests {
         // We need to construct the cache payload: [v2_bytes] + [json_data]
         let v2: u32 = 2;
         let mut cache_payload = v2.to_be_bytes().to_vec();
-        let fake_data = serde_json::to_vec(&HashMap::from([("k".to_string(), "fake_v2".to_string())])).unwrap();
+        let fake_data =
+            serde_json::to_vec(&HashMap::from([("k".to_string(), "fake_v2".to_string())])).unwrap();
         cache_payload.extend_from_slice(&fake_data);
 
-        service.performance.put_cached("app/race".to_string(), cache_payload).await.unwrap();
+        service
+            .performance
+            .put_cached("app/race".to_string(), cache_payload)
+            .await
+            .unwrap();
 
         // 3. Get Secret (current). Storage still has v1.
         let result = service.get_secret("app/race", &user, None).await.unwrap();
@@ -1722,19 +2070,25 @@ mod tests {
         assert_eq!(result.data.get("k").unwrap(), "v1");
 
         // 5. Assert cache is now corrected to v1
-        let cached = service.performance.get_cached("app/race").await.unwrap().unwrap();
+        let cached = service
+            .performance
+            .get_cached("app/race")
+            .await
+            .unwrap()
+            .unwrap();
         let (ver_bytes, _) = cached.split_at(4);
         let cached_ver = u32::from_be_bytes(ver_bytes.try_into().unwrap());
         assert_eq!(cached_ver, 1);
     }
 }
 
-
 #[cfg(test)]
 mod list_secrets_tests {
     use super::*;
-    use secreton_storage::{MockStorageBackend, StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
     use crate::services::audit::AuditLogger;
+    use secreton_storage::{
+        EncryptionMetadata, MockStorageBackend, SecretEntry, SecurityLevel, StorageBackend,
+    };
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -1766,7 +2120,7 @@ mod list_secrets_tests {
 
     // Helper to seed policy
     async fn seed_allow_all_policy(policy_service: &secreton_auth::PolicyService, role_name: &str) {
-        use secreton_auth::policies::model::{Policy, PolicyType, PolicyEffect, PolicyRule, Role};
+        use secreton_auth::policies::model::{Policy, PolicyEffect, PolicyRule, PolicyType, Role};
 
         let policy = Policy {
             id: Uuid::new_v4(),
@@ -1777,8 +2131,29 @@ mod list_secrets_tests {
                 id: Uuid::new_v4(),
                 name: "allow_all".to_string(),
                 conditions: vec![],
-                actions: vec!["create".to_string(), "read".to_string(), "update".to_string(), "delete".to_string(), "list".to_string(), "list_versions".to_string(), "rotate".to_string(), "encrypt".to_string(), "decrypt".to_string(), "sign".to_string(), "verify".to_string(), "hash".to_string(), "write".to_string()],
-                resources: vec!["*".to_string(), "app/".to_string(), "keys/".to_string(), "sys/".to_string(), "key_data/".to_string(), "users/".to_string()],
+                actions: vec![
+                    "create".to_string(),
+                    "read".to_string(),
+                    "update".to_string(),
+                    "delete".to_string(),
+                    "list".to_string(),
+                    "list_versions".to_string(),
+                    "rotate".to_string(),
+                    "encrypt".to_string(),
+                    "decrypt".to_string(),
+                    "sign".to_string(),
+                    "verify".to_string(),
+                    "hash".to_string(),
+                    "write".to_string(),
+                ],
+                resources: vec![
+                    "*".to_string(),
+                    "app/".to_string(),
+                    "keys/".to_string(),
+                    "sys/".to_string(),
+                    "key_data/".to_string(),
+                    "users/".to_string(),
+                ],
             }],
             metadata: HashMap::new(),
             created_at: chrono::Utc::now(),
@@ -1816,7 +2191,16 @@ mod list_secrets_tests {
         seed_allow_all_policy(&policy_service, "user").await;
         seed_allow_all_policy(&policy_service, "admin").await;
 
-        let service = SecretService::new(storage.clone(), crypto.clone(), audit, identity, policy_service, performance).await.unwrap();
+        let service = SecretService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit,
+            identity,
+            policy_service,
+            performance,
+        )
+        .await
+        .unwrap();
 
         let user1_uuid = Uuid::new_v4();
         let user2_uuid = Uuid::new_v4();

@@ -3,15 +3,15 @@
 //! Handles persistence of PKI state (CA keys, certificates) using the StorageBackend
 //! and CryptoService. Wraps the in-memory PkiEngine.
 
+use anyhow::{Result, anyhow};
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, anyhow};
-use tracing::{info, warn, error};
-use serde_json::json;
+use tracing::{error, info, warn};
 
-use secreton_storage::{StorageBackend, SecretEntry, EncryptionMetadata, SecurityLevel};
-use secreton_secrets_pki::{PkiEngine, PkiConfig, CertificateRequest, CertificateResponse};
 use crate::services::crypto::CryptoService;
+use secreton_secrets_pki::{CertificateRequest, CertificateResponse, PkiConfig, PkiEngine};
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 
 const CA_STORAGE_PATH: &str = "sys/pki/ca";
 const CA_CONFIG_PATH: &str = "sys/pki/config";
@@ -24,10 +24,7 @@ pub struct PkiPersistentService {
 }
 
 impl PkiPersistentService {
-    pub fn new(
-        storage: Arc<dyn StorageBackend + Send + Sync>,
-        crypto: Arc<CryptoService>,
-    ) -> Self {
+    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>) -> Self {
         // Initialize engine with empty config initially
         let config = PkiConfig {
             default_lease_ttl: 3600,
@@ -58,8 +55,12 @@ impl PkiPersistentService {
             let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
             let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
 
-            let cert_pem = ca_data["certificate"].as_str().ok_or_else(|| anyhow!("Missing certificate in storage"))?;
-            let key_pem = ca_data["private_key"].as_str().ok_or_else(|| anyhow!("Missing private key in storage"))?;
+            let cert_pem = ca_data["certificate"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing certificate in storage"))?;
+            let key_pem = ca_data["private_key"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing private key in storage"))?;
 
             // Re-initialize engine with loaded CA
             let config = PkiConfig {
@@ -79,12 +80,17 @@ impl PkiPersistentService {
             info!("No CA found in storage. PKI Engine running in uninitialized mode.");
         }
 
-        self.initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.initialized
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
     /// Generate a new Root CA
-    pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String)> {
+    pub async fn generate_root_ca(
+        &self,
+        common_name: &str,
+        organization: &str,
+    ) -> Result<(String, String)> {
         // Ensure initialized to load any existing CA from storage before checking/generating
         self.ensure_initialized().await?;
 
@@ -94,11 +100,15 @@ impl PkiPersistentService {
 
         // Guard: Check if CA already exists in the engine config
         if engine_lock.has_ca_configured() {
-             return Err(anyhow!("Root CA already exists. Use force if you really intend to overwrite."));
+            return Err(anyhow!(
+                "Root CA already exists. Use force if you really intend to overwrite."
+            ));
         }
 
         // Generate via engine logic
-        let (cert_pem, key_pem) = engine_lock.generate_root_ca(common_name, organization).await
+        let (cert_pem, key_pem) = engine_lock
+            .generate_root_ca(common_name, organization)
+            .await
             .map_err(|e| anyhow!("Failed to generate Root CA: {}", e))?;
 
         // Store in storage
@@ -124,7 +134,7 @@ impl PkiPersistentService {
         // This storage operation is async and outside the lock? No, we are holding the lock.
         // This blocks other readers/writers which is what we want for correctness here.
         if let Err(e) = self.storage.store(&entry).await {
-             return Err(anyhow!("Failed to persist Root CA: {}", e));
+            return Err(anyhow!("Failed to persist Root CA: {}", e));
         }
 
         // Update in-memory engine configuration
@@ -169,10 +179,14 @@ impl PkiPersistentService {
 
         // Ensure CA is configured
         if !engine.has_ca_configured() {
-            return Err(anyhow!("PKI Engine not initialized with a Root CA. Please generate one first."));
+            return Err(anyhow!(
+                "PKI Engine not initialized with a Root CA. Please generate one first."
+            ));
         }
 
-        let response = engine.generate_certificate(&req).await
+        let response = engine
+            .generate_certificate(&req)
+            .await
             .map_err(|e| anyhow!("Failed to issue certificate: {}", e))?;
 
         // Persist the issued certificate

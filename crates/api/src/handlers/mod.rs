@@ -1,48 +1,37 @@
 //! HTTP request handlers for the Secreton API.
-//! 
+//!
 //! Provides comprehensive REST endpoints for secreton operations,
 //! authentication, authorization, and administrative functions.
 
-pub mod auth;
-pub mod secret;
 pub mod admin;
-pub mod health;
+pub mod auth;
 pub mod config;
+pub mod health;
+pub mod secret;
 pub mod sys;
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 
 use std::sync::Arc;
 use tower::ServiceBuilder;
-use tower_http::{
-    compression::CompressionLayer,
-    trace::TraceLayer,
+use tower_http::{compression::CompressionLayer, trace::TraceLayer};
+
+use crate::config::ApiConfig;
+use crate::middleware::{
+    auth::AuthMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware,
+    seal::SealMiddleware,
 };
-
-
-use crate::middleware::{auth::AuthMiddleware, seal::SealMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware};
+use crate::services::ApiServiceContainer;
+use crate::services::{
+    admin::AdminService, audit::AuditLogger, auth::AuthenticationService, crypto::CryptoService,
+    seal::SealService, secret::SecretService,
+};
 use crate::{ApiResponse, ApiResult};
 use axum::middleware::{self};
-use crate::config::ApiConfig;
-use crate::services::ApiServiceContainer;
-use secreton_storage::StorageBackend;
-use crate::services::{
-    audit::AuditLogger,
-    auth::AuthenticationService,
-    crypto::CryptoService,
-    secret::SecretService,
-    admin::AdminService,
-    seal::SealService,
-};
-use secreton_performance::SecretPerformanceOptimizer;
-use secreton_auth::policies::service::PolicyService;
 use secreton_auth::mfa::CombinedMfaService;
+use secreton_auth::policies::service::PolicyService;
+use secreton_performance::SecretPerformanceOptimizer;
+use secreton_storage::StorageBackend;
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -101,11 +90,19 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
                 // Use defaults for missing config fields
-                .layer(tower_http::timeout::TimeoutLayer::new(std::time::Duration::from_secs(30)))
+                .layer(tower_http::timeout::TimeoutLayer::new(
+                    std::time::Duration::from_secs(30),
+                ))
                 .layer(create_cors_layer())
                 .layer(middleware::from_fn(RateLimitMiddleware::limit))
-                .layer(middleware::from_fn_with_state(app_state.clone(), SealMiddleware::check))
-                .layer(middleware::from_fn_with_state(app_state.clone(), AuthMiddleware::authenticate)),
+                .layer(middleware::from_fn_with_state(
+                    app_state.clone(),
+                    SealMiddleware::check,
+                ))
+                .layer(middleware::from_fn_with_state(
+                    app_state.clone(),
+                    AuthMiddleware::authenticate,
+                )),
         )
         .with_state(app_state)
 }
@@ -142,7 +139,8 @@ async fn get_metrics(State(_state): State<AppState>) -> Result<String, StatusCod
          api_requests_total{method=\"POST\"} 0\n\
          api_response_time_seconds{quantile=\"0.5\"} 0.1\n\
          api_response_time_seconds{quantile=\"0.9\"} 0.2\n\
-         api_response_time_seconds{quantile=\"0.99\"} 0.5\n".to_string();
+         api_response_time_seconds{quantile=\"0.99\"} 0.5\n"
+        .to_string();
     Ok(metrics)
 }
 
@@ -158,8 +156,8 @@ pub struct VersionInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum_test::TestServer;
     use crate::config::ApiConfig;
+    use axum_test::TestServer;
 
     #[tokio::test]
     async fn test_root_endpoint() {
@@ -167,19 +165,19 @@ mod tests {
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        
+
         let services = Arc::new(
             ApiServiceContainer::new(&config)
                 .await
-                .expect("Failed to create services")
+                .expect("Failed to create services"),
         );
-        
+
         let app = create_router(&config, services.into());
         let server = TestServer::new(app.into_make_service()).unwrap();
-        
+
         let response = server.get("/").await;
         response.assert_status_ok();
-        
+
         let body: ApiResponse<serde_json::Value> = response.json();
         assert!(body.success);
         assert!(body.data.is_some());
@@ -195,15 +193,15 @@ mod tests {
         let services = Arc::new(
             ApiServiceContainer::new(&config)
                 .await
-                .expect("Failed to create services")
+                .expect("Failed to create services"),
         );
-        
+
         let app = create_router(&config, services.into());
         let server = TestServer::new(app.into_make_service()).unwrap();
-        
+
         let response = server.get("/api/v1/version").await;
         response.assert_status_ok();
-        
+
         let body: ApiResponse<VersionInfo> = response.json();
         assert!(body.success);
         assert!(body.data.is_some());

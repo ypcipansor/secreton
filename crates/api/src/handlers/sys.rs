@@ -1,13 +1,13 @@
+use crate::handlers::AppState;
+use crate::services::seal::{InitResponse, UnsealResponse};
+use crate::{ApiResponse, ApiResult};
 use axum::{
-    extract::{State, Json},
     Router,
-    routing::{get, post},
+    extract::{Json, State},
     http::StatusCode,
+    routing::{get, post},
 };
 use serde::Deserialize;
-use crate::handlers::AppState;
-use crate::{ApiResult, ApiResponse};
-use crate::services::seal::{InitResponse, UnsealResponse};
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()
@@ -38,13 +38,16 @@ async fn initialize(
 ) -> ApiResult<Json<ApiResponse<InitResponse>>> {
     let root_username = payload.root_username.as_deref().unwrap_or("root");
 
-    let result = state.seal.init(
-        payload.shares,
-        payload.threshold,
-        root_username,
-        &state.auth,
-        &state.mfa
-    ).await
+    let result = state
+        .seal
+        .init(
+            payload.shares,
+            payload.threshold,
+            root_username,
+            &state.auth,
+            &state.mfa,
+        )
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
     Ok(Json(ApiResponse::success(result)))
 }
@@ -54,7 +57,10 @@ async fn unseal(
     State(state): State<AppState>,
     Json(payload): Json<UnsealRequest>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
-    let result = state.seal.unseal(&payload.key).await
+    let result = state
+        .seal
+        .unseal(&payload.key)
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
     Ok(Json(ApiResponse::success(result)))
 }
@@ -63,15 +69,16 @@ async fn unseal(
 async fn get_seal_status(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
-    let result = state.seal.get_status().await
+    let result = state
+        .seal
+        .get_status()
+        .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
     Ok(Json(ApiResponse::success(result)))
 }
 
 /// Seal the vault
-async fn seal(
-    State(state): State<AppState>,
-) -> ApiResult<StatusCode> {
+async fn seal(State(state): State<AppState>) -> ApiResult<StatusCode> {
     state.seal.seal().await;
     Ok(StatusCode::NO_CONTENT)
 }
