@@ -210,7 +210,7 @@ impl AdvancedSecurityManager {
         info!("Initializing Advanced Security Manager");
 
         // Initialize concrete implementations for abstract interfaces
-        let audit_system = audit::AuditLogger::new(Arc::new(secreton_storage::MockStorageBackend::new()), 2555).await.map_err(|e| SecretonError::Audit { message: format!("Failed to initialize audit logger: {}", e) })?;
+        let audit_system = audit::AuditLogger::new(vec![Arc::new(audit::MemoryBackend::default())]);
         let policy_engine = PolicySet { rules: Vec::new() };
         let compliance_engine = ComplianceProfile {
             profile_id: "default".to_string(),
