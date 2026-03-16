@@ -571,7 +571,7 @@ impl SecretService {
         // Self-permission check (can user create policy?)
         self.check_permission(user, &format!("sys/policies/{}", name), "create")
             .await?;
-        self.update_policy(name, rules, metadata, user).await
+        self._upsert_policy(name, rules, metadata).await
     }
 
     /// Get policy by name
@@ -1132,7 +1132,15 @@ impl SecretService {
     ) -> Result<Policy, SecretError> {
         self.check_permission(user, &format!("sys/policies/{}", name), "update")
             .await?;
+        self._upsert_policy(name, rules, metadata).await
+    }
 
+    async fn _upsert_policy(
+        &self,
+        name: &str,
+        rules: Vec<String>,
+        metadata: PolicyMetadata,
+    ) -> Result<Policy, SecretError> {
         let policy = Policy {
             name: name.to_string(),
             rules,

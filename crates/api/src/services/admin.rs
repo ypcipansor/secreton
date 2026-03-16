@@ -299,7 +299,6 @@ impl AdminService {
         let checksum = format!("sha256:{:x}", hasher.finalize());
 
         // Store backup metadata
-        let size_bytes = backup_data.len() as u64;
         let mut metadata = HashMap::new();
         metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
         metadata.insert("type".to_string(), "full".to_string());
@@ -326,12 +325,12 @@ impl AdminService {
 
         let mut final_metadata = metadata.clone();
         if !is_encrypted {
-            final_metadata.insert("data".to_string(), backup_data);
+            final_metadata.insert("data".to_string(), backup_data.clone());
         }
 
         let mut backup_entry = secreton_storage::SecretEntry::new(
             backup_path,
-            encrypted_data,
+            encrypted_data.clone(),
             encryption_metadata,
             secreton_storage::SecurityLevel::TopSecret,
             uuid::Uuid::new_v4(),
@@ -339,6 +338,12 @@ impl AdminService {
         backup_entry.id = uuid::Uuid::new_v4();
         backup_entry.metadata = final_metadata;
         backup_entry.tags = vec!["backup".to_string(), "system".to_string()];
+
+        let size_bytes = if is_encrypted {
+            encrypted_data.len() as u64
+        } else {
+            backup_data.len() as u64
+        };
 
         self.storage
             .store(&backup_entry)
