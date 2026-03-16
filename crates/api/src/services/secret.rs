@@ -591,7 +591,7 @@ impl SecretService {
             let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?;
             Ok(policy)
         } else {
-            Err(SecretError::PolicyNotFound { name: name.to_string() })
+            Err(SecretError::KeyNotFound { key_id: name.to_string() })
         }
     }
 
@@ -611,7 +611,7 @@ impl SecretService {
             self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
             Ok(true)
         } else {
-            Err(SecretError::PolicyNotFound { name: name.to_string() })
+            Err(SecretError::KeyNotFound { key_id: name.to_string() })
         }
     }
 
@@ -1133,25 +1133,10 @@ impl SecretService {
         self.check_permission(user, &format!("sys/policies/{}", name), "update")
             .await?;
 
-        let policy_path = format!("sys/policies/{}", name);
-        let existing_entry = self.storage.get_by_path(&policy_path).await.unwrap_or(None);
-
-        let original_created_at = if let Some(ref entry) = existing_entry {
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                serde_json::from_slice::<Policy>(&decrypted)
-                    .map(|p| p.created_at)
-                    .unwrap_or_else(|_| chrono::Utc::now())
-            } else {
-                entry.created_at
-            }
-        } else {
-            chrono::Utc::now()
-        };
-
         let policy = Policy {
             name: name.to_string(),
             rules,
-            created_at: original_created_at,
+            created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata,
         };

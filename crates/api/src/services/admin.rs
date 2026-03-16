@@ -305,13 +305,14 @@ impl AdminService {
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
         let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto {
-            let (enc, encrypted) = match crypto.encrypt_data(backup_data.as_bytes()).await {
-                Ok(data) => (data, true),
+            let enc = match crypto.encrypt_data(backup_data.as_bytes()).await {
+                Ok(data) => data,
                 Err(e) => {
                     tracing::warn!("Encryption failed: {}, falling back to unencrypted backup", e);
-                    (backup_data.as_bytes().to_vec(), false)
+                    backup_data.as_bytes().to_vec()
                 }
             };
+            let encrypted = enc != backup_data.as_bytes();
             let metadata = if encrypted {
                 secreton_storage::EncryptionMetadata::default()
             } else {
@@ -404,16 +405,19 @@ impl AdminService {
             .into_iter()
             .filter_map(|entry| {
                 let backup_id = entry.path.split('/').next_back()?.to_string();
+                let encrypted = entry.encryption_metadata.algorithm != "none" || !entry.metadata.contains_key("data");
+                let size_bytes = if let Some(data) = entry.metadata.get("data") {
+                    data.len() as u64
+                } else {
+                    entry.encrypted_data.len() as u64
+                };
+
                 Some(BackupInfo {
                     id: backup_id,
                     created_at: entry.created_at,
-                    size_bytes: entry
-                        .metadata
-                        .get("data")
-                        .map(|d| d.len() as u64)
-                        .unwrap_or(0),
+                    size_bytes,
                     compressed: false,
-                    encrypted: false,
+                    encrypted,
                     checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
                     metadata: {
                         let mut m = entry.metadata;
@@ -440,15 +444,26 @@ impl AdminService {
             .ok_or_else(|| AdminError::NotFound(format!("Backup {} not found", backup_id)))?;
 
         // Get backup data
-        let backup_data = backup_entry
-            .metadata
-            .get("data")
-            .ok_or_else(|| AdminError::Internal(anyhow::anyhow!("Backup data not found")))?;
+        let backup_data_bytes = if let Some(data) = backup_entry.metadata.get("data") {
+            data.as_bytes().to_vec()
+        } else if !backup_entry.encrypted_data.is_empty() {
+            if let Some(crypto) = &self.crypto {
+                crypto.decrypt(&backup_entry.encrypted_data).await.map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!("Failed to decrypt backup data: {}", e))
+                })?
+            } else {
+                return Err(AdminError::Internal(anyhow::anyhow!(
+                    "Crypto service unavailable, cannot decrypt backup"
+                )));
+            }
+        } else {
+            return Err(AdminError::Internal(anyhow::anyhow!("Backup data not found")));
+        };
 
         // Verify checksum
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(backup_data.as_bytes());
+        hasher.update(&backup_data_bytes);
         let computed_checksum = format!("sha256:{:x}", hasher.finalize());
 
         if let Some(stored_checksum) = backup_entry.metadata.get("checksum") {
@@ -461,7 +476,7 @@ impl AdminService {
 
         // Parse entries
         let entries: Vec<secreton_storage::SecretEntry> =
-            serde_json::from_str(backup_data).map_err(|e| AdminError::Internal(e.into()))?;
+            serde_json::from_slice(&backup_data_bytes).map_err(|e| AdminError::Internal(e.into()))?;
 
         // Restore each entry (excluding backup entries themselves)
         for entry in &entries {
