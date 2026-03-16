@@ -305,14 +305,13 @@ impl AdminService {
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
         let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto {
-            let enc = match crypto.encrypt_data(backup_data.as_bytes()).await {
-                Ok(data) => data,
+            let (enc, encrypted) = match crypto.encrypt_data(backup_data.as_bytes()).await {
+                Ok(data) => (data, true),
                 Err(e) => {
                     tracing::warn!("Encryption failed: {}, falling back to unencrypted backup", e);
-                    backup_data.as_bytes().to_vec()
+                    (backup_data.as_bytes().to_vec(), false)
                 }
             };
-            let encrypted = enc != backup_data.as_bytes();
             let metadata = if encrypted {
                 secreton_storage::EncryptionMetadata::default()
             } else {
