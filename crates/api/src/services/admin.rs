@@ -304,29 +304,58 @@ impl AdminService {
         metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
-        metadata.insert("data".to_string(), backup_data);
-
-        let backup_entry = secreton_storage::SecretEntry {
-            id: uuid::Uuid::new_v4(),
-            path: backup_path,
-            encrypted_data: Vec::new(),
-            encryption_metadata: secreton_storage::EncryptionMetadata {
-                algorithm: "none".to_string(),
-                key_id: "backup".to_string(),
-                iv: Vec::new(),
-                auth_tag: None,
-                aad: None,
-                kdf_params: None,
-            },
-            security_level: secreton_storage::SecurityLevel::TopSecret,
-            metadata,
-            tags: vec!["backup".to_string(), "system".to_string()],
-            version: 1,
-            owner_id: uuid::Uuid::new_v4(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            expires_at: None,
+        let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto {
+            let enc = match crypto.encrypt_data(backup_data.as_bytes()).await {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::warn!("Encryption failed: {}, falling back to unencrypted backup", e);
+                    backup_data.as_bytes().to_vec()
+                }
+            };
+            let encrypted = enc != backup_data.as_bytes();
+            let metadata = if encrypted {
+                secreton_storage::EncryptionMetadata::default()
+            } else {
+                secreton_storage::EncryptionMetadata {
+                    algorithm: "none".to_string(),
+                    key_id: "backup".to_string(),
+                    iv: Vec::new(),
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                }
+            };
+            (enc, metadata, encrypted)
+        } else {
+            (
+                backup_data.as_bytes().to_vec(),
+                secreton_storage::EncryptionMetadata {
+                    algorithm: "none".to_string(),
+                    key_id: "backup".to_string(),
+                    iv: Vec::new(),
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+                false,
+            )
         };
+
+        let mut final_metadata = metadata.clone();
+        if !is_encrypted {
+            final_metadata.insert("data".to_string(), backup_data);
+        }
+
+        let mut backup_entry = secreton_storage::SecretEntry::new(
+            backup_path,
+            encrypted_data,
+            encryption_metadata,
+            secreton_storage::SecurityLevel::TopSecret,
+            uuid::Uuid::new_v4(),
+        );
+        backup_entry.id = uuid::Uuid::new_v4();
+        backup_entry.metadata = final_metadata;
+        backup_entry.tags = vec!["backup".to_string(), "system".to_string()];
 
         self.storage
             .store(&backup_entry)
@@ -338,12 +367,14 @@ impl AdminService {
             created_at: chrono::Utc::now(),
             size_bytes,
             compressed: false,
-            encrypted: false,
+            encrypted: is_encrypted,
             checksum,
             metadata: {
                 let mut m = HashMap::new();
-                m.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
-                m.insert("type".to_string(), "full".to_string());
+                m.insert(
+                    "version".to_string(),
+                    env!("CARGO_PKG_VERSION").to_string(),
+                );
                 m
             },
         };
@@ -2031,17 +2062,44 @@ mod tests {
                 .await
                 .unwrap(),
         );
+
+        // Pre-populate mock storage to avoid initialization errors during unseal
+        let active_key_id = "test_active_key_123";
+        let active_key_data = vec![1; 32]; // dummy encrypted key data
+
+        let mut active_key_ref_entry = secreton_storage::SecretEntry::new(
+            "sys/keys/active_key_ref".to_string(),
+            active_key_id.as_bytes().to_vec(),
+            secreton_storage::EncryptionMetadata::default(),
+            secreton_storage::SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        );
+        let mut active_key_entry = secreton_storage::SecretEntry::new(
+            format!("sys/keys/{}", active_key_id),
+            active_key_data,
+            secreton_storage::EncryptionMetadata::default(),
+            secreton_storage::SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        );
+        let _ = storage.store(&active_key_ref_entry).await;
+        let _ = storage.store(&active_key_entry).await;
+
+        crypto.set_root_key(vec![0; 32]).await.unwrap();
+
         let mut config = AuthConfig::default();
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
         let auth = Arc::new(
-            AuthenticationService::new(storage.clone(), crypto, &config)
+            AuthenticationService::new(storage.clone(), crypto.clone(), &config)
                 .await
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance).await.unwrap();
+        let service = AdminService::new(storage, auth, performance)
+            .await
+            .unwrap()
+            .with_crypto(crypto);
 
         let backup = service.create_backup().await.expect("backup");
         assert!(backup.encrypted);

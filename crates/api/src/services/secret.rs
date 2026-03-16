@@ -582,19 +582,17 @@ impl SecretService {
     ) -> Result<Policy, SecretError> {
         self.check_permission(user, &format!("sys/policies/{}", name), "read")
             .await?;
-        // Placeholder
-        Ok(Policy {
-            name: name.to_string(),
-            rules: vec![],
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            metadata: PolicyMetadata {
-                description: None,
-                created_by: "system".to_string(),
-                owner: None,
-                tags: std::collections::HashMap::new(),
-            },
-        })
+
+        let path = format!("sys/policies/{}", name);
+        let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
+
+        if let Some(entry) = entry {
+            let decrypted = self.crypto.decrypt(&entry.encrypted_data).await.map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+            let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?;
+            Ok(policy)
+        } else {
+            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+        }
     }
 
     /// Delete policy
@@ -605,8 +603,16 @@ impl SecretService {
     ) -> Result<bool, SecretError> {
         self.check_permission(user, &format!("sys/policies/{}", name), "delete")
             .await?;
-        // Placeholder
-        Ok(true)
+
+        let path = format!("sys/policies/{}", name);
+        let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
+
+        if let Some(entry) = entry {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            Ok(true)
+        } else {
+            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+        }
     }
 
     pub async fn list_secret_versions(
@@ -1120,31 +1126,71 @@ impl SecretService {
     pub async fn update_policy(
         &self,
         name: &str,
-        _rules: Vec<String>,
-        _metadata: PolicyMetadata,
+        rules: Vec<String>,
+        metadata: PolicyMetadata,
         user: &secreton_auth::User,
     ) -> Result<Policy, SecretError> {
         self.check_permission(user, &format!("sys/policies/{}", name), "update")
             .await?;
-        // Placeholder implementation
-        Ok(Policy {
+
+        let policy = Policy {
             name: name.to_string(),
-            rules: vec![],
+            rules,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            metadata: PolicyMetadata {
-                description: None,
-                created_by: "system".to_string(),
-                owner: None,
-                tags: std::collections::HashMap::new(),
-            },
-        })
+            metadata,
+        };
+
+        let data = serde_json::to_vec(&policy).map_err(|e| {
+            SecretError::Internal(anyhow::anyhow!("Failed to serialize policy: {}", e))
+        })?;
+
+        let encrypted_data = self.crypto.encrypt_data(&data).await.map_err(|e| {
+            SecretError::Internal(anyhow::anyhow!("Failed to encrypt policy: {}", e))
+        })?;
+
+        let policy_path = format!("sys/policies/{}", name);
+        let existing_entry = self.storage.get_by_path(&policy_path).await.unwrap_or(None);
+        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
+
+        let mut entry = secreton_storage::SecretEntry::new(
+            policy_path,
+            encrypted_data,
+            secreton_storage::EncryptionMetadata::default(),
+            secreton_storage::SecurityLevel::Secret,
+            uuid::Uuid::nil(),
+        );
+        entry.id = entry_id;
+        entry.created_at = created_at;
+        entry.version = version;
+
+        self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+
+        Ok(policy)
     }
 
     pub async fn list_policies(&self, _filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
-        // Placeholder: in real implementation, fetch from storage.
-        // For now, return empty so check_permission defaults to allow.
-        Ok(vec![])
+        let query_params = secreton_storage::QueryParams {
+            path_prefix: Some("sys/policies/".to_string()),
+            limit: None,
+            offset: None,
+            ..Default::default()
+        };
+
+        let entries = self.storage.list(&query_params).await.map_err(SecretError::Storage)?;
+        let mut policies = Vec::new();
+
+        for entry in entries {
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                if let Ok(policy) = serde_json::from_slice::<Policy>(&decrypted) {
+                    policies.push(policy);
+                }
+            }
+        }
+
+        Ok(policies)
     }
 
     /// List key versions
