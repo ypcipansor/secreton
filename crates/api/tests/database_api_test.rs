@@ -56,7 +56,7 @@ async fn test_database_api_endpoints() {
             .unwrap(),
     );
     let audit = Arc::new(
-        secreton_api::services::audit::AuditLogger::new(storage.clone())
+        secreton_api::services::audit::AuditLogger::new(storage.clone(), 2555)
             .await
             .unwrap(),
     );

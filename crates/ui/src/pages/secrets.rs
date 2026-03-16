@@ -554,7 +554,10 @@ pub fn SecretsList() -> impl IntoView {
 
             <Modal
                 show=show_modal
-                on_close=move || set_show_modal.set(false)
+                on_close=move || {
+                    set_error_msg.set(None);
+                    set_show_modal.set(false);
+                }
                 title=if matches!(secret_resource.get(), Some(SecretViewMode::View(_, _))) {
                     format!("Edit Secret: {}", path())
                 } else {
