@@ -11,6 +11,7 @@ pub mod secret;
 
 use anyhow::Result;
 use secreton_common::{InitResult, ServiceContainer, ServiceHealth, StandardServiceContainer};
+use secreton_config::Config;
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
 use std::sync::Arc;
@@ -67,6 +68,12 @@ impl ApiServiceContainer {
     pub async fn new(config: &ApiConfig) -> Result<Self> {
         let _registry = StandardServiceContainer::new();
 
+        let mut config_clone = config.clone();
+        if let Err(e) = config_clone.audit.validate() {
+             tracing::error!("Audit configuration validation failed: {}", e);
+             config_clone.audit.retention_days = 2555;
+        }
+
         // Initialize storage backend
         let storage = StorageFactory::create(config.storage.clone()).await?;
 
@@ -88,7 +95,7 @@ impl ApiServiceContainer {
         ));
 
         // Initialize audit logger
-        let audit = Arc::new(AuditLogger::new(storage.clone(), config.audit.retention_days).await?);
+        let audit = Arc::new(AuditLogger::new(storage.clone(), config_clone.audit.retention_days).await?);
 
         // Initialize MFA Services first (needed for Auth)
         let mfa_config = &config.auth.mfa;
