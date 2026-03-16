@@ -88,7 +88,7 @@ impl ApiServiceContainer {
         ));
 
         // Initialize audit logger
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
+        let audit = Arc::new(AuditLogger::new(storage.clone(), config.security.audit.retention_days).await?);
 
         // Initialize MFA Services first (needed for Auth)
         let mfa_config = &config.auth.mfa;

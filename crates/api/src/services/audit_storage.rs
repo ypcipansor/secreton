@@ -9,11 +9,15 @@ use uuid::Uuid;
 /// Storage-backed audit device that persists audit events as SecretEntry records
 pub struct StorageAuditDevice {
     storage: Arc<dyn StorageBackend + Send + Sync>,
+    retention_days: u32,
 }
 
 impl StorageAuditDevice {
-    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, retention_days: u32) -> Self {
+        Self {
+            storage,
+            retention_days,
+        }
     }
 }
 
@@ -37,9 +41,8 @@ impl AuditDevice for StorageAuditDevice {
             event.id
         );
 
-        // Calculate expiration (default 7 years to meet compliance standards like SOX/FedRAMP)
-        // TODO: Make this configurable via ApiConfig
-        let expiration = now + Duration::days(2555);
+        // Calculate expiration using configured retention_days
+        let expiration = now + Duration::days(self.retention_days as i64);
 
         // Create SecretEntry
         // Note: AdminService expects data in metadata["log_data"]

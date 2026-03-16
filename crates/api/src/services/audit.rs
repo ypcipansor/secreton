@@ -12,9 +12,12 @@ pub struct AuditLogger {
 }
 
 impl AuditLogger {
-    pub async fn new(storage: Arc<dyn StorageBackend + Send + Sync>) -> Result<Self> {
+    pub async fn new(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        retention_days: u32,
+    ) -> Result<Self> {
         let service = Arc::new(AuditService::new(1000));
-        let device = StorageAuditDevice::new(storage);
+        let device = StorageAuditDevice::new(storage, retention_days);
         service.add_device(Box::new(device)).await;
         Ok(Self { service })
     }

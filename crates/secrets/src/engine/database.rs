@@ -98,7 +98,7 @@ impl DatabaseEngine {
                 .to_string();
 
             // We store data as JSON in encrypted_data (plaintext for now)
-            // TODO: Implement proper encryption using CryptoService or KMS
+            // TODO: Implement proper encryption using KMS
             let role: DatabaseRole = serde_json::from_slice(&entry.encrypted_data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
 
@@ -137,7 +137,7 @@ impl DatabaseEngine {
             .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
 
         // Create SecretEntry
-        // TODO: Encrypt data properly
+        // TODO: Encrypt data properly using KMS
         let entry = SecretEntry::new(
             path.clone(),
             data,
@@ -176,7 +176,7 @@ impl DatabaseEngine {
         // The password is returned to the client and not stored here.
         // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
         // If the storage backend supports encryption at rest, it will be encrypted there.
-        // TODO: Implement application-level encryption using CryptoService for defense-in-depth.
+        // TODO: Implement application-level encryption using KMS for defense-in-depth.
         let entry = SecretEntry::new(
             path.clone(),
             data,
