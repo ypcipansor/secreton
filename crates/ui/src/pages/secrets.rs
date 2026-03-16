@@ -238,6 +238,7 @@ pub fn SecretsList() -> impl IntoView {
             return;
         }
 
+        set_error_msg.set(None);
         spawn_local(async move {
             // If we are creating new, use input path. If editing, use current path.
             let target_path = if current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)) {
