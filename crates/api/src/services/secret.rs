@@ -591,7 +591,7 @@ impl SecretService {
             let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?;
             Ok(policy)
         } else {
-            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+            Err(SecretError::PolicyNotFound { name: name.to_string() })
         }
     }
 
@@ -611,7 +611,7 @@ impl SecretService {
             self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
             Ok(true)
         } else {
-            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+            Err(SecretError::PolicyNotFound { name: name.to_string() })
         }
     }
 
@@ -1150,7 +1150,7 @@ impl SecretService {
         })?;
 
         let policy_path = format!("sys/policies/{}", name);
-        let existing_entry = self.storage.get_by_path(&policy_path).await.unwrap_or(None);
+        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
         let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
         let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
         let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
@@ -1183,10 +1183,14 @@ impl SecretService {
         let mut policies = Vec::new();
 
         for entry in entries {
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                if let Ok(policy) = serde_json::from_slice::<Policy>(&decrypted) {
-                    policies.push(policy);
+            match self.crypto.decrypt(&entry.encrypted_data).await {
+                Ok(decrypted) => {
+                    match serde_json::from_slice::<Policy>(&decrypted) {
+                        Ok(policy) => policies.push(policy),
+                        Err(e) => tracing::warn!("Failed to deserialize policy at {}: {}", entry.path, e),
+                    }
                 }
+                Err(e) => tracing::warn!("Failed to decrypt policy at {}: {}", entry.path, e),
             }
         }
 

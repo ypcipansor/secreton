@@ -305,27 +305,10 @@ impl AdminService {
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
         let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto {
-            let enc = match crypto.encrypt_data(backup_data.as_bytes()).await {
-                Ok(data) => data,
-                Err(e) => {
-                    tracing::warn!("Encryption failed: {}, falling back to unencrypted backup", e);
-                    backup_data.as_bytes().to_vec()
-                }
-            };
-            let encrypted = enc != backup_data.as_bytes();
-            let metadata = if encrypted {
-                secreton_storage::EncryptionMetadata::default()
-            } else {
-                secreton_storage::EncryptionMetadata {
-                    algorithm: "none".to_string(),
-                    key_id: "backup".to_string(),
-                    iv: Vec::new(),
-                    auth_tag: None,
-                    aad: None,
-                    kdf_params: None,
-                }
-            };
-            (enc, metadata, encrypted)
+            let enc = crypto.encrypt_data(backup_data.as_bytes()).await.map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e))
+            })?;
+            (enc, secreton_storage::EncryptionMetadata::default(), true)
         } else {
             (
                 backup_data.as_bytes().to_vec(),
@@ -342,7 +325,6 @@ impl AdminService {
         };
 
         let mut final_metadata = metadata.clone();
-        final_metadata.insert("checksum".to_string(), checksum.clone());
         if !is_encrypted {
             final_metadata.insert("data".to_string(), backup_data);
         }
@@ -376,6 +358,8 @@ impl AdminService {
                     "version".to_string(),
                     env!("CARGO_PKG_VERSION").to_string(),
                 );
+                m.insert("type".to_string(), "full".to_string());
+                m.insert("entry_count".to_string(), entries.len().to_string());
                 m
             },
         };
