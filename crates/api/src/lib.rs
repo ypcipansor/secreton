@@ -713,15 +713,9 @@ async fn health_handler(
         )
     };
 
-    let cache_status = if backend_type.to_lowercase().contains("redis") {
-        if health_status.is_healthy {
-            "Redis (Operational)".to_string()
-        } else {
-            "Redis (Unhealthy)".to_string()
-        }
-    } else {
-        "Local (Operational)".to_string()
-    };
+    // Currently, there's no way to query the cache status since storage and cache
+    // backends are conflated. We can improve this in the future if Redis cache becomes distinct.
+    let cache_status = "Local (Operational)".to_string();
 
     let response = ApiResponse::success(HealthCheckResponse {
         status: if health_status.is_healthy {
