@@ -375,6 +375,7 @@ impl AdminService {
                     "version".to_string(),
                     env!("CARGO_PKG_VERSION").to_string(),
                 );
+                m.insert("type".to_string(), "full".to_string());
                 m
             },
         };
