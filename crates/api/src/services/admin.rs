@@ -375,7 +375,6 @@ impl AdminService {
                     "version".to_string(),
                     env!("CARGO_PKG_VERSION").to_string(),
                 );
-                m.insert("type".to_string(), "full".to_string());
                 m
             },
         };
@@ -565,17 +564,18 @@ impl AdminService {
         let entry = entry_opt
             .ok_or_else(|| AdminError::NotFound(format!("Backup {} not found", backup_id)))?;
 
-        let size_bytes = entry
-            .metadata
-            .get("data")
-            .map(|d: &String| d.len() as u64)
-            .unwrap_or(0);
+        let size_bytes = if let Some(data) = entry.metadata.get("data") {
+            data.len() as u64
+        } else {
+            entry.encrypted_data.len() as u64
+        };
+
         Ok(BackupInfo {
             id: backup_id.to_string(),
             created_at: entry.created_at,
             size_bytes,
             compressed: false,
-            encrypted: false,
+            encrypted: entry.encryption_metadata.algorithm != "none" || !entry.metadata.contains_key("data"),
             checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
             metadata: {
                 let mut m = entry.metadata;
