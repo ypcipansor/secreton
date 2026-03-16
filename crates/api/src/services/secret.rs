@@ -611,7 +611,7 @@ impl SecretService {
             self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
             Ok(true)
         } else {
-            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+            Err(SecretError::PolicyNotFound { name: name.to_string() })
         }
     }
 
