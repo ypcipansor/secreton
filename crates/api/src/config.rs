@@ -6,6 +6,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use secreton_config::AuditConfig;
 use secreton_storage::StorageFactoryConfig;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,10 @@ pub struct ApiConfig {
 
     /// Authentication configuration
     pub auth: AuthConfig,
+
+    /// Audit logging configuration
+    #[serde(default)]
+    pub audit: AuditConfig,
 
     /// Rate limiting configuration
     pub rate_limit: RateLimitConfig,
@@ -699,6 +704,7 @@ mod tests {
                     }),
                 },
             },
+            audit: AuditConfig::default(),
             rate_limit: RateLimitConfig {
                 enabled: true,
                 global: RateLimitRule {
