@@ -342,6 +342,7 @@ impl AdminService {
         };
 
         let mut final_metadata = metadata.clone();
+        final_metadata.insert("checksum".to_string(), checksum.clone());
         if !is_encrypted {
             final_metadata.insert("data".to_string(), backup_data);
         }
