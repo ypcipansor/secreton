@@ -591,7 +591,7 @@ impl SecretService {
             let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?;
             Ok(policy)
         } else {
-            Err(SecretError::KeyNotFound { key_id: name.to_string() })
+            Err(SecretError::PolicyNotFound { name: name.to_string() })
         }
     }
 
