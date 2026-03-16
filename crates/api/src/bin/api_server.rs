@@ -155,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
     let storage = StorageFactory::create(storage_config).await?;
     info!("Storage backend initialized successfully");
 
+    use secreton_config::Config;
     // Load Configuration from Storage
     let mut api_config = match ConfigService::load_config(storage.as_ref()).await {
         Ok(c) => {
@@ -169,6 +170,12 @@ async fn main() -> anyhow::Result<()> {
             ApiConfig::default()
         }
     };
+
+    if let Err(e) = api_config.audit.validate() {
+         tracing::error!("Audit configuration validation failed: {}", e);
+         // Enforce a safe default if someone maliciously set retention_days to 0 and enabled to true or similar manually bypassing the check
+         api_config.audit.retention_days = 2555;
+    }
 
     // Ensure JWT secret exists (auto-generate if missing/None)
     if api_config.auth.jwt.secret.is_none() {
