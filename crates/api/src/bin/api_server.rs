@@ -290,7 +290,7 @@ async fn main() -> anyhow::Result<()> {
             .with_mfa(mfa.clone()),
     );
 
-    let audit = Arc::new(AuditLogger::new(storage.clone(), api_config.audit.retention_days).await?);
+    let audit = Arc::new(AuditLogger::new(storage.clone(), api_config.audit.retention_days, api_config.audit.max_batch_size, api_config.audit.enabled).await?);
 
     // Initialize Seal Service
     let seal = Arc::new(SealService::new(

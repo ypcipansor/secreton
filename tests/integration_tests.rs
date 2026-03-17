@@ -14,7 +14,7 @@ use secreton_crypto::SecurityParams;
 async fn create_test_secreton_service() -> Result<SecretService, Box<dyn std::error::Error>> {
     let storage = Arc::new(MockStorageBackend::new());
     let crypto = Arc::new(CryptoService::new(SecurityParams::default())?);
-    let audit = Arc::new(AuditLogger::new(storage.clone(), 2555).await?);
+    let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await?);
 
     Ok(SecretService::new(storage, crypto, audit).await?)
 }

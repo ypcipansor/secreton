@@ -15,7 +15,7 @@ async fn test_audit_log_persistence() {
 
     // 2. Setup Logger
     let logger = Arc::new(
-        AuditLogger::new(storage.clone(), 2555)
+        AuditLogger::new(storage.clone(), 2555, 1000, true)
             .await
             .expect("Failed to create logger"),
     );

@@ -989,7 +989,7 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
         .unwrap(),
     );
     let audit = Arc::new(
-        crate::services::audit::AuditLogger::new(storage.clone(), 2555)
+        crate::services::audit::AuditLogger::new(storage.clone(), 2555, 1000, true)
             .await
             .unwrap(),
     );
