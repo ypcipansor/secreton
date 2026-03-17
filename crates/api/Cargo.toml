@@ -81,6 +81,9 @@ secreton-grpc = { path = "../grpc" }
 # Metrics
 prometheus.workspace = true
 
+# Memory safety
+zeroize.workspace = true
+
 # Random number generation
 rand.workspace = true
 

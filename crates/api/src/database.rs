@@ -40,30 +40,25 @@ impl DatabaseApiState {
         // Manually enable the engine since init isn't called via standard flow here
         // Derive encryption key from the SECRETON_ENCRYPTION_KEY environment variable
         // to ensure encrypted data survives restarts.
-        let env_key = std::env::var("SECRETON_ENCRYPTION_KEY").unwrap_or_else(|_| {
-            tracing::warn!("SECRETON_ENCRYPTION_KEY is not set! Using an insecure default key. DO NOT use this in production.");
-            "your-32-byte-encryption-key-here".to_string()
-        });
-        let key = match secreton_crypto::hashing::compute_hash(
-            secreton_crypto::AlgorithmId::Sha256,
-            env_key.as_bytes(),
-        ) {
-            Ok(result) => result.hash,
-            Err(e) => {
-                tracing::error!("CRITICAL: Failed to derive encryption key via SHA-256: {:?}. Database engine encryption will be unavailable.", e);
-                // Return early with an engine that has no crypto configured
-                let mut engine = DatabaseEngine::new(config, storage);
-                if let Err(e) = engine.load_state().await {
-                    tracing::error!("Failed to load database engine state: {}", e);
-                }
-                engine.enable();
-                return Self {
-                    engine: Arc::new(RwLock::new(engine)),
-                };
+        let mut engine = match std::env::var("SECRETON_ENCRYPTION_KEY") {
+            Ok(raw_key) => {
+                // Wrap in Zeroizing so the raw key material is wiped on drop
+                let env_key = zeroize::Zeroizing::new(raw_key);
+                // Hash directly with sha2 to avoid the intermediate HashResult.hex leak
+                use sha2::Digest;
+                let key = zeroize::Zeroizing::new(sha2::Sha256::digest(env_key.as_bytes()).to_vec());
+                let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+                // Zeroizing<Vec<u8>> derefs to Vec<u8>; with_crypto takes Vec<u8> and re-wraps it
+                DatabaseEngine::new(config, storage).with_crypto(cipher, (*key).clone())
+            }
+            Err(_) => {
+                tracing::error!(
+                    "SECRETON_ENCRYPTION_KEY is not set! Database engine will operate WITHOUT encryption. \
+                     Set this environment variable to enable encryption at rest."
+                );
+                DatabaseEngine::new(config, storage)
             }
         };
-        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
-        let mut engine = DatabaseEngine::new(config, storage).with_crypto(cipher, key);
         if let Err(e) = engine.load_state().await {
             tracing::error!("Failed to load database engine state: {}", e);
         }
