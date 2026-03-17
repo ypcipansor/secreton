@@ -48,8 +48,7 @@ impl DatabaseApiState {
                 use sha2::Digest;
                 let key = zeroize::Zeroizing::new(sha2::Sha256::digest(env_key.as_bytes()).to_vec());
                 let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
-                // Zeroizing<Vec<u8>> derefs to Vec<u8>; with_crypto takes Vec<u8> and re-wraps it
-                DatabaseEngine::new(config, storage).with_crypto(cipher, (*key).clone())
+                DatabaseEngine::new(config, storage).with_crypto(cipher, key)
             }
             Err(_) => {
                 tracing::error!(
@@ -72,7 +71,9 @@ impl DatabaseApiState {
         // network I/O, allowing write operations to proceed between revocations.
         let background_engine = engine_arc.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            let period = std::time::Duration::from_secs(60);
+            let start = tokio::time::Instant::now() + period;
+            let mut interval = tokio::time::interval_at(start, period);
             loop {
                 interval.tick().await;
 
@@ -88,14 +89,18 @@ impl DatabaseApiState {
                     }
                 }; // read lock released here
 
-                // Phase 2: revoke each lease, re-acquiring the read lock per lease
+                // Phase 2: revoke each lease, acquiring and releasing the read lock per lease
+                // so that write operations (e.g. configure_database) are not blocked
+                // across the async network I/O inside revoke_lease.
                 for lease_id in &expired_ids {
-                    let engine_read = background_engine.read().await;
-                    match engine_read.revoke_lease(lease_id).await {
+                    let result = {
+                        let engine_read = background_engine.read().await;
+                        engine_read.revoke_lease(lease_id).await
+                    }; // read lock released here before logging
+                    match result {
                         Ok(_) => tracing::info!("Background TTL: revoked expired lease {}", lease_id),
                         Err(e) => tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e),
                     }
-                    // read lock dropped at end of each iteration
                 }
             }
         });

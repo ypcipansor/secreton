@@ -86,10 +86,10 @@ impl DatabaseEngine {
     pub fn with_crypto(
         mut self,
         cipher: Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>,
-        key: Vec<u8>,
+        key: Zeroizing<Vec<u8>>,
     ) -> Self {
         self.cipher = Some(cipher);
-        self.encryption_key = Some(Zeroizing::new(key));
+        self.encryption_key = Some(key);
         self
     }
 
@@ -699,7 +699,7 @@ impl SecretEngine for DatabaseEngine {
                     Ok(_) => self.enabled = true,
                     Err(e) => {
                         // Log error and keep enabled = false
-                        eprintln!("Failed to initialize database backend during enable: {}", e);
+                        tracing::error!("Failed to initialize database backend during enable: {}", e);
                         self.enabled = false;
                     }
                 }
