@@ -94,7 +94,7 @@ impl DatabaseEngine {
     /// Validates loaded leases against the initialized database backend.
     pub async fn validate_leases(&self) -> SecretResult<()> {
         let lease_count = {
-            let leases = self.leases.lock().unwrap();
+            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
             leases.len()
         };
 
@@ -170,7 +170,7 @@ impl DatabaseEngine {
             .await
             .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
 
-        let mut leases = self.leases.lock().unwrap();
+        let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
         for entry in entries {
             let lease_id = entry
                 .path

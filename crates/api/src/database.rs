@@ -38,7 +38,16 @@ impl DatabaseApiState {
             max_connection_lifetime: Some(30),
         };
         // Manually enable the engine since init isn't called via standard flow here
-        let key = secreton_crypto::generate_random_bytes(32).unwrap_or_else(|_| vec![0; 32]);
+        // Derive encryption key from the SECRETON_ENCRYPTION_KEY environment variable
+        // to ensure encrypted data survives restarts.
+        let env_key = std::env::var("SECRETON_ENCRYPTION_KEY")
+            .unwrap_or_else(|_| "your-32-byte-encryption-key-here".to_string());
+        let key = secreton_crypto::hashing::compute_hash(
+            secreton_crypto::AlgorithmId::Sha256,
+            env_key.as_bytes(),
+        )
+        .expect("SHA-256 hashing should not fail")
+        .hash;
         let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
         let mut engine = DatabaseEngine::new(config, storage).with_crypto(cipher, key);
         if let Err(e) = engine.load_state().await {
