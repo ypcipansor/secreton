@@ -38,13 +38,31 @@ impl DatabaseApiState {
             max_connection_lifetime: Some(30),
         };
         // Manually enable the engine since init isn't called via standard flow here
-        let mut engine = DatabaseEngine::new(config, storage);
+        let key = secreton_crypto::generate_random_bytes(32).unwrap_or_else(|_| vec![0; 32]);
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let mut engine = DatabaseEngine::new(config, storage).with_crypto(cipher, key);
         if let Err(e) = engine.load_state().await {
             tracing::error!("Failed to load database engine state: {}", e);
         }
         engine.enable();
+
+        let engine_arc = Arc::new(RwLock::new(engine));
+
+        // Spawn background task for TTL enforcement
+        let background_engine = engine_arc.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let engine_read = background_engine.read().await;
+                if let Err(e) = engine_read.revoke_expired_leases().await {
+                    tracing::error!("Background TTL enforcement task failed: {}", e);
+                }
+            }
+        });
+
         Self {
-            engine: Arc::new(RwLock::new(engine)),
+            engine: engine_arc,
         }
     }
 }

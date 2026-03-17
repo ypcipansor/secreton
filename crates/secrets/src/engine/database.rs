@@ -47,6 +47,8 @@ pub struct DatabaseEngine {
     leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
     storage: Arc<dyn StorageBackend>,
+    cipher: Option<Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>>,
+    encryption_key: Option<Vec<u8>>,
 }
 
 impl DatabaseEngine {
@@ -73,13 +75,47 @@ impl DatabaseEngine {
             leases: Mutex::new(HashMap::new()),
             backend: None,
             storage,
+            cipher: None,
+            encryption_key: None,
         }
     }
 
+    /// Add crypto provider
+    pub fn with_crypto(
+        mut self,
+        cipher: Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>,
+        key: Vec<u8>,
+    ) -> Self {
+        self.cipher = Some(cipher);
+        self.encryption_key = Some(key);
+        self
+    }
+
+    /// Validates loaded leases against the initialized database backend.
+    pub async fn validate_leases(&self) -> SecretResult<()> {
+        let lease_count = {
+            let leases = self.leases.lock().unwrap();
+            leases.len()
+        };
+
+        if lease_count == 0 {
+            return Ok(());
+        }
+
+        if let Some(backend) = &self.backend {
+            if let Err(e) = backend.test_connection().await {
+                tracing::warn!("Failed to connect to database backend during lease validation: {}. Loaded {} leases may be stale or orphaned.", e, lease_count);
+            } else {
+                tracing::info!("Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.", lease_count);
+            }
+        } else {
+            tracing::warn!("Database backend not initialized during lease validation. {} leases loaded without backend validation.", lease_count);
+        }
+
+        Ok(())
+    }
+
     /// Load roles and leases from storage
-    // TODO: Validate loaded leases against the backend when it is initialized.
-    // Currently, leases are loaded into memory but may be stale if the backend database state has changed (e.g., users dropped).
-    // Future work should include a reconciliation process.
     pub async fn load_state(&mut self) -> SecretResult<()> {
         // Load roles
         let roles_path = "sys/database/roles/";
@@ -97,9 +133,29 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            // We store data as JSON in encrypted_data (plaintext for now)
-            // TODO: Implement proper encryption using KMS
-            let role: DatabaseRole = serde_json::from_slice(&entry.encrypted_data)
+            let data = if entry.encryption_metadata.algorithm != "plaintext" {
+                if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+                    let enc_data = secreton_crypto::encryption::EncryptedData {
+                        algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
+                            secreton_crypto::AlgorithmId::Aes256Gcm
+                        } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
+                            secreton_crypto::AlgorithmId::ChaCha20Poly1305
+                        } else {
+                            secreton_crypto::AlgorithmId::Aes256Gcm
+                        },
+                        nonce: entry.encryption_metadata.iv.clone(),
+                        ciphertext: entry.encrypted_data.clone(),
+                        tag: entry.encryption_metadata.auth_tag.clone(),
+                    };
+                    cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt role: {:?}", e)))?
+                } else {
+                    return Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt role".to_string()));
+                }
+            } else {
+                entry.encrypted_data.clone()
+            };
+
+            let role: DatabaseRole = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
 
             self.roles.insert(role_name, role);
@@ -122,7 +178,29 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            let lease: LeaseInfo = serde_json::from_slice(&entry.encrypted_data)
+            let data = if entry.encryption_metadata.algorithm != "plaintext" {
+                if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+                    let enc_data = secreton_crypto::encryption::EncryptedData {
+                        algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
+                            secreton_crypto::AlgorithmId::Aes256Gcm
+                        } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
+                            secreton_crypto::AlgorithmId::ChaCha20Poly1305
+                        } else {
+                            secreton_crypto::AlgorithmId::Aes256Gcm
+                        },
+                        nonce: entry.encryption_metadata.iv.clone(),
+                        ciphertext: entry.encrypted_data.clone(),
+                        tag: entry.encryption_metadata.auth_tag.clone(),
+                    };
+                    cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt lease: {:?}", e)))?
+                } else {
+                    return Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt lease".to_string()));
+                }
+            } else {
+                entry.encrypted_data.clone()
+            };
+
+            let lease: LeaseInfo = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e)))?;
 
             leases.insert(lease_id, lease);
@@ -136,15 +214,33 @@ impl DatabaseEngine {
         let data = serde_json::to_vec(role)
             .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
 
+        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt role: {:?}", e)))?;
+            (
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: format!("{:?}", enc_result.algorithm),
+                    key_id: "internal".to_string(),
+                    iv: enc_result.nonce,
+                    auth_tag: enc_result.tag,
+                    ..Default::default()
+                }
+            )
+        } else {
+            (
+                data,
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    ..Default::default()
+                }
+            )
+        };
+
         // Create SecretEntry
-        // TODO: Encrypt data properly using KMS
         let entry = SecretEntry::new(
             path.clone(),
-            data,
-            EncryptionMetadata {
-                algorithm: "plaintext".to_string(), // Mark as plaintext
-                ..Default::default()
-            },
+            encrypted_data,
+            encryption_metadata,
             SecurityLevel::Confidential,
             uuid::Uuid::nil(), // System owned
         );
@@ -174,16 +270,34 @@ impl DatabaseEngine {
 
         // NOTE: LeaseInfo contains metadata (username, role, lease_id) but NOT the actual password.
         // The password is returned to the client and not stored here.
+        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt lease: {:?}", e)))?;
+            (
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: format!("{:?}", enc_result.algorithm),
+                    key_id: "internal".to_string(),
+                    iv: enc_result.nonce,
+                    auth_tag: enc_result.tag,
+                    ..Default::default()
+                }
+            )
+        } else {
+            (
+                data,
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    ..Default::default()
+                }
+            )
+        };
+
         // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
         // If the storage backend supports encryption at rest, it will be encrypted there.
-        // TODO: Implement application-level encryption using KMS for defense-in-depth.
         let entry = SecretEntry::new(
             path.clone(),
-            data,
-            EncryptionMetadata {
-                algorithm: "plaintext".to_string(),
-                ..Default::default()
-            },
+            encrypted_data,
+            encryption_metadata,
             SecurityLevel::Confidential,
             uuid::Uuid::nil(),
         );
@@ -273,6 +387,49 @@ impl DatabaseEngine {
         }
     }
 
+    /// Automatically revoke leases that have exceeded their TTL
+    pub async fn revoke_expired_leases(&self) -> SecretResult<()> {
+        if !self.enabled || self.backend.is_none() {
+            return Ok(());
+        }
+
+        let expired_lease_ids: Vec<String> = {
+            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            let now = chrono::Utc::now();
+
+            leases.iter().filter_map(|(id, info)| {
+                if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
+                    let expiration = created_at + chrono::Duration::seconds(info.lease_duration as i64);
+                    if now > expiration {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
+                    Some(id.clone())
+                }
+            }).collect()
+        };
+
+        let mut revoked_count = 0;
+        for lease_id in &expired_lease_ids {
+            match self.revoke_lease(lease_id).await {
+                Ok(_) => {
+                    tracing::info!("Successfully revoked expired lease {}", lease_id);
+                    revoked_count += 1;
+                }
+                Err(e) => tracing::error!("Failed to revoke expired lease {}: {}", lease_id, e),
+            }
+        }
+
+        if revoked_count > 0 {
+            tracing::info!("Revoked {} expired leases out of {} identified", revoked_count, expired_lease_ids.len());
+        }
+
+        Ok(())
+    }
+
     /// Revoke a lease
     pub async fn revoke_lease(&self, lease_id: &str) -> SecretResult<()> {
         // Need to find username first
@@ -335,6 +492,7 @@ impl SecretEngine for DatabaseEngine {
                      // Initialize backend only if enabled to avoid wasteful resource allocation
                      if config.enabled {
                          self.init_backend()?;
+                         self.validate_leases().await?;
                      }
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))

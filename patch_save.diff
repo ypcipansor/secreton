@@ -1,0 +1,90 @@
+<<<<<<< SEARCH
+        // Create SecretEntry
+        // TODO: Encrypt data properly using KMS
+        let entry = SecretEntry::new(
+            path.clone(),
+            data,
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(), // Mark as plaintext
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(), // System owned
+        );
+=======
+        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt role: {:?}", e)))?;
+            (
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: enc_result.algorithm.to_string(),
+                    nonce: enc_result.nonce,
+                    tag: enc_result.tag.unwrap_or_default(),
+                }
+            )
+        } else {
+            (
+                data,
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    nonce: vec![],
+                    tag: vec![],
+                }
+            )
+        };
+
+        // Create SecretEntry
+        let entry = SecretEntry::new(
+            path.clone(),
+            encrypted_data,
+            encryption_metadata,
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(), // System owned
+        );
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+        // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
+        // If the storage backend supports encryption at rest, it will be encrypted there.
+        // TODO: Implement application-level encryption using KMS for defense-in-depth.
+        let entry = SecretEntry::new(
+            path.clone(),
+            data,
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(),
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+=======
+        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt lease: {:?}", e)))?;
+            (
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: enc_result.algorithm.to_string(),
+                    nonce: enc_result.nonce,
+                    tag: enc_result.tag.unwrap_or_default(),
+                }
+            )
+        } else {
+            (
+                data,
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    nonce: vec![],
+                    tag: vec![],
+                }
+            )
+        };
+
+        // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
+        // If the storage backend supports encryption at rest, it will be encrypted there.
+        let entry = SecretEntry::new(
+            path.clone(),
+            encrypted_data,
+            encryption_metadata,
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+>>>>>>> REPLACE

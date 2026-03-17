@@ -1,0 +1,50 @@
+<<<<<<< SEARCH
+    /// Revoke a lease
+    pub async fn revoke_lease(&self, lease_id: &str) -> SecretResult<()> {
+=======
+    /// Automatically revoke leases that have exceeded their TTL
+    pub async fn revoke_expired_leases(&self) -> SecretResult<()> {
+        if !self.enabled || self.backend.is_none() {
+            return Ok(());
+        }
+
+        let expired_lease_ids: Vec<String> = {
+            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            let now = chrono::Utc::now();
+
+            leases.iter().filter_map(|(id, info)| {
+                if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
+                    let expiration = created_at + chrono::Duration::seconds(info.lease_duration as i64);
+                    if now > expiration {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
+                    Some(id.clone())
+                }
+            }).collect()
+        };
+
+        let mut revoked_count = 0;
+        for lease_id in &expired_lease_ids {
+            match self.revoke_lease(lease_id).await {
+                Ok(_) => {
+                    tracing::info!("Successfully revoked expired lease {}", lease_id);
+                    revoked_count += 1;
+                }
+                Err(e) => tracing::error!("Failed to revoke expired lease {}: {}", lease_id, e),
+            }
+        }
+
+        if revoked_count > 0 {
+            tracing::info!("Revoked {} expired leases out of {} identified", revoked_count, expired_lease_ids.len());
+        }
+
+        Ok(())
+    }
+
+    /// Revoke a lease
+    pub async fn revoke_lease(&self, lease_id: &str) -> SecretResult<()> {
+>>>>>>> REPLACE

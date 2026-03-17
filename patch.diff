@@ -1,0 +1,61 @@
+<<<<<<< SEARCH
+    // Currently, leases are only tracked for manual revocation.
+    leases: Mutex<HashMap<String, LeaseInfo>>,
+    backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
+    storage: Arc<dyn StorageBackend>,
+}
+
+impl DatabaseEngine {
+    // Default configuration to use before initialization
+=======
+    // Currently, leases are only tracked for manual revocation.
+    leases: Mutex<HashMap<String, LeaseInfo>>,
+    backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
+    storage: Arc<dyn StorageBackend>,
+    cipher: Option<Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>>,
+    encryption_key: Option<Vec<u8>>,
+}
+
+impl DatabaseEngine {
+    // Default configuration to use before initialization
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+    pub fn new(config: DatabaseConfig, storage: Arc<dyn StorageBackend>) -> Self {
+        Self {
+            config,
+            enabled: false,
+            roles: HashMap::new(),
+            leases: Mutex::new(HashMap::new()),
+            backend: None,
+            storage,
+        }
+    }
+
+    /// Load roles and leases from storage
+=======
+    pub fn new(config: DatabaseConfig, storage: Arc<dyn StorageBackend>) -> Self {
+        Self {
+            config,
+            enabled: false,
+            roles: HashMap::new(),
+            leases: Mutex::new(HashMap::new()),
+            backend: None,
+            storage,
+            cipher: None,
+            encryption_key: None,
+        }
+    }
+
+    /// Add crypto provider
+    pub fn with_crypto(
+        mut self,
+        cipher: Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>,
+        key: Vec<u8>,
+    ) -> Self {
+        self.cipher = Some(cipher);
+        self.encryption_key = Some(key);
+        self
+    }
+
+    /// Load roles and leases from storage
+>>>>>>> REPLACE
