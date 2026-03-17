@@ -1702,7 +1702,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -1726,7 +1726,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -1775,7 +1775,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -1809,7 +1809,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -1883,7 +1883,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -1937,7 +1937,7 @@ mod tests {
 
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2024,7 +2024,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2082,7 +2082,7 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2240,7 +2240,7 @@ mod list_secrets_tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());

@@ -1470,7 +1470,7 @@ impl Default for AuditConfig {
             enabled: true,
             level: AuditLevel::Detailed,
             storage: AuditStorage::File,
-            retention_days: 365,
+            retention_days: 2555,
             max_batch_size: 100,
             filters: Vec::new(),
         }

@@ -713,6 +713,10 @@ async fn health_handler(
         )
     };
 
+    // Currently, there's no way to query the cache status since storage and cache
+    // backends are conflated. We can improve this in the future if Redis cache becomes distinct.
+    let cache_status = "Local (Operational)".to_string();
+
     let response = ApiResponse::success(HealthCheckResponse {
         status: if health_status.is_healthy {
             "healthy".to_string()
@@ -723,7 +727,7 @@ async fn health_handler(
         uptime: health_status.uptime_seconds,
         dependencies: HealthCheckDependencies {
             database: db_status,
-            cache: "Local (Operational)".to_string(), // TODO: Check Redis if enabled
+            cache: cache_status,
             crypto: "RustCrypto (Operational)".to_string(),
         },
     });
@@ -985,7 +989,7 @@ pub async fn start_security_server(port: u16) -> Result<(), Box<dyn std::error::
         .unwrap(),
     );
     let audit = Arc::new(
-        crate::services::audit::AuditLogger::new(storage.clone())
+        crate::services::audit::AuditLogger::new(storage.clone(), 2555, 1000, true)
             .await
             .unwrap(),
     );

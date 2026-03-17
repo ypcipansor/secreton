@@ -9,17 +9,28 @@ use std::sync::Arc;
 /// Audit logger service adapter
 pub struct AuditLogger {
     service: Arc<AuditService>,
+    enabled: bool,
 }
 
 impl AuditLogger {
-    pub async fn new(storage: Arc<dyn StorageBackend + Send + Sync>) -> Result<Self> {
-        let service = Arc::new(AuditService::new(1000));
-        let device = StorageAuditDevice::new(storage);
-        service.add_device(Box::new(device)).await;
-        Ok(Self { service })
+    pub async fn new(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        retention_days: u32,
+        max_batch_size: usize,
+        enabled: bool,
+    ) -> Result<Self> {
+        let service = Arc::new(AuditService::new(max_batch_size));
+        if enabled {
+            let device = StorageAuditDevice::new(storage, retention_days);
+            service.add_device(Box::new(device)).await;
+        }
+        Ok(Self { service, enabled })
     }
 
     pub async fn flush(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
         self.service
             .flush()
             .await
@@ -27,6 +38,9 @@ impl AuditLogger {
     }
 
     pub async fn log_event(&self, event: SecurityEventType) {
+        if !self.enabled {
+            return;
+        }
         let (core_type, status, user, resource, op, metadata) = match event {
             SecurityEventType::SecretAccess {
                 secret_path,

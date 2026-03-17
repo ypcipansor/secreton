@@ -155,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
     let storage = StorageFactory::create(storage_config).await?;
     info!("Storage backend initialized successfully");
 
+    use secreton_config::Config;
     // Load Configuration from Storage
     let mut api_config = match ConfigService::load_config(storage.as_ref()).await {
         Ok(c) => {
@@ -169,6 +170,17 @@ async fn main() -> anyhow::Result<()> {
             ApiConfig::default()
         }
     };
+
+    if api_config.audit.enabled {
+        if api_config.audit.retention_days == 0 {
+            tracing::error!("Audit retention_days is 0, enforcing safe default of 2555");
+            api_config.audit.retention_days = 2555;
+        }
+        if api_config.audit.max_batch_size == 0 {
+            tracing::error!("Audit max_batch_size is 0, enforcing safe default of 100");
+            api_config.audit.max_batch_size = 100;
+        }
+    }
 
     // Ensure JWT secret exists (auto-generate if missing/None)
     if api_config.auth.jwt.secret.is_none() {
@@ -278,7 +290,7 @@ async fn main() -> anyhow::Result<()> {
             .with_mfa(mfa.clone()),
     );
 
-    let audit = Arc::new(AuditLogger::new(storage.clone()).await?);
+    let audit = Arc::new(AuditLogger::new(storage.clone(), api_config.audit.retention_days, api_config.audit.max_batch_size, api_config.audit.enabled).await?);
 
     // Initialize Seal Service
     let seal = Arc::new(SealService::new(

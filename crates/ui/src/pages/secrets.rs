@@ -128,6 +128,7 @@ pub fn SecretsList() -> impl IntoView {
     let (show_history_modal, set_show_history_modal) = signal(false);
     let (history_versions, set_history_versions) = signal::<Vec<SecretVersionInfo>>(vec![]);
     let (new_secret_path, set_new_secret_path) = signal("".to_string());
+    let (error_msg, set_error_msg) = signal::<Option<String>>(None);
 
     // Editor State (KV pairs)
     let (kv_rows, set_kv_rows) = signal::<Vec<KvRow>>(vec![]);
@@ -233,7 +234,7 @@ pub fn SecretsList() -> impl IntoView {
 
         // Validate new secret name if creating
         if (current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound))) && new_secret_path.get().is_empty() {
-            // TODO: Show error message
+            set_error_msg.set(Some("Secret name cannot be empty".to_string()));
             return;
         }
 
@@ -287,13 +288,19 @@ pub fn SecretsList() -> impl IntoView {
                 api::post::<serde_json::Value, _>(&url, payload).await
             };
 
-            if result.is_ok() {
-                set_show_modal.set(false);
-                secret_resource.refetch();
+            match result {
+                Ok(_) => {
+                    set_error_msg.set(None);
+                    set_show_modal.set(false);
+                    secret_resource.refetch();
 
-                // If we created a new secret, navigate to it
-                if target_path != current_path {
-                     navigate(&format!("/secrets/{}", target_path), Default::default());
+                    // If we created a new secret, navigate to it
+                    if target_path != current_path {
+                         navigate(&format!("/secrets/{}", target_path), Default::default());
+                    }
+                }
+                Err(e) => {
+                    set_error_msg.set(Some(format!("Failed to save secret: {:?}", e)));
                 }
             }
         });
@@ -547,7 +554,10 @@ pub fn SecretsList() -> impl IntoView {
 
             <Modal
                 show=show_modal
-                on_close=move || set_show_modal.set(false)
+                on_close=move || {
+                    set_error_msg.set(None);
+                    set_show_modal.set(false);
+                }
                 title=if matches!(secret_resource.get(), Some(SecretViewMode::View(_, _))) {
                     format!("Edit Secret: {}", path())
                 } else {
@@ -558,6 +568,11 @@ pub fn SecretsList() -> impl IntoView {
                     let handle_save = handle_save.clone();
                     view! {
                         <div class="space-y-4 max-h-[70vh] flex flex-col">
+                             <Show when=move || error_msg.get().is_some()>
+                                 <div class="bg-red-50 text-red-700 p-3 rounded mb-4 text-sm">
+                                     {move || error_msg.get().unwrap_or_default()}
+                                 </div>
+                             </Show>
                              <Show when=move || !matches!(secret_resource.get(), Some(SecretViewMode::View(_, _)))>
                                  <div class="bg-blue-50 p-3 rounded text-sm text-blue-800 mb-2">
                                     "Creating secret at: "
