@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use zeroize::Zeroizing;
 
 /// Database type
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +49,7 @@ pub struct DatabaseEngine {
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
     storage: Arc<dyn StorageBackend>,
     cipher: Option<Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>>,
-    encryption_key: Option<Vec<u8>>,
+    encryption_key: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl DatabaseEngine {
@@ -80,14 +81,15 @@ impl DatabaseEngine {
         }
     }
 
-    /// Add crypto provider
+    /// Add crypto provider. The key is wrapped in `Zeroizing` to ensure it is
+    /// wiped from memory when the engine is dropped.
     pub fn with_crypto(
         mut self,
         cipher: Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>,
         key: Vec<u8>,
     ) -> Self {
         self.cipher = Some(cipher);
-        self.encryption_key = Some(key);
+        self.encryption_key = Some(Zeroizing::new(key));
         self
     }
 
