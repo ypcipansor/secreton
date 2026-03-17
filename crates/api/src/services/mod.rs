@@ -69,13 +69,16 @@ impl ApiServiceContainer {
         let _registry = StandardServiceContainer::new();
 
         let mut config_clone = config.clone();
-        if let Err(e) = config_clone.audit.validate() {
-             tracing::error!("Audit configuration validation failed: {}", e);
-             config_clone.audit.retention_days = 2555;
+        if config_clone.audit.enabled {
+            if config_clone.audit.retention_days == 0 {
+                tracing::error!("Audit retention_days is 0, enforcing safe default of 2555");
+                config_clone.audit.retention_days = 2555;
+            }
+            if config_clone.audit.max_batch_size == 0 {
+                tracing::error!("Audit max_batch_size is 0, enforcing safe default of 100");
+                config_clone.audit.max_batch_size = 100;
+            }
         }
-
-        // Use the validated config for the rest of the function
-        let config = &config_clone;
 
         // Initialize storage backend
         let storage = StorageFactory::create(config.storage.clone()).await?;

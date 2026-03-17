@@ -171,10 +171,15 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Err(e) = api_config.audit.validate() {
-         tracing::error!("Audit configuration validation failed: {}", e);
-         // Enforce a safe default if someone maliciously set retention_days to 0 and enabled to true or similar manually bypassing the check
-         api_config.audit.retention_days = 2555;
+    if api_config.audit.enabled {
+        if api_config.audit.retention_days == 0 {
+            tracing::error!("Audit retention_days is 0, enforcing safe default of 2555");
+            api_config.audit.retention_days = 2555;
+        }
+        if api_config.audit.max_batch_size == 0 {
+            tracing::error!("Audit max_batch_size is 0, enforcing safe default of 100");
+            api_config.audit.max_batch_size = 100;
+        }
     }
 
     // Ensure JWT secret exists (auto-generate if missing/None)
