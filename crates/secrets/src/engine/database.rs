@@ -97,10 +97,12 @@ impl DatabaseEngine {
         if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
             let enc_result = cipher.encrypt(data, key)
                 .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e)))?;
+            let algorithm_str = serde_json::to_string(&enc_result.algorithm)
+                .unwrap_or_else(|_| format!("{:?}", enc_result.algorithm));
             Ok((
                 enc_result.ciphertext,
                 EncryptionMetadata {
-                    algorithm: format!("{:?}", enc_result.algorithm),
+                    algorithm: algorithm_str,
                     key_id: "internal".to_string(),
                     iv: enc_result.nonce,
                     // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
@@ -126,14 +128,21 @@ impl DatabaseEngine {
     fn decrypt_entry(&self, entry: &SecretEntry) -> SecretResult<Vec<u8>> {
         if entry.encryption_metadata.algorithm != "plaintext" {
             if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-                let enc_data = secreton_crypto::encryption::EncryptedData {
-                    algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
+                // Try serde deserialization first (stable round-trip), then fall back
+                // to substring matching for backward compatibility with Debug-formatted values.
+                let algorithm = serde_json::from_str::<secreton_crypto::AlgorithmId>(
+                    &entry.encryption_metadata.algorithm,
+                ).unwrap_or_else(|_| {
+                    if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
                         secreton_crypto::AlgorithmId::Aes256Gcm
                     } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
                         secreton_crypto::AlgorithmId::ChaCha20Poly1305
                     } else {
                         secreton_crypto::AlgorithmId::Aes256Gcm
-                    },
+                    }
+                });
+                let enc_data = secreton_crypto::encryption::EncryptedData {
+                    algorithm,
                     nonce: entry.encryption_metadata.iv.clone(),
                     ciphertext: entry.encrypted_data.clone(),
                     // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
