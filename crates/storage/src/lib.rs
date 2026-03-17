@@ -42,7 +42,10 @@ pub struct EncryptionMetadata {
     pub key_id: String,
     /// Initialization vector
     pub iv: Vec<u8>,
-    /// Authentication tag for AEAD ciphers
+    /// Authentication tag for AEAD ciphers.
+    /// Note: For AES-GCM and ChaCha20-Poly1305 as implemented in `secreton_crypto`,
+    /// the auth tag is appended to the ciphertext by the underlying crates, so this
+    /// field is `None`. It is kept for ciphers that produce a separate tag.
     pub auth_tag: Option<Vec<u8>>,
     /// Additional authenticated data
     pub aad: Option<Vec<u8>>,

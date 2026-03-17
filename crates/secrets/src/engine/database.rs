@@ -145,6 +145,9 @@ impl DatabaseEngine {
                         },
                         nonce: entry.encryption_metadata.iv.clone(),
                         ciphertext: entry.encrypted_data.clone(),
+                        // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                        // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                        // field is None. The decrypt() impl reads the tag from the ciphertext.
                         tag: entry.encryption_metadata.auth_tag.clone(),
                     };
                     cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt role: {:?}", e)))?
@@ -190,6 +193,9 @@ impl DatabaseEngine {
                         },
                         nonce: entry.encryption_metadata.iv.clone(),
                         ciphertext: entry.encrypted_data.clone(),
+                        // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                        // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                        // field is None. The decrypt() impl reads the tag from the ciphertext.
                         tag: entry.encryption_metadata.auth_tag.clone(),
                     };
                     cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt lease: {:?}", e)))?
@@ -222,6 +228,9 @@ impl DatabaseEngine {
                     algorithm: format!("{:?}", enc_result.algorithm),
                     key_id: "internal".to_string(),
                     iv: enc_result.nonce,
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // is None. The decrypt() impl reads the tag from the ciphertext.
                     auth_tag: enc_result.tag,
                     ..Default::default()
                 }
@@ -278,6 +287,9 @@ impl DatabaseEngine {
                     algorithm: format!("{:?}", enc_result.algorithm),
                     key_id: "internal".to_string(),
                     iv: enc_result.nonce,
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // is None. The decrypt() impl reads the tag from the ciphertext.
                     auth_tag: enc_result.tag,
                     ..Default::default()
                 }
