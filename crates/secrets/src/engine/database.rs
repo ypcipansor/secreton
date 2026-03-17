@@ -91,6 +91,66 @@ impl DatabaseEngine {
         self
     }
 
+    /// Encrypt data using the configured cipher, returning the ciphertext and metadata.
+    /// Falls back to plaintext if no cipher is configured.
+    fn encrypt_data(&self, data: &[u8]) -> SecretResult<(Vec<u8>, EncryptionMetadata)> {
+        if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(data, key)
+                .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e)))?;
+            Ok((
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: format!("{:?}", enc_result.algorithm),
+                    key_id: "internal".to_string(),
+                    iv: enc_result.nonce,
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // is None. The decrypt() impl reads the tag from the ciphertext.
+                    auth_tag: enc_result.tag,
+                    ..Default::default()
+                },
+            ))
+        } else {
+            Ok((
+                data.to_vec(),
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    ..Default::default()
+                },
+            ))
+        }
+    }
+
+    /// Decrypt a stored entry using the configured cipher.
+    /// Returns the plaintext bytes, or the raw data if stored as plaintext.
+    fn decrypt_entry(&self, entry: &SecretEntry) -> SecretResult<Vec<u8>> {
+        if entry.encryption_metadata.algorithm != "plaintext" {
+            if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+                let enc_data = secreton_crypto::encryption::EncryptedData {
+                    algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
+                        secreton_crypto::AlgorithmId::Aes256Gcm
+                    } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
+                        secreton_crypto::AlgorithmId::ChaCha20Poly1305
+                    } else {
+                        secreton_crypto::AlgorithmId::Aes256Gcm
+                    },
+                    nonce: entry.encryption_metadata.iv.clone(),
+                    ciphertext: entry.encrypted_data.clone(),
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // field is None. The decrypt() impl reads the tag from the ciphertext.
+                    tag: entry.encryption_metadata.auth_tag.clone(),
+                };
+                cipher.decrypt(&enc_data, key)
+                    .map_err(|e| SecretError::DecryptionFailed(format!("Decryption failed: {:?}", e)))
+            } else {
+                Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt data".to_string()))
+            }
+        } else {
+            Ok(entry.encrypted_data.clone())
+        }
+    }
+
     /// Validates loaded leases against the initialized database backend.
     pub async fn validate_leases(&self) -> SecretResult<()> {
         let lease_count = {
@@ -133,30 +193,7 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            let data = if entry.encryption_metadata.algorithm != "plaintext" {
-                if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-                    let enc_data = secreton_crypto::encryption::EncryptedData {
-                        algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
-                            secreton_crypto::AlgorithmId::Aes256Gcm
-                        } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
-                            secreton_crypto::AlgorithmId::ChaCha20Poly1305
-                        } else {
-                            secreton_crypto::AlgorithmId::Aes256Gcm
-                        },
-                        nonce: entry.encryption_metadata.iv.clone(),
-                        ciphertext: entry.encrypted_data.clone(),
-                        // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
-                        // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
-                        // field is None. The decrypt() impl reads the tag from the ciphertext.
-                        tag: entry.encryption_metadata.auth_tag.clone(),
-                    };
-                    cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt role: {:?}", e)))?
-                } else {
-                    return Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt role".to_string()));
-                }
-            } else {
-                entry.encrypted_data.clone()
-            };
+            let data = self.decrypt_entry(&entry)?;
 
             let role: DatabaseRole = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
@@ -181,30 +218,7 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            let data = if entry.encryption_metadata.algorithm != "plaintext" {
-                if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-                    let enc_data = secreton_crypto::encryption::EncryptedData {
-                        algorithm: if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
-                            secreton_crypto::AlgorithmId::Aes256Gcm
-                        } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
-                            secreton_crypto::AlgorithmId::ChaCha20Poly1305
-                        } else {
-                            secreton_crypto::AlgorithmId::Aes256Gcm
-                        },
-                        nonce: entry.encryption_metadata.iv.clone(),
-                        ciphertext: entry.encrypted_data.clone(),
-                        // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
-                        // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
-                        // field is None. The decrypt() impl reads the tag from the ciphertext.
-                        tag: entry.encryption_metadata.auth_tag.clone(),
-                    };
-                    cipher.decrypt(&enc_data, key).map_err(|e| SecretError::DecryptionFailed(format!("Failed to decrypt lease: {:?}", e)))?
-                } else {
-                    return Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt lease".to_string()));
-                }
-            } else {
-                entry.encrypted_data.clone()
-            };
+            let data = self.decrypt_entry(&entry)?;
 
             let lease: LeaseInfo = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e)))?;
@@ -220,30 +234,7 @@ impl DatabaseEngine {
         let data = serde_json::to_vec(role)
             .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
 
-        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt role: {:?}", e)))?;
-            (
-                enc_result.ciphertext,
-                EncryptionMetadata {
-                    algorithm: format!("{:?}", enc_result.algorithm),
-                    key_id: "internal".to_string(),
-                    iv: enc_result.nonce,
-                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
-                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
-                    // is None. The decrypt() impl reads the tag from the ciphertext.
-                    auth_tag: enc_result.tag,
-                    ..Default::default()
-                }
-            )
-        } else {
-            (
-                data,
-                EncryptionMetadata {
-                    algorithm: "plaintext".to_string(),
-                    ..Default::default()
-                }
-            )
-        };
+        let (encrypted_data, encryption_metadata) = self.encrypt_data(&data)?;
 
         // Create SecretEntry
         let entry = SecretEntry::new(
@@ -279,30 +270,7 @@ impl DatabaseEngine {
 
         // NOTE: LeaseInfo contains metadata (username, role, lease_id) but NOT the actual password.
         // The password is returned to the client and not stored here.
-        let (encrypted_data, encryption_metadata) = if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-            let enc_result = cipher.encrypt(&data, key).map_err(|e| SecretError::EncryptionFailed(format!("Failed to encrypt lease: {:?}", e)))?;
-            (
-                enc_result.ciphertext,
-                EncryptionMetadata {
-                    algorithm: format!("{:?}", enc_result.algorithm),
-                    key_id: "internal".to_string(),
-                    iv: enc_result.nonce,
-                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
-                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
-                    // is None. The decrypt() impl reads the tag from the ciphertext.
-                    auth_tag: enc_result.tag,
-                    ..Default::default()
-                }
-            )
-        } else {
-            (
-                data,
-                EncryptionMetadata {
-                    algorithm: "plaintext".to_string(),
-                    ..Default::default()
-                }
-            )
-        };
+        let (encrypted_data, encryption_metadata) = self.encrypt_data(&data)?;
 
         // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
         // If the storage backend supports encryption at rest, it will be encrypted there.
