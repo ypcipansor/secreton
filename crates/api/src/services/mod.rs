@@ -74,6 +74,9 @@ impl ApiServiceContainer {
              config_clone.audit.retention_days = 2555;
         }
 
+        // Use the validated config for the rest of the function
+        let config = &config_clone;
+
         // Initialize storage backend
         let storage = StorageFactory::create(config.storage.clone()).await?;
 
