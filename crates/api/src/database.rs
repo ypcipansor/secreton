@@ -22,6 +22,9 @@ use crate::ApiResponse;
 #[derive(Clone)]
 pub struct DatabaseApiState {
     pub engine: Arc<RwLock<DatabaseEngine>>,
+    /// Handle to the background TTL enforcement task.
+    /// Stored so the task is aborted when all clones are dropped.
+    _ttl_task: Arc<tokio::task::JoinHandle<()>>,
 }
 
 impl DatabaseApiState {
@@ -70,7 +73,7 @@ impl DatabaseApiState {
         // lease individually so the RwLock is not held across all the async
         // network I/O, allowing write operations to proceed between revocations.
         let background_engine = engine_arc.clone();
-        tokio::spawn(async move {
+        let ttl_task = tokio::spawn(async move {
             let period = std::time::Duration::from_secs(60);
             let start = tokio::time::Instant::now() + period;
             let mut interval = tokio::time::interval_at(start, period);
@@ -99,7 +102,16 @@ impl DatabaseApiState {
                     }; // read lock released here before logging
                     match result {
                         Ok(_) => tracing::info!("Background TTL: revoked expired lease {}", lease_id),
-                        Err(e) => tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e),
+                        Err(e) => {
+                            // SecretNotFound is expected when a concurrent API call already
+                            // revoked the lease between collect and revoke (benign TOCTOU race).
+                            let msg = format!("{}", e);
+                            if msg.contains("not found") {
+                                tracing::debug!("Background TTL: lease {} already revoked by another caller", lease_id);
+                            } else {
+                                tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e);
+                            }
+                        }
                     }
                 }
             }
@@ -107,6 +119,7 @@ impl DatabaseApiState {
 
         Self {
             engine: engine_arc,
+            _ttl_task: Arc::new(ttl_task),
         }
     }
 }

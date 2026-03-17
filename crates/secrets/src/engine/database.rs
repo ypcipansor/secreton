@@ -43,8 +43,6 @@ pub struct DatabaseEngine {
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
     // Use Mutex for interior mutability since SecretEngine::read is &self
-    // TODO: Implement background task for TTL enforcement to automatically revoke expired leases.
-    // Currently, leases are only tracked for manual revocation.
     leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
     storage: Arc<dyn StorageBackend>,
@@ -162,7 +160,9 @@ impl DatabaseEngine {
         }
     }
 
-    /// Validates loaded leases against the initialized database backend.
+    /// Checks backend connectivity when leases are loaded.
+    /// This does NOT validate individual leases — stale leases (referencing
+    /// dropped users) will be cleaned up by the background TTL task.
     pub async fn validate_leases(&self) -> SecretResult<()> {
         let lease_count = {
             let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
@@ -282,9 +282,6 @@ impl DatabaseEngine {
         // NOTE: LeaseInfo contains metadata (username, role, lease_id) but NOT the actual password.
         // The password is returned to the client and not stored here.
         let (encrypted_data, encryption_metadata) = self.encrypt_data(&data)?;
-
-        // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
-        // If the storage backend supports encryption at rest, it will be encrypted there.
         let entry = SecretEntry::new(
             path.clone(),
             encrypted_data,
