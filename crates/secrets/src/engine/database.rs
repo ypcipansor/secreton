@@ -387,30 +387,34 @@ impl DatabaseEngine {
         }
     }
 
-    /// Automatically revoke leases that have exceeded their TTL
-    pub async fn revoke_expired_leases(&self) -> SecretResult<()> {
+    /// Collect lease IDs that have exceeded their TTL.
+    /// This only acquires the mutex briefly to snapshot expired IDs.
+    pub fn collect_expired_lease_ids(&self) -> SecretResult<Vec<String>> {
         if !self.enabled || self.backend.is_none() {
-            return Ok(());
+            return Ok(vec![]);
         }
 
-        let expired_lease_ids: Vec<String> = {
-            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
-            let now = chrono::Utc::now();
+        let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+        let now = chrono::Utc::now();
 
-            leases.iter().filter_map(|(id, info)| {
-                if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
-                    let expiration = created_at + chrono::Duration::seconds(info.lease_duration as i64);
-                    if now > expiration {
-                        Some(id.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
+        Ok(leases.iter().filter_map(|(id, info)| {
+            if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
+                let expiration = created_at + chrono::Duration::seconds(info.lease_duration as i64);
+                if now > expiration {
                     Some(id.clone())
+                } else {
+                    None
                 }
-            }).collect()
-        };
+            } else {
+                tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
+                Some(id.clone())
+            }
+        }).collect())
+    }
+
+    /// Automatically revoke leases that have exceeded their TTL
+    pub async fn revoke_expired_leases(&self) -> SecretResult<()> {
+        let expired_lease_ids = self.collect_expired_lease_ids()?;
 
         let mut revoked_count = 0;
         for lease_id in &expired_lease_ids {

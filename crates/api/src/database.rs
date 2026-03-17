@@ -57,15 +57,36 @@ impl DatabaseApiState {
 
         let engine_arc = Arc::new(RwLock::new(engine));
 
-        // Spawn background task for TTL enforcement
+        // Spawn background task for TTL enforcement.
+        // We collect expired IDs under a brief read lock, then revoke each
+        // lease individually so the RwLock is not held across all the async
+        // network I/O, allowing write operations to proceed between revocations.
         let background_engine = engine_arc.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
-                let engine_read = background_engine.read().await;
-                if let Err(e) = engine_read.revoke_expired_leases().await {
-                    tracing::error!("Background TTL enforcement task failed: {}", e);
+
+                // Phase 1: collect expired lease IDs (brief read lock)
+                let expired_ids = {
+                    let engine_read = background_engine.read().await;
+                    match engine_read.collect_expired_lease_ids() {
+                        Ok(ids) => ids,
+                        Err(e) => {
+                            tracing::error!("Background TTL enforcement: failed to collect expired leases: {}", e);
+                            continue;
+                        }
+                    }
+                }; // read lock released here
+
+                // Phase 2: revoke each lease, re-acquiring the read lock per lease
+                for lease_id in &expired_ids {
+                    let engine_read = background_engine.read().await;
+                    match engine_read.revoke_lease(lease_id).await {
+                        Ok(_) => tracing::info!("Background TTL: revoked expired lease {}", lease_id),
+                        Err(e) => tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e),
+                    }
+                    // read lock dropped at end of each iteration
                 }
             }
         });
