@@ -61,7 +61,7 @@ impl DatabaseApiState {
 
                 // Reject empty or very short keys to prevent weak encryption.
                 if env_key.len() < 16 {
-                    tracing::error!(
+                    tracing::warn!(
                         "SECRETON_ENCRYPTION_KEY is too short ({} bytes, minimum 16). \
                          Database engine will operate WITHOUT encryption.",
                         env_key.len()
@@ -87,25 +87,28 @@ impl DatabaseApiState {
                 }
             }
             Err(_) => {
-                tracing::error!(
-                    "SECRETON_ENCRYPTION_KEY is not set! Database engine will operate WITHOUT encryption. \
+                tracing::warn!(
+                    "SECRETON_ENCRYPTION_KEY is not set. Database engine will operate WITHOUT encryption. \
                      Set this environment variable to enable encryption at rest."
                 );
                 DatabaseEngine::new(config, storage)
             }
         };
         if let Err(e) = engine.load_state().await {
-            let err_msg = format!("{}", e);
-            if err_msg.contains("Decryption failed") || err_msg.contains("No crypto provider") {
-                tracing::error!(
-                    "Failed to load database engine state due to decryption error: {}. \
-                     This usually means SECRETON_ENCRYPTION_KEY has changed or is missing. \
-                     Previously encrypted roles and leases are UNRECOVERABLE without the \
-                     original key. The engine will start with empty state.",
-                    e
-                );
-            } else {
-                tracing::error!("Failed to load database engine state: {}", e);
+            match &e {
+                secreton_secrets::SecretError::DecryptionFailed(_)
+                | secreton_secrets::SecretError::EncryptionFailed(_) => {
+                    tracing::error!(
+                        "Failed to load database engine state due to decryption error: {}. \
+                         This usually means SECRETON_ENCRYPTION_KEY has changed or is missing. \
+                         Previously encrypted roles and leases are UNRECOVERABLE without the \
+                         original key. The engine will start with empty state.",
+                        e
+                    );
+                }
+                _ => {
+                    tracing::error!("Failed to load database engine state: {}", e);
+                }
             }
         }
         engine.enable();
@@ -154,8 +157,7 @@ impl DatabaseApiState {
                         Err(e) => {
                             // SecretNotFound is expected when a concurrent API call already
                             // revoked the lease between collect and revoke (benign TOCTOU race).
-                            let msg = format!("{}", e);
-                            if msg.contains("not found") {
+                            if matches!(&e, secreton_secrets::SecretError::SecretNotFound(_)) {
                                 tracing::debug!("Background TTL: lease {} already revoked by another caller", lease_id);
                             } else {
                                 tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e);
