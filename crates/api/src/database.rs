@@ -52,18 +52,28 @@ impl DatabaseApiState {
             max_idle_connections: Some(5),
             max_connection_lifetime: Some(30),
         };
-        // Manually enable the engine since init isn't called via standard flow here
         // Derive encryption key from the SECRETON_ENCRYPTION_KEY environment variable
         // to ensure encrypted data survives restarts.
         let mut engine = match std::env::var("SECRETON_ENCRYPTION_KEY") {
             Ok(raw_key) => {
                 // Wrap in Zeroizing so the raw key material is wiped on drop
                 let env_key = zeroize::Zeroizing::new(raw_key);
-                // Hash directly with sha2 to avoid the intermediate HashResult.hex leak
-                use sha2::Digest;
-                let key = zeroize::Zeroizing::new(sha2::Sha256::digest(env_key.as_bytes()).to_vec());
-                let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
-                DatabaseEngine::new(config, storage).with_crypto(cipher, key)
+                // Use HKDF-SHA256 to derive a proper 32-byte AES key from the input
+                // material. Plain SHA-256 is not a KDF and is more susceptible to
+                // brute-force on weak inputs. HKDF binds the key to an
+                // application-specific info string, preventing cross-protocol attacks.
+                let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, env_key.as_bytes());
+                let mut key_bytes = zeroize::Zeroizing::new(vec![0u8; 32]);
+                if let Err(e) = hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes) {
+                    tracing::error!(
+                        "HKDF key derivation failed: {}. Database engine will operate WITHOUT encryption.",
+                        e
+                    );
+                    DatabaseEngine::new(config, storage)
+                } else {
+                    let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+                    DatabaseEngine::new(config, storage).with_crypto(cipher, key_bytes)
+                }
             }
             Err(_) => {
                 tracing::error!(

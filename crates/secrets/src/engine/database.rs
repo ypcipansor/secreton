@@ -97,8 +97,7 @@ impl DatabaseEngine {
         if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
             let enc_result = cipher.encrypt(data, key)
                 .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e)))?;
-            let algorithm_str = serde_json::to_string(&enc_result.algorithm)
-                .unwrap_or_else(|_| format!("{:?}", enc_result.algorithm));
+            let algorithm_str = format!("{}", enc_result.algorithm);
             Ok((
                 enc_result.ciphertext,
                 EncryptionMetadata {
@@ -128,19 +127,31 @@ impl DatabaseEngine {
     fn decrypt_entry(&self, entry: &SecretEntry) -> SecretResult<Vec<u8>> {
         if entry.encryption_metadata.algorithm != "plaintext" {
             if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-                // Try serde deserialization first (stable round-trip), then fall back
-                // to substring matching for backward compatibility with Debug-formatted values.
-                let algorithm = serde_json::from_str::<secreton_crypto::AlgorithmId>(
-                    &entry.encryption_metadata.algorithm,
-                ).unwrap_or_else(|_| {
-                    if entry.encryption_metadata.algorithm.contains("Aes256Gcm") {
-                        secreton_crypto::AlgorithmId::Aes256Gcm
-                    } else if entry.encryption_metadata.algorithm.contains("ChaCha20Poly1305") {
-                        secreton_crypto::AlgorithmId::ChaCha20Poly1305
-                    } else {
-                        secreton_crypto::AlgorithmId::Aes256Gcm
+                // Match algorithm by Display string, with fallback for legacy
+                // serde_json-serialized values (e.g. "\"Aes256Gcm\"") and
+                // Debug-formatted values.
+                let algo_str = &entry.encryption_metadata.algorithm;
+                let algorithm = match algo_str.as_str() {
+                    "AES-256-GCM" => secreton_crypto::AlgorithmId::Aes256Gcm,
+                    "ChaCha20-Poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+                    other => {
+                        // Backward compat: try serde deserialization, then substring matching
+                        serde_json::from_str::<secreton_crypto::AlgorithmId>(other)
+                            .unwrap_or_else(|_| {
+                                if other.contains("Aes256Gcm") || other.contains("AES") {
+                                    secreton_crypto::AlgorithmId::Aes256Gcm
+                                } else if other.contains("ChaCha20") {
+                                    secreton_crypto::AlgorithmId::ChaCha20Poly1305
+                                } else {
+                                    tracing::warn!(
+                                        "Unknown encryption algorithm '{}', defaulting to AES-256-GCM",
+                                        other
+                                    );
+                                    secreton_crypto::AlgorithmId::Aes256Gcm
+                                }
+                            })
                     }
-                });
+                };
                 let enc_data = secreton_crypto::encryption::EncryptedData {
                     algorithm,
                     nonce: entry.encryption_metadata.iv.clone(),
@@ -160,10 +171,10 @@ impl DatabaseEngine {
         }
     }
 
-    /// Checks backend connectivity when leases are loaded.
+    /// Checks backend connectivity when leases are present.
     /// This does NOT validate individual leases — stale leases (referencing
     /// dropped users) will be cleaned up by the background TTL task.
-    pub async fn validate_leases(&self) -> SecretResult<()> {
+    pub async fn check_backend_connectivity(&self) -> SecretResult<()> {
         let lease_count = {
             let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
             leases.len()
@@ -484,7 +495,7 @@ impl SecretEngine for DatabaseEngine {
                      // Initialize backend only if enabled to avoid wasteful resource allocation
                      if config.enabled {
                          self.init_backend()?;
-                         self.validate_leases().await?;
+                         self.check_backend_connectivity().await?;
                      }
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))

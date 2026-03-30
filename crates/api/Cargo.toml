@@ -84,6 +84,9 @@ prometheus.workspace = true
 # Memory safety
 zeroize.workspace = true
 
+# Key derivation
+hkdf.workspace = true
+
 # Random number generation
 rand.workspace = true
 
