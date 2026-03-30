@@ -353,9 +353,15 @@ impl DatabaseEngine {
         } else if connection_url.starts_with("mongodb://") {
             Ok(DatabaseType::MongoDB)
         } else {
+            // Extract only the scheme from the URL to avoid leaking credentials
+            // that may be embedded in the connection string.
+            let scheme = connection_url
+                .split("://")
+                .next()
+                .unwrap_or("<unknown>");
             Err(SecretError::InvalidConfiguration(format!(
-                "Unsupported database type in URL: {}",
-                connection_url
+                "Unsupported database type for scheme: {}://",
+                scheme
             )))
         }
     }
