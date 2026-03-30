@@ -58,21 +58,32 @@ impl DatabaseApiState {
             Ok(raw_key) => {
                 // Wrap in Zeroizing so the raw key material is wiped on drop
                 let env_key = zeroize::Zeroizing::new(raw_key);
-                // Use HKDF-SHA256 to derive a proper 32-byte AES key from the input
-                // material. Plain SHA-256 is not a KDF and is more susceptible to
-                // brute-force on weak inputs. HKDF binds the key to an
-                // application-specific info string, preventing cross-protocol attacks.
-                let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, env_key.as_bytes());
-                let mut key_bytes = zeroize::Zeroizing::new(vec![0u8; 32]);
-                if let Err(e) = hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes) {
+
+                // Reject empty or very short keys to prevent weak encryption.
+                if env_key.len() < 16 {
                     tracing::error!(
-                        "HKDF key derivation failed: {}. Database engine will operate WITHOUT encryption.",
-                        e
+                        "SECRETON_ENCRYPTION_KEY is too short ({} bytes, minimum 16). \
+                         Database engine will operate WITHOUT encryption.",
+                        env_key.len()
                     );
                     DatabaseEngine::new(config, storage)
                 } else {
-                    let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
-                    DatabaseEngine::new(config, storage).with_crypto(cipher, key_bytes)
+                    // Use HKDF-SHA256 to derive a proper 32-byte AES key from the input
+                    // material. Plain SHA-256 is not a KDF and is more susceptible to
+                    // brute-force on weak inputs. HKDF binds the key to an
+                    // application-specific info string, preventing cross-protocol attacks.
+                    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, env_key.as_bytes());
+                    let mut key_bytes = zeroize::Zeroizing::new(vec![0u8; 32]);
+                    if let Err(e) = hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes) {
+                        tracing::error!(
+                            "HKDF key derivation failed: {}. Database engine will operate WITHOUT encryption.",
+                            e
+                        );
+                        DatabaseEngine::new(config, storage)
+                    } else {
+                        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+                        DatabaseEngine::new(config, storage).with_crypto(cipher, key_bytes)
+                    }
                 }
             }
             Err(_) => {
