@@ -95,7 +95,18 @@ impl DatabaseApiState {
             }
         };
         if let Err(e) = engine.load_state().await {
-            tracing::error!("Failed to load database engine state: {}", e);
+            let err_msg = format!("{}", e);
+            if err_msg.contains("Decryption failed") || err_msg.contains("No crypto provider") {
+                tracing::error!(
+                    "Failed to load database engine state due to decryption error: {}. \
+                     This usually means SECRETON_ENCRYPTION_KEY has changed or is missing. \
+                     Previously encrypted roles and leases are UNRECOVERABLE without the \
+                     original key. The engine will start with empty state.",
+                    e
+                );
+            } else {
+                tracing::error!("Failed to load database engine state: {}", e);
+            }
         }
         engine.enable();
 

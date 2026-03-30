@@ -403,11 +403,24 @@ impl DatabaseEngine {
 
         Ok(leases.iter().filter_map(|(id, info)| {
             if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
-                let expiration = created_at + chrono::TimeDelta::seconds(info.lease_duration as i64);
-                if now > expiration {
-                    Some(id.clone())
-                } else {
-                    None
+                // Safely convert u64 lease_duration to i64; treat overflow as
+                // non-expiring (the lease will never be considered expired).
+                match i64::try_from(info.lease_duration) {
+                    Ok(secs) => {
+                        let expiration = created_at + chrono::TimeDelta::seconds(secs);
+                        if now > expiration {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "Lease {} has an unreasonably large lease_duration ({}). Skipping expiration check.",
+                            id, info.lease_duration
+                        );
+                        None
+                    }
                 }
             } else {
                 tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
@@ -471,14 +484,27 @@ impl SecretEngine for DatabaseEngine {
         if let Some(db_config) = db_config_value {
              match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
                  Ok(cfg) => {
-                     self.config = cfg;
-                     // Validate connection URL regardless of enabled state
-                     self.detect_database_type(&self.config.connection_url)?;
+                     // Validate connection URL before mutating state to avoid
+                     // leaving the engine in a partially-updated state on error.
+                     self.detect_database_type(&cfg.connection_url)?;
+
+                     let old_config = std::mem::replace(&mut self.config, cfg);
+                     let old_backend = self.backend.take();
 
                      // Initialize backend only if enabled to avoid wasteful resource allocation
                      if config.enabled {
-                         self.init_backend()?;
-                         self.check_backend_connectivity().await?;
+                         if let Err(e) = self.init_backend() {
+                             // Rollback on failure
+                             self.config = old_config;
+                             self.backend = old_backend;
+                             return Err(e);
+                         }
+                         if let Err(e) = self.check_backend_connectivity().await {
+                             // Rollback on failure
+                             self.config = old_config;
+                             self.backend = old_backend;
+                             return Err(e);
+                         }
                      }
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
