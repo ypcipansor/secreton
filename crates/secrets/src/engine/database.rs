@@ -132,24 +132,23 @@ impl DatabaseEngine {
                 // Debug-formatted values.
                 let algo_str = &entry.encryption_metadata.algorithm;
                 let algorithm = match algo_str.as_str() {
-                    "AES-256-GCM" => secreton_crypto::AlgorithmId::Aes256Gcm,
+                    "AES-256-GCM" | "aes-256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
                     "ChaCha20-Poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
                     other => {
                         // Backward compat: try serde deserialization, then substring matching
                         serde_json::from_str::<secreton_crypto::AlgorithmId>(other)
-                            .unwrap_or_else(|_| {
-                                if other.contains("Aes256Gcm") || other.contains("AES") {
-                                    secreton_crypto::AlgorithmId::Aes256Gcm
-                                } else if other.contains("ChaCha20") {
-                                    secreton_crypto::AlgorithmId::ChaCha20Poly1305
+                            .or_else(|_| {
+                                if other.contains("Aes256Gcm") || other.contains("AES") || other.contains("aes") {
+                                    Ok(secreton_crypto::AlgorithmId::Aes256Gcm)
+                                } else if other.contains("ChaCha20") || other.contains("chacha20") {
+                                    Ok(secreton_crypto::AlgorithmId::ChaCha20Poly1305)
                                 } else {
-                                    tracing::warn!(
-                                        "Unknown encryption algorithm '{}', defaulting to AES-256-GCM",
-                                        other
-                                    );
-                                    secreton_crypto::AlgorithmId::Aes256Gcm
+                                    Err(())
                                 }
                             })
+                            .map_err(|_| SecretError::DecryptionFailed(
+                                format!("Unknown encryption algorithm: '{}'", other)
+                            ))?
                     }
                 };
                 let enc_data = secreton_crypto::encryption::EncryptedData {
@@ -355,10 +354,10 @@ impl DatabaseEngine {
         } else {
             // Extract only the scheme from the URL to avoid leaking credentials
             // that may be embedded in the connection string.
-            let scheme = connection_url
-                .split("://")
-                .next()
-                .unwrap_or("<unknown>");
+            let scheme = match connection_url.find("://") {
+                Some(pos) => &connection_url[..pos],
+                None => "<unknown>",
+            };
             Err(SecretError::InvalidConfiguration(format!(
                 "Unsupported database type for scheme: {}://",
                 scheme
