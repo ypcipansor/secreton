@@ -18,13 +18,25 @@ use tracing::{error, info, warn};
 
 use crate::ApiResponse;
 
+/// Wrapper around a `JoinHandle` that aborts the spawned task when dropped.
+/// `tokio::task::JoinHandle::drop` merely *detaches* the task, so without
+/// this wrapper the background TTL task would run forever even after all
+/// `DatabaseApiState` clones are dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// API state for Database engine
 #[derive(Clone)]
 pub struct DatabaseApiState {
     pub engine: Arc<RwLock<DatabaseEngine>>,
     /// Handle to the background TTL enforcement task.
-    /// Stored so the task is aborted when all clones are dropped.
-    _ttl_task: Arc<tokio::task::JoinHandle<()>>,
+    /// Wrapped in `AbortOnDrop` so the task is cancelled when all clones are dropped.
+    _ttl_task: Arc<AbortOnDrop>,
 }
 
 impl DatabaseApiState {
@@ -119,7 +131,7 @@ impl DatabaseApiState {
 
         Self {
             engine: engine_arc,
-            _ttl_task: Arc::new(ttl_task),
+            _ttl_task: Arc::new(AbortOnDrop(ttl_task)),
         }
     }
 }
