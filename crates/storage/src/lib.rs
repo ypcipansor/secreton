@@ -156,9 +156,9 @@ impl SecretEntry {
 impl Default for EncryptionMetadata {
     fn default() -> Self {
         Self {
-            algorithm: "aes-256-gcm".to_string(),
-            key_id: "default-key".to_string(),
-            iv: vec![0; 12],
+            algorithm: "plaintext".to_string(),
+            key_id: String::new(),
+            iv: Vec::new(),
             auth_tag: None,
             aad: None,
             kdf_params: None,

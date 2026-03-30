@@ -748,9 +748,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_lease_lifecycle() -> SecretResult<()> {
-        let config = DatabaseConfig {
+    fn test_config() -> DatabaseConfig {
+        DatabaseConfig {
             connection_url: "postgresql://localhost:5432/db".to_string(),
             plugin_name: "test".to_string(),
             allowed_roles: vec![],
@@ -759,10 +758,13 @@ mod tests {
             max_open_connections: None,
             max_idle_connections: None,
             max_connection_lifetime: None,
-        };
+        }
+    }
 
+    #[tokio::test]
+    async fn test_lease_lifecycle() -> SecretResult<()> {
         let storage = Arc::new(secreton_storage::MockStorageBackend::new());
-        let mut engine = DatabaseEngine::new(config, storage);
+        let mut engine = DatabaseEngine::new(test_config(), storage);
 
         // Inject mock backend
         engine.backend = Some(Box::new(MockBackend));
@@ -796,6 +798,275 @@ mod tests {
         let leases = engine.list_leases();
         assert_eq!(leases.len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip_with_aes256gcm() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xABu8; 32]);
+        let engine = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+
+        let plaintext = b"sensitive role data";
+        let (ciphertext, metadata) = engine.encrypt_data(plaintext).unwrap();
+
+        // Ciphertext must differ from plaintext
+        assert_ne!(ciphertext, plaintext);
+        assert_eq!(metadata.algorithm, "AES-256-GCM");
+        assert_eq!(metadata.key_id, "internal");
+        assert!(!metadata.iv.is_empty());
+
+        // Build a SecretEntry to test decrypt_entry
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            ciphertext,
+            metadata,
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let decrypted = engine.decrypt_entry(&entry).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_data_plaintext_fallback_without_cipher() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let plaintext = b"no encryption configured";
+        let (data, metadata) = engine.encrypt_data(plaintext).unwrap();
+
+        assert_eq!(data, plaintext);
+        assert_eq!(metadata.algorithm, "plaintext");
+    }
+
+    #[test]
+    fn test_decrypt_entry_plaintext_passthrough() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let raw = b"raw plaintext bytes";
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            raw.to_vec(),
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(),
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry).unwrap();
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn test_decrypt_entry_fails_without_cipher_for_encrypted_data() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        // Engine has no cipher configured
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "AES-256-GCM".to_string(),
+                key_id: "internal".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("No crypto provider configured"));
+    }
+
+    #[test]
+    fn test_decrypt_entry_unknown_algorithm_fails() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xABu8; 32]);
+        let engine = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "unknown-cipher-xyz".to_string(),
+                key_id: "internal".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Unknown encryption algorithm"));
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_returns_expired() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Insert an already-expired lease (created 2 hours ago, duration 1 second)
+        let expired_lease = LeaseInfo {
+            lease_id: "expired-1".to_string(),
+            username: "user1".to_string(),
+            role: "role1".to_string(),
+            created_at: (chrono::Utc::now() - chrono::TimeDelta::seconds(7200)).to_rfc3339(),
+            lease_duration: 1,
+        };
+
+        // Insert a still-valid lease (created now, duration 1 hour)
+        let valid_lease = LeaseInfo {
+            lease_id: "valid-1".to_string(),
+            username: "user2".to_string(),
+            role: "role1".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            lease_duration: 3600,
+        };
+
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("expired-1".to_string(), expired_lease);
+            leases.insert("valid-1".to_string(), valid_lease);
+        }
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert_eq!(expired_ids.len(), 1);
+        assert_eq!(expired_ids[0], "expired-1");
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_empty_when_disabled() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+        // Engine is disabled by default
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert!(expired_ids.is_empty());
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_treats_unparseable_as_expired() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        let bad_lease = LeaseInfo {
+            lease_id: "bad-date".to_string(),
+            username: "user1".to_string(),
+            role: "role1".to_string(),
+            created_at: "not-a-date".to_string(),
+            lease_duration: 3600,
+        };
+
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("bad-date".to_string(), bad_lease);
+        }
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert_eq!(expired_ids.len(), 1);
+        assert_eq!(expired_ids[0], "bad-date");
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_role_persistence_roundtrip() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xCDu8; 32]);
+        let mut engine = DatabaseEngine::new(test_config(), storage.clone())
+            .with_crypto(cipher.clone(), key.clone());
+
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Write a role (this encrypts and persists)
+        let mut role_data = HashMap::new();
+        role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
+        role_data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(900)));
+        engine.write("roles/encrypted_role", role_data).await?;
+
+        // Create a fresh engine with the same key and load state
+        let mut engine2 = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+        engine2.load_state().await?;
+
+        // Verify the role was loaded correctly
+        assert!(engine2.roles.contains_key("encrypted_role"));
+        let loaded_role = engine2.roles.get("encrypted_role").unwrap();
+        assert_eq!(loaded_role.sql, "CREATE ROLE");
+        assert_eq!(loaded_role.default_ttl, 900);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_revoke_nonexistent_lease_returns_not_found() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        let result = engine.revoke_lease("nonexistent-lease-id").await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_check_backend_connectivity_ok_with_no_leases() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // No leases → should return Ok immediately
+        engine.check_backend_connectivity().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_check_backend_connectivity_ok_with_leases() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Add a lease so the connectivity check actually runs
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("lease-1".to_string(), LeaseInfo {
+                lease_id: "lease-1".to_string(),
+                username: "user1".to_string(),
+                role: "role1".to_string(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                lease_duration: 3600,
+            });
+        }
+
+        engine.check_backend_connectivity().await?;
         Ok(())
     }
 }
