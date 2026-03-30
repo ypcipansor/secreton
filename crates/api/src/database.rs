@@ -18,10 +18,25 @@ use tracing::{error, info, warn};
 
 use crate::ApiResponse;
 
+/// Wrapper around a `JoinHandle` that aborts the spawned task when dropped.
+/// `tokio::task::JoinHandle::drop` merely *detaches* the task, so without
+/// this wrapper the background TTL task would run forever even after all
+/// `DatabaseApiState` clones are dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// API state for Database engine
 #[derive(Clone)]
 pub struct DatabaseApiState {
     pub engine: Arc<RwLock<DatabaseEngine>>,
+    /// Handle to the background TTL enforcement task.
+    /// Wrapped in `AbortOnDrop` so the task is cancelled when all clones are dropped.
+    _ttl_task: Arc<AbortOnDrop>,
 }
 
 impl DatabaseApiState {
@@ -37,14 +52,125 @@ impl DatabaseApiState {
             max_idle_connections: Some(5),
             max_connection_lifetime: Some(30),
         };
-        // Manually enable the engine since init isn't called via standard flow here
-        let mut engine = DatabaseEngine::new(config, storage);
+        // Derive encryption key from the SECRETON_ENCRYPTION_KEY environment variable
+        // to ensure encrypted data survives restarts.
+        let mut engine = match std::env::var("SECRETON_ENCRYPTION_KEY") {
+            Ok(raw_key) => {
+                // Wrap in Zeroizing so the raw key material is wiped on drop
+                let env_key = zeroize::Zeroizing::new(raw_key);
+
+                // Reject empty or very short keys to prevent weak encryption.
+                if env_key.len() < 16 {
+                    tracing::warn!(
+                        "SECRETON_ENCRYPTION_KEY is too short ({} bytes, minimum 16). \
+                         Database engine will operate WITHOUT encryption.",
+                        env_key.len()
+                    );
+                    DatabaseEngine::new(config, storage)
+                } else {
+                    // Use HKDF-SHA256 to derive a proper 32-byte AES key from the input
+                    // material. Plain SHA-256 is not a KDF and is more susceptible to
+                    // brute-force on weak inputs. HKDF binds the key to an
+                    // application-specific info string, preventing cross-protocol attacks.
+                    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, env_key.as_bytes());
+                    let mut key_bytes = zeroize::Zeroizing::new(vec![0u8; 32]);
+                    if let Err(e) = hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes) {
+                        tracing::error!(
+                            "HKDF key derivation failed: {}. Database engine will operate WITHOUT encryption.",
+                            e
+                        );
+                        DatabaseEngine::new(config, storage)
+                    } else {
+                        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+                        DatabaseEngine::new(config, storage).with_crypto(cipher, key_bytes)
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "SECRETON_ENCRYPTION_KEY is not set. Database engine will operate WITHOUT encryption. \
+                     Set this environment variable to enable encryption at rest."
+                );
+                DatabaseEngine::new(config, storage)
+            }
+        };
         if let Err(e) = engine.load_state().await {
-            tracing::error!("Failed to load database engine state: {}", e);
+            match &e {
+                secreton_secrets::SecretError::DecryptionFailed(_)
+                | secreton_secrets::SecretError::EncryptionFailed(_) => {
+                    tracing::error!(
+                        "Failed to load database engine state due to decryption error: {}. \
+                         This usually means SECRETON_ENCRYPTION_KEY has changed or is missing. \
+                         Previously encrypted roles and leases are UNRECOVERABLE without the \
+                         original key. The engine will start with empty state.",
+                        e
+                    );
+                }
+                _ => {
+                    tracing::error!("Failed to load database engine state: {}", e);
+                }
+            }
         }
         engine.enable();
+
+        let engine_arc = Arc::new(RwLock::new(engine));
+
+        // Spawn background task for TTL enforcement.
+        // We collect expired IDs under a brief read lock, then revoke each
+        // lease individually, releasing the RwLock between revocations so that
+        // write operations (e.g. configure_database) can proceed between leases.
+        // Note: the read lock IS held for the duration of each individual
+        // revoke_lease call (which includes async network I/O), blocking
+        // writers during that time. This is acceptable because individual
+        // revocations are expected to be fast.
+        let background_engine = engine_arc.clone();
+        let ttl_task = tokio::spawn(async move {
+            let period = std::time::Duration::from_secs(60);
+            let start = tokio::time::Instant::now() + period;
+            let mut interval = tokio::time::interval_at(start, period);
+            loop {
+                interval.tick().await;
+
+                // Phase 1: collect expired lease IDs (brief read lock)
+                let expired_ids = {
+                    let engine_read = background_engine.read().await;
+                    match engine_read.collect_expired_lease_ids() {
+                        Ok(ids) => ids,
+                        Err(e) => {
+                            tracing::error!("Background TTL enforcement: failed to collect expired leases: {}", e);
+                            continue;
+                        }
+                    }
+                }; // read lock released here
+
+                // Phase 2: revoke each lease individually.
+                // The read lock is held for each revoke_lease call (including its
+                // async network I/O) but released between leases, giving writers a
+                // window to acquire the write lock between revocations.
+                for lease_id in &expired_ids {
+                    let result = {
+                        let engine_read = background_engine.read().await;
+                        engine_read.revoke_lease(lease_id).await
+                    }; // read lock released here before logging
+                    match result {
+                        Ok(_) => tracing::info!("Background TTL: revoked expired lease {}", lease_id),
+                        Err(e) => {
+                            // SecretNotFound is expected when a concurrent API call already
+                            // revoked the lease between collect and revoke (benign TOCTOU race).
+                            if matches!(&e, secreton_secrets::SecretError::SecretNotFound(_)) {
+                                tracing::debug!("Background TTL: lease {} already revoked by another caller", lease_id);
+                            } else {
+                                tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         Self {
-            engine: Arc::new(RwLock::new(engine)),
+            engine: engine_arc,
+            _ttl_task: Arc::new(AbortOnDrop(ttl_task)),
         }
     }
 }

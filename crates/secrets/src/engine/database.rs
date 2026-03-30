@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use zeroize::Zeroizing;
 
 /// Database type
 #[derive(Debug, Clone, PartialEq)]
@@ -42,11 +43,11 @@ pub struct DatabaseEngine {
     enabled: bool,
     roles: HashMap<String, DatabaseRole>,
     // Use Mutex for interior mutability since SecretEngine::read is &self
-    // TODO: Implement background task for TTL enforcement to automatically revoke expired leases.
-    // Currently, leases are only tracked for manual revocation.
     leases: Mutex<HashMap<String, LeaseInfo>>,
     backend: Option<Box<dyn crate::backend::database::DatabaseBackend + Send + Sync>>,
     storage: Arc<dyn StorageBackend>,
+    cipher: Option<Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>>,
+    encryption_key: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl DatabaseEngine {
@@ -73,13 +74,136 @@ impl DatabaseEngine {
             leases: Mutex::new(HashMap::new()),
             backend: None,
             storage,
+            cipher: None,
+            encryption_key: None,
         }
     }
 
+    /// Add crypto provider. The key is wrapped in `Zeroizing` to ensure it is
+    /// wiped from memory when the engine is dropped.
+    pub fn with_crypto(
+        mut self,
+        cipher: Arc<dyn secreton_crypto::encryption::SymmetricCipher + Send + Sync>,
+        key: Zeroizing<Vec<u8>>,
+    ) -> Self {
+        self.cipher = Some(cipher);
+        self.encryption_key = Some(key);
+        self
+    }
+
+    /// Encrypt data using the configured cipher, returning the ciphertext and metadata.
+    /// Falls back to plaintext if no cipher is configured.
+    fn encrypt_data(&self, data: &[u8]) -> SecretResult<(Vec<u8>, EncryptionMetadata)> {
+        if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+            let enc_result = cipher.encrypt(data, key)
+                .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e)))?;
+            let algorithm_str = format!("{}", enc_result.algorithm);
+            Ok((
+                enc_result.ciphertext,
+                EncryptionMetadata {
+                    algorithm: algorithm_str,
+                    key_id: "internal".to_string(),
+                    iv: enc_result.nonce,
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // is None. The decrypt() impl reads the tag from the ciphertext.
+                    auth_tag: enc_result.tag,
+                    ..Default::default()
+                },
+            ))
+        } else {
+            Ok((
+                data.to_vec(),
+                EncryptionMetadata {
+                    algorithm: "plaintext".to_string(),
+                    ..Default::default()
+                },
+            ))
+        }
+    }
+
+    /// Decrypt a stored entry using the configured cipher.
+    /// Returns the plaintext bytes, or the raw data if stored as plaintext.
+    fn decrypt_entry(&self, entry: &SecretEntry) -> SecretResult<Vec<u8>> {
+        if entry.encryption_metadata.algorithm != "plaintext" {
+            if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
+                // Match algorithm by Display string, with fallback for legacy
+                // serde_json-serialized values (e.g. "\"Aes256Gcm\"") and
+                // Debug-formatted values.
+                let algo_str = &entry.encryption_metadata.algorithm;
+                let algorithm = match algo_str.as_str() {
+                    "AES-256-GCM" | "aes-256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+                    "ChaCha20-Poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+                    other => {
+                        // Backward compat: try serde deserialization, then specific substring matching
+                        serde_json::from_str::<secreton_crypto::AlgorithmId>(other)
+                            .or_else(|_| {
+                                if other.contains("Aes256Gcm") || other.contains("aes-256-gcm") {
+                                    Ok(secreton_crypto::AlgorithmId::Aes256Gcm)
+                                } else if other.contains("ChaCha20") || other.contains("chacha20") {
+                                    Ok(secreton_crypto::AlgorithmId::ChaCha20Poly1305)
+                                } else {
+                                    Err(())
+                                }
+                            })
+                            .map_err(|_| SecretError::DecryptionFailed(
+                                format!("Unknown encryption algorithm: '{}'", other)
+                            ))?
+                    }
+                };
+                let enc_data = secreton_crypto::encryption::EncryptedData {
+                    algorithm,
+                    nonce: entry.encryption_metadata.iv.clone(),
+                    ciphertext: entry.encrypted_data.clone(),
+                    // Note: For AES-GCM and ChaCha20-Poly1305, the auth tag is appended
+                    // to the ciphertext by the aes-gcm/chacha20poly1305 crates, so this
+                    // field is None. The decrypt() impl reads the tag from the ciphertext.
+                    tag: entry.encryption_metadata.auth_tag.clone(),
+                };
+                cipher.decrypt(&enc_data, key)
+                    .map_err(|e| SecretError::DecryptionFailed(format!("Decryption failed: {:?}", e)))
+            } else {
+                Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt data".to_string()))
+            }
+        } else {
+            Ok(entry.encrypted_data.clone())
+        }
+    }
+
+    /// Checks backend connectivity.
+    /// Returns an error if the backend fails the connection test, allowing
+    /// callers (e.g. `init`) to roll back configuration changes.
+    /// When no leases are present the check is skipped (no active credentials
+    /// depend on the connection).
+    pub async fn check_backend_connectivity(&self) -> SecretResult<()> {
+        let lease_count = {
+            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            leases.len()
+        };
+
+        if lease_count == 0 {
+            return Ok(());
+        }
+
+        if let Some(backend) = &self.backend {
+            backend.test_connection().await.map_err(|e| {
+                tracing::error!(
+                    "Failed to connect to database backend: {}. {} leases may be stale or orphaned.",
+                    e, lease_count
+                );
+                SecretError::BackendConnectionFailed(format!(
+                    "Database connectivity check failed: {}", e
+                ))
+            })?;
+            tracing::info!("Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.", lease_count);
+        } else {
+            tracing::warn!("Database backend not initialized during lease validation. {} leases loaded without backend validation.", lease_count);
+        }
+
+        Ok(())
+    }
+
     /// Load roles and leases from storage
-    // TODO: Validate loaded leases against the backend when it is initialized.
-    // Currently, leases are loaded into memory but may be stale if the backend database state has changed (e.g., users dropped).
-    // Future work should include a reconciliation process.
     pub async fn load_state(&mut self) -> SecretResult<()> {
         // Load roles
         let roles_path = "sys/database/roles/";
@@ -97,9 +221,9 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            // We store data as JSON in encrypted_data (plaintext for now)
-            // TODO: Implement proper encryption using KMS
-            let role: DatabaseRole = serde_json::from_slice(&entry.encrypted_data)
+            let data = self.decrypt_entry(&entry)?;
+
+            let role: DatabaseRole = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
 
             self.roles.insert(role_name, role);
@@ -114,7 +238,7 @@ impl DatabaseEngine {
             .await
             .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
 
-        let mut leases = self.leases.lock().unwrap();
+        let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
         for entry in entries {
             let lease_id = entry
                 .path
@@ -122,7 +246,9 @@ impl DatabaseEngine {
                 .unwrap_or(&entry.path)
                 .to_string();
 
-            let lease: LeaseInfo = serde_json::from_slice(&entry.encrypted_data)
+            let data = self.decrypt_entry(&entry)?;
+
+            let lease: LeaseInfo = serde_json::from_slice(&data)
                 .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e)))?;
 
             leases.insert(lease_id, lease);
@@ -136,15 +262,13 @@ impl DatabaseEngine {
         let data = serde_json::to_vec(role)
             .map_err(|e| SecretError::InvalidSecretData(format!("Serialization error: {}", e)))?;
 
+        let (encrypted_data, encryption_metadata) = self.encrypt_data(&data)?;
+
         // Create SecretEntry
-        // TODO: Encrypt data properly using KMS
         let entry = SecretEntry::new(
             path.clone(),
-            data,
-            EncryptionMetadata {
-                algorithm: "plaintext".to_string(), // Mark as plaintext
-                ..Default::default()
-            },
+            encrypted_data,
+            encryption_metadata,
             SecurityLevel::Confidential,
             uuid::Uuid::nil(), // System owned
         );
@@ -174,16 +298,11 @@ impl DatabaseEngine {
 
         // NOTE: LeaseInfo contains metadata (username, role, lease_id) but NOT the actual password.
         // The password is returned to the client and not stored here.
-        // We currently store this metadata in plaintext (serialized JSON) within the storage backend.
-        // If the storage backend supports encryption at rest, it will be encrypted there.
-        // TODO: Implement application-level encryption using KMS for defense-in-depth.
+        let (encrypted_data, encryption_metadata) = self.encrypt_data(&data)?;
         let entry = SecretEntry::new(
             path.clone(),
-            data,
-            EncryptionMetadata {
-                algorithm: "plaintext".to_string(),
-                ..Default::default()
-            },
+            encrypted_data,
+            encryption_metadata,
             SecurityLevel::Confidential,
             uuid::Uuid::nil(),
         );
@@ -240,9 +359,15 @@ impl DatabaseEngine {
         } else if connection_url.starts_with("mongodb://") {
             Ok(DatabaseType::MongoDB)
         } else {
+            // Extract only the scheme from the URL to avoid leaking credentials
+            // that may be embedded in the connection string.
+            let scheme = match connection_url.find("://") {
+                Some(pos) => &connection_url[..pos],
+                None => "<unknown>",
+            };
             Err(SecretError::InvalidConfiguration(format!(
-                "Unsupported database type in URL: {}",
-                connection_url
+                "Unsupported database type for scheme: {}://",
+                scheme
             )))
         }
     }
@@ -271,6 +396,44 @@ impl DatabaseEngine {
                 Err(SecretError::NotImplemented("MongoDB backend not fully implemented".to_string()))
             }
         }
+    }
+
+    /// Collect lease IDs that have exceeded their TTL.
+    /// This only acquires the mutex briefly to snapshot expired IDs.
+    pub fn collect_expired_lease_ids(&self) -> SecretResult<Vec<String>> {
+        if !self.enabled || self.backend.is_none() {
+            return Ok(vec![]);
+        }
+
+        let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+        let now = chrono::Utc::now();
+
+        Ok(leases.iter().filter_map(|(id, info)| {
+            if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
+                // Safely convert u64 lease_duration to i64; treat overflow as
+                // non-expiring (the lease will never be considered expired).
+                match i64::try_from(info.lease_duration) {
+                    Ok(secs) => {
+                        let expiration = created_at + chrono::TimeDelta::seconds(secs);
+                        if now > expiration {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "Lease {} has an unreasonably large lease_duration ({}). Skipping expiration check.",
+                            id, info.lease_duration
+                        );
+                        None
+                    }
+                }
+            } else {
+                tracing::warn!("Failed to parse lease creation time for {}. Assuming expired for safety.", id);
+                Some(id.clone())
+            }
+        }).collect())
     }
 
     /// Revoke a lease
@@ -328,13 +491,27 @@ impl SecretEngine for DatabaseEngine {
         if let Some(db_config) = db_config_value {
              match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
                  Ok(cfg) => {
-                     self.config = cfg;
-                     // Validate connection URL regardless of enabled state
-                     self.detect_database_type(&self.config.connection_url)?;
+                     // Validate connection URL before mutating state to avoid
+                     // leaving the engine in a partially-updated state on error.
+                     self.detect_database_type(&cfg.connection_url)?;
+
+                     let old_config = std::mem::replace(&mut self.config, cfg);
 
                      // Initialize backend only if enabled to avoid wasteful resource allocation
                      if config.enabled {
-                         self.init_backend()?;
+                         let old_backend = self.backend.take();
+                         if let Err(e) = self.init_backend() {
+                             // Rollback on failure
+                             self.config = old_config;
+                             self.backend = old_backend;
+                             return Err(e);
+                         }
+                         if let Err(e) = self.check_backend_connectivity().await {
+                             // Rollback on failure
+                             self.config = old_config;
+                             self.backend = old_backend;
+                             return Err(e);
+                         }
                      }
                  },
                  Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
@@ -546,7 +723,7 @@ impl SecretEngine for DatabaseEngine {
                     Ok(_) => self.enabled = true,
                     Err(e) => {
                         // Log error and keep enabled = false
-                        eprintln!("Failed to initialize database backend during enable: {}", e);
+                        tracing::error!("Failed to initialize database backend during enable: {}", e);
                         self.enabled = false;
                     }
                 }
@@ -604,9 +781,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_lease_lifecycle() -> SecretResult<()> {
-        let config = DatabaseConfig {
+    fn test_config() -> DatabaseConfig {
+        DatabaseConfig {
             connection_url: "postgresql://localhost:5432/db".to_string(),
             plugin_name: "test".to_string(),
             allowed_roles: vec![],
@@ -615,10 +791,13 @@ mod tests {
             max_open_connections: None,
             max_idle_connections: None,
             max_connection_lifetime: None,
-        };
+        }
+    }
 
+    #[tokio::test]
+    async fn test_lease_lifecycle() -> SecretResult<()> {
         let storage = Arc::new(secreton_storage::MockStorageBackend::new());
-        let mut engine = DatabaseEngine::new(config, storage);
+        let mut engine = DatabaseEngine::new(test_config(), storage);
 
         // Inject mock backend
         engine.backend = Some(Box::new(MockBackend));
@@ -652,6 +831,275 @@ mod tests {
         let leases = engine.list_leases();
         assert_eq!(leases.len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip_with_aes256gcm() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xABu8; 32]);
+        let engine = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+
+        let plaintext = b"sensitive role data";
+        let (ciphertext, metadata) = engine.encrypt_data(plaintext).unwrap();
+
+        // Ciphertext must differ from plaintext
+        assert_ne!(ciphertext, plaintext);
+        assert_eq!(metadata.algorithm, "AES-256-GCM");
+        assert_eq!(metadata.key_id, "internal");
+        assert!(!metadata.iv.is_empty());
+
+        // Build a SecretEntry to test decrypt_entry
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            ciphertext,
+            metadata,
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let decrypted = engine.decrypt_entry(&entry).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_data_plaintext_fallback_without_cipher() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let plaintext = b"no encryption configured";
+        let (data, metadata) = engine.encrypt_data(plaintext).unwrap();
+
+        assert_eq!(data, plaintext);
+        assert_eq!(metadata.algorithm, "plaintext");
+    }
+
+    #[test]
+    fn test_decrypt_entry_plaintext_passthrough() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let raw = b"raw plaintext bytes";
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            raw.to_vec(),
+            EncryptionMetadata {
+                algorithm: "plaintext".to_string(),
+                ..Default::default()
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry).unwrap();
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn test_decrypt_entry_fails_without_cipher_for_encrypted_data() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        // Engine has no cipher configured
+        let engine = DatabaseEngine::new(test_config(), storage);
+
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "AES-256-GCM".to_string(),
+                key_id: "internal".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("No crypto provider configured"));
+    }
+
+    #[test]
+    fn test_decrypt_entry_unknown_algorithm_fails() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xABu8; 32]);
+        let engine = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+
+        let entry = SecretEntry::new(
+            "test/path".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata {
+                algorithm: "unknown-cipher-xyz".to_string(),
+                key_id: "internal".to_string(),
+                iv: vec![0; 12],
+                auth_tag: None,
+                aad: None,
+                kdf_params: None,
+            },
+            SecurityLevel::Confidential,
+            uuid::Uuid::nil(),
+        );
+
+        let result = engine.decrypt_entry(&entry);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Unknown encryption algorithm"));
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_returns_expired() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Insert an already-expired lease (created 2 hours ago, duration 1 second)
+        let expired_lease = LeaseInfo {
+            lease_id: "expired-1".to_string(),
+            username: "user1".to_string(),
+            role: "role1".to_string(),
+            created_at: (chrono::Utc::now() - chrono::TimeDelta::seconds(7200)).to_rfc3339(),
+            lease_duration: 1,
+        };
+
+        // Insert a still-valid lease (created now, duration 1 hour)
+        let valid_lease = LeaseInfo {
+            lease_id: "valid-1".to_string(),
+            username: "user2".to_string(),
+            role: "role1".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            lease_duration: 3600,
+        };
+
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("expired-1".to_string(), expired_lease);
+            leases.insert("valid-1".to_string(), valid_lease);
+        }
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert_eq!(expired_ids.len(), 1);
+        assert_eq!(expired_ids[0], "expired-1");
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_empty_when_disabled() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let engine = DatabaseEngine::new(test_config(), storage);
+        // Engine is disabled by default
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert!(expired_ids.is_empty());
+    }
+
+    #[test]
+    fn test_collect_expired_lease_ids_treats_unparseable_as_expired() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        let bad_lease = LeaseInfo {
+            lease_id: "bad-date".to_string(),
+            username: "user1".to_string(),
+            role: "role1".to_string(),
+            created_at: "not-a-date".to_string(),
+            lease_duration: 3600,
+        };
+
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("bad-date".to_string(), bad_lease);
+        }
+
+        let expired_ids = engine.collect_expired_lease_ids().unwrap();
+        assert_eq!(expired_ids.len(), 1);
+        assert_eq!(expired_ids[0], "bad-date");
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_role_persistence_roundtrip() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
+        let key = Zeroizing::new(vec![0xCDu8; 32]);
+        let mut engine = DatabaseEngine::new(test_config(), storage.clone())
+            .with_crypto(cipher.clone(), key.clone());
+
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Write a role (this encrypts and persists)
+        let mut role_data = HashMap::new();
+        role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
+        role_data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(900)));
+        engine.write("roles/encrypted_role", role_data).await?;
+
+        // Create a fresh engine with the same key and load state
+        let mut engine2 = DatabaseEngine::new(test_config(), storage)
+            .with_crypto(cipher, key);
+        engine2.load_state().await?;
+
+        // Verify the role was loaded correctly
+        assert!(engine2.roles.contains_key("encrypted_role"));
+        let loaded_role = engine2.roles.get("encrypted_role").unwrap();
+        assert_eq!(loaded_role.sql, "CREATE ROLE");
+        assert_eq!(loaded_role.default_ttl, 900);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_revoke_nonexistent_lease_returns_not_found() {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        let result = engine.revoke_lease("nonexistent-lease-id").await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_check_backend_connectivity_ok_with_no_leases() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // No leases → should return Ok immediately
+        engine.check_backend_connectivity().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_check_backend_connectivity_ok_with_leases() -> SecretResult<()> {
+        let storage = Arc::new(secreton_storage::MockStorageBackend::new());
+        let mut engine = DatabaseEngine::new(test_config(), storage);
+        engine.backend = Some(Box::new(MockBackend));
+        engine.enabled = true;
+
+        // Add a lease so the connectivity check actually runs
+        {
+            let mut leases = engine.leases.lock().unwrap();
+            leases.insert("lease-1".to_string(), LeaseInfo {
+                lease_id: "lease-1".to_string(),
+                username: "user1".to_string(),
+                role: "role1".to_string(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                lease_duration: 3600,
+            });
+        }
+
+        engine.check_backend_connectivity().await?;
         Ok(())
     }
 }
