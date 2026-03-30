@@ -13,6 +13,8 @@ use uuid;
 
 use crate::services::auth::{AuthenticationService, USER_STORAGE_PREFIX};
 use crate::services::crypto::CryptoService;
+
+pub const ROLE_STORAGE_PREFIX: &str = "sys/auth/roles/";
 use secreton_performance::SecretPerformanceOptimizer;
 use secreton_storage::{QueryParams, StorageBackend};
 
@@ -112,6 +114,27 @@ pub struct UpdateUserRequest {
     pub full_name: Option<String>,
     pub enabled: Option<bool>,
     pub roles: Option<Vec<String>>,
+}
+
+/// Role information
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RoleInfo {
+    pub name: String,
+    pub description: Option<String>,
+    pub permissions: Vec<String>,
+    pub users: Vec<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub metadata: HashMap<String, String>,
+}
+
+/// Role creation request
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateRoleRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub permissions: Vec<String>,
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 /// Admin service for system management with request metrics tracking
@@ -1619,6 +1642,187 @@ impl AdminService {
         })
     }
 
+    /// List all roles
+    pub async fn list_roles(&self) -> Result<Vec<RoleInfo>, AdminError> {
+        let query_params = QueryParams {
+            path_prefix: Some(ROLE_STORAGE_PREFIX.to_string()),
+            limit: Some(1000),
+            offset: Some(0),
+            ..Default::default()
+        };
+
+        let entries: Vec<_> = self
+            .storage
+            .list(&query_params)
+            .await
+            .map_err(AdminError::Storage)?
+            .into_iter()
+            .collect();
+
+        let mut roles = Vec::new();
+        for entry in entries {
+            match self.secreton_entry_to_role_info(&entry).await {
+                Ok(role) => roles.push(role),
+                Err(e) => {
+                    tracing::warn!("Failed to deserialize role at {}: {}", entry.path, e);
+                }
+            }
+        }
+
+        Ok(roles)
+    }
+
+    /// Create a new role
+    pub async fn create_role(&self, request: CreateRoleRequest) -> Result<RoleInfo, AdminError> {
+        let path = format!("{}{}", ROLE_STORAGE_PREFIX, request.name);
+        if self
+            .storage
+            .exists(&path)
+            .await
+            .map_err(AdminError::Storage)?
+        {
+            return Err(AdminError::Internal(anyhow::anyhow!("Role already exists")));
+        }
+
+        let now = chrono::Utc::now();
+        let role = RoleInfo {
+            name: request.name,
+            description: request.description,
+            permissions: request.permissions,
+            users: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            metadata: request.metadata.unwrap_or_default(),
+        };
+
+        let entry = self.role_info_to_secreton_entry(&role).await?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        Ok(role)
+    }
+
+    /// Helper method to convert RoleInfo to SecretEntry for storage
+    async fn role_info_to_secreton_entry(
+        &self,
+        role: &RoleInfo,
+    ) -> Result<secreton_storage::SecretEntry, AdminError> {
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
+
+        let role_data = serde_json::to_vec(role).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to serialize role: {}", e))
+        })?;
+
+        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
+            let enc = crypto
+                .encrypt_data(&role_data)
+                .await
+                .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
+            (enc, EncryptionMetadata::default())
+        } else {
+            (
+                role_data,
+                EncryptionMetadata {
+                    algorithm: "none".to_string(),
+                    key_id: "none".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
+        };
+
+        Ok(SecretEntry::new(
+            format!("{}{}", ROLE_STORAGE_PREFIX, role.name),
+            encrypted_data,
+            encryption_metadata,
+            SecurityLevel::Secret,
+            uuid::Uuid::nil(), // System owned
+        ))
+    }
+
+    /// Helper method to convert SecretEntry to RoleInfo
+    async fn secreton_entry_to_role_info(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> Result<RoleInfo, AdminError> {
+        let data = if let Some(crypto) = &self.crypto {
+            match crypto.decrypt(&entry.encrypted_data).await {
+                Ok(d) => d,
+                Err(_) => entry.encrypted_data.clone(),
+            }
+        } else {
+            entry.encrypted_data.clone()
+        };
+
+        let role: RoleInfo = serde_json::from_slice(&data).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to deserialize role: {}", e))
+        })?;
+        Ok(role)
+    }
+
+    /// Update an existing role
+    pub async fn update_role(
+        &self,
+        name: &str,
+        request: CreateRoleRequest,
+    ) -> Result<RoleInfo, AdminError> {
+        let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
+        let exists = self
+            .storage
+            .exists(&path)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        if !exists {
+            return Err(AdminError::NotFound(format!("Role {} not found", name)));
+        }
+
+        let now = chrono::Utc::now();
+        let entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+            .ok_or_else(|| AdminError::NotFound(format!("Role {} not found", name)))?;
+
+        let mut role = self.secreton_entry_to_role_info(&entry).await?;
+
+        role.description = request.description;
+        role.permissions = request.permissions;
+        role.updated_at = now;
+        if let Some(metadata) = request.metadata {
+            role.metadata.extend(metadata);
+        }
+
+        let entry = self.role_info_to_secreton_entry(&role).await?;
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        Ok(role)
+    }
+
+    /// Delete a role
+    pub async fn delete_role(&self, name: &str) -> Result<(), AdminError> {
+        let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
+        let deleted = self
+            .storage
+            .delete_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        if !deleted {
+            return Err(AdminError::NotFound(format!("Role {} not found", name)));
+        }
+
+        Ok(())
+    }
+
     /// List all users
     pub async fn list_users(&self) -> Result<Vec<UserInfo>, AdminError> {
         use secreton_storage::QueryParams;
@@ -1724,6 +1928,37 @@ impl AdminService {
             .map_err(AdminError::Storage)?;
 
         Ok(user)
+    }
+
+    /// Get user roles
+    pub async fn get_user_roles(&self, user_id: &str) -> Result<Vec<String>, AdminError> {
+        let user = self.get_user(user_id).await?;
+        Ok(user.roles)
+    }
+
+    /// Assign roles to user
+    pub async fn assign_user_roles(
+        &self,
+        user_id: &str,
+        roles: Vec<String>,
+    ) -> Result<(), AdminError> {
+        let mut user = self.get_user(user_id).await?;
+        user.roles = roles;
+        user.updated_at = chrono::Utc::now();
+
+        let entry = self.user_info_to_secreton_entry(&user).await?;
+        self.storage
+            .update(&entry)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        Ok(())
+    }
+
+    /// Get user permissions
+    pub async fn get_user_permissions(&self, user_id: &str) -> Result<Vec<String>, AdminError> {
+        let user = self.get_user(user_id).await?;
+        Ok(user.permissions)
     }
 
     /// Delete a user

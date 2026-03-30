@@ -130,6 +130,14 @@ pub fn Layout(children: Children) -> impl IntoView {
                         <span>"Policies"</span>
                     </Link>
                     <Link
+                        href="/users"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
+                        <span class="text-lg">"👥"</span>
+                        <span>"Users"</span>
+                    </Link>
+                    <Link
                         href="/audit"
                         class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
                         active_class="bg-gray-800 text-white shadow-inner"

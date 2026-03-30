@@ -51,6 +51,8 @@ pub fn create_routes() -> Router<AppState> {
         .route("/maintenance/gc", post(run_garbage_collection))
         .route("/maintenance/compact", post(compact_database))
         .route("/maintenance/vacuum", post(vacuum_database))
+        // Audit logs
+        .route("/audit", get(list_audit_logs))
         // Backup operations
         .route("/backups", post(create_backup))
         .route("/backups", get(list_backups))
@@ -952,47 +954,99 @@ async fn check_auth_health(_state: &AppState) -> String {
 // Stub implementations for missing handlers
 
 pub async fn get_user_roles(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    let roles = state.admin.get_user_roles(&user_id).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
+    Ok(Json(ApiResponse::success(roles)))
 }
 
 pub async fn assign_user_roles(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
-    Json(_request): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    Json(request): Json<AssignRolesRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    state
+        .admin
+        .assign_user_roles(&user_id, request.roles)
+        .await
+        .map_err(|e| secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        })?;
+
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "updated"}),
     )))
 }
 
 pub async fn get_user_permissions(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    let permissions = state.admin.get_user_permissions(&user_id).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
+    Ok(Json(ApiResponse::success(permissions)))
 }
 
 pub async fn list_roles(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<Vec<RoleResponse>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    let roles = state.admin.list_roles().await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
+    let responses = roles
+        .into_iter()
+        .map(|r| RoleResponse {
+            name: r.name,
+            description: r.description,
+            permissions: r.permissions,
+            users: r.users,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            metadata: r.metadata,
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(responses)))
 }
 
 pub async fn create_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
-    Ok(Json(ApiResponse::success(RoleResponse {
+    let create_req = crate::services::admin::CreateRoleRequest {
         name: request.name,
         description: request.description,
         permissions: request.permissions,
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: request.metadata.unwrap_or_default(),
+        metadata: request.metadata,
+    };
+
+    let role = state.admin.create_role(create_req).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
+    Ok(Json(ApiResponse::success(RoleResponse {
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 
@@ -1012,27 +1066,46 @@ pub async fn get_role(
 }
 
 pub async fn update_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(role_name): Path<String>,
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
-    Ok(Json(ApiResponse::success(RoleResponse {
-        name: role_name,
+    let update_req = crate::services::admin::CreateRoleRequest {
+        name: role_name.clone(),
         description: request.description,
         permissions: request.permissions,
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: request.metadata.unwrap_or_default(),
+        metadata: request.metadata,
+    };
+
+    let role = state.admin.update_role(&role_name, update_req).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
+    Ok(Json(ApiResponse::success(RoleResponse {
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 
 pub async fn delete_role(
-    State(_state): State<AppState>,
-    Path(_role_name): Path<String>,
+    State(state): State<AppState>,
+    Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    state.admin.delete_role(&role_name).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
     Ok(Json(ApiResponse::success(
-        serde_json::json!({"status": "deleted"}),
+        serde_json::json!({"status": "deleted", "role": role_name}),
     )))
 }
 
@@ -1116,6 +1189,36 @@ pub async fn get_security_incident(
         updated_at: chrono::Utc::now(),
         resolved_at: None,
     })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    pub start_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub end_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub user_id: Option<String>,
+    pub action: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn list_audit_logs(
+    State(state): State<AppState>,
+    Query(query): Query<AuditQuery>,
+) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::AuditLogEntry>>>> {
+    let logs = state
+        .admin
+        .get_audit_logs(
+            query.start_time,
+            query.end_time,
+            query.user_id.as_deref(),
+            query.action.as_deref(),
+            query.limit,
+        )
+        .await
+        .map_err(|e| secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(ApiResponse::success(logs)))
 }
 
 // --- Backup Endpoints ---
