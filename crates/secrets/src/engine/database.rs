@@ -170,9 +170,11 @@ impl DatabaseEngine {
         }
     }
 
-    /// Checks backend connectivity when leases are present.
-    /// This does NOT validate individual leases — stale leases (referencing
-    /// dropped users) will be cleaned up by the background TTL task.
+    /// Checks backend connectivity.
+    /// Returns an error if the backend fails the connection test, allowing
+    /// callers (e.g. `init`) to roll back configuration changes.
+    /// When no leases are present the check is skipped (no active credentials
+    /// depend on the connection).
     pub async fn check_backend_connectivity(&self) -> SecretResult<()> {
         let lease_count = {
             let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
@@ -184,11 +186,16 @@ impl DatabaseEngine {
         }
 
         if let Some(backend) = &self.backend {
-            if let Err(e) = backend.test_connection().await {
-                tracing::warn!("Failed to connect to database backend during lease validation: {}. Loaded {} leases may be stale or orphaned.", e, lease_count);
-            } else {
-                tracing::info!("Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.", lease_count);
-            }
+            backend.test_connection().await.map_err(|e| {
+                tracing::error!(
+                    "Failed to connect to database backend: {}. {} leases may be stale or orphaned.",
+                    e, lease_count
+                );
+                SecretError::BackendConnectionFailed(format!(
+                    "Database connectivity check failed: {}", e
+                ))
+            })?;
+            tracing::info!("Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.", lease_count);
         } else {
             tracing::warn!("Database backend not initialized during lease validation. {} leases loaded without backend validation.", lease_count);
         }
@@ -489,10 +496,10 @@ impl SecretEngine for DatabaseEngine {
                      self.detect_database_type(&cfg.connection_url)?;
 
                      let old_config = std::mem::replace(&mut self.config, cfg);
-                     let old_backend = self.backend.take();
 
                      // Initialize backend only if enabled to avoid wasteful resource allocation
                      if config.enabled {
+                         let old_backend = self.backend.take();
                          if let Err(e) = self.init_backend() {
                              // Rollback on failure
                              self.config = old_config;
