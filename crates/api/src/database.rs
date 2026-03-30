@@ -92,8 +92,12 @@ impl DatabaseApiState {
 
         // Spawn background task for TTL enforcement.
         // We collect expired IDs under a brief read lock, then revoke each
-        // lease individually so the RwLock is not held across all the async
-        // network I/O, allowing write operations to proceed between revocations.
+        // lease individually, releasing the RwLock between revocations so that
+        // write operations (e.g. configure_database) can proceed between leases.
+        // Note: the read lock IS held for the duration of each individual
+        // revoke_lease call (which includes async network I/O), blocking
+        // writers during that time. This is acceptable because individual
+        // revocations are expected to be fast.
         let background_engine = engine_arc.clone();
         let ttl_task = tokio::spawn(async move {
             let period = std::time::Duration::from_secs(60);
@@ -114,9 +118,10 @@ impl DatabaseApiState {
                     }
                 }; // read lock released here
 
-                // Phase 2: revoke each lease, acquiring and releasing the read lock per lease
-                // so that write operations (e.g. configure_database) are not blocked
-                // across the async network I/O inside revoke_lease.
+                // Phase 2: revoke each lease individually.
+                // The read lock is held for each revoke_lease call (including its
+                // async network I/O) but released between leases, giving writers a
+                // window to acquire the write lock between revocations.
                 for lease_id in &expired_ids {
                     let result = {
                         let engine_read = background_engine.read().await;

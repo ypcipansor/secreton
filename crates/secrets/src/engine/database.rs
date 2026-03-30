@@ -135,10 +135,10 @@ impl DatabaseEngine {
                     "AES-256-GCM" | "aes-256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
                     "ChaCha20-Poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
                     other => {
-                        // Backward compat: try serde deserialization, then substring matching
+                        // Backward compat: try serde deserialization, then specific substring matching
                         serde_json::from_str::<secreton_crypto::AlgorithmId>(other)
                             .or_else(|_| {
-                                if other.contains("Aes256Gcm") || other.contains("AES") || other.contains("aes") {
+                                if other.contains("Aes256Gcm") || other.contains("aes-256-gcm") {
                                     Ok(secreton_crypto::AlgorithmId::Aes256Gcm)
                                 } else if other.contains("ChaCha20") || other.contains("chacha20") {
                                     Ok(secreton_crypto::AlgorithmId::ChaCha20Poly1305)
@@ -403,7 +403,7 @@ impl DatabaseEngine {
 
         Ok(leases.iter().filter_map(|(id, info)| {
             if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(&info.created_at) {
-                let expiration = created_at + chrono::Duration::seconds(info.lease_duration as i64);
+                let expiration = created_at + chrono::TimeDelta::seconds(info.lease_duration as i64);
                 if now > expiration {
                     Some(id.clone())
                 } else {
@@ -414,28 +414,6 @@ impl DatabaseEngine {
                 Some(id.clone())
             }
         }).collect())
-    }
-
-    /// Automatically revoke leases that have exceeded their TTL
-    pub async fn revoke_expired_leases(&self) -> SecretResult<()> {
-        let expired_lease_ids = self.collect_expired_lease_ids()?;
-
-        let mut revoked_count = 0;
-        for lease_id in &expired_lease_ids {
-            match self.revoke_lease(lease_id).await {
-                Ok(_) => {
-                    tracing::info!("Successfully revoked expired lease {}", lease_id);
-                    revoked_count += 1;
-                }
-                Err(e) => tracing::error!("Failed to revoke expired lease {}: {}", lease_id, e),
-            }
-        }
-
-        if revoked_count > 0 {
-            tracing::info!("Revoked {} expired leases out of {} identified", revoked_count, expired_lease_ids.len());
-        }
-
-        Ok(())
     }
 
     /// Revoke a lease
