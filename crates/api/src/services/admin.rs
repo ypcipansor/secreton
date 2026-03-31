@@ -2157,6 +2157,26 @@ impl AdminService {
         }
 
         let path = format!("{}{}", USER_STORAGE_PREFIX, username);
+
+        // Read the user record before deletion so we can extract the UUID for
+        // cascade-deleting owned secrets. The stored document is the full
+        // `secreton_auth::User` struct which contains an `id` field (UUID string).
+        let owner_uuid = if let Ok(Some(entry)) = self.storage.get_by_path(&path).await {
+            if let Ok(raw_data) = self.decrypt_entry_data(&entry).await {
+                if let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&raw_data) {
+                    doc.get("id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let deleted = self
             .storage
             .delete_by_path(&path)
@@ -2168,7 +2188,7 @@ impl AdminService {
         }
 
         // Cascade delete: Remove all secrets owned by this user
-        if let Ok(owner_uuid) = uuid::Uuid::parse_str(username) {
+        if let Some(owner_uuid) = owner_uuid {
             let query_params = secreton_storage::QueryParams::new().with_owner(owner_uuid);
 
             if let Ok(secrets) = self.storage.list(&query_params).await {
