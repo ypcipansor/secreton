@@ -2025,6 +2025,7 @@ impl AdminService {
             entry.id = original_entry.id;
             entry.path = original_entry.path.clone();
             entry.created_at = original_entry.created_at;
+            entry.owner_id = original_entry.owner_id;
             self.storage
                 .update(&entry)
                 .await
@@ -2104,6 +2105,7 @@ impl AdminService {
         entry.id = original_entry.id;
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
+        entry.owner_id = original_entry.owner_id;
         self.storage
             .update(&entry)
             .await
@@ -2156,6 +2158,7 @@ impl AdminService {
         entry.id = original_entry.id;
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
+        entry.owner_id = original_entry.owner_id;
         self.storage
             .update(&entry)
             .await
