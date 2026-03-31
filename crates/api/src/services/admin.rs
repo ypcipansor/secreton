@@ -1693,7 +1693,7 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
         {
-            return Err(AdminError::Internal(anyhow::anyhow!("Role already exists")));
+            return Err(AdminError::InvalidConfig(format!("Role '{}' already exists", request.name)));
         }
 
         let now = chrono::Utc::now();

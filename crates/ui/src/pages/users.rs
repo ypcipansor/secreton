@@ -30,7 +30,8 @@ pub fn UsersList() -> impl IntoView {
     );
 
     let handle_delete = move |id: String, username: String| {
-        if !web_sys::window().unwrap().confirm_with_message(&format!("Delete user {}?", username)).unwrap_or(false) {
+        let Some(window) = web_sys::window() else { return };
+        if !window.confirm_with_message(&format!("Delete user {}?", username)).unwrap_or(false) {
             return;
         }
         spawn_local(async move {
