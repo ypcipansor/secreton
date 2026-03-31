@@ -521,19 +521,9 @@ pub async fn create_user(
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
-    let create_request = CreateUserRequest {
-        username: request.username,
-        email: request.email,
-        password: request.password,
-        full_name: request.full_name,
-        enabled: request.enabled,
-        roles: request.roles,
-        permissions: request.permissions,
-        metadata: request.metadata,
-    };
 
     let user: crate::services::admin::UserInfo =
-        state.admin.create_user(create_request).await.map_err(map_admin_error)?;
+        state.admin.create_user(request).await.map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -623,7 +613,6 @@ pub async fn delete_user(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(username): Path<String>,
-    Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
     state

@@ -104,6 +104,7 @@ pub struct CreateUserRequest {
     pub roles: Vec<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
+    #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 }
 
@@ -2334,61 +2335,6 @@ impl AdminService {
             AdminError::Internal(anyhow::anyhow!("Failed to extract UserInfo: {}", e))
         })?;
         Ok(user)
-    }
-
-    /// Helper method to convert UserInfo to SecretEntry for storage
-    async fn user_info_to_secreton_entry(
-        &self,
-        user: &UserInfo,
-    ) -> Result<secreton_storage::SecretEntry, AdminError> {
-        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
-
-        let user_data = serde_json::to_vec(user).map_err(|e| {
-            AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
-        })?;
-
-        // Create encryption metadata
-        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
-            let enc = crypto
-                .encrypt_data(&user_data)
-                .await
-                .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
-            (
-                enc,
-                EncryptionMetadata {
-                    algorithm: "encrypted".to_string(),
-                    key_id: "active".to_string(),
-                    iv: vec![],
-                    auth_tag: None,
-                    aad: None,
-                    kdf_params: None,
-                },
-            )
-        } else {
-            // Fallback for tests or if crypto not configured (should not happen in prod)
-            (
-                user_data,
-                EncryptionMetadata {
-                    algorithm: "none".to_string(),
-                    key_id: "none".to_string(),
-                    iv: vec![],
-                    auth_tag: None,
-                    aad: None,
-                    kdf_params: None,
-                },
-            )
-        };
-
-        let user_id = uuid::Uuid::parse_str(&user.id)
-            .map_err(|e| AdminError::Internal(anyhow::anyhow!("Invalid user ID: {}", e)))?;
-
-        Ok(SecretEntry::new(
-            format!("{}{}", USER_STORAGE_PREFIX, user.username),
-            encrypted_data,
-            encryption_metadata,
-            SecurityLevel::Secret,
-            user_id, // owner_id
-        ))
     }
 
     /// Helper method to convert SecretEntry to UserInfo
