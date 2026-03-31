@@ -1200,7 +1200,7 @@ pub async fn update_config(
     // Return mock config
     Ok(Json(ApiResponse::success(SystemConfig {
         api: ApiConfigInfo {
-            version: "1.0.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             bind_address: "0.0.0.0:8080".to_string(),
             max_connections: 1000,
             timeout: 30,

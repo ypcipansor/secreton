@@ -2311,12 +2311,26 @@ impl AdminService {
     /// Extract a `UserInfo` view from an already-parsed `serde_json::Value`.
     /// This is used after raw-JSON updates so we can return a `UserInfo` to
     /// the caller without a second storage round-trip.
+    ///
+    /// NOTE: The stored `User` struct has `email: Option<String>`, but `UserInfo`
+    /// expects `email: String`. We normalise `null` → `""` before deserialising
+    /// so that users created without an email don't cause a type-mismatch error.
     fn secreton_entry_to_user_info_from_value(
         &self,
         doc: &serde_json::Value,
     ) -> Result<UserInfo, AdminError> {
+        let mut doc = doc.clone();
+        // Normalise null email to empty string to match UserInfo's non-optional field.
+        if let Some(obj) = doc.as_object_mut() {
+            if matches!(obj.get("email"), None | Some(serde_json::Value::Null)) {
+                obj.insert(
+                    "email".to_string(),
+                    serde_json::Value::String(String::new()),
+                );
+            }
+        }
         // Deserialize only the UserInfo subset; unknown fields are ignored by serde.
-        let user: UserInfo = serde_json::from_value(doc.clone()).map_err(|e| {
+        let user: UserInfo = serde_json::from_value(doc).map_err(|e| {
             AdminError::Internal(anyhow::anyhow!("Failed to extract UserInfo: {}", e))
         })?;
         Ok(user)
@@ -2378,6 +2392,10 @@ impl AdminService {
     }
 
     /// Helper method to convert SecretEntry to UserInfo
+    ///
+    /// NOTE: The stored `User` struct has `email: Option<String>`, but `UserInfo`
+    /// expects `email: String`. We normalise `null` → `""` before deserialising
+    /// so that users with a null email don't cause a type-mismatch error.
     async fn secreton_entry_to_user_info(
         &self,
         entry: &secreton_storage::SecretEntry,
@@ -2395,7 +2413,19 @@ impl AdminService {
             entry.encrypted_data.clone()
         };
 
-        let user: UserInfo = serde_json::from_slice(&data).map_err(|e| {
+        // Parse as Value first so we can normalise null email.
+        let mut doc: serde_json::Value = serde_json::from_slice(&data).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
+        })?;
+        if let Some(obj) = doc.as_object_mut() {
+            if matches!(obj.get("email"), None | Some(serde_json::Value::Null)) {
+                obj.insert(
+                    "email".to_string(),
+                    serde_json::Value::String(String::new()),
+                );
+            }
+        }
+        let user: UserInfo = serde_json::from_value(doc).map_err(|e| {
             AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
         })?;
         Ok(user)
