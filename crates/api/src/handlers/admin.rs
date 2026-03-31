@@ -946,12 +946,29 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
     }
 }
 
+/// Verify that the authenticated user has admin privileges.
+/// Returns an authorization error if the user is not a superuser and does not
+/// hold the "admin" or "root" role.
+fn require_admin(user: &secreton_auth::User) -> Result<(), crate::ApiError> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 // Stub implementations for missing handlers
 
 pub async fn get_user_roles(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
+    require_admin(&user)?;
     let roles = state.admin.get_user_roles(&user_id).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(roles)))
@@ -959,9 +976,11 @@ pub async fn get_user_roles(
 
 pub async fn assign_user_roles(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
     Json(request): Json<AssignRolesRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     state
         .admin
         .assign_user_roles(&user_id, request.roles)
@@ -975,8 +994,10 @@ pub async fn assign_user_roles(
 
 pub async fn get_user_permissions(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
+    require_admin(&user)?;
     let permissions = state.admin.get_user_permissions(&user_id).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(permissions)))
@@ -984,7 +1005,9 @@ pub async fn get_user_permissions(
 
 pub async fn list_roles(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<RoleResponse>>>> {
+    require_admin(&user)?;
     let roles = state.admin.list_roles().await.map_err(map_admin_error)?;
 
     let responses = roles
@@ -1005,8 +1028,10 @@ pub async fn list_roles(
 
 pub async fn create_role(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
     let create_req = crate::services::admin::CreateRoleRequest {
         name: request.name,
         description: request.description,
@@ -1029,8 +1054,10 @@ pub async fn create_role(
 
 pub async fn get_role(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
     let role = state.admin.get_role(&role_name).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
@@ -1046,9 +1073,11 @@ pub async fn get_role(
 
 pub async fn update_role(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
     let update_req = crate::services::admin::CreateRoleRequest {
         name: role_name.clone(),
         description: request.description,
@@ -1071,8 +1100,10 @@ pub async fn update_role(
 
 pub async fn delete_role(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     state.admin.delete_role(&role_name).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(
@@ -1173,8 +1204,10 @@ pub struct AuditQuery {
 
 pub async fn list_audit_logs(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(query): Query<AuditQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::AuditLogEntry>>>> {
+    require_admin(&user)?;
     let limit = Some(query.limit.unwrap_or(1000));
     let logs = state
         .admin
