@@ -1710,6 +1710,7 @@ impl AdminService {
 
     /// Validate that a role name is safe for use in storage paths and URL path segments.
     /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
+    /// Double-dots (`..`) are explicitly rejected to prevent path traversal.
     fn validate_role_name(name: &str) -> Result<(), AdminError> {
         if name.is_empty() || name.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
@@ -1719,6 +1720,11 @@ impl AdminService {
         if name.len() > 256 {
             return Err(AdminError::InvalidConfig(
                 "Role name is too long (max 256 characters)".to_string(),
+            ));
+        }
+        if name.contains("..") {
+            return Err(AdminError::InvalidConfig(
+                "Role name cannot contain '..' (path traversal)".to_string(),
             ));
         }
         if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
@@ -1930,6 +1936,7 @@ impl AdminService {
 
     /// Validate that a username is safe for use in storage paths and URL path segments.
     /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
+    /// Double-dots (`..`) are explicitly rejected to prevent path traversal.
     fn validate_username(username: &str) -> Result<(), AdminError> {
         if username.is_empty() || username.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
@@ -1939,6 +1946,11 @@ impl AdminService {
         if username.len() > 256 {
             return Err(AdminError::InvalidConfig(
                 "Username is too long (max 256 characters)".to_string(),
+            ));
+        }
+        if username.contains("..") {
+            return Err(AdminError::InvalidConfig(
+                "Username cannot contain '..' (path traversal)".to_string(),
             ));
         }
         if !username.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
