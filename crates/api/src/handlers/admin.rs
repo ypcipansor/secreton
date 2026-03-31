@@ -434,11 +434,7 @@ pub async fn list_users(
             .admin
             .list_users()
             .await
-            .map_err(|e: crate::services::admin::AdminError| {
-                secreton_errors::SecretonError::Internal {
-                    message: e.to_string(),
-                }
-            })?;
+            .map_err(map_admin_error)?;
 
     let user_responses: Vec<UserResponse> = users
         .into_iter()
@@ -476,11 +472,7 @@ pub async fn create_user(
     };
 
     let user: crate::services::admin::UserInfo =
-        state.admin.create_user(create_request).await.map_err(
-            |e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            },
-        )?;
+        state.admin.create_user(create_request).await.map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -511,11 +503,7 @@ pub async fn get_user(
             .admin
             .get_user(&user_id)
             .await
-            .map_err(|e: crate::services::admin::AdminError| {
-                secreton_errors::SecretonError::Internal {
-                    message: e.to_string(),
-                }
-            })?;
+            .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -550,11 +538,7 @@ pub async fn update_user(
         .admin
         .update_user(&user_id, update_request)
         .await
-        .map_err(|e: crate::services::admin::AdminError| {
-            secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -582,11 +566,7 @@ pub async fn delete_user(
         .admin
         .delete_user(&user_id)
         .await
-        .map_err(|e: crate::services::admin::AdminError| {
-            secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "User deleted successfully"
@@ -846,11 +826,7 @@ pub async fn get_security_incidents(
 pub async fn run_garbage_collection(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.run_garbage_collection().await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": "Garbage collection completed",
@@ -866,11 +842,7 @@ pub async fn run_garbage_collection(
 pub async fn compact_database(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.compact_database().await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let result = state.admin.compact_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": "Database compaction completed",
@@ -951,17 +923,31 @@ async fn check_auth_health(_state: &AppState) -> String {
     }
 }
 
+/// Map AdminError to the appropriate SecretonError variant for proper HTTP status codes.
+fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::SecretonError {
+    match e {
+        crate::services::admin::AdminError::NotFound(msg) => {
+            secreton_errors::SecretonError::NotFound { resource: msg }
+        }
+        crate::services::admin::AdminError::NotPermitted(msg) => {
+            secreton_errors::SecretonError::Authorization { message: msg }
+        }
+        crate::services::admin::AdminError::InvalidConfig(msg) => {
+            secreton_errors::SecretonError::Validation { message: msg }
+        }
+        other => secreton_errors::SecretonError::Internal {
+            message: other.to_string(),
+        },
+    }
+}
+
 // Stub implementations for missing handlers
 
 pub async fn get_user_roles(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    let roles = state.admin.get_user_roles(&user_id).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let roles = state.admin.get_user_roles(&user_id).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(roles)))
 }
@@ -975,9 +961,7 @@ pub async fn assign_user_roles(
         .admin
         .assign_user_roles(&user_id, request.roles)
         .await
-        .map_err(|e| secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        })?;
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "updated"}),
@@ -988,11 +972,7 @@ pub async fn get_user_permissions(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    let permissions = state.admin.get_user_permissions(&user_id).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let permissions = state.admin.get_user_permissions(&user_id).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }
@@ -1000,11 +980,7 @@ pub async fn get_user_permissions(
 pub async fn list_roles(
     State(state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<Vec<RoleResponse>>>> {
-    let roles = state.admin.list_roles().await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let roles = state.admin.list_roles().await.map_err(map_admin_error)?;
 
     let responses = roles
         .into_iter()
@@ -1033,11 +1009,7 @@ pub async fn create_role(
         metadata: request.metadata,
     };
 
-    let role = state.admin.create_role(create_req).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let role = state.admin.create_role(create_req).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1054,11 +1026,7 @@ pub async fn get_role(
     State(state): State<AppState>,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
-    let role = state.admin.get_role(&role_name).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let role = state.admin.get_role(&role_name).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1083,11 +1051,7 @@ pub async fn update_role(
         metadata: request.metadata,
     };
 
-    let role = state.admin.update_role(&role_name, update_req).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    let role = state.admin.update_role(&role_name, update_req).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1104,11 +1068,7 @@ pub async fn delete_role(
     State(state): State<AppState>,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    state.admin.delete_role(&role_name).await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    state.admin.delete_role(&role_name).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "deleted", "role": role_name}),
@@ -1220,9 +1180,7 @@ pub async fn list_audit_logs(
             query.limit,
         )
         .await
-        .map_err(|e| secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        })?;
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(logs)))
 }
