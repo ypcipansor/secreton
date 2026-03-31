@@ -1134,6 +1134,10 @@ impl axum::response::IntoResponse for ApiError {
             SecretonError::Parse { message } => {
                 (axum::http::StatusCode::BAD_REQUEST, message.clone())
             }
+            SecretonError::ServiceUnavailable { service } => (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                format!("Service unavailable: {}", service),
+            ),
             SecretonError::MfaRequired => (
                 axum::http::StatusCode::UNAUTHORIZED,
                 "MFA required".to_string(),
