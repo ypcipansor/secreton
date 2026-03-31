@@ -1922,32 +1922,32 @@ impl AdminService {
         Ok(users)
     }
 
-    /// Validate that a user ID is safe for use in storage paths.
-    fn validate_user_id(user_id: &str) -> Result<(), AdminError> {
-        if user_id.is_empty() || user_id.trim().is_empty() {
+    /// Validate that a username is safe for use in storage paths.
+    fn validate_username(username: &str) -> Result<(), AdminError> {
+        if username.is_empty() || username.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
-                "User ID cannot be empty".to_string(),
+                "Username cannot be empty".to_string(),
             ));
         }
-        if user_id.contains('/') || user_id.contains('\\') || user_id.contains("..") || user_id.contains('\0')
+        if username.contains('/') || username.contains('\\') || username.contains("..") || username.contains('\0')
         {
             return Err(AdminError::InvalidConfig(
-                "User ID contains invalid characters".to_string(),
+                "Username contains invalid characters".to_string(),
             ));
         }
         Ok(())
     }
 
-    /// Get user by ID
-    pub async fn get_user(&self, user_id: &str) -> Result<UserInfo, AdminError> {
-        Self::validate_user_id(user_id)?;
-        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+    /// Get user by username
+    pub async fn get_user(&self, username: &str) -> Result<UserInfo, AdminError> {
+        Self::validate_username(username)?;
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         let entry = self
             .storage
             .get_by_path(&path)
             .await
             .map_err(AdminError::Storage)?
-            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", username)))?;
 
         self.secreton_entry_to_user_info(&entry).await
     }
@@ -1967,19 +1967,63 @@ impl AdminService {
             .await
             .map_err(AdminError::Auth)?;
 
+        // Persist caller-supplied metadata and full_name/enabled via raw-JSON
+        // update, since auth.create_user does not forward these fields.
+        let has_extra_fields = !request.metadata.is_empty()
+            || request.full_name.is_some()
+            || request.enabled == Some(false);
+
+        if has_extra_fields {
+            let path = format!("{}{}", USER_STORAGE_PREFIX, user.username);
+            if let Ok(Some(original_entry)) = self.storage.get_by_path(&path).await {
+                if let Ok(raw_data) = self.decrypt_entry_data(&original_entry).await {
+                    if let Ok(mut doc) =
+                        serde_json::from_slice::<serde_json::Value>(&raw_data)
+                    {
+                        if !request.metadata.is_empty() {
+                            if let Ok(meta_val) = serde_json::to_value(&request.metadata) {
+                                doc["metadata"] = meta_val;
+                            }
+                        }
+                        if let Some(full_name) = &request.full_name {
+                            doc["full_name"] = serde_json::Value::String(full_name.clone());
+                        }
+                        if let Some(false) = request.enabled {
+                            doc["enabled"] = serde_json::Value::Bool(false);
+                        }
+
+                        if let Ok(updated_bytes) = serde_json::to_vec(&doc) {
+                            if let Ok(mut entry) =
+                                self.build_encrypted_entry(&updated_bytes, &original_entry.path).await
+                            {
+                                entry.id = original_entry.id;
+                                entry.path = original_entry.path.clone();
+                                entry.created_at = original_entry.created_at;
+                                let _ = self.storage.update(&entry).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Map User to UserInfo
         Ok(UserInfo {
             id: user.id,
             username: user.username,
             email: user.email.unwrap_or_default(),
-            full_name: user.full_name,
-            enabled: user.enabled,
+            full_name: request.full_name.or(user.full_name),
+            enabled: request.enabled.unwrap_or(user.enabled),
             roles: user.roles,
             permissions: user.permissions,
             last_login: user.last_login,
             created_at: user.created_at,
             updated_at: user.updated_at,
-            metadata: user.metadata,
+            metadata: if request.metadata.is_empty() {
+                user.metadata
+            } else {
+                request.metadata
+            },
         })
     }
 
@@ -1993,17 +2037,17 @@ impl AdminService {
     /// writing the complete document back.
     pub async fn update_user(
         &self,
-        user_id: &str,
+        username: &str,
         request: UpdateUserRequest,
     ) -> Result<UserInfo, AdminError> {
-        Self::validate_user_id(user_id)?;
-        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        Self::validate_username(username)?;
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         let original_entry = self
             .storage
             .get_by_path(&path)
             .await
             .map_err(AdminError::Storage)?
-            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", username)))?;
 
         // Decrypt to raw bytes
         let raw_data = self.decrypt_entry_data(&original_entry).await?;
@@ -2046,8 +2090,8 @@ impl AdminService {
     }
 
     /// Get user roles
-    pub async fn get_user_roles(&self, user_id: &str) -> Result<Vec<String>, AdminError> {
-        let user = self.get_user(user_id).await?;
+    pub async fn get_user_roles(&self, username: &str) -> Result<Vec<String>, AdminError> {
+        let user = self.get_user(username).await?;
         Ok(user.roles)
     }
 
@@ -2057,17 +2101,17 @@ impl AdminService {
     /// from the stored `User` struct (see `update_user` for details).
     pub async fn assign_user_roles(
         &self,
-        user_id: &str,
+        username: &str,
         roles: Vec<String>,
     ) -> Result<(), AdminError> {
-        Self::validate_user_id(user_id)?;
-        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        Self::validate_username(username)?;
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         let original_entry = self
             .storage
             .get_by_path(&path)
             .await
             .map_err(AdminError::Storage)?
-            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", username)))?;
 
         // Decrypt to raw bytes
         let raw_data = self.decrypt_entry_data(&original_entry).await?;
@@ -2097,22 +2141,22 @@ impl AdminService {
     }
 
     /// Get user permissions
-    pub async fn get_user_permissions(&self, user_id: &str) -> Result<Vec<String>, AdminError> {
-        let user = self.get_user(user_id).await?;
+    pub async fn get_user_permissions(&self, username: &str) -> Result<Vec<String>, AdminError> {
+        let user = self.get_user(username).await?;
         Ok(user.permissions)
     }
 
-    /// Delete a user
-    pub async fn delete_user(&self, user_id: &str) -> Result<(), AdminError> {
-        Self::validate_user_id(user_id)?;
-        // Prevent deletion of admin user
-        if user_id == "user_1" {
+    /// Delete a user by username
+    pub async fn delete_user(&self, username: &str) -> Result<(), AdminError> {
+        Self::validate_username(username)?;
+        // Prevent deletion of the default admin user
+        if username == "admin" {
             return Err(AdminError::NotPermitted(
                 "Cannot delete admin user".to_string(),
             ));
         }
 
-        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         let deleted = self
             .storage
             .delete_by_path(&path)
@@ -2120,11 +2164,11 @@ impl AdminService {
             .map_err(AdminError::Storage)?;
 
         if !deleted {
-            return Err(AdminError::NotFound(format!("User {} not found", user_id)));
+            return Err(AdminError::NotFound(format!("User {} not found", username)));
         }
 
         // Cascade delete: Remove all secrets owned by this user
-        if let Ok(owner_uuid) = uuid::Uuid::parse_str(user_id) {
+        if let Ok(owner_uuid) = uuid::Uuid::parse_str(username) {
             let query_params = secreton_storage::QueryParams::new().with_owner(owner_uuid);
 
             if let Ok(secrets) = self.storage.list(&query_params).await {

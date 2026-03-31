@@ -27,12 +27,12 @@ pub fn create_routes() -> Router<AppState> {
         // User management
         .route("/users", get(list_users))
         .route("/users", post(create_user))
-        .route("/users/{user_id}", get(get_user))
-        .route("/users/{user_id}", put(update_user))
-        .route("/users/{user_id}", delete(delete_user))
-        .route("/users/{user_id}/roles", get(get_user_roles))
-        .route("/users/{user_id}/roles", post(assign_user_roles))
-        .route("/users/{user_id}/permissions", get(get_user_permissions))
+        .route("/users/{username}", get(get_user))
+        .route("/users/{username}", put(update_user))
+        .route("/users/{username}", delete(delete_user))
+        .route("/users/{username}/roles", get(get_user_roles))
+        .route("/users/{username}/roles", post(assign_user_roles))
+        .route("/users/{username}/permissions", get(get_user_permissions))
         // Role management
         .route("/roles", get(list_roles))
         .route("/roles", post(create_role))
@@ -555,16 +555,13 @@ pub async fn create_user(
 pub async fn get_user(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
-    // Assuming OAuthUserInfo is a type that can be converted to UserResponse or used to fetch UserInfo
-    // This snippet seems to be a placeholder or from a different context, as `oauth_provider` and `access_token` are not defined here.
-    // The original logic for fetching a user by ID is retained, as the provided snippet is incomplete and inconsistent.
     let user: crate::services::admin::UserInfo =
         state
             .admin
-            .get_user(&user_id)
+            .get_user(&username)
             .await
             .map_err(map_admin_error)?;
 
@@ -588,7 +585,7 @@ pub async fn get_user(
 pub async fn update_user(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
     Json(request): Json<UpdateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
@@ -601,7 +598,7 @@ pub async fn update_user(
 
     let user: crate::services::admin::UserInfo = state
         .admin
-        .update_user(&user_id, update_request)
+        .update_user(&username, update_request)
         .await
         .map_err(map_admin_error)?;
 
@@ -625,13 +622,13 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
     state
         .admin
-        .delete_user(&user_id)
+        .delete_user(&username)
         .await
         .map_err(map_admin_error)?;
 
@@ -1050,10 +1047,10 @@ fn require_admin(user: &secreton_auth::User) -> Result<(), crate::ApiError> {
 pub async fn get_user_roles(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
     require_admin(&user)?;
-    let roles = state.admin.get_user_roles(&user_id).await.map_err(map_admin_error)?;
+    let roles = state.admin.get_user_roles(&username).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(roles)))
 }
@@ -1061,13 +1058,13 @@ pub async fn get_user_roles(
 pub async fn assign_user_roles(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
     Json(request): Json<AssignRolesRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
     state
         .admin
-        .assign_user_roles(&user_id, request.roles)
+        .assign_user_roles(&username, request.roles)
         .await
         .map_err(map_admin_error)?;
 
@@ -1079,10 +1076,10 @@ pub async fn assign_user_roles(
 pub async fn get_user_permissions(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Path(user_id): Path<String>,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
     require_admin(&user)?;
-    let permissions = state.admin.get_user_permissions(&user_id).await.map_err(map_admin_error)?;
+    let permissions = state.admin.get_user_permissions(&username).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }
