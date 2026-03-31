@@ -338,7 +338,18 @@ impl AdminService {
             let enc = crypto.encrypt_data(backup_data.as_bytes()).await.map_err(|e| {
                 AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e))
             })?;
-            (enc, secreton_storage::EncryptionMetadata::default(), true)
+            (
+                enc,
+                secreton_storage::EncryptionMetadata {
+                    algorithm: "encrypted".to_string(),
+                    key_id: "active".to_string(),
+                    iv: Vec::new(),
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+                true,
+            )
         } else {
             (
                 backup_data.as_bytes().to_vec(),
@@ -1695,14 +1706,20 @@ impl AdminService {
 
     /// Validate that a role name is safe for use in storage paths.
     fn validate_role_name(name: &str) -> Result<(), AdminError> {
-        if name.is_empty() {
+        if name.is_empty() || name.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
                 "Role name cannot be empty".to_string(),
             ));
         }
-        if name.contains('/') || name.contains('\\') || name.contains("..") {
+        if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0')
+        {
             return Err(AdminError::InvalidConfig(
                 "Role name contains invalid characters".to_string(),
+            ));
+        }
+        if name.len() > 256 {
+            return Err(AdminError::InvalidConfig(
+                "Role name is too long (max 256 characters)".to_string(),
             ));
         }
         Ok(())
@@ -1757,7 +1774,17 @@ impl AdminService {
                 .encrypt_data(&role_data)
                 .await
                 .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
-            (enc, EncryptionMetadata::default())
+            (
+                enc,
+                EncryptionMetadata {
+                    algorithm: "encrypted".to_string(),
+                    key_id: "active".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
         } else {
             (
                 role_data,
@@ -1895,8 +1922,25 @@ impl AdminService {
         Ok(users)
     }
 
+    /// Validate that a user ID is safe for use in storage paths.
+    fn validate_user_id(user_id: &str) -> Result<(), AdminError> {
+        if user_id.is_empty() || user_id.trim().is_empty() {
+            return Err(AdminError::InvalidConfig(
+                "User ID cannot be empty".to_string(),
+            ));
+        }
+        if user_id.contains('/') || user_id.contains('\\') || user_id.contains("..") || user_id.contains('\0')
+        {
+            return Err(AdminError::InvalidConfig(
+                "User ID contains invalid characters".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Get user by ID
     pub async fn get_user(&self, user_id: &str) -> Result<UserInfo, AdminError> {
+        Self::validate_user_id(user_id)?;
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let entry = self
             .storage
@@ -1945,6 +1989,7 @@ impl AdminService {
         user_id: &str,
         request: UpdateUserRequest,
     ) -> Result<UserInfo, AdminError> {
+        Self::validate_user_id(user_id)?;
         // Fetch the original storage entry once — used both for deserialization and
         // to preserve id/path/created_at when writing back.
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
@@ -1996,6 +2041,7 @@ impl AdminService {
         user_id: &str,
         roles: Vec<String>,
     ) -> Result<(), AdminError> {
+        Self::validate_user_id(user_id)?;
         // Fetch the original storage entry once — used both for deserialization and
         // to preserve id/path/created_at when writing back.
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
@@ -2030,6 +2076,7 @@ impl AdminService {
 
     /// Delete a user
     pub async fn delete_user(&self, user_id: &str) -> Result<(), AdminError> {
+        Self::validate_user_id(user_id)?;
         // Prevent deletion of admin user
         if user_id == "user_1" {
             return Err(AdminError::NotPermitted(
@@ -2082,7 +2129,17 @@ impl AdminService {
                 .encrypt_data(&user_data)
                 .await
                 .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
-            (enc, EncryptionMetadata::default())
+            (
+                enc,
+                EncryptionMetadata {
+                    algorithm: "encrypted".to_string(),
+                    key_id: "active".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
         } else {
             // Fallback for tests or if crypto not configured (should not happen in prod)
             (
