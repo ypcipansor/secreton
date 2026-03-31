@@ -79,6 +79,27 @@ mod tests {
     use std::sync::Arc;
     use uuid::Uuid;
 
+    /// Create a test `ApiServiceContainer` with JWT auth configured.
+    async fn test_services() -> Arc<crate::services::ApiServiceContainer> {
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+        Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        )
+    }
+
+    /// Create a `TestServer` from the given services.
+    fn test_server(services: Arc<crate::services::ApiServiceContainer>) -> TestServer {
+        let app = create_routes().with_state(services.into());
+        use std::net::SocketAddr;
+        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server")
+    }
+
     /// Generate a valid admin JWT token for use in tests.
     async fn admin_token(services: &Arc<crate::services::ApiServiceContainer>) -> String {
         let admin_user = secreton_auth::User {
@@ -113,15 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_users_returns_placeholder_user() {
-        let mut config = ApiConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
+        let services = test_services().await;
 
         // Seed admin user
         let user_info = crate::services::admin::UserInfo {
@@ -148,12 +161,7 @@ mod tests {
         services.storage.store(&entry).await.expect("Failed to store seeded user");
 
         let token = admin_token(&services).await;
-        let server = {
-            let app = create_routes().with_state(services.into());
-            use std::net::SocketAddr;
-            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-                .expect("Failed to start test server")
-        };
+        let server = test_server(services);
 
         let response = server
             .get("/users")
@@ -180,21 +188,9 @@ mod tests {
             metadata: None,
         };
 
-        let mut config = ApiConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
+        let services = test_services().await;
         let token = admin_token(&services).await;
-
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("Failed to start test server");
+        let server = test_server(services);
 
         let response = server
             .post("/roles")
@@ -215,21 +211,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_config_returns_security_info() {
-        let mut config = ApiConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
+        let services = test_services().await;
         let token = admin_token(&services).await;
-
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("Failed to start test server");
+        let server = test_server(services);
 
         let response = server
             .get("/config")
@@ -249,21 +233,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_security_scan() {
-        let mut config = ApiConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
+        let services = test_services().await;
         let token = admin_token(&services).await;
-
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("Failed to start test server");
+        let server = test_server(services);
 
         let response = server
             .post("/security/scan")
@@ -579,16 +551,10 @@ pub async fn update_user(
     Json(request): Json<UpdateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
-    let update_request = UpdateUserRequest {
-        email: request.email,
-        full_name: request.full_name,
-        enabled: request.enabled,
-        roles: request.roles,
-    };
 
     let user: crate::services::admin::UserInfo = state
         .admin
-        .update_user(&username, update_request)
+        .update_user(&username, request)
         .await
         .map_err(map_admin_error)?;
 

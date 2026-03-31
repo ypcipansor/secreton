@@ -1708,22 +1708,22 @@ impl AdminService {
         Ok(roles)
     }
 
-    /// Validate that a role name is safe for use in storage paths.
+    /// Validate that a role name is safe for use in storage paths and URL path segments.
+    /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
     fn validate_role_name(name: &str) -> Result<(), AdminError> {
         if name.is_empty() || name.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
                 "Role name cannot be empty".to_string(),
             ));
         }
-        if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0')
-        {
-            return Err(AdminError::InvalidConfig(
-                "Role name contains invalid characters".to_string(),
-            ));
-        }
         if name.len() > 256 {
             return Err(AdminError::InvalidConfig(
                 "Role name is too long (max 256 characters)".to_string(),
+            ));
+        }
+        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+            return Err(AdminError::InvalidConfig(
+                "Role name contains invalid characters (only alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
         }
         Ok(())
@@ -1928,22 +1928,22 @@ impl AdminService {
         Ok(users)
     }
 
-    /// Validate that a username is safe for use in storage paths.
+    /// Validate that a username is safe for use in storage paths and URL path segments.
+    /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
     fn validate_username(username: &str) -> Result<(), AdminError> {
         if username.is_empty() || username.trim().is_empty() {
             return Err(AdminError::InvalidConfig(
                 "Username cannot be empty".to_string(),
             ));
         }
-        if username.contains('/') || username.contains('\\') || username.contains("..") || username.contains('\0')
-        {
-            return Err(AdminError::InvalidConfig(
-                "Username contains invalid characters".to_string(),
-            ));
-        }
         if username.len() > 256 {
             return Err(AdminError::InvalidConfig(
                 "Username is too long (max 256 characters)".to_string(),
+            ));
+        }
+        if !username.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+            return Err(AdminError::InvalidConfig(
+                "Username contains invalid characters (only alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
         }
         Ok(())
