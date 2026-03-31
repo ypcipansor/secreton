@@ -1984,14 +1984,19 @@ impl AdminService {
     }
 
     /// Update an existing user
+    ///
+    /// IMPORTANT: Users are stored as the full `secreton_auth::User` struct which
+    /// contains security-critical fields (`password_hash`, `is_superuser`,
+    /// `mfa_enabled`, `failed_login_attempts`, `locked_until`, etc.) that are NOT
+    /// present in `UserInfo`. To avoid destroying those fields we operate on the
+    /// raw JSON (`serde_json::Value`) and only mutate the requested keys before
+    /// writing the complete document back.
     pub async fn update_user(
         &self,
         user_id: &str,
         request: UpdateUserRequest,
     ) -> Result<UserInfo, AdminError> {
         Self::validate_user_id(user_id)?;
-        // Fetch the original storage entry once — used both for deserialization and
-        // to preserve id/path/created_at when writing back.
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let original_entry = self
             .storage
@@ -2000,33 +2005,44 @@ impl AdminService {
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
-        let mut user = self.secreton_entry_to_user_info(&original_entry).await?;
+        // Decrypt to raw bytes
+        let raw_data = self.decrypt_entry_data(&original_entry).await?;
 
-        // Update fields
+        // Parse as generic JSON so we never drop unknown fields
+        let mut doc: serde_json::Value = serde_json::from_slice(&raw_data).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
+        })?;
+
+        // Apply only the requested mutations
         if let Some(email) = request.email {
-            user.email = email;
+            doc["email"] = serde_json::Value::String(email);
         }
         if let Some(full_name) = request.full_name {
-            user.full_name = Some(full_name);
+            doc["full_name"] = serde_json::Value::String(full_name);
         }
         if let Some(enabled) = request.enabled {
-            user.enabled = enabled;
+            doc["enabled"] = serde_json::Value::Bool(enabled);
         }
         if let Some(roles) = request.roles {
-            user.roles = roles;
+            doc["roles"] = serde_json::to_value(&roles).unwrap_or_default();
         }
-        user.updated_at = chrono::Utc::now();
+        doc["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
 
-        let mut entry = self.user_info_to_secreton_entry(&user).await?;
-        entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
-        entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
-        entry.created_at = original_entry.created_at; // Preserve original creation timestamp
+        // Re-encrypt the full document and write back
+        let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
+        })?;
+        let mut entry = self.build_encrypted_entry(&updated_bytes, &original_entry.path).await?;
+        entry.id = original_entry.id;
+        entry.path = original_entry.path.clone();
+        entry.created_at = original_entry.created_at;
         self.storage
             .update(&entry)
             .await
             .map_err(AdminError::Storage)?;
 
-        Ok(user)
+        // Return the UserInfo view to the caller
+        self.secreton_entry_to_user_info_from_value(&doc)
     }
 
     /// Get user roles
@@ -2036,14 +2052,15 @@ impl AdminService {
     }
 
     /// Assign roles to user
+    ///
+    /// Uses raw JSON manipulation to avoid dropping security-critical fields
+    /// from the stored `User` struct (see `update_user` for details).
     pub async fn assign_user_roles(
         &self,
         user_id: &str,
         roles: Vec<String>,
     ) -> Result<(), AdminError> {
         Self::validate_user_id(user_id)?;
-        // Fetch the original storage entry once — used both for deserialization and
-        // to preserve id/path/created_at when writing back.
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let original_entry = self
             .storage
@@ -2052,14 +2069,25 @@ impl AdminService {
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
-        let mut user = self.secreton_entry_to_user_info(&original_entry).await?;
-        user.roles = roles;
-        user.updated_at = chrono::Utc::now();
+        // Decrypt to raw bytes
+        let raw_data = self.decrypt_entry_data(&original_entry).await?;
 
-        let mut entry = self.user_info_to_secreton_entry(&user).await?;
-        entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
-        entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
-        entry.created_at = original_entry.created_at; // Preserve original creation timestamp
+        // Parse as generic JSON so we never drop unknown fields
+        let mut doc: serde_json::Value = serde_json::from_slice(&raw_data).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
+        })?;
+
+        doc["roles"] = serde_json::to_value(&roles).unwrap_or_default();
+        doc["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+
+        // Re-encrypt the full document and write back
+        let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
+        })?;
+        let mut entry = self.build_encrypted_entry(&updated_bytes, &original_entry.path).await?;
+        entry.id = original_entry.id;
+        entry.path = original_entry.path.clone();
+        entry.created_at = original_entry.created_at;
         self.storage
             .update(&entry)
             .await
@@ -2110,6 +2138,92 @@ impl AdminService {
         }
 
         Ok(())
+    }
+
+    /// Decrypt the `encrypted_data` of a storage entry, falling back to
+    /// plaintext when no crypto service is configured or decryption fails.
+    async fn decrypt_entry_data(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> Result<Vec<u8>, AdminError> {
+        if let Some(crypto) = &self.crypto {
+            match crypto.decrypt(&entry.encrypted_data).await {
+                Ok(d) => Ok(d),
+                Err(e) => {
+                    tracing::warn!(
+                        "Decryption failed for entry at {}, falling back to plaintext: {}",
+                        entry.path,
+                        e
+                    );
+                    Ok(entry.encrypted_data.clone())
+                }
+            }
+        } else {
+            Ok(entry.encrypted_data.clone())
+        }
+    }
+
+    /// Build a `SecretEntry` from raw bytes, encrypting if a crypto service is
+    /// available. The caller is responsible for overriding `id`, `path`, and
+    /// `created_at` from the original entry when performing an UPDATE.
+    async fn build_encrypted_entry(
+        &self,
+        data: &[u8],
+        path: &str,
+    ) -> Result<secreton_storage::SecretEntry, AdminError> {
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
+
+        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
+            let enc = crypto
+                .encrypt_data(data)
+                .await
+                .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
+            (
+                enc,
+                EncryptionMetadata {
+                    algorithm: "encrypted".to_string(),
+                    key_id: "active".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
+        } else {
+            (
+                data.to_vec(),
+                EncryptionMetadata {
+                    algorithm: "none".to_string(),
+                    key_id: "none".to_string(),
+                    iv: vec![],
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
+        };
+
+        Ok(SecretEntry::new(
+            path.to_string(),
+            encrypted_data,
+            encryption_metadata,
+            SecurityLevel::Secret,
+            uuid::Uuid::nil(),
+        ))
+    }
+
+    /// Extract a `UserInfo` view from an already-parsed `serde_json::Value`.
+    /// This is used after raw-JSON updates so we can return a `UserInfo` to
+    /// the caller without a second storage round-trip.
+    fn secreton_entry_to_user_info_from_value(
+        &self,
+        doc: &serde_json::Value,
+    ) -> Result<UserInfo, AdminError> {
+        // Deserialize only the UserInfo subset; unknown fields are ignored by serde.
+        let user: UserInfo = serde_json::from_value(doc.clone()).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to extract UserInfo: {}", e))
+        })?;
+        Ok(user)
     }
 
     /// Helper method to convert UserInfo to SecretEntry for storage
