@@ -1709,7 +1709,7 @@ impl AdminService {
     }
 
     /// Validate that a role name is safe for use in storage paths and URL path segments.
-    /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
+    /// Only ASCII alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
     /// Double-dots (`..`) are explicitly rejected to prevent path traversal.
     fn validate_role_name(name: &str) -> Result<(), AdminError> {
         if name.is_empty() || name.trim().is_empty() {
@@ -1727,9 +1727,9 @@ impl AdminService {
                 "Role name cannot contain '..' (path traversal)".to_string(),
             ));
         }
-        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
             return Err(AdminError::InvalidConfig(
-                "Role name contains invalid characters (only alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
+                "Role name contains invalid characters (only ASCII alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
         }
         Ok(())
@@ -1935,7 +1935,7 @@ impl AdminService {
     }
 
     /// Validate that a username is safe for use in storage paths and URL path segments.
-    /// Only alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
+    /// Only ASCII alphanumeric characters, hyphens, underscores, dots, and `@` are allowed.
     /// Double-dots (`..`) are explicitly rejected to prevent path traversal.
     fn validate_username(username: &str) -> Result<(), AdminError> {
         if username.is_empty() || username.trim().is_empty() {
@@ -1953,9 +1953,9 @@ impl AdminService {
                 "Username cannot contain '..' (path traversal)".to_string(),
             ));
         }
-        if !username.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
             return Err(AdminError::InvalidConfig(
-                "Username contains invalid characters (only alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
+                "Username contains invalid characters (only ASCII alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
         }
         Ok(())
@@ -2116,7 +2116,9 @@ impl AdminService {
             doc["enabled"] = serde_json::Value::Bool(enabled);
         }
         if let Some(roles) = request.roles {
-            doc["roles"] = serde_json::to_value(&roles).unwrap_or_default();
+            doc["roles"] = serde_json::to_value(&roles).map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!("Failed to serialize roles: {}", e))
+            })?;
         }
         doc["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
 
@@ -2170,7 +2172,9 @@ impl AdminService {
             AdminError::Internal(anyhow::anyhow!("Failed to deserialize user: {}", e))
         })?;
 
-        doc["roles"] = serde_json::to_value(&roles).unwrap_or_default();
+        doc["roles"] = serde_json::to_value(&roles).map_err(|e| {
+            AdminError::Internal(anyhow::anyhow!("Failed to serialize roles: {}", e))
+        })?;
         doc["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
 
         // Re-encrypt the full document and write back
