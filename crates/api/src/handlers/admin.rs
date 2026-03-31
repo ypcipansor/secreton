@@ -996,6 +996,9 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
         crate::services::admin::AdminError::NotFound(msg) => {
             secreton_errors::SecretonError::NotFound { resource: msg }
         }
+        crate::services::admin::AdminError::AlreadyExists(msg) => {
+            secreton_errors::SecretonError::AlreadyExists { resource: msg }
+        }
         crate::services::admin::AdminError::NotPermitted(msg) => {
             secreton_errors::SecretonError::Authorization { message: msg }
         }
@@ -1005,6 +1008,28 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
         crate::services::admin::AdminError::MaintenanceInProgress => {
             secreton_errors::SecretonError::ServiceUnavailable {
                 service: "admin".to_string(),
+            }
+        }
+        crate::services::admin::AdminError::Auth(auth_err) => {
+            match auth_err {
+                crate::services::auth::AuthError::UserAlreadyExists => {
+                    secreton_errors::SecretonError::AlreadyExists {
+                        resource: "user".to_string(),
+                    }
+                }
+                crate::services::auth::AuthError::UserNotFound => {
+                    secreton_errors::SecretonError::NotFound {
+                        resource: "user".to_string(),
+                    }
+                }
+                crate::services::auth::AuthError::PermissionDenied => {
+                    secreton_errors::SecretonError::Authorization {
+                        message: "Permission denied".to_string(),
+                    }
+                }
+                other => secreton_errors::SecretonError::Internal {
+                    message: other.to_string(),
+                },
             }
         }
         other => secreton_errors::SecretonError::Internal {

@@ -27,6 +27,9 @@ pub enum AdminError {
     #[error("Resource not found: {0}")]
     NotFound(String),
 
+    #[error("Resource already exists: {0}")]
+    AlreadyExists(String),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
@@ -1736,7 +1739,7 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
         {
-            return Err(AdminError::InvalidConfig(format!("Role '{}' already exists", request.name)));
+            return Err(AdminError::AlreadyExists(format!("Role '{}'", request.name)));
         }
 
         let now = chrono::Utc::now();
@@ -1865,10 +1868,12 @@ impl AdminService {
         let original_id = entry.id;
         let original_path = entry.path.clone();
         let original_created_at = entry.created_at;
+        let original_owner_id = entry.owner_id;
         let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
         new_entry.id = original_id; // Preserve original entry ID for UPDATE WHERE id = $1
         new_entry.path = original_path; // Preserve original storage path
         new_entry.created_at = original_created_at; // Preserve original creation timestamp
+        new_entry.owner_id = original_owner_id; // Preserve original ownership
         self.storage
             .update(&new_entry)
             .await
