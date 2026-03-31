@@ -1955,6 +1955,7 @@ impl AdminService {
 
         let mut entry = self.user_info_to_secreton_entry(&user).await?;
         entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
+        entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
         self.storage
             .update(&entry)
             .await
@@ -1989,6 +1990,7 @@ impl AdminService {
 
         let mut entry = self.user_info_to_secreton_entry(&user).await?;
         entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
+        entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
         self.storage
             .update(&entry)
             .await
