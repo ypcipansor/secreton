@@ -2159,7 +2159,7 @@ impl AdminService {
             .map_err(|e| AdminError::Internal(anyhow::anyhow!("Invalid user ID: {}", e)))?;
 
         Ok(SecretEntry::new(
-            format!("{}{}", USER_STORAGE_PREFIX, user.id),
+            format!("{}{}", USER_STORAGE_PREFIX, user.username),
             encrypted_data,
             encryption_metadata,
             SecurityLevel::Secret,

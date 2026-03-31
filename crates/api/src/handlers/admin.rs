@@ -75,101 +75,9 @@ mod tests {
     use crate::config::ApiConfig;
     use crate::services::ApiServiceContainer;
     use axum_test::TestServer;
-    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
     use std::sync::Arc;
     use uuid::Uuid;
-
-    async fn server_with_routes() -> TestServer {
-        let mut config = ApiConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
-
-        // Seed admin user
-        let user = secreton_auth::User {
-            id: uuid::Uuid::new_v4().to_string(),
-            username: "admin".to_string(),
-            email: Some("admin@example.com".to_string()),
-            display_name: Some("Admin User".to_string()),
-            full_name: Some("Admin User".to_string()),
-            roles: vec!["admin".to_string()],
-            policies: vec!["default".to_string()],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            failed_login_attempts: 0,
-            locked_until: None,
-            last_login: None,
-            mfa_enabled: false,
-            mfa_secret: None,
-            password_hash: "mock_hash".to_string(),
-            disabled: false,
-            enabled: true,
-            is_active: true,
-            is_superuser: true,
-            permissions: vec![],
-        };
-        // Simplified: Direct storage injection would be better if we knew the schema,
-        // but assuming we can't easily access storage internal map.
-        // Using auth service if available or just mocking the response if the test mocks the service.
-        // Actually, let's use the service if possible.
-        // But wait, the test fails because it returns 0 users.
-        // We need to inject into the MockStorageBackend.
-        // Since we can't easily access the inner mock map from here without casting,
-        // let's try to use the auth service to create a user if defined,
-        // or assumes MockStorageBackend is used.
-
-        // Let's rely on `server_with_routes` using `InMemorySecretStorage` which is Mock compatible?
-        // No, ApiServiceContainer uses `MockStorageBackend`.
-
-        // Let's try to use a valid `User` struct from `secreton_auth` and save it to storage.
-        // Note: The failure is `test_list_users_returns_placeholder_user` failing on `users.len() == 1`.
-
-        // If I can't easily insert, I will change the test expectation to 0 for now to verify passing,
-        // but the test name says "returns_placeholder_user".
-
-        // A better approach: The failing test expects a user "admin".
-        // Let's manually inject it via the storage interface.
-        // Use crate::services::admin::UserInfo (as expected by list_users deserialization)
-        let user_info = crate::services::admin::UserInfo {
-            id: user.id.clone(),
-            username: user.username.clone(),
-            email: user.email.clone().unwrap(),
-            full_name: None,
-            enabled: true,
-            roles: user.roles.clone(),
-            permissions: vec![],
-            last_login: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            metadata: Default::default(),
-        };
-
-        let user_json = serde_json::to_vec(&user_info).unwrap();
-        // Construct storage entry
-        let entry = SecretEntry::new(
-            "users/admin".to_string(),
-            user_json,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::new_v4(),
-        );
-        services
-            .storage
-            .store(&entry)
-            .await
-            .expect("Failed to store seeded user");
-
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("Failed to start test server")
-    }
 
     /// Generate a valid admin JWT token for use in tests.
     async fn admin_token(services: &Arc<crate::services::ApiServiceContainer>) -> String {
@@ -621,7 +529,7 @@ pub async fn create_user(
         enabled: request.enabled,
         roles: request.roles,
         permissions: request.permissions,
-        metadata: HashMap::new(),
+        metadata: request.metadata,
     };
 
     let user: crate::services::admin::UserInfo =
@@ -1120,8 +1028,11 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
 }
 
 /// Verify that the authenticated user has admin privileges.
-/// Returns an authorization error if the user is not a superuser and does not
-/// hold the "admin" or "root" role.
+/// Returns an authorization error if the user does not hold the "admin" or "root" role.
+///
+/// NOTE: `is_superuser` is checked for forward-compatibility but is currently
+/// always `false` for token-authenticated users because `validate_token`
+/// reconstructs the `User` from JWT claims which do not carry that flag.
 fn require_admin(user: &secreton_auth::User) -> Result<(), crate::ApiError> {
     if !user.is_superuser
         && !user.roles.contains(&"admin".to_string())
