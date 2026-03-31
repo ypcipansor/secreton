@@ -427,8 +427,10 @@ pub struct SecurityIncident {
 /// User management endpoints
 pub async fn list_users(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<UserResponse>>>> {
+    require_admin(&user)?;
     let users: Vec<crate::services::admin::UserInfo> =
         state
             .admin
@@ -458,8 +460,10 @@ pub async fn list_users(
 
 pub async fn create_user(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
+    require_admin(&user)?;
     let create_request = CreateUserRequest {
         username: request.username,
         email: request.email,
@@ -493,8 +497,10 @@ pub async fn create_user(
 
 pub async fn get_user(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
+    require_admin(&user)?;
     // Assuming OAuthUserInfo is a type that can be converted to UserResponse or used to fetch UserInfo
     // This snippet seems to be a placeholder or from a different context, as `oauth_provider` and `access_token` are not defined here.
     // The original logic for fetching a user by ID is retained, as the provided snippet is incomplete and inconsistent.
@@ -524,9 +530,11 @@ pub async fn get_user(
 
 pub async fn update_user(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
     Json(request): Json<UpdateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
+    require_admin(&user)?;
     let update_request = UpdateUserRequest {
         email: request.email,
         full_name: request.full_name,
@@ -559,9 +567,11 @@ pub async fn update_user(
 
 pub async fn delete_user(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(user_id): Path<String>,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     state
         .admin
         .delete_user(&user_id)
@@ -825,7 +835,9 @@ pub async fn get_security_incidents(
 /// Maintenance operations
 pub async fn run_garbage_collection(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
@@ -841,7 +853,9 @@ pub async fn run_garbage_collection(
 
 pub async fn compact_database(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     let result = state.admin.compact_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
