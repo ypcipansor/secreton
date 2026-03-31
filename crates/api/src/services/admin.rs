@@ -1934,8 +1934,17 @@ impl AdminService {
         }
         user.updated_at = chrono::Utc::now();
 
-        // Store updated user
-        let entry = self.user_info_to_secreton_entry(&user).await?;
+        // Store updated user - preserve original entry ID for UPDATE WHERE id = $1
+        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        let original_entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+
+        let mut entry = self.user_info_to_secreton_entry(&user).await?;
+        entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
         self.storage
             .update(&entry)
             .await
@@ -1960,7 +1969,16 @@ impl AdminService {
         user.roles = roles;
         user.updated_at = chrono::Utc::now();
 
-        let entry = self.user_info_to_secreton_entry(&user).await?;
+        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        let original_entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+
+        let mut entry = self.user_info_to_secreton_entry(&user).await?;
+        entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
         self.storage
             .update(&entry)
             .await
