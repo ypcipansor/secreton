@@ -1815,7 +1815,9 @@ impl AdminService {
         role.description = request.description;
         role.permissions = request.permissions;
         role.updated_at = now;
-        role.metadata = request.metadata.unwrap_or_default();
+        if let Some(metadata) = request.metadata {
+            role.metadata = metadata;
+        }
 
         let original_id = entry.id;
         let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
