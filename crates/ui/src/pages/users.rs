@@ -30,14 +30,14 @@ pub fn UsersList() -> impl IntoView {
 
     let (delete_error, set_delete_error) = signal(None::<String>);
 
-    let handle_delete = move |id: String, username: String| {
+    let handle_delete = move |username: String| {
         let Some(window) = web_sys::window() else { return };
         if !window.confirm_with_message(&format!("Delete user {}?", username)).unwrap_or(false) {
             return;
         }
         set_delete_error.set(None);
         spawn_local(async move {
-            let url = format!("/admin/users/{}", id);
+            let url = format!("/admin/users/{}", username);
             match api::delete::<serde_json::Value>(&url).await {
                 Ok(_) => {
                     users_resource.refetch();
@@ -84,9 +84,7 @@ pub fn UsersList() -> impl IntoView {
                                     view! {
                                         <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                                             {users.into_iter().map(|user| {
-                                                let u_id = user.id.clone();
                                                 let u_name = user.username.clone();
-                                                let u_del_id = user.id.clone();
                                                 let u_del_name = user.username.clone();
                                                 let u_email = user.email.clone();
                                                 let u_enabled = user.enabled;
@@ -98,7 +96,7 @@ pub fn UsersList() -> impl IntoView {
                                                         actions=view! {
                                                             <button
                                                                 class="text-red-600 hover:text-red-800 text-sm font-medium"
-                                                                on:click=move |_| handle_delete(u_del_id.clone(), u_del_name.clone())
+                                                                on:click=move |_| handle_delete(u_del_name.clone())
                                                             >
                                                                 "Delete"
                                                             </button>
