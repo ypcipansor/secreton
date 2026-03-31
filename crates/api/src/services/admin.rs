@@ -1975,36 +1975,58 @@ impl AdminService {
 
         if has_extra_fields {
             let path = format!("{}{}", USER_STORAGE_PREFIX, user.username);
-            if let Ok(Some(original_entry)) = self.storage.get_by_path(&path).await {
-                if let Ok(raw_data) = self.decrypt_entry_data(&original_entry).await {
-                    if let Ok(mut doc) =
-                        serde_json::from_slice::<serde_json::Value>(&raw_data)
-                    {
-                        if !request.metadata.is_empty() {
-                            if let Ok(meta_val) = serde_json::to_value(&request.metadata) {
-                                doc["metadata"] = meta_val;
-                            }
-                        }
-                        if let Some(full_name) = &request.full_name {
-                            doc["full_name"] = serde_json::Value::String(full_name.clone());
-                        }
-                        if let Some(false) = request.enabled {
-                            doc["enabled"] = serde_json::Value::Bool(false);
-                        }
+            let original_entry = self
+                .storage
+                .get_by_path(&path)
+                .await
+                .map_err(AdminError::Storage)?
+                .ok_or_else(|| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "User {} was created but not found in storage for patching extra fields",
+                        user.username
+                    ))
+                })?;
 
-                        if let Ok(updated_bytes) = serde_json::to_vec(&doc) {
-                            if let Ok(mut entry) =
-                                self.build_encrypted_entry(&updated_bytes, &original_entry.path).await
-                            {
-                                entry.id = original_entry.id;
-                                entry.path = original_entry.path.clone();
-                                entry.created_at = original_entry.created_at;
-                                let _ = self.storage.update(&entry).await;
-                            }
-                        }
-                    }
-                }
+            let raw_data = self.decrypt_entry_data(&original_entry).await?;
+            let mut doc: serde_json::Value =
+                serde_json::from_slice(&raw_data).map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Failed to deserialize newly created user: {}",
+                        e
+                    ))
+                })?;
+
+            if !request.metadata.is_empty() {
+                doc["metadata"] = serde_json::to_value(&request.metadata).map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Failed to serialize metadata: {}",
+                        e
+                    ))
+                })?;
             }
+            if let Some(full_name) = &request.full_name {
+                doc["full_name"] = serde_json::Value::String(full_name.clone());
+            }
+            if let Some(false) = request.enabled {
+                doc["enabled"] = serde_json::Value::Bool(false);
+            }
+
+            let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!(
+                    "Failed to serialize patched user: {}",
+                    e
+                ))
+            })?;
+            let mut entry = self
+                .build_encrypted_entry(&updated_bytes, &original_entry.path)
+                .await?;
+            entry.id = original_entry.id;
+            entry.path = original_entry.path.clone();
+            entry.created_at = original_entry.created_at;
+            self.storage
+                .update(&entry)
+                .await
+                .map_err(AdminError::Storage)?;
         }
 
         // Map User to UserInfo
