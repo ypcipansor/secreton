@@ -1644,6 +1644,7 @@ impl AdminService {
 
     /// Get a single role by name
     pub async fn get_role(&self, name: &str) -> Result<RoleInfo, AdminError> {
+        Self::validate_role_name(name)?;
         let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
         let entry = self
             .storage
@@ -1684,8 +1685,24 @@ impl AdminService {
         Ok(roles)
     }
 
+    /// Validate that a role name is safe for use in storage paths.
+    fn validate_role_name(name: &str) -> Result<(), AdminError> {
+        if name.is_empty() {
+            return Err(AdminError::InvalidConfig(
+                "Role name cannot be empty".to_string(),
+            ));
+        }
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            return Err(AdminError::InvalidConfig(
+                "Role name contains invalid characters".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Create a new role
     pub async fn create_role(&self, request: CreateRoleRequest) -> Result<RoleInfo, AdminError> {
+        Self::validate_role_name(&request.name)?;
         let path = format!("{}{}", ROLE_STORAGE_PREFIX, request.name);
         if self
             .storage
@@ -1782,16 +1799,8 @@ impl AdminService {
         name: &str,
         request: CreateRoleRequest,
     ) -> Result<RoleInfo, AdminError> {
+        Self::validate_role_name(name)?;
         let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
-        let exists = self
-            .storage
-            .exists(&path)
-            .await
-            .map_err(AdminError::Storage)?;
-
-        if !exists {
-            return Err(AdminError::NotFound(format!("Role {} not found", name)));
-        }
 
         let now = chrono::Utc::now();
         let entry = self
@@ -1823,6 +1832,7 @@ impl AdminService {
 
     /// Delete a role
     pub async fn delete_role(&self, name: &str) -> Result<(), AdminError> {
+        Self::validate_role_name(name)?;
         let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
         let deleted = self
             .storage

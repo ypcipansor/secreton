@@ -935,6 +935,11 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
         crate::services::admin::AdminError::InvalidConfig(msg) => {
             secreton_errors::SecretonError::Validation { message: msg }
         }
+        crate::services::admin::AdminError::MaintenanceInProgress => {
+            secreton_errors::SecretonError::ServiceUnavailable {
+                service: "admin".to_string(),
+            }
+        }
         other => secreton_errors::SecretonError::Internal {
             message: other.to_string(),
         },
@@ -1170,6 +1175,7 @@ pub async fn list_audit_logs(
     State(state): State<AppState>,
     Query(query): Query<AuditQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::AuditLogEntry>>>> {
+    let limit = Some(query.limit.unwrap_or(1000));
     let logs = state
         .admin
         .get_audit_logs(
@@ -1177,7 +1183,7 @@ pub async fn list_audit_logs(
             query.end_time,
             query.user_id.as_deref(),
             query.action.as_deref(),
-            query.limit,
+            limit,
         )
         .await
         .map_err(map_admin_error)?;
