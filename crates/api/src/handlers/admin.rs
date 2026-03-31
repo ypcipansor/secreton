@@ -1178,7 +1178,9 @@ pub async fn get_system_logs(
 
 pub async fn vacuum_database(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "vacuumed"}),
     )))
