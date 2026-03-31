@@ -1954,6 +1954,8 @@ impl AdminService {
 
     /// Create a new user
     pub async fn create_user(&self, request: CreateUserRequest) -> Result<UserInfo, AdminError> {
+        Self::validate_username(&request.username)?;
+
         // Use auth service to create user (handles password hashing and storage)
         let user = self
             .auth
