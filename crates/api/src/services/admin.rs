@@ -1812,7 +1812,9 @@ impl AdminService {
 
         let mut role = self.secreton_entry_to_role_info(&entry).await?;
 
-        role.description = request.description;
+        if let Some(description) = request.description {
+            role.description = Some(description);
+        }
         role.permissions = request.permissions;
         role.updated_at = now;
         if let Some(metadata) = request.metadata {
