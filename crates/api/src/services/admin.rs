@@ -1971,7 +1971,7 @@ impl AdminService {
         // update, since auth.create_user does not forward these fields.
         let has_extra_fields = !request.metadata.is_empty()
             || request.full_name.is_some()
-            || request.enabled == Some(false);
+            || request.enabled.is_some();
 
         if has_extra_fields {
             let path = format!("{}{}", USER_STORAGE_PREFIX, user.username);
@@ -2007,8 +2007,8 @@ impl AdminService {
             if let Some(full_name) = &request.full_name {
                 doc["full_name"] = serde_json::Value::String(full_name.clone());
             }
-            if let Some(false) = request.enabled {
-                doc["enabled"] = serde_json::Value::Bool(false);
+            if let Some(enabled) = request.enabled {
+                doc["enabled"] = serde_json::Value::Bool(enabled);
             }
 
             let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
