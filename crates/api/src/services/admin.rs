@@ -1789,7 +1789,10 @@ impl AdminService {
         let data = if let Some(crypto) = &self.crypto {
             match crypto.decrypt(&entry.encrypted_data).await {
                 Ok(d) => d,
-                Err(_) => entry.encrypted_data.clone(),
+                Err(e) => {
+                    tracing::warn!("Decryption failed for role at {}, falling back to plaintext: {}", entry.path, e);
+                    entry.encrypted_data.clone()
+                }
             }
         } else {
             entry.encrypted_data.clone()
@@ -1833,9 +1836,11 @@ impl AdminService {
 
         let original_id = entry.id;
         let original_path = entry.path.clone();
+        let original_created_at = entry.created_at;
         let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
         new_entry.id = original_id; // Preserve original entry ID for UPDATE WHERE id = $1
         new_entry.path = original_path; // Preserve original storage path
+        new_entry.created_at = original_created_at; // Preserve original creation timestamp
         self.storage
             .update(&new_entry)
             .await
@@ -1940,8 +1945,17 @@ impl AdminService {
         user_id: &str,
         request: UpdateUserRequest,
     ) -> Result<UserInfo, AdminError> {
-        // Get existing user
-        let mut user = self.get_user(user_id).await?;
+        // Fetch the original storage entry once — used both for deserialization and
+        // to preserve id/path/created_at when writing back.
+        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
+        let original_entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
+
+        let mut user = self.secreton_entry_to_user_info(&original_entry).await?;
 
         // Update fields
         if let Some(email) = request.email {
@@ -1958,18 +1972,10 @@ impl AdminService {
         }
         user.updated_at = chrono::Utc::now();
 
-        // Store updated user - preserve original entry ID for UPDATE WHERE id = $1
-        let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
-        let original_entry = self
-            .storage
-            .get_by_path(&path)
-            .await
-            .map_err(AdminError::Storage)?
-            .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
-
         let mut entry = self.user_info_to_secreton_entry(&user).await?;
         entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
         entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
+        entry.created_at = original_entry.created_at; // Preserve original creation timestamp
         self.storage
             .update(&entry)
             .await
@@ -1990,10 +1996,8 @@ impl AdminService {
         user_id: &str,
         roles: Vec<String>,
     ) -> Result<(), AdminError> {
-        let mut user = self.get_user(user_id).await?;
-        user.roles = roles;
-        user.updated_at = chrono::Utc::now();
-
+        // Fetch the original storage entry once — used both for deserialization and
+        // to preserve id/path/created_at when writing back.
         let path = format!("{}{}", USER_STORAGE_PREFIX, user_id);
         let original_entry = self
             .storage
@@ -2002,9 +2006,14 @@ impl AdminService {
             .map_err(AdminError::Storage)?
             .ok_or_else(|| AdminError::NotFound(format!("User {} not found", user_id)))?;
 
+        let mut user = self.secreton_entry_to_user_info(&original_entry).await?;
+        user.roles = roles;
+        user.updated_at = chrono::Utc::now();
+
         let mut entry = self.user_info_to_secreton_entry(&user).await?;
         entry.id = original_entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
         entry.path = original_entry.path; // Preserve original storage path (users/{username}, not users/{uuid})
+        entry.created_at = original_entry.created_at; // Preserve original creation timestamp
         self.storage
             .update(&entry)
             .await
@@ -2109,8 +2118,9 @@ impl AdminService {
         let data = if let Some(crypto) = &self.crypto {
             match crypto.decrypt(&entry.encrypted_data).await {
                 Ok(d) => d,
-                Err(_) => {
+                Err(e) => {
                     // Try plaintext fallback if decryption fails (legacy data)
+                    tracing::warn!("Decryption failed for user at {}, falling back to plaintext: {}", entry.path, e);
                     entry.encrypted_data.clone()
                 }
             }

@@ -307,8 +307,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_config_returns_security_info() {
-        let server = server_with_routes().await;
-        let response = server.get("/config").await;
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+        let services = Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+        let token = admin_token(&services).await;
+
+        let app = create_routes().with_state(services.into());
+        use std::net::SocketAddr;
+        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server");
+
+        let response = server
+            .get("/config")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<SystemConfig> = response.json();
@@ -320,9 +341,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_security_scan() {
-        let server = server_with_routes().await;
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+        let services = Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+        let token = admin_token(&services).await;
 
-        let response = server.post("/security/scan").await;
+        let app = create_routes().with_state(services.into());
+        use std::net::SocketAddr;
+        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server");
+
+        let response = server
+            .post("/security/scan")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<SecurityScanResult> = response.json();
@@ -694,7 +735,9 @@ pub async fn delete_user(
 /// System configuration endpoints
 pub async fn get_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
+    require_admin(&user)?;
     // Get actual configuration from the services
     let config = SystemConfig {
         api: ApiConfigInfo {
@@ -733,8 +776,10 @@ use tokio::time::{Duration, timeout};
 
 pub async fn get_system_metrics(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<SystemMetrics>>> {
+    require_admin(&user)?;
     let stats = state
         .admin
         .get_system_stats()
@@ -853,7 +898,9 @@ pub async fn get_system_metrics(
 
 pub async fn get_system_status(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemStatus>>> {
+    require_admin(&user)?;
     // Check component health
     let database_status = check_database_health(&state).await;
     let cache_status = check_cache_health(&state).await;
@@ -900,7 +947,9 @@ pub async fn get_system_status(
 /// Security endpoints
 pub async fn run_security_scan(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SecurityScanResult>>> {
+    require_admin(&user)?;
     let report = state
         .admin
         .run_security_scan()
@@ -931,8 +980,10 @@ pub async fn run_security_scan(
 
 pub async fn get_security_incidents(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecurityIncident>>>> {
+    require_admin(&user)?;
     // For now, return empty list - in a real implementation,
     // this would query the security monitoring system
     let incidents = Vec::new();
@@ -1282,8 +1333,10 @@ pub async fn reload_config(
 
 pub async fn get_system_logs(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(vec![])))
 }
 
@@ -1299,14 +1352,18 @@ pub async fn vacuum_database(
 
 pub async fn get_security_reports(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<serde_json::Value>>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(vec![])))
 }
 
 pub async fn get_security_incident(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(incident_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecurityIncident>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(SecurityIncident {
         id: incident_id,
         severity: "low".to_string(),
@@ -1357,14 +1414,7 @@ pub async fn create_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backup_info = state
         .admin
@@ -1379,14 +1429,7 @@ pub async fn list_backups(
     axum::extract::State(state): axum::extract::State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::BackupInfo>>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backups = state
         .admin
@@ -1402,14 +1445,7 @@ pub async fn get_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backup = state
         .admin
@@ -1430,14 +1466,7 @@ pub async fn restore_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::MaintenanceResult>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let result = state
         .admin
@@ -1453,14 +1482,7 @@ pub async fn delete_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     state
         .admin
