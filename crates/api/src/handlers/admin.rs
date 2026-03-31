@@ -171,10 +171,89 @@ mod tests {
             .expect("Failed to start test server")
     }
 
+    /// Generate a valid admin JWT token for use in tests.
+    async fn admin_token(services: &Arc<crate::services::ApiServiceContainer>) -> String {
+        let admin_user = secreton_auth::User {
+            id: uuid::Uuid::new_v4().to_string(),
+            username: "admin".to_string(),
+            email: Some("admin@example.com".to_string()),
+            display_name: Some("Admin User".to_string()),
+            full_name: Some("Admin User".to_string()),
+            roles: vec!["admin".to_string()],
+            policies: vec!["default".to_string()],
+            metadata: std::collections::HashMap::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            failed_login_attempts: 0,
+            locked_until: None,
+            last_login: None,
+            mfa_enabled: false,
+            mfa_secret: None,
+            password_hash: "mock_hash".to_string(),
+            disabled: false,
+            enabled: true,
+            is_active: true,
+            is_superuser: true,
+            permissions: vec![],
+        };
+        services
+            .auth
+            .generate_token(&admin_user)
+            .await
+            .expect("Failed to generate admin token")
+    }
+
     #[tokio::test]
     async fn test_list_users_returns_placeholder_user() {
-        let server = server_with_routes().await;
-        let response = server.get("/users").await;
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+        let services = Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+
+        // Seed admin user
+        let user_info = crate::services::admin::UserInfo {
+            id: uuid::Uuid::new_v4().to_string(),
+            username: "admin".to_string(),
+            email: "admin@example.com".to_string(),
+            full_name: None,
+            enabled: true,
+            roles: vec!["admin".to_string()],
+            permissions: vec![],
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: Default::default(),
+        };
+        let user_json = serde_json::to_vec(&user_info).unwrap();
+        let entry = SecretEntry::new(
+            "users/admin".to_string(),
+            user_json,
+            secreton_storage::EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::new_v4(),
+        );
+        services.storage.store(&entry).await.expect("Failed to store seeded user");
+
+        let token = admin_token(&services).await;
+        let server = {
+            let app = create_routes().with_state(services.into());
+            use std::net::SocketAddr;
+            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+                .expect("Failed to start test server")
+        };
+
+        let response = server
+            .get("/users")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<Vec<UserResponse>> = response.json();
@@ -186,7 +265,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_role_endpoint() {
-        let server = server_with_routes().await;
         let request = CreateRoleRequest {
             name: "auditor".to_string(),
             description: Some("Audit role".to_string()),
@@ -194,7 +272,30 @@ mod tests {
             metadata: None,
         };
 
-        let response = server.post("/roles").json(&request).await;
+        let mut config = ApiConfig::default();
+        config.auth.jwt.secret = Some("test_secret".to_string());
+        config.auth.jwt.issuer = "secreton".to_string();
+        config.auth.jwt.audience = "secreton-api".to_string();
+        let services = Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
+                .await
+                .expect("Failed to create services"),
+        );
+        let token = admin_token(&services).await;
+
+        let app = create_routes().with_state(services.into());
+        use std::net::SocketAddr;
+        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server");
+
+        let response = server
+            .post("/roles")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .json(&request)
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<RoleResponse> = response.json();
@@ -1133,8 +1234,10 @@ pub async fn delete_role(
 
 pub async fn update_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(_request): Json<serde_json::Value>,
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
+    require_admin(&user)?;
     // Return mock config
     Ok(Json(ApiResponse::success(SystemConfig {
         api: ApiConfigInfo {
@@ -1169,7 +1272,9 @@ pub async fn update_config(
 
 pub async fn reload_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "reloaded"}),
     )))

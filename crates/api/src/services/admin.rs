@@ -1832,8 +1832,10 @@ impl AdminService {
         }
 
         let original_id = entry.id;
+        let original_path = entry.path.clone();
         let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
         new_entry.id = original_id; // Preserve original entry ID for UPDATE WHERE id = $1
+        new_entry.path = original_path; // Preserve original storage path
         self.storage
             .update(&new_entry)
             .await
