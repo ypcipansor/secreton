@@ -1051,17 +1051,23 @@ pub async fn create_role(
 }
 
 pub async fn get_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    let role = state.admin.get_role(&role_name).await.map_err(|e| {
+        secreton_errors::SecretonError::Internal {
+            message: e.to_string(),
+        }
+    })?;
+
     Ok(Json(ApiResponse::success(RoleResponse {
-        name: role_name,
-        description: None,
-        permissions: vec![],
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: std::collections::HashMap::new(),
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 

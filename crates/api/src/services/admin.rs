@@ -1642,6 +1642,18 @@ impl AdminService {
         })
     }
 
+    /// Get a single role by name
+    pub async fn get_role(&self, name: &str) -> Result<RoleInfo, AdminError> {
+        let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
+        let entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+            .ok_or_else(|| AdminError::NotFound(format!("Role {} not found", name)))?;
+        self.secreton_entry_to_role_info(&entry).await
+    }
+
     /// List all roles
     pub async fn list_roles(&self) -> Result<Vec<RoleInfo>, AdminError> {
         let query_params = QueryParams {
@@ -1798,9 +1810,11 @@ impl AdminService {
             role.metadata.extend(metadata);
         }
 
-        let entry = self.role_info_to_secreton_entry(&role).await?;
+        let original_id = entry.id;
+        let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
+        new_entry.id = original_id; // Preserve original entry ID for UPDATE WHERE id = $1
         self.storage
-            .store(&entry)
+            .update(&new_entry)
             .await
             .map_err(AdminError::Storage)?;
 
