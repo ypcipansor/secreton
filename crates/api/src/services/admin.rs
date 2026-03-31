@@ -1935,6 +1935,11 @@ impl AdminService {
                 "Username contains invalid characters".to_string(),
             ));
         }
+        if username.len() > 256 {
+            return Err(AdminError::InvalidConfig(
+                "Username is too long (max 256 characters)".to_string(),
+            ));
+        }
         Ok(())
     }
 
