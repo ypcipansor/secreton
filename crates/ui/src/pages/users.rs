@@ -29,15 +29,24 @@ pub fn UsersList() -> impl IntoView {
         },
     );
 
+    let (delete_error, set_delete_error) = signal(None::<String>);
+
     let handle_delete = move |id: String, username: String| {
         let Some(window) = web_sys::window() else { return };
         if !window.confirm_with_message(&format!("Delete user {}?", username)).unwrap_or(false) {
             return;
         }
+        set_delete_error.set(None);
         spawn_local(async move {
             let url = format!("/admin/users/{}", id);
-            let _ = api::delete::<serde_json::Value>(&url).await;
-            users_resource.refetch();
+            match api::delete::<serde_json::Value>(&url).await {
+                Ok(_) => {
+                    users_resource.refetch();
+                }
+                Err(e) => {
+                    set_delete_error.set(Some(format!("Failed to delete user {}: {}", username, e)));
+                }
+            }
         });
     };
 
@@ -49,6 +58,14 @@ pub fn UsersList() -> impl IntoView {
                     <p class="text-gray-500 text-sm mt-1">"Manage system users and their access"</p>
                 </div>
             </header>
+
+            {move || {
+                delete_error.get().map(|err| view! {
+                    <div class="p-4 bg-red-50 text-red-700 rounded border border-red-200">
+                        {err}
+                    </div>
+                })
+            }}
 
             <Suspense fallback=|| view! { <div class="text-center p-8">"Loading users..."</div> }>
                 {move || {

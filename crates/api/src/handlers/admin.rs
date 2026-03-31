@@ -264,6 +264,13 @@ pub struct CreateRoleRequest {
     pub metadata: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateRoleRequest {
+    pub description: Option<String>,
+    pub permissions: Option<Vec<String>>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoleResponse {
     pub name: String,
@@ -1089,11 +1096,10 @@ pub async fn update_role(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
-    Json(request): Json<CreateRoleRequest>,
+    Json(request): Json<UpdateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
-    let update_req = crate::services::admin::CreateRoleRequest {
-        name: role_name.clone(),
+    let update_req = crate::services::admin::UpdateRoleRequest {
         description: request.description,
         permissions: request.permissions,
         metadata: request.metadata,

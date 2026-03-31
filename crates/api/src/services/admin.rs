@@ -137,6 +137,14 @@ pub struct CreateRoleRequest {
     pub metadata: Option<HashMap<String, String>>,
 }
 
+/// Role update request — all fields are optional to support partial updates
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateRoleRequest {
+    pub description: Option<String>,
+    pub permissions: Option<Vec<String>>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
 /// Admin service for system management with request metrics tracking
 pub struct AdminService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -1797,7 +1805,7 @@ impl AdminService {
     pub async fn update_role(
         &self,
         name: &str,
-        request: CreateRoleRequest,
+        request: UpdateRoleRequest,
     ) -> Result<RoleInfo, AdminError> {
         Self::validate_role_name(name)?;
         let path = format!("{}{}", ROLE_STORAGE_PREFIX, name);
@@ -1815,7 +1823,9 @@ impl AdminService {
         if let Some(description) = request.description {
             role.description = Some(description);
         }
-        role.permissions = request.permissions;
+        if let Some(permissions) = request.permissions {
+            role.permissions = permissions;
+        }
         role.updated_at = now;
         if let Some(metadata) = request.metadata {
             role.metadata = metadata;
