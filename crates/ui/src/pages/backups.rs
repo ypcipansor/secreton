@@ -173,7 +173,7 @@ pub fn BackupsPage() -> impl IntoView {
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-blue-600">{b.id.clone()}</td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{b.created_at.clone()}</td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {(b.size_bytes as f64 / 1024.0 / 1024.0).round()} " MB"
+                                                    {format!("{:.1}", b.size_bytes as f64 / 1024.0 / 1024.0)} " MB"
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
                                                     <div class="flex gap-2">

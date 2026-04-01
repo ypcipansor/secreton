@@ -345,7 +345,7 @@ pub fn SecretsList() -> impl IntoView {
         let current_path = path();
         if current_path.is_empty() { return; }
 
-        let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false);
+        let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Delete secret at {}?", current_path)).ok()).unwrap_or(false);
         if !confirm { return; }
 
         let navigate = navigate_delete.clone();
@@ -506,7 +506,7 @@ pub fn SecretsList() -> impl IntoView {
                                                                      <button
                                                                         class="text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition px-2"
                                                                         title="Copy"
-                                                                        on:click=move |_| { let _ = web_sys::window().unwrap().navigator().clipboard().write_text(&val_str); }
+                                                                        on:click=move |_| { if let Some(w) = web_sys::window() { let _ = w.navigator().clipboard().write_text(&val_str); } }
                                                                      >
                                                                         "📋"
                                                                      </button>
@@ -572,8 +572,9 @@ pub fn SecretsList() -> impl IntoView {
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            {move || history_versions.get().into_iter().map(|v| {
+                            {move || history_versions.get().into_iter().enumerate().map(|(idx, v)| {
                                 let ver = v.version;
+                                let is_latest = idx == 0;
                                 view! {
                                     <tr>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{v.version}</td>
@@ -585,12 +586,18 @@ pub fn SecretsList() -> impl IntoView {
                                             >
                                                 "View"
                                             </button>
-                                            <button
-                                                class="text-orange-600 hover:text-orange-900"
-                                                on:click=move |_| rollback_to_version(ver)
-                                            >
-                                                "Rollback"
-                                            </button>
+                                            {if !is_latest {
+                                                view! {
+                                                    <button
+                                                        class="text-orange-600 hover:text-orange-900"
+                                                        on:click=move |_| rollback_to_version(ver)
+                                                    >
+                                                        "Rollback"
+                                                    </button>
+                                                }.into_any()
+                                            } else {
+                                                view! {}.into_any()
+                                            }}
                                         </td>
                                     </tr>
                                 }

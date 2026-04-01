@@ -552,29 +552,35 @@ pub fn TransitPage() -> impl IntoView {
                                                 view! {}.into_any()
                                             }}
 
-                                            // Algorithm Selector
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-1">"Algorithm"</label>
-                                                <select
-                                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                    on:change=move |ev| set_selected_algo.set(event_target_value(&ev))
-                                                    prop:value=selected_algo
-                                                >
-                                                    {move || match active_tab.get().as_str() {
-                                                        "encrypt" | "decrypt" => view! {
-                                                            <option value="AES-GCM">"AES-GCM"</option>
-                                                            <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
-                                                        }.into_any(),
-                                                        "sign" | "verify" => view! {
-                                                            <option value="RSA-PSS">"RSA-PSS"</option>
-                                                            <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
-                                                            <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
-                                                            <option value="ED25519">"ED25519"</option>
-                                                        }.into_any(),
-                                                        _ => view! {}.into_any()
-                                                    }}
-                                                </select>
-                                            </div>
+                                            // Algorithm Selector (hidden for decrypt — backend determines algorithm from key)
+                                            {move || if active_tab.get() == "decrypt" {
+                                                view! {}.into_any()
+                                            } else {
+                                                view! {
+                                                    <div>
+                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Algorithm"</label>
+                                                        <select
+                                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                            on:change=move |ev| set_selected_algo.set(event_target_value(&ev))
+                                                            prop:value=selected_algo
+                                                        >
+                                                            {move || match active_tab.get().as_str() {
+                                                                "encrypt" => view! {
+                                                                    <option value="AES-GCM">"AES-GCM"</option>
+                                                                    <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
+                                                                }.into_any(),
+                                                                "sign" | "verify" => view! {
+                                                                    <option value="RSA-PSS">"RSA-PSS"</option>
+                                                                    <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
+                                                                    <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
+                                                                    <option value="ED25519">"ED25519"</option>
+                                                                }.into_any(),
+                                                                _ => view! {}.into_any()
+                                                            }}
+                                                        </select>
+                                                    </div>
+                                                }.into_any()
+                                            }}
 
                                             <div class="flex justify-end">
                                                 <Button
