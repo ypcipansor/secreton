@@ -532,10 +532,6 @@ impl AuditLogger {
         &self,
         filters: AuditFilters,
     ) -> Result<Vec<RichAuditEntry>> {
-        if !self.enabled {
-            return Ok(vec![]);
-        }
-
         // Optimize query by using a more specific prefix if time range allows
         use chrono::Datelike;
         let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
@@ -567,9 +563,13 @@ impl AuditLogger {
             ..Default::default()
         };
 
-        // Flush buffered events to storage before querying so recent entries are visible
-        if let Err(e) = self.service.flush().await {
-            tracing::warn!("Audit flush failed before query, recent events may be missing: {}", e);
+        // Flush buffered events to storage before querying so recent entries are visible.
+        // Only flush when auditing is enabled — when disabled, no devices are registered
+        // so there is nothing to flush, but we still want to query historical data.
+        if self.enabled {
+            if let Err(e) = self.service.flush().await {
+                tracing::warn!("Audit flush failed before query, recent events may be missing: {}", e);
+            }
         }
 
         let entries = self.storage.list(&query_params).await?;
@@ -627,13 +627,6 @@ impl AuditLogger {
         format: ExportFormat,
         filters: AuditFilters,
     ) -> Result<Vec<u8>> {
-        if !self.enabled {
-            return match format {
-                ExportFormat::JSON => Ok(b"[]".to_vec()),
-                ExportFormat::CSV => Ok(b"timestamp,user,action,resource,success,ip_address\n".to_vec()),
-            };
-        }
-
         let entries = self.get_entries(filters).await?;
 
         match format {
