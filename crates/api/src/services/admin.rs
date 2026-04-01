@@ -163,6 +163,7 @@ pub struct AdminService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     auth: Arc<AuthenticationService>,
     performance: Arc<SecretPerformanceOptimizer>,
+    audit: Arc<crate::services::audit::AuditLogger>,
     crypto: Option<Arc<CryptoService>>,
 }
 
@@ -172,11 +173,13 @@ impl AdminService {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         auth: Arc<AuthenticationService>,
         performance: Arc<SecretPerformanceOptimizer>,
+        audit: Arc<crate::services::audit::AuditLogger>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             auth,
             performance,
+            audit,
             crypto: None,
         })
     }
@@ -284,10 +287,13 @@ impl AdminService {
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::minutes(5);
 
-        match self
-            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000))
-            .await
-        {
+        let filters = crate::services::audit::AuditFilters {
+            start_date: Some(start_time),
+            end_date: Some(end_time),
+            ..Default::default()
+        };
+
+        match self.audit.get_entries(filters).await {
             Ok(audit_logs) => {
                 let total_requests = audit_logs.len() as f64;
                 let minutes_elapsed = 5.0; // 5 minutes window
@@ -677,118 +683,39 @@ impl AdminService {
         end_time: Option<chrono::DateTime<chrono::Utc>>,
         user_id: Option<&str>,
         action: Option<&str>,
-        limit: Option<u32>,
+        _limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
-        // Optimize query by using a more specific prefix if time range allows
-        use chrono::Datelike;
-        let prefix = if let (Some(start), Some(end)) = (start_time, end_time) {
-            if start.year() == end.year() {
-                if start.month() == end.month() {
-                    if start.day() == end.day() {
-                        // Same day: sys/audit/YYYY/MM/DD/
-                        format!(
-                            "sys/audit/{}/{:02}/{:02}/",
-                            start.year(),
-                            start.month(),
-                            start.day()
-                        )
-                    } else {
-                        // Same month: sys/audit/YYYY/MM/
-                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
-                    }
-                } else {
-                    // Same year: sys/audit/YYYY/
-                    format!("sys/audit/{}/", start.year())
-                }
-            } else {
-                // Different years: fallback to root
-                "sys/audit/".to_string()
-            }
-        } else {
-            // No range specified
-            "sys/audit/".to_string()
-        };
-
-        // Do not pass limit to storage because we filter in memory after fetching.
-        // Storage limit would truncate results before filtering, leading to incomplete results.
-        let query_params = secreton_storage::QueryParams {
-            path_prefix: Some(prefix),
-            limit: None,
-            offset: Some(0),
+        let filters = crate::services::audit::AuditFilters {
+            user: user_id.map(|s| s.to_string()),
+            action: action.map(|s| s.to_string()),
+            start_date: start_time,
+            end_date: end_time,
             ..Default::default()
         };
 
-        let entries: Vec<_> = self
-            .storage
-            .list(&query_params)
+        let entries = self
+            .audit
+            .get_entries(filters)
             .await
-            .map_err(AdminError::Storage)?
-            .into_iter()
-            .collect();
+            .map_err(|e| AdminError::Internal(e.into()))?;
 
-        let mut audit_logs: Vec<AuditLogEntry> = entries
+        let logs = entries
             .into_iter()
-            .filter_map(|entry| {
-                entry.metadata.get("log_data").and_then(|data| {
-                    // First deserialize to AuditEvent to match stored format
-                    if let Ok(event) =
-                        serde_json::from_str::<secreton_security::policies::audit::AuditEvent>(data)
-                    {
-                        // Map AuditEvent to AuditLogEntry
-                        Some(AuditLogEntry {
-                            id: event.id,
-                            timestamp: event.timestamp,
-                            user_id: event.user,
-                            action: event.operation,
-                            resource: event.resource,
-                            resource_id: None, // Not directly available in AuditEvent
-                            ip_address: event.client_ip.unwrap_or_default(),
-                            user_agent: String::new(), // Not available in AuditEvent
-                            success: match event.status {
-                                secreton_security::policies::audit::AuditStatus::Success => true,
-                                _ => false,
-                            },
-                            details: Some(serde_json::Value::Object(
-                                event
-                                    .metadata
-                                    .into_iter()
-                                    .map(|(k, v)| (k, serde_json::Value::String(v)))
-                                    .collect(),
-                            )),
-                        })
-                    } else {
-                        // Fallback: try direct deserialization if format changes or legacy data
-                        serde_json::from_str(data).ok()
-                    }
-                })
+            .map(|e| AuditLogEntry {
+                id: e.id.to_string(),
+                timestamp: e.timestamp,
+                user_id: e.user_id.to_string(),
+                action: e.action,
+                resource: e.resource_type,
+                resource_id: e.resource_id,
+                ip_address: e.ip_address.unwrap_or_default(),
+                user_agent: e.user_agent.unwrap_or_default(),
+                success: e.success,
+                details: Some(serde_json::to_value(e.details).unwrap_or_default()),
             })
             .collect();
 
-        // Apply filters
-        if let Some(start) = start_time {
-            audit_logs.retain(|log| log.timestamp >= start);
-        }
-        if let Some(end) = end_time {
-            audit_logs.retain(|log| log.timestamp <= end);
-        }
-        if let Some(user) = user_id {
-            audit_logs.retain(|log| log.user_id == user);
-        }
-        if let Some(act) = action {
-            audit_logs.retain(|log| log.action == act);
-        }
-
-        // Sort by timestamp descending
-        audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-        // Apply limit after filtering and sorting
-        if let Some(l) = limit {
-            if audit_logs.len() > l as usize {
-                audit_logs.truncate(l as usize);
-            }
-        }
-
-        Ok(audit_logs)
+        Ok(logs)
     }
 
     /// Export audit logs in specified format

@@ -203,9 +203,14 @@ impl ApiServiceContainer {
 
         // Initialize admin service
         let admin = Arc::new(
-            admin::AdminService::new(storage.clone(), auth.clone(), performance.clone())
-                .await?
-                .with_crypto(crypto.clone()),
+            admin::AdminService::new(
+                storage.clone(),
+                auth.clone(),
+                performance.clone(),
+                audit.clone(),
+            )
+            .await?
+            .with_crypto(crypto.clone()),
         );
 
         // Initialize Telemetry

@@ -5,10 +5,12 @@ use secreton_security::policies::audit::{
 };
 use secreton_storage::StorageBackend;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Audit logger service adapter
 pub struct AuditLogger {
     service: Arc<AuditService>,
+    storage: Arc<dyn StorageBackend + Send + Sync>,
     enabled: bool,
 }
 
@@ -21,10 +23,14 @@ impl AuditLogger {
     ) -> Result<Self> {
         let service = Arc::new(AuditService::new(max_batch_size));
         if enabled {
-            let device = StorageAuditDevice::new(storage, retention_days);
+            let device = StorageAuditDevice::new(storage.clone(), retention_days);
             service.add_device(Box::new(device)).await;
         }
-        Ok(Self { service, enabled })
+        Ok(Self {
+            service,
+            storage,
+            enabled,
+        })
     }
 
     pub async fn flush(&self) -> Result<()> {
@@ -513,19 +519,91 @@ impl AuditLogger {
     /// Get audit entries based on filters
     pub async fn get_entries(
         &self,
-        _filters: AuditFilters,
+        filters: AuditFilters,
     ) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
-        // Placeholder
-        Ok(vec![])
+        let query_params = secreton_storage::QueryParams {
+            path_prefix: Some("sys/audit/".to_string()),
+            limit: Some(1000),
+            ..Default::default()
+        };
+
+        let entries = self.storage.list(&query_params).await?;
+        let mut results = Vec::new();
+
+        for entry in entries {
+            if let Some(log_data) = entry.metadata.get("log_data") {
+                if let Ok(event) = serde_json::from_str::<AuditEvent>(log_data) {
+                    // Apply filters
+                    if let Some(user) = &filters.user {
+                        if &event.user != user { continue; }
+                    }
+                    if let Some(action) = &filters.action {
+                        if &event.operation != action { continue; }
+                    }
+                    if let Some(path) = &filters.path {
+                        if &event.resource != path { continue; }
+                    }
+                    if let Some(start) = filters.start_date {
+                        if event.timestamp < start { continue; }
+                    }
+                    if let Some(end) = filters.end_date {
+                        if event.timestamp > end { continue; }
+                    }
+
+                    let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
+                    results.push(secreton_storage::models::storage_models::AuditEntry {
+                        id: Uuid::parse_str(&event.id).unwrap_or_default(),
+                        timestamp: event.timestamp,
+                        user_id,
+                        action: event.operation.clone(),
+                        resource_type: event.event_type.as_str().to_string(),
+                        resource_id: Some(event.resource.clone()),
+                        details: event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect(),
+                        ip_address: event.client_ip.clone(),
+                        user_agent: None,
+                        success: match event.status {
+                            AuditStatus::Success => true,
+                            _ => false,
+                        },
+                        error_message: None,
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(results)
     }
 
     /// Export audit data
     pub async fn export_data(
         &self,
-        _format: ExportFormat,
-        _filters: AuditFilters,
+        format: ExportFormat,
+        filters: AuditFilters,
     ) -> Result<Vec<u8>> {
-        // Placeholder
-        Ok(vec![])
+        let entries = self.get_entries(filters).await?;
+
+        match format {
+            ExportFormat::JSON => {
+                let json = serde_json::to_vec_pretty(&entries)?;
+                Ok(json)
+            }
+            ExportFormat::CSV => {
+                let mut csv = String::from("timestamp,user,action,resource,success,ip_address\n");
+                for e in entries {
+                    csv.push_str(&format!(
+                        "{},{},{},{},{},{}\n",
+                        e.timestamp,
+                        e.user_id,
+                        e.action,
+                        e.resource_id.unwrap_or_default(),
+                        e.success,
+                        e.ip_address.unwrap_or_default()
+                    ));
+                }
+                Ok(csv.into_bytes())
+            }
+            _ => Err(anyhow::anyhow!("Export format {:?} not yet implemented", format)),
+        }
     }
 }

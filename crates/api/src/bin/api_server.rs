@@ -367,6 +367,7 @@ async fn main() -> anyhow::Result<()> {
             storage.clone(),
             auth.clone(),
             performance.clone(),
+            audit.clone(),
         )
         .await?
         .with_crypto(crypto.clone()),

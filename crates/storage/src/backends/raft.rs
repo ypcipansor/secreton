@@ -641,6 +641,16 @@ impl StorageBackend for RaftStorageBackend {
         Ok(())
     }
 
+    async fn compact(&self) -> StorageResult<()> {
+        // Raft state machine can be compacted by taking a snapshot
+        // For now, this is a placeholder
+        Ok(())
+    }
+
+    async fn vacuum(&self) -> StorageResult<()> {
+        Ok(())
+    }
+
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
         Err(StorageError::BackendError { backend: "Raft".to_string(), message: "Not implemented".to_string() })
     }
