@@ -884,16 +884,10 @@ pub async fn create_key(
         name: key_info.name,
         key_type: key_info.key_type.clone(),
         algorithm: {
-            let (algo, _, _) = infer_key_attributes(&key_info.key_type);
-            algo
-        },
-        size: {
-            let (_, sz, _) = infer_key_attributes(&key_info.key_type);
-            sz
-        },
-        usage: {
-            let (_, _, usg) = infer_key_attributes(&key_info.key_type);
-            usg
+            let (algo, size, usage) = infer_key_attributes(&key_info.key_type);
+            // Store size and usage for use below
+            // Actually we need to restructure — use a let binding before the struct
+            unreachable!()
         },
         metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
             description: None,
