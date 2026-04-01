@@ -537,6 +537,22 @@ pub async fn update_user(
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
 
+    // Prevent admins from demoting themselves (removing their own admin role)
+    if username == user.username {
+        if let Some(ref roles) = request.roles {
+            if !roles.contains(&"admin".to_string()) && !roles.contains(&"root".to_string()) {
+                return Err(crate::ApiError::Authorization(
+                    "Cannot remove admin privileges from your own account".to_string(),
+                ));
+            }
+        }
+        if let Some(false) = request.enabled {
+            return Err(crate::ApiError::Authorization(
+                "Cannot disable your own account".to_string(),
+            ));
+        }
+    }
+
     let user: crate::services::admin::UserInfo = state
         .admin
         .update_user(&username, request)
@@ -566,6 +582,14 @@ pub async fn delete_user(
     Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
+
+    // Prevent admins from deleting their own account
+    if username == user.username {
+        return Err(crate::ApiError::Authorization(
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
     state
         .admin
         .delete_user(&username)
@@ -1027,6 +1051,17 @@ pub async fn assign_user_roles(
     Json(request): Json<AssignRolesRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
+
+    // Prevent admins from demoting themselves (removing their own admin role)
+    if username == user.username
+        && !request.roles.contains(&"admin".to_string())
+        && !request.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Cannot remove admin privileges from your own account".to_string(),
+        ));
+    }
+
     state
         .admin
         .assign_user_roles(&username, request.roles)

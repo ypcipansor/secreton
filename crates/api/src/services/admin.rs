@@ -87,13 +87,21 @@ pub struct UserInfo {
     pub username: String,
     pub email: String,
     pub full_name: Option<String>,
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
     pub roles: Vec<String>,
+    #[serde(default)]
     pub permissions: Vec<String>,
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
     pub metadata: HashMap<String, String>,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// User creation request
@@ -1871,15 +1879,14 @@ impl AdminService {
             role.metadata = metadata;
         }
 
-        let original_id = entry.id;
-        let original_path = entry.path.clone();
-        let original_created_at = entry.created_at;
-        let original_owner_id = entry.owner_id;
         let mut new_entry = self.role_info_to_secreton_entry(&role).await?;
-        new_entry.id = original_id; // Preserve original entry ID for UPDATE WHERE id = $1
-        new_entry.path = original_path; // Preserve original storage path
-        new_entry.created_at = original_created_at; // Preserve original creation timestamp
-        new_entry.owner_id = original_owner_id; // Preserve original ownership
+        new_entry.id = entry.id; // Preserve original entry ID for UPDATE WHERE id = $1
+        new_entry.path = entry.path.clone(); // Preserve original storage path
+        new_entry.created_at = entry.created_at; // Preserve original creation timestamp
+        new_entry.owner_id = entry.owner_id; // Preserve original ownership
+        new_entry.version = entry.version; // Preserve version for optimistic concurrency
+        new_entry.tags = entry.tags.clone(); // Preserve entry-level tags
+        new_entry.metadata = entry.metadata.clone(); // Preserve entry-level metadata
         self.storage
             .update(&new_entry)
             .await
@@ -2049,6 +2056,9 @@ impl AdminService {
             entry.path = original_entry.path.clone();
             entry.created_at = original_entry.created_at;
             entry.owner_id = original_entry.owner_id;
+            entry.version = original_entry.version;
+            entry.tags = original_entry.tags.clone();
+            entry.metadata = original_entry.metadata.clone();
             self.storage
                 .update(&entry)
                 .await
@@ -2146,6 +2156,9 @@ impl AdminService {
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
         entry.owner_id = original_entry.owner_id;
+        entry.version = original_entry.version;
+        entry.tags = original_entry.tags.clone();
+        entry.metadata = original_entry.metadata.clone();
         self.storage
             .update(&entry)
             .await
@@ -2212,6 +2225,9 @@ impl AdminService {
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
         entry.owner_id = original_entry.owner_id;
+        entry.version = original_entry.version;
+        entry.tags = original_entry.tags.clone();
+        entry.metadata = original_entry.metadata.clone();
         self.storage
             .update(&entry)
             .await
