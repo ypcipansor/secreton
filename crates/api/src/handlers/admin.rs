@@ -1259,7 +1259,13 @@ pub async fn vacuum_database(
         "error": result.err().map(|e| e.to_string()),
     });
 
-    Ok(Json(ApiResponse::success(data)))
+    if success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            data["error"].as_str().unwrap_or("Vacuum operation failed").to_string(),
+        ))
+    }
 }
 
 pub async fn get_security_reports(
