@@ -145,6 +145,22 @@ pub fn Layout(children: Children) -> impl IntoView {
                         <span class="text-lg">"📜"</span>
                         <span>"Audit"</span>
                     </Link>
+                    <Link
+                        href="/backups"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
+                        <span class="text-lg">"💾"</span>
+                        <span>"Backups"</span>
+                    </Link>
+                    <Link
+                        href="/settings"
+                        class="flex items-center gap-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-md transition-colors"
+                        active_class="bg-gray-800 text-white shadow-inner"
+                    >
+                        <span class="text-lg">"⚙️"</span>
+                        <span>"Settings"</span>
+                    </Link>
                 </nav>
 
                 <div class="p-4 border-t border-gray-800 bg-gray-900">

@@ -194,6 +194,35 @@ pub fn SecretsList() -> impl IntoView {
         secret_resource.refetch();
     };
 
+    // Helper to rollback to a specific version
+    let rollback_to_version = move |v: u32| {
+        spawn_local(async move {
+            let current_path = path();
+            let fetch_url = format!("/secret/secrets/{}?version={}", current_path, v);
+
+            // 1. Fetch the historical data
+            match api::get::<GetSecretResponse>(&fetch_url).await {
+                Ok(historical) => {
+                    // 2. PUT it as the new latest version
+                    let put_url = format!("/secret/secrets/{}", current_path);
+                    let payload = serde_json::json!({
+                        "data": historical.data
+                    });
+
+                    match api::put::<serde_json::Value, _>(&put_url, payload).await {
+                        Ok(_) => {
+                            set_view_version.set(None);
+                            set_show_history_modal.set(false);
+                            secret_resource.refetch();
+                        }
+                        Err(e) => set_error_msg.set(Some(format!("Rollback failed: {:?}", e))),
+                    }
+                }
+                Err(e) => set_error_msg.set(Some(format!("Failed to fetch version for rollback: {:?}", e))),
+            }
+        });
+    };
+
     // Helper to clear version view (show latest)
     let clear_version_view = move || {
         set_view_version.set(None);
@@ -536,12 +565,18 @@ pub fn SecretsList() -> impl IntoView {
                                     <tr>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{v.version}</td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{v.created_at}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                             <button
                                                 class="text-blue-600 hover:text-blue-900"
                                                 on:click=move |_| load_specific_version(ver)
                                             >
                                                 "View"
+                                            </button>
+                                            <button
+                                                class="text-orange-600 hover:text-orange-900"
+                                                on:click=move |_| rollback_to_version(ver)
+                                            >
+                                                "Rollback"
                                             </button>
                                         </td>
                                     </tr>

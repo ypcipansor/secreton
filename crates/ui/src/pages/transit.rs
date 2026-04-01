@@ -3,63 +3,90 @@ use serde::{Deserialize, Serialize};
 use crate::api;
 use crate::components::{Button, Input, Card};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use std::collections::HashMap;
 
-// API Structures
+// API Structures matching backend crates/api/src/handlers/secret.rs
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ListKeysResponse {
-    pub keys: Vec<String>,
+pub struct KeyResponse {
+    pub id: String,
+    pub name: String,
+    pub key_type: String,
+    pub algorithm: String,
+    pub size: u32,
+    pub usage: Vec<String>,
+    pub metadata: KeyMetadata,
+    pub version: u32,
+    pub created_at: String, // Backend uses DateTime, serialized to string
+    pub status: String,
+    pub public_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct KeyMetadata {
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub owner: Option<String>,
+    pub purpose: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateKeyRequest {
-    pub key_type: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CreateKeyResponse {
-    pub success: bool,
-    pub message: String,
+    pub name: String,
+    pub key_type: String,
+    pub algorithm: String,
+    pub size: Option<u32>,
+    pub usage: Vec<String>,
+    pub metadata: Option<KeyMetadata>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EncryptRequest {
+    pub key_id: String,
     pub plaintext: String,       // base64 encoded
-    pub context: Option<String>, // base64 encoded
+    pub context: Option<HashMap<String, String>>,
+    pub algorithm: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncryptResponse {
     pub ciphertext: String,
+    pub key_version: u32,
+    pub algorithm: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DecryptRequest {
+    pub key_id: String,
     pub ciphertext: String,
-    pub context: Option<String>, // base64 encoded
+    pub context: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DecryptResponse {
     pub plaintext: String, // base64 encoded
+    pub key_version: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignRequest {
-    pub input: String, // base64 encoded
+    pub key_id: String,
+    pub data: String, // base64 encoded
     pub algorithm: Option<String>,
-    pub key_version: Option<u32>,
+    pub format: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SignResponse {
     pub signature: String,
-    pub algorithm: Option<String>,
-    pub key_version: Option<u32>,
+    pub key_version: u32,
+    pub algorithm: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VerifyRequest {
-    pub input: String, // base64 encoded
+    pub key_id: String,
+    pub data: String, // base64 encoded
     pub signature: String,
     pub algorithm: Option<String>,
 }
@@ -67,35 +94,14 @@ pub struct VerifyRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VerifyResponse {
     pub valid: bool,
-}
-
-// Simplified KeyInfo struct for frontend
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KeyInfo {
-    pub name: String,
-    pub key_type: KeyType,
-    // other fields omitted for brevity if not needed
-}
-
-// KeyType enum matching backend
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum KeyType {
-    Aes256Gcm,
-    ChaCha20Poly1305,
-    XChaCha20Poly1305,
-    Ed25519,
-    EcdsaP256,
-    EcdsaSecp256k1,
-    X25519,
-    Rsa(u32),
+    pub key_version: u32,
 }
 
 #[component]
 pub fn TransitPage() -> impl IntoView {
     // State
-    let (keys, set_keys) = signal(Vec::<String>::new());
-    let (selected_key, set_selected_key) = signal(Option::<String>::None);
-    let (key_info, set_key_info) = signal(Option::<KeyInfo>::None);
+    let (keys, set_keys) = signal(Vec::<KeyResponse>::new());
+    let (selected_key, set_selected_key) = signal(Option::<KeyResponse>::None);
     let (active_tab, set_active_tab) = signal("encrypt".to_string());
 
     // Create Key Form
@@ -109,49 +115,14 @@ pub fn TransitPage() -> impl IntoView {
     let (output_result, set_output_result) = signal(String::new());
     let (verify_result, set_verify_result) = signal(Option::<bool>::None);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
-    let (selected_algo, set_selected_algo) = signal("ed25519".to_string());
+    let (selected_algo, set_selected_algo) = signal("AES-GCM".to_string());
 
     // Fetch Keys
     let fetch_keys = Action::new_local(move |_: &()| {
         async move {
-            match api::get::<ListKeysResponse>("/transit/keys").await {
-                Ok(res) => set_keys.set(res.keys),
+            match api::get::<Vec<KeyResponse>>("/secret/keys").await {
+                Ok(res) => set_keys.set(res),
                 Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
-            }
-        }
-    });
-
-    // Fetch Key Info
-    let fetch_key_info = Action::new_local(move |key_name: &String| {
-        let name = key_name.clone();
-        async move {
-            let path = format!("/transit/keys/{}", name);
-            match api::get::<KeyInfo>(&path).await {
-                Ok(info) => {
-                    // Auto-switch tab based on capability
-                    match info.key_type {
-                        KeyType::Ed25519 => {
-                            set_active_tab.set("sign".to_string());
-                            set_selected_algo.set("ed25519".to_string());
-                        },
-                        KeyType::EcdsaP256 => {
-                            set_active_tab.set("sign".to_string());
-                            set_selected_algo.set("ecdsa-p256".to_string());
-                        },
-                        KeyType::EcdsaSecp256k1 => {
-                            set_active_tab.set("sign".to_string());
-                            set_selected_algo.set("ecdsa-secp256k1".to_string());
-                        },
-                        _ => {
-                            set_active_tab.set("encrypt".to_string());
-                        }
-                    }
-                    set_key_info.set(Some(info));
-                },
-                Err(e) => {
-                     set_error_msg.set(Some(format!("Failed to fetch key info: {:?}", e)));
-                     set_key_info.set(None);
-                }
             }
         }
     });
@@ -170,11 +141,17 @@ pub fn TransitPage() -> impl IntoView {
                 set_create_status.set(Some("Key name required".to_string()));
                 return;
             }
-            let req = CreateKeyRequest { key_type: Some(k_type) };
-            let path = format!("/transit/keys/{}", name);
-            match api::post::<CreateKeyResponse, _>(&path, req).await {
-                Ok(res) => {
-                    set_create_status.set(Some(res.message));
+            let req = CreateKeyRequest {
+                name: name.clone(),
+                key_type: k_type.clone(),
+                algorithm: k_type.clone(),
+                size: Some(256),
+                usage: vec!["encrypt".to_string(), "decrypt".to_string()],
+                metadata: None,
+            };
+            match api::post::<KeyResponse, _>("/secret/keys", req).await {
+                Ok(_) => {
+                    set_create_status.set(Some("Key created successfully".to_string()));
                     set_new_key_name.set(String::new());
                     fetch_keys.dispatch(()); // Refresh list
                 },
@@ -187,12 +164,17 @@ pub fn TransitPage() -> impl IntoView {
     let encrypt_action = Action::new_local(move |_: &()| {
         let key = selected_key.get();
         let text = input_text.get();
+        let algo = selected_algo.get();
         async move {
             if let Some(k) = key {
                 let b64_text = BASE64.encode(text.as_bytes());
-                let req = EncryptRequest { plaintext: b64_text, context: None };
-                let path = format!("/transit/encrypt/{}", k);
-                match api::post::<EncryptResponse, _>(&path, req).await {
+                let req = EncryptRequest {
+                    key_id: k.id,
+                    plaintext: b64_text,
+                    context: None,
+                    algorithm: Some(algo),
+                };
+                match api::post::<EncryptResponse, _>("/secret/encrypt", req).await {
                     Ok(res) => {
                         set_output_result.set(res.ciphertext);
                         set_error_msg.set(None);
@@ -212,9 +194,12 @@ pub fn TransitPage() -> impl IntoView {
         let ciphertext = input_text.get();
         async move {
             if let Some(k) = key {
-                let req = DecryptRequest { ciphertext, context: None };
-                let path = format!("/transit/decrypt/{}", k);
-                match api::post::<DecryptResponse, _>(&path, req).await {
+                let req = DecryptRequest {
+                    key_id: k.id,
+                    ciphertext,
+                    context: None,
+                };
+                match api::post::<DecryptResponse, _>("/secret/decrypt", req).await {
                     Ok(res) => {
                         match BASE64.decode(&res.plaintext) {
                             Ok(bytes) => {
@@ -246,12 +231,12 @@ pub fn TransitPage() -> impl IntoView {
             if let Some(k) = key {
                 let b64_input = BASE64.encode(text.as_bytes());
                 let req = SignRequest {
-                    input: b64_input,
+                    key_id: k.id,
+                    data: b64_input,
                     algorithm: Some(algo),
-                    key_version: None
+                    format: None,
                 };
-                let path = format!("/transit/sign/{}", k);
-                match api::post::<SignResponse, _>(&path, req).await {
+                match api::post::<SignResponse, _>("/secret/sign", req).await {
                     Ok(res) => {
                         set_output_result.set(res.signature);
                         set_error_msg.set(None);
@@ -273,18 +258,17 @@ pub fn TransitPage() -> impl IntoView {
         let algo = selected_algo.get();
         async move {
             if let Some(k) = key {
-                // Trim inputs to avoid whitespace issues
                 let text_trimmed = text.trim();
                 let sig_trimmed = sig.trim();
 
                 let b64_input = BASE64.encode(text_trimmed.as_bytes());
                 let req = VerifyRequest {
-                    input: b64_input,
+                    key_id: k.id,
+                    data: b64_input,
                     signature: sig_trimmed.to_string(),
                     algorithm: Some(algo)
                 };
-                let path = format!("/transit/verify/{}", k);
-                match api::post::<VerifyResponse, _>(&path, req).await {
+                match api::post::<VerifyResponse, _>("/secret/verify", req).await {
                     Ok(res) => {
                         set_verify_result.set(Some(res.valid));
                         set_error_msg.set(None);
@@ -327,9 +311,11 @@ pub fn TransitPage() -> impl IntoView {
                             >
                                 <option value="aes256-gcm">"AES-256-GCM"</option>
                                 <option value="chacha20-poly1305">"ChaCha20-Poly1305"</option>
-                                <option value="ed25519">"Ed25519 (Sign)"</option>
-                                <option value="ecdsa-p256">"ECDSA P-256 (Sign)"</option>
-                                <option value="ecdsa-secp256k1">"ECDSA secp256k1 (Sign)"</option>
+                                <option value="rsa-2048">"RSA-2048"</option>
+                                <option value="rsa-4096">"RSA-4096"</option>
+                                <option value="ecdsa-p256">"ECDSA-P256"</option>
+                                <option value="ecdsa-p384">"ECDSA-P384"</option>
+                                <option value="ed25519">"Ed25519"</option>
                             </select>
                         </div>
                         <Button on_click=Box::new(move |_| { create_key_action.dispatch(()); })>"Create"</Button>
@@ -353,7 +339,7 @@ pub fn TransitPage() -> impl IntoView {
                                         <ul class="space-y-2">
                                             {k_list.into_iter().map(|k| {
                                                 let k_clone = k.clone();
-                                                let is_sel = selected_key.get() == Some(k.clone());
+                                                let is_sel = selected_key.get().as_ref().map(|sk| sk.id == k_clone.id).unwrap_or(false);
                                                 view! {
                                                     <li
                                                         class=format!(
@@ -362,7 +348,17 @@ pub fn TransitPage() -> impl IntoView {
                                                         )
                                                         on:click=move |_| {
                                                             set_selected_key.set(Some(k_clone.clone()));
-                                                            fetch_key_info.dispatch(k_clone.clone());
+                                                            // Auto-switch tab based on capability
+                                                            match k_clone.key_type.as_str() {
+                                                                "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+                                                                    set_active_tab.set("sign".to_string());
+                                                                    set_selected_algo.set(k_clone.key_type.to_uppercase());
+                                                                },
+                                                                _ => {
+                                                                    set_active_tab.set("encrypt".to_string());
+                                                                    set_selected_algo.set("AES-GCM".to_string());
+                                                                }
+                                                            }
                                                             set_output_result.set(String::new());
                                                             set_input_text.set(String::new());
                                                             set_signature_input.set(String::new());
@@ -370,7 +366,11 @@ pub fn TransitPage() -> impl IntoView {
                                                             set_error_msg.set(None);
                                                         }
                                                     >
-                                                        {k}
+                                                        <div class="flex justify-between items-center">
+                                                            <span class="font-medium">{k.name}</span>
+                                                            <span class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 uppercase">{k.key_type}</span>
+                                                        </div>
+                                                        <div class="text-[10px] text-gray-400 mt-1 truncate">{k.id}</div>
                                                     </li>
                                                 }
                                             }).collect::<Vec<_>>()}
@@ -392,81 +392,72 @@ pub fn TransitPage() -> impl IntoView {
                                 </div>
                             }.into_any(),
                             Some(key) => {
+                                let key_for_tabs = key.clone();
                                 view! {
                                     <Card>
                                         <div class="flex justify-between items-center mb-6">
-                                            <h2 class="text-lg font-semibold">"Operations: " <span class="text-blue-600">{key}</span></h2>
-                                            {move || {
-                                                let info = key_info.get();
-                                                // X25519 supports encryption
-                                                let can_encrypt = info.as_ref().map(|i| matches!(i.key_type, KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 | KeyType::X25519 | KeyType::Rsa(_))).unwrap_or(true);
-                                                // RSA currently maps to X25519 material (placeholder) which does not support signing
-                                                let can_sign = info.as_ref().map(|i| matches!(i.key_type, KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1)).unwrap_or(true);
-
+                                            <h2 class="text-lg font-semibold">"Operations: " <span class="text-blue-600">{key.name}</span></h2>
+                                            {
+                                                let k_type = key_for_tabs.key_type.clone();
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
-                                                        {if can_encrypt {
-                                                            view! {
-                                                                <button
-                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                                    on:click=move |_| {
-                                                                        set_active_tab.set("encrypt".to_string());
-                                                                        set_output_result.set(String::new());
-                                                                        set_input_text.set(String::new());
-                                                                        set_error_msg.set(None);
-                                                                    }
-                                                                >
-                                                                    "Encrypt"
-                                                                </button>
-                                                                <button
-                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                                    on:click=move |_| {
-                                                                        set_active_tab.set("decrypt".to_string());
-                                                                        set_output_result.set(String::new());
-                                                                        set_input_text.set(String::new());
-                                                                        set_error_msg.set(None);
-                                                                    }
-                                                                >
-                                                                    "Decrypt"
-                                                                </button>
-                                                            }.into_any()
-                                                        } else {
-                                                            view! {}.into_any()
-                                                        }}
+                                                        <button
+                                                            class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                            on:click=move |_| {
+                                                                set_active_tab.set("encrypt".to_string());
+                                                                set_output_result.set(String::new());
+                                                                set_input_text.set(String::new());
+                                                                set_error_msg.set(None);
+                                                            }
+                                                        >
+                                                            "Encrypt"
+                                                        </button>
+                                                        <button
+                                                            class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                            on:click=move |_| {
+                                                                set_active_tab.set("decrypt".to_string());
+                                                                set_output_result.set(String::new());
+                                                                set_input_text.set(String::new());
+                                                                set_error_msg.set(None);
+                                                            }
+                                                        >
+                                                            "Decrypt"
+                                                        </button>
 
-                                                        {if can_sign {
-                                                            view! {
-                                                                <button
-                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                                    on:click=move |_| {
-                                                                        set_active_tab.set("sign".to_string());
-                                                                        set_output_result.set(String::new());
-                                                                        set_input_text.set(String::new());
-                                                                        set_error_msg.set(None);
-                                                                    }
-                                                                >
-                                                                    "Sign"
-                                                                </button>
-                                                                <button
-                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                                    on:click=move |_| {
-                                                                        set_active_tab.set("verify".to_string());
-                                                                        set_output_result.set(String::new());
-                                                                        set_input_text.set(String::new());
-                                                                        set_signature_input.set(String::new());
-                                                                        set_verify_result.set(None);
-                                                                        set_error_msg.set(None);
-                                                                    }
-                                                                >
-                                                                    "Verify"
-                                                                </button>
-                                                            }.into_any()
-                                                        } else {
-                                                            view! {}.into_any()
+                                                        {match k_type.as_str() {
+                                                            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+                                                                view! {
+                                                                    <button
+                                                                        class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                        on:click=move |_| {
+                                                                            set_active_tab.set("sign".to_string());
+                                                                            set_output_result.set(String::new());
+                                                                            set_input_text.set(String::new());
+                                                                            set_error_msg.set(None);
+                                                                        }
+                                                                    >
+                                                                        "Sign"
+                                                                    </button>
+                                                                    <button
+                                                                        class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                        on:click=move |_| {
+                                                                            set_active_tab.set("verify".to_string());
+                                                                            set_output_result.set(String::new());
+                                                                            set_input_text.set(String::new());
+                                                                            set_signature_input.set(String::new());
+                                                                            set_verify_result.set(None);
+                                                                            set_error_msg.set(None);
+                                                                        }
+                                                                    >
+                                                                        "Verify"
+                                                                    </button>
+                                                                }.into_any()
+                                                            },
+                                                            _ => view! {}.into_any()
                                                         }}
                                                     </div>
                                                 }
-                                            }}
+                                            }
                                         </div>
 
                                         <div class="space-y-4">
@@ -475,7 +466,7 @@ pub fn TransitPage() -> impl IntoView {
                                                 <label class="block text-sm font-medium text-gray-700 mb-1">
                                                     {move || match active_tab.get().as_str() {
                                                         "encrypt" => "Plaintext",
-                                                        "decrypt" => "Ciphertext",
+                                                        "decrypt" => "Ciphertext (Base64)",
                                                         "sign" => "Data to Sign",
                                                         "verify" => "Original Data",
                                                         _ => "Input"
@@ -487,7 +478,7 @@ pub fn TransitPage() -> impl IntoView {
                                                     on:input=move |ev| set_input_text.set(event_target_value(&ev))
                                                     placeholder=move || match active_tab.get().as_str() {
                                                         "encrypt" => "Enter text to encrypt...",
-                                                        "decrypt" => "Enter ciphertext (vault:v1:...)",
+                                                        "decrypt" => "Enter base64 ciphertext...",
                                                         "sign" => "Enter data to sign...",
                                                         "verify" => "Enter original data...",
                                                         _ => ""
@@ -499,12 +490,12 @@ pub fn TransitPage() -> impl IntoView {
                                             {move || if active_tab.get() == "verify" {
                                                 view! {
                                                     <div>
-                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Signature"</label>
+                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Signature (Base64)"</label>
                                                         <textarea
                                                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 h-24 font-mono text-sm"
                                                             prop:value=signature_input
                                                             on:input=move |ev| set_signature_input.set(event_target_value(&ev))
-                                                            placeholder="Enter signature..."
+                                                            placeholder="Enter base64 signature..."
                                                         ></textarea>
                                                     </div>
                                                 }.into_any()
@@ -512,25 +503,29 @@ pub fn TransitPage() -> impl IntoView {
                                                 view! {}.into_any()
                                             }}
 
-                                            // Algorithm Selector for Sign/Verify
-                                            {move || if active_tab.get() == "sign" || active_tab.get() == "verify" {
-                                                view! {
-                                                    <div>
-                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Algorithm"</label>
-                                                        <select
-                                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                            on:change=move |ev| set_selected_algo.set(event_target_value(&ev))
-                                                            prop:value=selected_algo
-                                                        >
-                                                            <option value="ed25519">"Ed25519"</option>
-                                                            <option value="ecdsa-p256">"ECDSA P-256"</option>
-                                                            <option value="ecdsa-secp256k1">"ECDSA secp256k1"</option>
-                                                        </select>
-                                                    </div>
-                                                }.into_any()
-                                            } else {
-                                                view! {}.into_any()
-                                            }}
+                                            // Algorithm Selector
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">"Algorithm"</label>
+                                                <select
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    on:change=move |ev| set_selected_algo.set(event_target_value(&ev))
+                                                    prop:value=selected_algo
+                                                >
+                                                    {move || match active_tab.get().as_str() {
+                                                        "encrypt" | "decrypt" => view! {
+                                                            <option value="AES-GCM">"AES-GCM"</option>
+                                                            <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
+                                                        }.into_any(),
+                                                        "sign" | "verify" => view! {
+                                                            <option value="RSA-PSS">"RSA-PSS"</option>
+                                                            <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
+                                                            <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
+                                                            <option value="ED25519">"ED25519"</option>
+                                                        }.into_any(),
+                                                        _ => view! {}.into_any()
+                                                    }}
+                                                </select>
+                                            </div>
 
                                             <div class="flex justify-end">
                                                 <Button
@@ -566,9 +561,9 @@ pub fn TransitPage() -> impl IntoView {
                                                 if !res.is_empty() && active_tab.get() != "verify" {
                                                     view! {
                                                         <div class="space-y-1">
-                                                            <label class="block text-sm font-medium text-gray-700">"Result"</label>
+                                                            <label class="block text-sm font-medium text-gray-700">"Result (Base64)"</label>
                                                             <div class="relative">
-                                                                <pre class="bg-gray-800 text-gray-100 p-4 rounded-md overflow-x-auto text-sm font-mono">
+                                                                <pre class="bg-gray-800 text-gray-100 p-4 rounded-md overflow-x-auto text-sm font-mono break-all whitespace-pre-wrap">
                                                                     {res}
                                                                 </pre>
                                                             </div>
