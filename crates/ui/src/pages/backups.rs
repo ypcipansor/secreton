@@ -65,7 +65,7 @@ pub fn BackupsPage() -> impl IntoView {
     let restore_backup = Action::new_local(move |id: &String| {
         let id = id.clone();
         async move {
-            let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Restore system from backup {}? This will overwrite current data.", id)).unwrap_or(false);
+            let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Restore system from backup {}? This will overwrite current data.", id)).ok()).unwrap_or(false);
             if !confirm { return; }
 
             set_loading.set(true);
@@ -87,7 +87,7 @@ pub fn BackupsPage() -> impl IntoView {
     let delete_backup = Action::new_local(move |id: &String| {
         let id = id.clone();
         async move {
-            let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete backup {}?", id)).unwrap_or(false);
+            let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Delete backup {}?", id)).ok()).unwrap_or(false);
             if !confirm { return; }
 
             set_loading.set(true);

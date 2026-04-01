@@ -417,6 +417,7 @@ pub fn TransitPage() -> impl IntoView {
                                                             class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                             on:click=move |_| {
                                                                 set_active_tab.set("encrypt".to_string());
+                                                                set_selected_algo.set("AES-GCM".to_string());
                                                                 set_output_result.set(String::new());
                                                                 set_input_text.set(String::new());
                                                                 set_error_msg.set(None);
@@ -428,6 +429,7 @@ pub fn TransitPage() -> impl IntoView {
                                                             class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                             on:click=move |_| {
                                                                 set_active_tab.set("decrypt".to_string());
+                                                                set_selected_algo.set("AES-GCM".to_string());
                                                                 set_output_result.set(String::new());
                                                                 set_input_text.set(String::new());
                                                                 set_error_msg.set(None);
@@ -443,6 +445,7 @@ pub fn TransitPage() -> impl IntoView {
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("sign".to_string());
+                                                                            set_selected_algo.set("RSA-PSS".to_string());
                                                                             set_output_result.set(String::new());
                                                                             set_input_text.set(String::new());
                                                                             set_error_msg.set(None);
@@ -454,6 +457,7 @@ pub fn TransitPage() -> impl IntoView {
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("verify".to_string());
+                                                                            set_selected_algo.set("RSA-PSS".to_string());
                                                                             set_output_result.set(String::new());
                                                                             set_input_text.set(String::new());
                                                                             set_signature_input.set(String::new());
