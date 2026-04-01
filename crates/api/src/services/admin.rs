@@ -745,12 +745,12 @@ impl AdminService {
                     csv_content.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         log.timestamp,
-                        log.user_id,
-                        log.action,
-                        log.resource,
-                        log.resource_id.unwrap_or_default(),
-                        log.ip_address,
-                        log.user_agent,
+                        log.user_id.replace('"', "\"\""),
+                        log.action.replace('"', "\"\""),
+                        log.resource.replace('"', "\"\""),
+                        log.resource_id.unwrap_or_default().replace('"', "\"\""),
+                        log.ip_address.replace('"', "\"\""),
+                        log.user_agent.replace('"', "\"\""),
                         log.success
                     ));
                 }
