@@ -96,22 +96,15 @@ pub async fn get_audit_logs(
         .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    // Convert entries to clean JSON values: recover original username and
-    // strip the internal _original_user key before returning to the client.
+    // Convert entries to clean JSON values with the original username.
     let mut clean_entries: Vec<serde_json::Value> = entries
         .into_iter()
-        .map(|mut e| {
-            let user = e
-                .details
-                .get("_original_user")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| e.user_id.to_string());
-            e.details.remove("_original_user");
+        .map(|rich| {
+            let e = rich.entry;
             serde_json::json!({
                 "id": e.id.to_string(),
                 "timestamp": e.timestamp,
-                "user": user,
+                "user": rich.original_user,
                 "action": e.action,
                 "resource_type": e.resource_type,
                 "resource_id": e.resource_id,

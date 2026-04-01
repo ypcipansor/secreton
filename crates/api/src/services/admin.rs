@@ -698,21 +698,12 @@ impl AdminService {
 
         let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
-            .map(|mut e| {
-                // Recover the original username string that was stashed by
-                // AuditLogger::get_entries, falling back to the Uuid representation.
-                let user_id = e
-                    .details
-                    .get("_original_user")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| e.user_id.to_string());
-                // Strip internal key so it doesn't leak into API responses
-                e.details.remove("_original_user");
+            .map(|rich| {
+                let e = rich.entry;
                 AuditLogEntry {
                     id: e.id.to_string(),
                     timestamp: e.timestamp,
-                    user_id,
+                    user_id: rich.original_user,
                     action: e.action,
                     resource: e.resource_type,
                     resource_id: e.resource_id,

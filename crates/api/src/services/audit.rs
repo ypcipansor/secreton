@@ -489,6 +489,20 @@ pub enum ExportFormat {
     SIEM,
 }
 
+/// Wrapper that pairs an `AuditEntry` with the original username string.
+///
+/// `AuditEntry.user_id` is a `Uuid`, but the source `AuditEvent.user` is a
+/// free-form string (e.g. `"admin"`) that almost never parses as a valid UUID.
+/// This struct carries the original value so callers don't have to rely on a
+/// convention key stashed inside `details`.
+#[derive(Debug, Clone)]
+pub struct RichAuditEntry {
+    /// The original username from the audit event.
+    pub original_user: String,
+    /// The underlying storage-level audit entry.
+    pub entry: secreton_storage::models::storage_models::AuditEntry,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AuditFilters {
     pub user: Option<String>,
@@ -521,7 +535,7 @@ impl AuditLogger {
     pub async fn get_entries(
         &self,
         filters: AuditFilters,
-    ) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
+    ) -> Result<Vec<RichAuditEntry>> {
         // Optimize query by using a more specific prefix if time range allows
         use chrono::Datelike;
         let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
@@ -577,31 +591,28 @@ impl AuditLogger {
                     }
 
                     let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
-                    let mut details: HashMap<String, serde_json::Value> = event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
-                    // Preserve original username so callers can recover it even
-                    // when the value is not a valid UUID.
-                    details.insert("_original_user".to_string(), serde_json::Value::String(event.user.clone()));
-                    results.push(secreton_storage::models::storage_models::AuditEntry {
-                        id: Uuid::parse_str(&event.id).unwrap_or_default(),
-                        timestamp: event.timestamp,
-                        user_id,
-                        action: event.operation.clone(),
-                        resource_type: event.resource.clone(),
-                        resource_id: Some(event.event_type.as_str().to_string()),
-                        details,
-                        ip_address: event.client_ip.clone(),
-                        user_agent: None,
-                        success: match event.status {
-                            AuditStatus::Success => true,
-                            _ => false,
+                    let details: HashMap<String, serde_json::Value> = event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
+                    results.push(RichAuditEntry {
+                        original_user: event.user.clone(),
+                        entry: secreton_storage::models::storage_models::AuditEntry {
+                            id: Uuid::parse_str(&event.id).unwrap_or_default(),
+                            timestamp: event.timestamp,
+                            user_id,
+                            action: event.operation.clone(),
+                            resource_type: event.resource.clone(),
+                            resource_id: Some(event.event_type.as_str().to_string()),
+                            details,
+                            ip_address: event.client_ip.clone(),
+                            user_agent: None,
+                            success: matches!(event.status, AuditStatus::Success),
+                            error_message: None,
                         },
-                        error_message: None,
                     });
                 }
             }
         }
 
-        results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        results.sort_by(|a, b| b.entry.timestamp.cmp(&a.entry.timestamp));
         Ok(results)
     }
 
@@ -613,31 +624,17 @@ impl AuditLogger {
     ) -> Result<Vec<u8>> {
         let entries = self.get_entries(filters).await?;
 
-        // Pre-process entries: recover original username and strip internal key
-        let entries: Vec<(String, secreton_storage::models::storage_models::AuditEntry)> = entries
-            .into_iter()
-            .map(|mut e| {
-                let user = e
-                    .details
-                    .get("_original_user")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| e.user_id.to_string());
-                e.details.remove("_original_user");
-                (user, e)
-            })
-            .collect();
-
         match format {
             ExportFormat::JSON => {
                 // Build export-friendly structs with the real username
                 let export_entries: Vec<serde_json::Value> = entries
                     .iter()
-                    .map(|(user, e)| {
+                    .map(|rich| {
+                        let e = &rich.entry;
                         serde_json::json!({
                             "id": e.id.to_string(),
                             "timestamp": e.timestamp,
-                            "user": user,
+                            "user": rich.original_user,
                             "action": e.action,
                             "resource_type": e.resource_type,
                             "resource_id": e.resource_id,
@@ -654,11 +651,12 @@ impl AuditLogger {
             }
             ExportFormat::CSV => {
                 let mut csv = String::from("timestamp,user,action,resource,success,ip_address\n");
-                for (user, e) in &entries {
+                for rich in &entries {
+                    let e = &rich.entry;
                     csv.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         e.timestamp,
-                        user,
+                        rich.original_user,
                         e.action,
                         e.resource_type,
                         e.success,
