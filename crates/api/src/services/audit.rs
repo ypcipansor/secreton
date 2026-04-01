@@ -607,7 +607,7 @@ impl AuditLogger {
                         e.timestamp,
                         user,
                         e.action,
-                        e.resource_id.unwrap_or_default(),
+                        e.resource_type,
                         e.success,
                         e.ip_address.unwrap_or_default()
                     ));

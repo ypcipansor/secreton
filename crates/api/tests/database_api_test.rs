@@ -89,6 +89,7 @@ async fn test_database_api_endpoints() {
             storage.clone(),
             auth.clone(),
             performance.clone(),
+            audit.clone(),
         )
         .await
         .unwrap(),
