@@ -536,6 +536,10 @@ impl AuditLogger {
         &self,
         filters: AuditFilters,
     ) -> Result<Vec<RichAuditEntry>> {
+        if !self.enabled {
+            return Ok(vec![]);
+        }
+
         // Optimize query by using a more specific prefix if time range allows
         use chrono::Datelike;
         let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
@@ -627,6 +631,14 @@ impl AuditLogger {
         format: ExportFormat,
         filters: AuditFilters,
     ) -> Result<Vec<u8>> {
+        if !self.enabled {
+            return match format {
+                ExportFormat::JSON => Ok(b"[]".to_vec()),
+                ExportFormat::CSV => Ok(b"timestamp,user,action,resource,success,ip_address\n".to_vec()),
+                _ => Err(anyhow::anyhow!("Export format {:?} not yet implemented", format)),
+            };
+        }
+
         let entries = self.get_entries(filters).await?;
 
         match format {

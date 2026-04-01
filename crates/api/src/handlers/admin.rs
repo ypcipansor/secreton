@@ -1238,13 +1238,28 @@ pub async fn get_system_logs(
 }
 
 pub async fn vacuum_database(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    Ok(Json(ApiResponse::success(
-        serde_json::json!({"status": "vacuumed"}),
-    )))
+
+    let start = std::time::Instant::now();
+    let result = state.storage.vacuum().await;
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let success = result.is_ok();
+
+    if let Err(ref e) = result {
+        tracing::warn!("Vacuum operation failed: {}", e);
+    }
+
+    let data = serde_json::json!({
+        "status": if success { "vacuumed" } else { "failed" },
+        "success": success,
+        "duration_ms": duration_ms,
+        "error": result.err().map(|e| e.to_string()),
+    });
+
+    Ok(Json(ApiResponse::success(data)))
 }
 
 pub async fn get_security_reports(
