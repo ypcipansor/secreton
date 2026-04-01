@@ -879,13 +879,15 @@ pub async fn create_key(
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+    let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
     let response = KeyResponse {
         id: key_info.id.clone(),
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: request.algorithm.clone(),
-        size: request.size.unwrap_or(256),
-        usage: request.usage,
+        algorithm,
+        size,
+        usage,
         metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
             description: None,
             tags: vec![],
@@ -939,13 +941,15 @@ pub async fn get_key(
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+    let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
     let response = KeyResponse {
         id: key_info.id,
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
-        size: 256,                            // Default size
-        usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+        algorithm,
+        size,
+        usage,
         metadata: KeyMetadata {
             description: None,
             tags: vec![],
@@ -998,13 +1002,15 @@ pub async fn list_keys(
         // Get public key if available (for asymmetric keys)
         let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+        let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
         keys.push(KeyResponse {
             id: key_info.id,
             name: key_info.name,
             key_type: key_info.key_type.clone(),
-            algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
-            size: 256,                            // Default size
-            usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+            algorithm,
+            size,
+            usage,
             metadata: KeyMetadata {
                 description: None,
                 tags: vec![],
@@ -1060,13 +1066,15 @@ pub async fn rotate_key(
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+    let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
     let response = KeyResponse {
         id: key_info.id.clone(),
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: key_info.key_type.clone(), // Use key_type as algorithm for now
-        size: 256,                            // Default size
-        usage: vec!["encrypt".to_string(), "decrypt".to_string()], // Default usage
+        algorithm,
+        size,
+        usage,
         metadata: KeyMetadata {
             description: None,
             tags: vec![],
@@ -1114,13 +1122,15 @@ pub async fn update_key(
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+    let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
     let response = KeyResponse {
         id: key_info.id,
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: key_info.key_type.clone(),
-        size: 256,
-        usage: vec!["encrypt".to_string(), "decrypt".to_string()],
+        algorithm,
+        size,
+        usage,
         metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
             description: None,
             tags: vec![],
@@ -1549,6 +1559,69 @@ pub async fn delete_policy(
     });
 
     Ok(Json(ApiResponse::success(data)))
+}
+
+/// Infer algorithm, size, and usage from a key type string.
+///
+/// Returns `(algorithm, size, usage)` matching the conventions used in the
+/// frontend's `CreateKeyRequest` builder so that read endpoints (get_key,
+/// list_keys, rotate_key, update_key) return consistent metadata.
+fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
+    match key_type {
+        "rsa-2048" => (
+            "RSA-2048".to_string(),
+            2048,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
+        "rsa-4096" => (
+            "RSA-4096".to_string(),
+            4096,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
+        "ecdsa-p256" => (
+            "ECDSA-P256".to_string(),
+            256,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
+        "ecdsa-p384" => (
+            "ECDSA-P384".to_string(),
+            384,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
+        "ed25519" => (
+            "ED25519".to_string(),
+            256,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
+        "chacha20-poly1305" => (
+            "CHACHA20-POLY1305".to_string(),
+            256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "aes256-gcm" => (
+            "AES-GCM".to_string(),
+            256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "aes128-gcm" => (
+            "AES-GCM".to_string(),
+            128,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        // Unknown key type — default to AES-GCM but log a warning so new
+        // key types are not silently misclassified.
+        other => {
+            tracing::warn!(
+                "infer_key_attributes: unrecognised key type '{}', defaulting to AES-GCM",
+                other
+            );
+            (
+                "AES-GCM".to_string(),
+                256,
+                vec!["encrypt".to_string(), "decrypt".to_string()],
+            )
+        }
+    }
 }
 
 /// Helper function to get public key for a key (for asymmetric keys)

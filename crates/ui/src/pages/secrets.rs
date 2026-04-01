@@ -194,6 +194,38 @@ pub fn SecretsList() -> impl IntoView {
         secret_resource.refetch();
     };
 
+    // Helper to rollback to a specific version
+    let rollback_to_version = move |v: u32| {
+        spawn_local(async move {
+            let current_path = path();
+            let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Rollback secret at {} to version {}? This will create a new version with the historical data.", current_path, v)).ok()).unwrap_or(false);
+            if !confirm { return; }
+            let fetch_url = format!("/secret/secrets/{}?version={}", current_path, v);
+
+            // 1. Fetch the historical data
+            match api::get::<GetSecretResponse>(&fetch_url).await {
+                Ok(historical) => {
+                    // 2. PUT it as the new latest version
+                    let put_url = format!("/secret/secrets/{}", current_path);
+                    let payload = serde_json::json!({
+                        "data": historical.data
+                    });
+
+                    match api::put::<serde_json::Value, _>(&put_url, payload).await {
+                        Ok(_) => {
+                            set_error_msg.set(None);
+                            set_view_version.set(None);
+                            set_show_history_modal.set(false);
+                            secret_resource.refetch();
+                        }
+                        Err(e) => set_error_msg.set(Some(format!("Rollback failed: {:?}", e))),
+                    }
+                }
+                Err(e) => set_error_msg.set(Some(format!("Failed to fetch version for rollback: {:?}", e))),
+            }
+        });
+    };
+
     // Helper to clear version view (show latest)
     let clear_version_view = move || {
         set_view_version.set(None);
@@ -202,6 +234,7 @@ pub fn SecretsList() -> impl IntoView {
 
     // Open Modal for Create (New)
     let open_create = move |_| {
+        set_error_msg.set(None);
         set_new_secret_path.set("".to_string());
         set_kv_rows.set(vec![KvRow { id: 0, key: "".to_string(), value: "".to_string() }]);
         set_next_id.set(1);
@@ -210,6 +243,7 @@ pub fn SecretsList() -> impl IntoView {
 
     // Open Modal for Edit (Existing)
     let open_edit = move |_| {
+        set_error_msg.set(None);
         if let Some(SecretViewMode::View(data, _)) = secret_resource.get() {
              if let serde_json::Value::Object(map) = data {
                  let mut rows = Vec::new();
@@ -311,7 +345,7 @@ pub fn SecretsList() -> impl IntoView {
         let current_path = path();
         if current_path.is_empty() { return; }
 
-        let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Delete secret at {}?", current_path)).unwrap_or(false);
+        let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Delete secret at {}?", current_path)).ok()).unwrap_or(false);
         if !confirm { return; }
 
         let navigate = navigate_delete.clone();
@@ -472,7 +506,7 @@ pub fn SecretsList() -> impl IntoView {
                                                                      <button
                                                                         class="text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition px-2"
                                                                         title="Copy"
-                                                                        on:click=move |_| { let _ = web_sys::window().unwrap().navigator().clipboard().write_text(&val_str); }
+                                                                        on:click=move |_| { if let Some(w) = web_sys::window() { let _ = w.navigator().clipboard().write_text(&val_str); } }
                                                                      >
                                                                         "📋"
                                                                      </button>
@@ -517,9 +551,17 @@ pub fn SecretsList() -> impl IntoView {
 
             <Modal
                 show=show_history_modal
-                on_close=move || set_show_history_modal.set(false)
+                on_close=move || {
+                    set_error_msg.set(None);
+                    set_show_history_modal.set(false);
+                }
                 title="Secret History".to_string()
             >
+                <Show when=move || error_msg.get().is_some()>
+                    <div class="bg-red-50 text-red-700 p-3 rounded mb-4 text-sm">
+                        {move || error_msg.get().unwrap_or_default()}
+                    </div>
+                </Show>
                 <div class="max-h-[60vh] overflow-y-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
@@ -530,19 +572,32 @@ pub fn SecretsList() -> impl IntoView {
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            {move || history_versions.get().into_iter().map(|v| {
+                            {move || history_versions.get().into_iter().enumerate().map(|(idx, v)| {
                                 let ver = v.version;
+                                let is_latest = idx == 0;
                                 view! {
                                     <tr>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{v.version}</td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{v.created_at}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                             <button
                                                 class="text-blue-600 hover:text-blue-900"
                                                 on:click=move |_| load_specific_version(ver)
                                             >
                                                 "View"
                                             </button>
+                                            {if !is_latest {
+                                                view! {
+                                                    <button
+                                                        class="text-orange-600 hover:text-orange-900"
+                                                        on:click=move |_| rollback_to_version(ver)
+                                                    >
+                                                        "Rollback"
+                                                    </button>
+                                                }.into_any()
+                                            } else {
+                                                view! {}.into_any()
+                                            }}
                                         </td>
                                     </tr>
                                 }
