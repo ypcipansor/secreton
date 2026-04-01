@@ -879,16 +879,15 @@ pub async fn create_key(
     // Get public key if available (for asymmetric keys)
     let public_key = get_public_key_for_key(&state, &key_info, &user).await;
 
+    let (algorithm, size, usage) = infer_key_attributes(&key_info.key_type);
+
     let response = KeyResponse {
         id: key_info.id.clone(),
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: {
-            let (algo, size, usage) = infer_key_attributes(&key_info.key_type);
-            // Store size and usage for use below
-            // Actually we need to restructure — use a let binding before the struct
-            unreachable!()
-        },
+        algorithm,
+        size,
+        usage,
         metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
             description: None,
             tags: vec![],
