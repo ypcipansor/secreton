@@ -213,6 +213,7 @@ pub fn SecretsList() -> impl IntoView {
 
                     match api::put::<serde_json::Value, _>(&put_url, payload).await {
                         Ok(_) => {
+                            set_error_msg.set(None);
                             set_view_version.set(None);
                             set_show_history_modal.set(false);
                             secret_resource.refetch();
