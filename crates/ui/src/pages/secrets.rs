@@ -551,6 +551,11 @@ pub fn SecretsList() -> impl IntoView {
                 on_close=move || set_show_history_modal.set(false)
                 title="Secret History".to_string()
             >
+                <Show when=move || error_msg.get().is_some()>
+                    <div class="bg-red-50 text-red-700 p-3 rounded mb-4 text-sm">
+                        {move || error_msg.get().unwrap_or_default()}
+                    </div>
+                </Show>
                 <div class="max-h-[60vh] overflow-y-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">

@@ -53,10 +53,12 @@ pub fn BackupsPage() -> impl IntoView {
             set_loading.set(true);
             match api::post::<BackupInfo, _>("/admin/backups", serde_json::json!({})).await {
                 Ok(_) => {
+                    set_error_msg.set(None);
                     set_success_msg.set(Some("Backup created successfully".to_string()));
                     fetch_backups.dispatch(());
                 },
                 Err(e) => {
+                    set_success_msg.set(None);
                     set_error_msg.set(Some(format!("Failed to create backup: {:?}", e)));
                     set_loading.set(false);
                 },
@@ -78,10 +80,14 @@ pub fn BackupsPage() -> impl IntoView {
                         set_error_msg.set(None);
                         set_success_msg.set(Some("System restored successfully".to_string()));
                     } else {
+                        set_success_msg.set(None);
                         set_error_msg.set(Some("Restore failed".to_string()));
                     }
                 },
-                Err(e) => set_error_msg.set(Some(format!("Restore failed: {:?}", e))),
+                Err(e) => {
+                    set_success_msg.set(None);
+                    set_error_msg.set(Some(format!("Restore failed: {:?}", e)));
+                },
             }
             set_loading.set(false);
         }
@@ -97,10 +103,12 @@ pub fn BackupsPage() -> impl IntoView {
             let url = format!("/admin/backups/{}", id);
             match api::delete::<serde_json::Value>(&url).await {
                 Ok(_) => {
+                    set_error_msg.set(None);
                     set_success_msg.set(Some("Backup deleted successfully".to_string()));
                     fetch_backups.dispatch(());
                 },
                 Err(e) => {
+                    set_success_msg.set(None);
                     set_error_msg.set(Some(format!("Failed to delete backup: {:?}", e)));
                     set_loading.set(false);
                 },

@@ -155,8 +155,8 @@ pub fn SettingsPage() -> impl IntoView {
                                                   <a href="/backups" class="block w-full text-center px-4 py-2 border border-gray-300 rounded shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition">
                                                       "System Backups"
                                                   </a>
-                                                  <button class="w-full text-center px-4 py-2 border border-gray-300 rounded shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition">
-                                                      "Clear Performance Cache"
+                                                  <button class="w-full text-center px-4 py-2 border border-gray-300 rounded shadow-sm text-sm font-medium text-gray-400 bg-gray-50 cursor-not-allowed" disabled=true title="Coming soon">
+                                                      "Clear Performance Cache (Coming Soon)"
                                                   </button>
                                               </div>
                                          </div>
