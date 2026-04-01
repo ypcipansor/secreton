@@ -603,7 +603,7 @@ impl AuditLogger {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| e.user_id.to_string());
                     csv.push_str(&format!(
-                        "{},{},{},{},{},{}\n",
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         e.timestamp,
                         user,
                         e.action,
