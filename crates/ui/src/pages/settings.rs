@@ -74,7 +74,7 @@ pub fn SettingsPage() -> impl IntoView {
                                         <div class="space-y-4">
                                             <div class="flex justify-between items-center pb-2 border-b">
                                                 <span class="text-sm text-gray-500">"MFA Required"</span>
-                                                <span class="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">
+                                                <span class={format!("px-2 py-1 text-xs font-bold rounded {}", if config.security.mfa_enabled { "bg-green-100 text-green-700" } else { "bg-red-100 text-red-700" })}>
                                                     {if config.security.mfa_enabled { "ENABLED" } else { "DISABLED" }}
                                                 </span>
                                             </div>
