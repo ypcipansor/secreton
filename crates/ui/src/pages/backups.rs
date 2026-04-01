@@ -56,9 +56,11 @@ pub fn BackupsPage() -> impl IntoView {
                     set_success_msg.set(Some("Backup created successfully".to_string()));
                     fetch_backups.dispatch(());
                 },
-                Err(e) => set_error_msg.set(Some(format!("Failed to create backup: {:?}", e))),
+                Err(e) => {
+                    set_error_msg.set(Some(format!("Failed to create backup: {:?}", e)));
+                    set_loading.set(false);
+                },
             }
-            set_loading.set(false);
         }
     });
 
@@ -98,9 +100,11 @@ pub fn BackupsPage() -> impl IntoView {
                     set_success_msg.set(Some("Backup deleted successfully".to_string()));
                     fetch_backups.dispatch(());
                 },
-                Err(e) => set_error_msg.set(Some(format!("Failed to delete backup: {:?}", e))),
+                Err(e) => {
+                    set_error_msg.set(Some(format!("Failed to delete backup: {:?}", e)));
+                    set_loading.set(false);
+                },
             }
-            set_loading.set(false);
         }
     });
 

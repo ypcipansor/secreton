@@ -148,6 +148,7 @@ pub fn TransitPage() -> impl IntoView {
                 size: match k_type.as_str() {
                     "rsa-2048" => Some(2048),
                     "rsa-4096" => Some(4096),
+                    "ecdsa-p384" => Some(384),
                     _ => Some(256),
                 },
                 usage: match k_type.as_str() {
