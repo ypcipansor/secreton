@@ -2113,10 +2113,25 @@ impl AdminService {
             doc["full_name"] = serde_json::Value::String(full_name);
         }
         if let Some(enabled) = request.enabled {
+            // Prevent disabling the default admin user
+            if username == "admin" && !enabled {
+                return Err(AdminError::NotPermitted(
+                    "Cannot disable the default admin user".to_string(),
+                ));
+            }
             doc["enabled"] = serde_json::Value::Bool(enabled);
         }
-        if let Some(roles) = request.roles {
-            doc["roles"] = serde_json::to_value(&roles).map_err(|e| {
+        if let Some(ref roles) = request.roles {
+            // Prevent removing admin privileges from the default admin user
+            if username == "admin"
+                && !roles.contains(&"admin".to_string())
+                && !roles.contains(&"root".to_string())
+            {
+                return Err(AdminError::NotPermitted(
+                    "Cannot remove admin privileges from the default admin user".to_string(),
+                ));
+            }
+            doc["roles"] = serde_json::to_value(roles).map_err(|e| {
                 AdminError::Internal(anyhow::anyhow!("Failed to serialize roles: {}", e))
             })?;
         }
@@ -2156,6 +2171,17 @@ impl AdminService {
         roles: Vec<String>,
     ) -> Result<(), AdminError> {
         Self::validate_username(username)?;
+
+        // Prevent removing the "admin" role from the default admin user
+        if username == "admin"
+            && !roles.contains(&"admin".to_string())
+            && !roles.contains(&"root".to_string())
+        {
+            return Err(AdminError::NotPermitted(
+                "Cannot remove admin privileges from the default admin user".to_string(),
+            ));
+        }
+
         let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         let original_entry = self
             .storage

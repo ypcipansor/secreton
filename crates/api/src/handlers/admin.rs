@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use crate::handlers::{AppState, secret::ListQuery};
 use crate::{
     ApiResponse, ApiResult,
-    services::admin::{CreateUserRequest, UpdateUserRequest},
+    services::admin::{CreateRoleRequest, CreateUserRequest, UpdateRoleRequest, UpdateUserRequest},
 };
 use secreton_crypto::{encryption, hashing};
 use secreton_storage::SecretEntry; // Moved from inside function to top-level
@@ -278,21 +278,6 @@ pub struct AssignRolesRequest {
 }
 
 /// Role management models
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CreateRoleRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub permissions: Vec<String>,
-    pub metadata: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct UpdateRoleRequest {
-    pub description: Option<String>,
-    pub permissions: Option<Vec<String>>,
-    pub metadata: Option<HashMap<String, String>>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoleResponse {
     pub name: String,
@@ -1093,14 +1078,8 @@ pub async fn create_role(
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
-    let create_req = crate::services::admin::CreateRoleRequest {
-        name: request.name,
-        description: request.description,
-        permissions: request.permissions,
-        metadata: request.metadata,
-    };
 
-    let role = state.admin.create_role(create_req).await.map_err(map_admin_error)?;
+    let role = state.admin.create_role(request).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1139,13 +1118,8 @@ pub async fn update_role(
     Json(request): Json<UpdateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
-    let update_req = crate::services::admin::UpdateRoleRequest {
-        description: request.description,
-        permissions: request.permissions,
-        metadata: request.metadata,
-    };
 
-    let role = state.admin.update_role(&role_name, update_req).await.map_err(map_admin_error)?;
+    let role = state.admin.update_role(&role_name, request).await.map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
