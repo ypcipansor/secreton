@@ -701,17 +701,27 @@ impl AdminService {
 
         let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
-            .map(|e| AuditLogEntry {
-                id: e.id.to_string(),
-                timestamp: e.timestamp,
-                user_id: e.user_id.to_string(),
-                action: e.action,
-                resource: e.resource_type,
-                resource_id: e.resource_id,
-                ip_address: e.ip_address.unwrap_or_default(),
-                user_agent: e.user_agent.unwrap_or_default(),
-                success: e.success,
-                details: Some(serde_json::to_value(e.details).unwrap_or_default()),
+            .map(|e| {
+                // Recover the original username string that was stashed by
+                // AuditLogger::get_entries, falling back to the Uuid representation.
+                let user_id = e
+                    .details
+                    .get("_original_user")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| e.user_id.to_string());
+                AuditLogEntry {
+                    id: e.id.to_string(),
+                    timestamp: e.timestamp,
+                    user_id,
+                    action: e.action,
+                    resource: e.resource_type,
+                    resource_id: e.resource_id,
+                    ip_address: e.ip_address.unwrap_or_default(),
+                    user_agent: e.user_agent.unwrap_or_default(),
+                    success: e.success,
+                    details: Some(serde_json::to_value(e.details).unwrap_or_default()),
+                }
             })
             .collect();
 

@@ -4,6 +4,7 @@ use secreton_security::policies::audit::{
     AuditEvent, AuditEventType as CoreAuditEventType, AuditService, AuditStatus,
 };
 use secreton_storage::StorageBackend;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -551,14 +552,18 @@ impl AuditLogger {
                     }
 
                     let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
+                    let mut details: HashMap<String, serde_json::Value> = event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
+                    // Preserve original username so callers can recover it even
+                    // when the value is not a valid UUID.
+                    details.insert("_original_user".to_string(), serde_json::Value::String(event.user.clone()));
                     results.push(secreton_storage::models::storage_models::AuditEntry {
                         id: Uuid::parse_str(&event.id).unwrap_or_default(),
                         timestamp: event.timestamp,
                         user_id,
                         action: event.operation.clone(),
-                        resource_type: event.event_type.as_str().to_string(),
-                        resource_id: Some(event.resource.clone()),
-                        details: event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect(),
+                        resource_type: event.resource.clone(),
+                        resource_id: Some(event.event_type.as_str().to_string()),
+                        details,
                         ip_address: event.client_ip.clone(),
                         user_agent: None,
                         success: match event.status {
@@ -591,10 +596,16 @@ impl AuditLogger {
             ExportFormat::CSV => {
                 let mut csv = String::from("timestamp,user,action,resource,success,ip_address\n");
                 for e in entries {
+                    let user = e
+                        .details
+                        .get("_original_user")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| e.user_id.to_string());
                     csv.push_str(&format!(
                         "{},{},{},{},{},{}\n",
                         e.timestamp,
-                        e.user_id,
+                        user,
                         e.action,
                         e.resource_id.unwrap_or_default(),
                         e.success,
