@@ -73,6 +73,7 @@ pub fn BackupsPage() -> impl IntoView {
             match api::post::<MaintenanceResult, _>(&url, serde_json::json!({})).await {
                 Ok(res) => {
                     if res.success {
+                        set_error_msg.set(None);
                         set_success_msg.set(Some("System restored successfully".to_string()));
                     } else {
                         set_error_msg.set(Some("Restore failed".to_string()));

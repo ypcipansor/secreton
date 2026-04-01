@@ -416,7 +416,7 @@ pub fn TransitPage() -> impl IntoView {
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
                                                         {match k_type.as_str() {
-                                                            "ed25519" | "ecdsa-p256" | "ecdsa-p384" => view! {}.into_any(),
+                                                            "ed25519" | "ecdsa-p256" | "ecdsa-p384" | "rsa-2048" | "rsa-4096" => view! {}.into_any(),
                                                             _ => view! {
                                                                 <button
                                                                     class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
