@@ -112,6 +112,7 @@ pub struct CreateUserRequest {
     pub password: String,
     pub full_name: Option<String>,
     pub enabled: Option<bool>,
+    #[serde(default)]
     pub roles: Vec<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
