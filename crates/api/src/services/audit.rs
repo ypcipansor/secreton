@@ -482,11 +482,7 @@ pub enum SecurityEventType {
 #[derive(Debug, Clone)]
 pub enum ExportFormat {
     CSV,
-    XML,
     JSON,
-    CEF,
-    LEEF,
-    SIEM,
 }
 
 /// Wrapper that pairs an `AuditEntry` with the original username string.
@@ -635,7 +631,6 @@ impl AuditLogger {
             return match format {
                 ExportFormat::JSON => Ok(b"[]".to_vec()),
                 ExportFormat::CSV => Ok(b"timestamp,user,action,resource,success,ip_address\n".to_vec()),
-                _ => Err(anyhow::anyhow!("Export format {:?} not yet implemented", format)),
             };
         }
 
@@ -682,7 +677,6 @@ impl AuditLogger {
                 }
                 Ok(csv.into_bytes())
             }
-            _ => Err(anyhow::anyhow!("Export format {:?} not yet implemented", format)),
         }
     }
 }
