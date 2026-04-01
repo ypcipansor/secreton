@@ -887,14 +887,20 @@ pub async fn compact_database(
     let result = state.admin.compact_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
-        "message": "Database compaction completed",
+        "message": if result.success { "Database compaction completed" } else { "Database compaction failed" },
         "operation": result.operation,
         "success": result.success,
         "duration_ms": result.duration_ms,
         "details": result.details
     });
 
-    Ok(Json(ApiResponse::success(data)))
+    if result.success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            "Database compaction failed".to_string(),
+        ))
+    }
 }
 
 /// Component health check functions
@@ -1242,28 +1248,21 @@ pub async fn vacuum_database(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-
-    let start = std::time::Instant::now();
-    let result = state.storage.vacuum().await;
-    let duration_ms = start.elapsed().as_millis() as u64;
-    let success = result.is_ok();
-
-    if let Err(ref e) = result {
-        tracing::warn!("Vacuum operation failed: {}", e);
-    }
+    let result = state.admin.vacuum_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
-        "status": if success { "vacuumed" } else { "failed" },
-        "success": success,
-        "duration_ms": duration_ms,
-        "error": result.err().map(|e| e.to_string()),
+        "message": if result.success { "Database vacuum completed" } else { "Database vacuum failed" },
+        "operation": result.operation,
+        "success": result.success,
+        "duration_ms": result.duration_ms,
+        "details": result.details
     });
 
-    if success {
+    if result.success {
         Ok(Json(ApiResponse::success(data)))
     } else {
         Err(crate::ApiError::Internal(
-            data["error"].as_str().unwrap_or("Vacuum operation failed").to_string(),
+            "Database vacuum failed".to_string(),
         ))
     }
 }

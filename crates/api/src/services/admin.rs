@@ -673,6 +673,32 @@ impl AdminService {
         })
     }
 
+    /// Vacuum the database storage backend
+    pub async fn vacuum_database(&self) -> Result<MaintenanceResult, AdminError> {
+        let start_time = std::time::Instant::now();
+
+        let result = self.storage.vacuum().await;
+        let success = result.is_ok();
+
+        let duration = start_time.elapsed();
+
+        let mut details = HashMap::new();
+        if let Err(ref e) = result {
+            tracing::warn!("Vacuum operation failed: {}", e);
+            details.insert(
+                "error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
+        }
+
+        Ok(MaintenanceResult {
+            operation: "vacuum_database".to_string(),
+            success,
+            duration_ms: duration.as_millis() as u64,
+            details,
+        })
+    }
+
     /// Get audit logs with filtering
     pub async fn get_audit_logs(
         &self,
