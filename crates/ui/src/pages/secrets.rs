@@ -234,6 +234,7 @@ pub fn SecretsList() -> impl IntoView {
 
     // Open Modal for Create (New)
     let open_create = move |_| {
+        set_error_msg.set(None);
         set_new_secret_path.set("".to_string());
         set_kv_rows.set(vec![KvRow { id: 0, key: "".to_string(), value: "".to_string() }]);
         set_next_id.set(1);
@@ -242,6 +243,7 @@ pub fn SecretsList() -> impl IntoView {
 
     // Open Modal for Edit (Existing)
     let open_edit = move |_| {
+        set_error_msg.set(None);
         if let Some(SecretViewMode::View(data, _)) = secret_resource.get() {
              if let serde_json::Value::Object(map) = data {
                  let mut rows = Vec::new();
@@ -549,7 +551,10 @@ pub fn SecretsList() -> impl IntoView {
 
             <Modal
                 show=show_history_modal
-                on_close=move || set_show_history_modal.set(false)
+                on_close=move || {
+                    set_error_msg.set(None);
+                    set_show_history_modal.set(false);
+                }
                 title="Secret History".to_string()
             >
                 <Show when=move || error_msg.get().is_some()>
