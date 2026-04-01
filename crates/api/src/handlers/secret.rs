@@ -883,9 +883,18 @@ pub async fn create_key(
         id: key_info.id.clone(),
         name: key_info.name,
         key_type: key_info.key_type.clone(),
-        algorithm: request.algorithm.clone(),
-        size: request.size.unwrap_or(256),
-        usage: request.usage,
+        algorithm: {
+            let (algo, _, _) = infer_key_attributes(&key_info.key_type);
+            algo
+        },
+        size: {
+            let (_, sz, _) = infer_key_attributes(&key_info.key_type);
+            sz
+        },
+        usage: {
+            let (_, _, usg) = infer_key_attributes(&key_info.key_type);
+            usg
+        },
         metadata: request.metadata.unwrap_or_else(|| KeyMetadata {
             description: None,
             tags: vec![],
