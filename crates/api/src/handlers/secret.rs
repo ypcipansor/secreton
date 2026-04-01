@@ -1598,9 +1598,14 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
-        "aes256-gcm" | "aes128-gcm" => (
+        "aes256-gcm" => (
             "AES-GCM".to_string(),
             256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "aes128-gcm" => (
+            "AES-GCM".to_string(),
+            128,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
         // Unknown key type — default to AES-GCM but log a warning so new
