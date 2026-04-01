@@ -605,7 +605,7 @@ impl AuditLogger {
                             user_id,
                             action: event.operation.clone(),
                             resource_type: event.resource.clone(),
-                            resource_id: Some(event.event_type.as_str().to_string()),
+                            resource_id: None,
                             details,
                             ip_address: event.client_ip.clone(),
                             user_agent: None,
