@@ -98,7 +98,7 @@ pub async fn get_audit_logs(
 
     // Convert entries to clean JSON values: recover original username and
     // strip the internal _original_user key before returning to the client.
-    let clean_entries: Vec<serde_json::Value> = entries
+    let mut clean_entries: Vec<serde_json::Value> = entries
         .into_iter()
         .map(|mut e| {
             let user = e
@@ -124,6 +124,19 @@ pub async fn get_audit_logs(
         })
         .collect();
 
+    // Apply offset and limit
+    if let Some(offset) = query.offset {
+        let offset = offset as usize;
+        if offset < clean_entries.len() {
+            clean_entries = clean_entries.split_off(offset);
+        } else {
+            clean_entries.clear();
+        }
+    }
+    if let Some(limit) = query.limit {
+        clean_entries.truncate(limit as usize);
+    }
+
     Ok(Json(ApiResponse::success(clean_entries)))
 }
 
@@ -147,19 +160,20 @@ pub async fn export_audit_logs(
         end_date: None,
     };
 
-    let format = match query
+    let format_str = query
         .format
         .as_deref()
         .unwrap_or("JSON")
-        .to_ascii_uppercase()
-        .as_str()
-    {
+        .to_ascii_uppercase();
+    let format = match format_str.as_str() {
         "CSV" => ExportFormat::CSV,
-        "XML" => ExportFormat::XML,
-        "SIEM" => ExportFormat::SIEM,
-        "CEF" => ExportFormat::CEF,
-        "LEEF" => ExportFormat::LEEF,
-        _ => ExportFormat::JSON,
+        "JSON" => ExportFormat::JSON,
+        other => {
+            return Err(crate::ApiError::BadRequest(format!(
+                "Unsupported export format: {}. Supported formats: JSON, CSV",
+                other
+            )));
+        }
     };
 
     let bytes: Vec<u8> = state
