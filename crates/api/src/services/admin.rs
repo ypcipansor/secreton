@@ -757,15 +757,22 @@ impl AdminService {
                 Ok(csv_content)
             }
             "xml" => {
+                fn escape_xml(s: &str) -> String {
+                    s.replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                        .replace('"', "&quot;")
+                        .replace('\'', "&apos;")
+                }
                 let mut xml_content =
                     String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
                 for log in audit_logs {
                     xml_content.push_str(&format!(
                         "  <entry>\n    <timestamp>{}</timestamp>\n    <user_id>{}</user_id>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
-                        log.timestamp,
-                        log.user_id,
-                        log.action,
-                        log.resource,
+                        escape_xml(&log.timestamp.to_string()),
+                        escape_xml(&log.user_id),
+                        escape_xml(&log.action),
+                        escape_xml(&log.resource),
                         log.success
                     ));
                 }
