@@ -21,7 +21,6 @@ use crate::services::audit::{AuditFilters, ExportFormat, SecurityEventType};
 use crate::services::secret;
 use crate::{ApiResponse, ApiResult};
 use secreton_crypto::EncryptedData;
-use secreton_storage::models::storage_models::AuditEntry;
 
 /// Create secret operation routes
 pub fn create_routes() -> Router<AppState> {
@@ -82,7 +81,7 @@ pub async fn get_audit_logs(
     State(state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Query(query): Query<AuditQuery>,
-) -> ApiResult<Json<ApiResponse<Vec<AuditEntry>>>> {
+) -> ApiResult<Json<ApiResponse<Vec<serde_json::Value>>>> {
     let filters = AuditFilters {
         user: query.user_id.clone(),
         action: query.action.clone(),
@@ -97,7 +96,35 @@ pub async fn get_audit_logs(
         .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(ApiResponse::success(entries)))
+    // Convert entries to clean JSON values: recover original username and
+    // strip the internal _original_user key before returning to the client.
+    let clean_entries: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|mut e| {
+            let user = e
+                .details
+                .get("_original_user")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| e.user_id.to_string());
+            e.details.remove("_original_user");
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "timestamp": e.timestamp,
+                "user": user,
+                "action": e.action,
+                "resource_type": e.resource_type,
+                "resource_id": e.resource_id,
+                "details": e.details,
+                "ip_address": e.ip_address,
+                "user_agent": e.user_agent,
+                "success": e.success,
+                "error_message": e.error_message,
+            })
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(clean_entries)))
 }
 
 #[derive(Debug, Deserialize)]

@@ -522,8 +522,33 @@ impl AuditLogger {
         &self,
         filters: AuditFilters,
     ) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
+        // Optimize query by using a more specific prefix if time range allows
+        use chrono::Datelike;
+        let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
+            if start.year() == end.year() {
+                if start.month() == end.month() {
+                    if start.day() == end.day() {
+                        format!(
+                            "sys/audit/{}/{:02}/{:02}/",
+                            start.year(),
+                            start.month(),
+                            start.day()
+                        )
+                    } else {
+                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
+                    }
+                } else {
+                    format!("sys/audit/{}/", start.year())
+                }
+            } else {
+                "sys/audit/".to_string()
+            }
+        } else {
+            "sys/audit/".to_string()
+        };
+
         let query_params = secreton_storage::QueryParams {
-            path_prefix: Some("sys/audit/".to_string()),
+            path_prefix: Some(prefix),
             limit: None,
             ..Default::default()
         };
@@ -588,20 +613,48 @@ impl AuditLogger {
     ) -> Result<Vec<u8>> {
         let entries = self.get_entries(filters).await?;
 
+        // Pre-process entries: recover original username and strip internal key
+        let entries: Vec<(String, secreton_storage::models::storage_models::AuditEntry)> = entries
+            .into_iter()
+            .map(|mut e| {
+                let user = e
+                    .details
+                    .get("_original_user")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| e.user_id.to_string());
+                e.details.remove("_original_user");
+                (user, e)
+            })
+            .collect();
+
         match format {
             ExportFormat::JSON => {
-                let json = serde_json::to_vec_pretty(&entries)?;
+                // Build export-friendly structs with the real username
+                let export_entries: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|(user, e)| {
+                        serde_json::json!({
+                            "id": e.id.to_string(),
+                            "timestamp": e.timestamp,
+                            "user": user,
+                            "action": e.action,
+                            "resource_type": e.resource_type,
+                            "resource_id": e.resource_id,
+                            "details": e.details,
+                            "ip_address": e.ip_address,
+                            "user_agent": e.user_agent,
+                            "success": e.success,
+                            "error_message": e.error_message,
+                        })
+                    })
+                    .collect();
+                let json = serde_json::to_vec_pretty(&export_entries)?;
                 Ok(json)
             }
             ExportFormat::CSV => {
                 let mut csv = String::from("timestamp,user,action,resource,success,ip_address\n");
-                for e in entries {
-                    let user = e
-                        .details
-                        .get("_original_user")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| e.user_id.to_string());
+                for (user, e) in &entries {
                     csv.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         e.timestamp,
@@ -609,7 +662,7 @@ impl AuditLogger {
                         e.action,
                         e.resource_type,
                         e.success,
-                        e.ip_address.unwrap_or_default()
+                        e.ip_address.as_deref().unwrap_or_default()
                     ));
                 }
                 Ok(csv.into_bytes())

@@ -287,13 +287,10 @@ impl AdminService {
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::minutes(5);
 
-        let filters = crate::services::audit::AuditFilters {
-            start_date: Some(start_time),
-            end_date: Some(end_time),
-            ..Default::default()
-        };
-
-        match self.audit.get_entries(filters).await {
+        match self
+            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000))
+            .await
+        {
             Ok(audit_logs) => {
                 let total_requests = audit_logs.len() as f64;
                 let minutes_elapsed = 5.0; // 5 minutes window
@@ -701,7 +698,7 @@ impl AdminService {
 
         let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
-            .map(|e| {
+            .map(|mut e| {
                 // Recover the original username string that was stashed by
                 // AuditLogger::get_entries, falling back to the Uuid representation.
                 let user_id = e
@@ -710,6 +707,8 @@ impl AdminService {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| e.user_id.to_string());
+                // Strip internal key so it doesn't leak into API responses
+                e.details.remove("_original_user");
                 AuditLogEntry {
                     id: e.id.to_string(),
                     timestamp: e.timestamp,
@@ -2465,11 +2464,19 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?;
 
-        // Perform compaction based on storage backend type
-        // For now, this is a placeholder - real implementation would depend on backend
-        let compaction_successful = true;
+        // Perform compaction and vacuum using the storage backend trait methods
+        let compact_result = self.storage.compact().await;
+        let vacuum_result = self.storage.vacuum().await;
+        let compaction_successful = compact_result.is_ok() && vacuum_result.is_ok();
 
-        // Get stats after compaction (simulated)
+        if let Err(e) = compact_result {
+            tracing::warn!("Storage compact failed: {}", e);
+        }
+        if let Err(e) = vacuum_result {
+            tracing::warn!("Storage vacuum failed: {}", e);
+        }
+
+        // Get stats after compaction
         let stats_after = self
             .storage
             .get_stats()
