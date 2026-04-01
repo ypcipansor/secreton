@@ -523,7 +523,7 @@ impl AuditLogger {
     ) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/audit/".to_string()),
-            limit: Some(1000),
+            limit: None,
             ..Default::default()
         };
 

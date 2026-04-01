@@ -683,7 +683,7 @@ impl AdminService {
         end_time: Option<chrono::DateTime<chrono::Utc>>,
         user_id: Option<&str>,
         action: Option<&str>,
-        _limit: Option<u32>,
+        limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
         let filters = crate::services::audit::AuditFilters {
             user: user_id.map(|s| s.to_string()),
@@ -699,7 +699,7 @@ impl AdminService {
             .await
             .map_err(|e| AdminError::Internal(e.into()))?;
 
-        let logs = entries
+        let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
             .map(|e| AuditLogEntry {
                 id: e.id.to_string(),
@@ -714,6 +714,10 @@ impl AdminService {
                 details: Some(serde_json::to_value(e.details).unwrap_or_default()),
             })
             .collect();
+
+        if let Some(l) = limit {
+            logs.truncate(l as usize);
+        }
 
         Ok(logs)
     }
@@ -2561,8 +2565,13 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
 
-        let admin_service = AdminService::new(storage, auth, performance).await;
+        let admin_service = AdminService::new(storage, auth, performance, audit).await;
         assert!(admin_service.is_ok());
     }
 
@@ -2584,7 +2593,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance).await.unwrap();
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
 
         let stats = service
             .get_system_stats()
@@ -2638,7 +2652,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance)
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit)
             .await
             .unwrap()
             .with_crypto(crypto);
@@ -2666,7 +2685,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance).await.unwrap();
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");
@@ -2720,7 +2744,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage.clone(), auth, performance)
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage.clone(), auth, performance, audit)
             .await
             .unwrap();
 

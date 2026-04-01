@@ -109,7 +109,7 @@ async fn test_audit_log_persistence() {
     );
     let performance = Arc::new(SecretPerformanceOptimizer::default());
 
-    let admin_service = AdminService::new(storage.clone(), auth, performance)
+    let admin_service = AdminService::new(storage.clone(), auth, performance, logger.clone())
         .await
         .unwrap();
 
