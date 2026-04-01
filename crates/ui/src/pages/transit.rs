@@ -369,7 +369,10 @@ pub fn TransitPage() -> impl IntoView {
                                                                 },
                                                                 _ => {
                                                                     set_active_tab.set("encrypt".to_string());
-                                                                    set_selected_algo.set("AES-GCM".to_string());
+                                                                    set_selected_algo.set(match k_clone.key_type.as_str() {
+                                                                        "chacha20-poly1305" => "CHACHA20-POLY1305".to_string(),
+                                                                        _ => "AES-GCM".to_string(),
+                                                                    });
                                                                 }
                                                             }
                                                             set_output_result.set(String::new());
@@ -414,6 +417,8 @@ pub fn TransitPage() -> impl IntoView {
                                                 let k_type = key_for_tabs.key_type.clone();
                                                 let k_type_for_sign = k_type.clone();
                                                 let k_type_for_verify = k_type.clone();
+                                                let k_type_for_encrypt = k_type.clone();
+                                                let k_type_for_decrypt = k_type.clone();
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
                                                         {match k_type.as_str() {
@@ -423,7 +428,11 @@ pub fn TransitPage() -> impl IntoView {
                                                                     class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("encrypt".to_string());
-                                                                        set_selected_algo.set("AES-GCM".to_string());
+                                                                        let algo = match k_type_for_encrypt.as_str() {
+                                                                            "chacha20-poly1305" => "CHACHA20-POLY1305",
+                                                                            _ => "AES-GCM",
+                                                                        };
+                                                                        set_selected_algo.set(algo.to_string());
                                                                         set_output_result.set(String::new());
                                                                         set_input_text.set(String::new());
                                                                         set_error_msg.set(None);
@@ -435,7 +444,11 @@ pub fn TransitPage() -> impl IntoView {
                                                                     class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("decrypt".to_string());
-                                                                        set_selected_algo.set("AES-GCM".to_string());
+                                                                        let algo = match k_type_for_decrypt.as_str() {
+                                                                            "chacha20-poly1305" => "CHACHA20-POLY1305",
+                                                                            _ => "AES-GCM",
+                                                                        };
+                                                                        set_selected_algo.set(algo.to_string());
                                                                         set_output_result.set(String::new());
                                                                         set_input_text.set(String::new());
                                                                         set_error_msg.set(None);
