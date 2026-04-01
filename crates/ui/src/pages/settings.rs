@@ -114,7 +114,7 @@ pub fn SettingsPage() -> impl IntoView {
                                             </div>
                                             <div class="flex justify-between items-center pb-2 border-b">
                                                 <span class="text-sm text-gray-500">"Encryption"</span>
-                                                <span class="text-sm font-bold text-green-600">"ACTIVE"</span>
+                                                <span class={format!("text-sm font-bold {}", if config.storage.encryption_enabled { "text-green-600" } else { "text-red-600" })}>{if config.storage.encryption_enabled { "ACTIVE" } else { "DISABLED" }}</span>
                                             </div>
                                             <div class="flex justify-between items-center pb-2 border-b">
                                                 <span class="text-sm text-gray-500">"Automatic Backups"</span>

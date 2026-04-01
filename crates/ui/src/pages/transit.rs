@@ -145,8 +145,15 @@ pub fn TransitPage() -> impl IntoView {
                 name: name.clone(),
                 key_type: k_type.clone(),
                 algorithm: k_type.clone(),
-                size: Some(256),
-                usage: vec!["encrypt".to_string(), "decrypt".to_string()],
+                size: match k_type.as_str() {
+                    "rsa-2048" => Some(2048),
+                    "rsa-4096" => Some(4096),
+                    _ => Some(256),
+                },
+                usage: match k_type.as_str() {
+                    "ed25519" | "ecdsa-p256" | "ecdsa-p384" | "rsa-2048" | "rsa-4096" => vec!["sign".to_string(), "verify".to_string()],
+                    _ => vec!["encrypt".to_string(), "decrypt".to_string()],
+                },
                 metadata: None,
             };
             match api::post::<KeyResponse, _>("/secret/keys", req).await {
@@ -352,7 +359,12 @@ pub fn TransitPage() -> impl IntoView {
                                                             match k_clone.key_type.as_str() {
                                                                 "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
                                                                     set_active_tab.set("sign".to_string());
-                                                                    set_selected_algo.set(k_clone.key_type.to_uppercase());
+                                                                    set_selected_algo.set(match k_clone.key_type.as_str() {
+                                                                        "rsa-2048" | "rsa-4096" => "RSA-PSS".to_string(),
+                                                                        "ecdsa-p256" | "ecdsa-p384" => "ECDSA-SHA256".to_string(),
+                                                                        "ed25519" => "ED25519".to_string(),
+                                                                        _ => "RSA-PSS".to_string(),
+                                                                    });
                                                                 },
                                                                 _ => {
                                                                     set_active_tab.set("encrypt".to_string());

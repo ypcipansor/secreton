@@ -198,6 +198,8 @@ pub fn SecretsList() -> impl IntoView {
     let rollback_to_version = move |v: u32| {
         spawn_local(async move {
             let current_path = path();
+            let confirm = web_sys::window().unwrap().confirm_with_message(&format!("Rollback secret at {} to version {}? This will create a new version with the historical data.", current_path, v)).unwrap_or(false);
+            if !confirm { return; }
             let fetch_url = format!("/secret/secrets/{}?version={}", current_path, v);
 
             // 1. Fetch the historical data
