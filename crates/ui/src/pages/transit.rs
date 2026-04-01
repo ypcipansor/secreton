@@ -576,10 +576,14 @@ pub fn TransitPage() -> impl IntoView {
                                                             {move || {
                                                                 let key_type = selected_key.get().map(|k| k.key_type.clone()).unwrap_or_default();
                                                                 match active_tab.get().as_str() {
-                                                                    "encrypt" => view! {
-                                                                        <option value="AES-GCM">"AES-GCM"</option>
-                                                                        <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
-                                                                    }.into_any(),
+                                                                    "encrypt" => match key_type.as_str() {
+                                                                        "chacha20-poly1305" => view! {
+                                                                            <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
+                                                                        }.into_any(),
+                                                                        _ => view! {
+                                                                            <option value="AES-GCM">"AES-GCM"</option>
+                                                                        }.into_any(),
+                                                                    },
                                                                     "sign" | "verify" => match key_type.as_str() {
                                                                         "rsa-2048" | "rsa-4096" => view! {
                                                                             <option value="RSA-PSS">"RSA-PSS"</option>
