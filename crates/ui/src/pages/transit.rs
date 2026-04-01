@@ -411,41 +411,54 @@ pub fn TransitPage() -> impl IntoView {
                                             <h2 class="text-lg font-semibold">"Operations: " <span class="text-blue-600">{key.name}</span></h2>
                                             {
                                                 let k_type = key_for_tabs.key_type.clone();
+                                                let k_type_for_sign = k_type.clone();
+                                                let k_type_for_verify = k_type.clone();
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
-                                                        <button
-                                                            class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                            on:click=move |_| {
-                                                                set_active_tab.set("encrypt".to_string());
-                                                                set_selected_algo.set("AES-GCM".to_string());
-                                                                set_output_result.set(String::new());
-                                                                set_input_text.set(String::new());
-                                                                set_error_msg.set(None);
-                                                            }
-                                                        >
-                                                            "Encrypt"
-                                                        </button>
-                                                        <button
-                                                            class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
-                                                            on:click=move |_| {
-                                                                set_active_tab.set("decrypt".to_string());
-                                                                set_selected_algo.set("AES-GCM".to_string());
-                                                                set_output_result.set(String::new());
-                                                                set_input_text.set(String::new());
-                                                                set_error_msg.set(None);
-                                                            }
-                                                        >
-                                                            "Decrypt"
-                                                        </button>
-
                                                         {match k_type.as_str() {
+                                                            "ed25519" | "ecdsa-p256" | "ecdsa-p384" => view! {}.into_any(),
+                                                            _ => view! {
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("encrypt".to_string());
+                                                                        set_selected_algo.set("AES-GCM".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Encrypt"
+                                                                </button>
+                                                                <button
+                                                                    class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
+                                                                    on:click=move |_| {
+                                                                        set_active_tab.set("decrypt".to_string());
+                                                                        set_selected_algo.set("AES-GCM".to_string());
+                                                                        set_output_result.set(String::new());
+                                                                        set_input_text.set(String::new());
+                                                                        set_error_msg.set(None);
+                                                                    }
+                                                                >
+                                                                    "Decrypt"
+                                                                </button>
+                                                            }.into_any()
+                                                        }}
+
+                                                        {match k_type_for_sign.as_str() {
                                                             "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
                                                                 view! {
                                                                     <button
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("sign".to_string());
-                                                                            set_selected_algo.set("RSA-PSS".to_string());
+                                                                            let algo = match k_type_for_sign.as_str() {
+                                                                                "rsa-2048" | "rsa-4096" => "RSA-PSS",
+                                                                                "ecdsa-p256" | "ecdsa-p384" => "ECDSA-SHA256",
+                                                                                "ed25519" => "ED25519",
+                                                                                _ => "RSA-PSS",
+                                                                            };
+                                                                            set_selected_algo.set(algo.to_string());
                                                                             set_output_result.set(String::new());
                                                                             set_input_text.set(String::new());
                                                                             set_error_msg.set(None);
@@ -457,7 +470,13 @@ pub fn TransitPage() -> impl IntoView {
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("verify".to_string());
-                                                                            set_selected_algo.set("RSA-PSS".to_string());
+                                                                            let algo = match k_type_for_verify.as_str() {
+                                                                                "rsa-2048" | "rsa-4096" => "RSA-PSS",
+                                                                                "ecdsa-p256" | "ecdsa-p384" => "ECDSA-SHA256",
+                                                                                "ed25519" => "ED25519",
+                                                                                _ => "RSA-PSS",
+                                                                            };
+                                                                            set_selected_algo.set(algo.to_string());
                                                                             set_output_result.set(String::new());
                                                                             set_input_text.set(String::new());
                                                                             set_signature_input.set(String::new());
