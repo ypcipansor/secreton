@@ -567,6 +567,9 @@ impl AuditLogger {
             ..Default::default()
         };
 
+        // Flush buffered events to storage before querying so recent entries are visible
+        let _ = self.service.flush().await;
+
         let entries = self.storage.list(&query_params).await?;
         let mut results = Vec::new();
 
