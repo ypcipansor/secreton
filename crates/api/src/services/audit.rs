@@ -656,11 +656,11 @@ impl AuditLogger {
                     csv.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         e.timestamp,
-                        rich.original_user,
-                        e.action,
-                        e.resource_type,
+                        rich.original_user.replace('"', "\"\""),
+                        e.action.replace('"', "\"\""),
+                        e.resource_type.replace('"', "\"\""),
                         e.success,
-                        e.ip_address.as_deref().unwrap_or_default()
+                        e.ip_address.as_deref().unwrap_or_default().replace('"', "\"\"")
                     ));
                 }
                 Ok(csv.into_bytes())
