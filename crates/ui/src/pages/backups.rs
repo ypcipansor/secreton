@@ -55,6 +55,7 @@ pub fn BackupsPage() -> impl IntoView {
                 Ok(_) => {
                     set_error_msg.set(None);
                     set_success_msg.set(Some("Backup created successfully".to_string()));
+                    set_loading.set(false);
                     fetch_backups.dispatch(());
                 },
                 Err(e) => {
@@ -105,6 +106,7 @@ pub fn BackupsPage() -> impl IntoView {
                 Ok(_) => {
                     set_error_msg.set(None);
                     set_success_msg.set(Some("Backup deleted successfully".to_string()));
+                    set_loading.set(false);
                     fetch_backups.dispatch(());
                 },
                 Err(e) => {

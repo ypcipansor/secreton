@@ -1598,12 +1598,24 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
-        // aes256-gcm and any other symmetric key
-        _ => (
+        "aes256-gcm" | "aes128-gcm" => (
             "AES-GCM".to_string(),
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
+        // Unknown key type — default to AES-GCM but log a warning so new
+        // key types are not silently misclassified.
+        other => {
+            tracing::warn!(
+                "infer_key_attributes: unrecognised key type '{}', defaulting to AES-GCM",
+                other
+            );
+            (
+                "AES-GCM".to_string(),
+                256,
+                vec!["encrypt".to_string(), "decrypt".to_string()],
+            )
+        }
     }
 }
 

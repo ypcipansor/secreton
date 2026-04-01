@@ -141,10 +141,19 @@ pub fn TransitPage() -> impl IntoView {
                 set_create_status.set(Some("Key name required".to_string()));
                 return;
             }
+            let algo = match k_type.as_str() {
+                "rsa-2048" => "RSA-2048",
+                "rsa-4096" => "RSA-4096",
+                "ecdsa-p256" => "ECDSA-P256",
+                "ecdsa-p384" => "ECDSA-P384",
+                "ed25519" => "ED25519",
+                "chacha20-poly1305" => "CHACHA20-POLY1305",
+                _ => "AES-GCM",
+            };
             let req = CreateKeyRequest {
                 name: name.clone(),
                 key_type: k_type.clone(),
-                algorithm: k_type.clone(),
+                algorithm: algo.to_string(),
                 size: match k_type.as_str() {
                     "rsa-2048" => Some(2048),
                     "rsa-4096" => Some(4096),
@@ -564,18 +573,33 @@ pub fn TransitPage() -> impl IntoView {
                                                             on:change=move |ev| set_selected_algo.set(event_target_value(&ev))
                                                             prop:value=selected_algo
                                                         >
-                                                            {move || match active_tab.get().as_str() {
-                                                                "encrypt" => view! {
-                                                                    <option value="AES-GCM">"AES-GCM"</option>
-                                                                    <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
-                                                                }.into_any(),
-                                                                "sign" | "verify" => view! {
-                                                                    <option value="RSA-PSS">"RSA-PSS"</option>
-                                                                    <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
-                                                                    <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
-                                                                    <option value="ED25519">"ED25519"</option>
-                                                                }.into_any(),
-                                                                _ => view! {}.into_any()
+                                                            {move || {
+                                                                let key_type = selected_key.get().map(|k| k.key_type.clone()).unwrap_or_default();
+                                                                match active_tab.get().as_str() {
+                                                                    "encrypt" => view! {
+                                                                        <option value="AES-GCM">"AES-GCM"</option>
+                                                                        <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
+                                                                    }.into_any(),
+                                                                    "sign" | "verify" => match key_type.as_str() {
+                                                                        "rsa-2048" | "rsa-4096" => view! {
+                                                                            <option value="RSA-PSS">"RSA-PSS"</option>
+                                                                            <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
+                                                                        }.into_any(),
+                                                                        "ecdsa-p256" | "ecdsa-p384" => view! {
+                                                                            <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
+                                                                        }.into_any(),
+                                                                        "ed25519" => view! {
+                                                                            <option value="ED25519">"ED25519"</option>
+                                                                        }.into_any(),
+                                                                        _ => view! {
+                                                                            <option value="RSA-PSS">"RSA-PSS"</option>
+                                                                            <option value="RSA-PKCS1v15">"RSA-PKCS1v15"</option>
+                                                                            <option value="ECDSA-SHA256">"ECDSA-SHA256"</option>
+                                                                            <option value="ED25519">"ED25519"</option>
+                                                                        }.into_any(),
+                                                                    },
+                                                                    _ => view! {}.into_any()
+                                                                }
                                                             }}
                                                         </select>
                                                     </div>
