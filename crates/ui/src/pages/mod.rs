@@ -5,6 +5,7 @@ pub mod database;
 pub mod pki;
 pub mod policies;
 pub mod audit;
+pub mod users;
 pub mod not_found;
 pub mod transit;
 pub mod ssh;

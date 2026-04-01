@@ -4,20 +4,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 struct AuditEvent {
-    id: String,
-    #[serde(rename = "type")]
-    event_type: String,
-    user: String,
-    status: String,
-    timestamp: String,
-    #[serde(flatten)]
-    details: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct AuditResponse {
-    events: Vec<AuditEvent>,
-    total: u64,
+    pub id: String,
+    pub timestamp: String,
+    pub user_id: String,
+    pub action: String,
+    pub resource: String,
+    pub ip_address: String,
+    pub success: bool,
+    pub details: Option<serde_json::Value>,
 }
 
 #[component]
@@ -25,7 +19,7 @@ pub fn AuditLog() -> impl IntoView {
     // Fetch audit events using LocalResource since reqwest is !Send in WASM
     let audit_resource = LocalResource::new(
         move || async move {
-            api::get::<AuditResponse>("/audit/events").await
+            api::get::<Vec<AuditEvent>>("/admin/audit").await
         },
     );
 
@@ -52,28 +46,27 @@ pub fn AuditLog() -> impl IntoView {
                                             </tr>
                                         </thead>
                                         <tbody class="bg-white divide-y divide-gray-200">
-                                            {data.events.iter().map(|event| {
+                                            {data.iter().map(|event| {
                                                 let timestamp = event.timestamp.clone();
-                                                let event_type = event.event_type.clone();
-                                                let user = event.user.clone();
-                                                let status = event.status.clone();
-                                                let status_text = status.clone();
+                                                let action = event.action.clone();
+                                                let user = event.user_id.clone();
+                                                let success = event.success;
 
                                                 view! {
                                                     <tr>
-                                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{timestamp}</td>
-                                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event_type}</td>
+                                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{timestamp.split('T').next().unwrap_or_default().to_string()}</td>
+                                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{action}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap">
                                                             <span class={
                                                                 let base = "px-2 inline-flex text-xs leading-5 font-semibold rounded-full ";
-                                                                if status == "success" {
+                                                                if success {
                                                                     format!("{} bg-green-100 text-green-800", base)
                                                                 } else {
                                                                     format!("{} bg-red-100 text-red-800", base)
                                                                 }
                                                             }>
-                                                                {status_text}
+                                                                {if success { "success" } else { "failure" }}
                                                             </span>
                                                         </td>
                                                     </tr>
@@ -82,7 +75,7 @@ pub fn AuditLog() -> impl IntoView {
                                         </tbody>
                                     </table>
                                     <div class="p-4 border-t border-gray-200 text-sm text-gray-500">
-                                        "Total events: " {data.total}
+                                        "Total events: " {data.len()}
                                     </div>
                                 </div>
                             }.into_any(),

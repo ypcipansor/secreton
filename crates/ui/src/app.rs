@@ -8,6 +8,7 @@ use crate::pages::secrets::SecretsList;
 use crate::pages::database::DatabaseSecrets;
 use crate::pages::pki::PkiPage;
 use crate::pages::policies::PoliciesList;
+use crate::pages::users::UsersList;
 use crate::pages::audit::AuditLog;
 use crate::pages::not_found::NotFound;
 use crate::pages::transit::TransitPage;
@@ -34,6 +35,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("ssh") view=SshPage />
                         <Route path=path!("totp") view=TotpPage />
                         <Route path=path!("policies") view=PoliciesList />
+                        <Route path=path!("users") view=UsersList />
                         <Route path=path!("audit") view=AuditLog />
                     </ParentRoute>
                 </Routes>

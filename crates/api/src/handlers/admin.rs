@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use crate::handlers::{AppState, secret::ListQuery};
 use crate::{
     ApiResponse, ApiResult,
-    services::admin::{CreateUserRequest, UpdateUserRequest},
+    services::admin::{CreateRoleRequest, CreateUserRequest, UpdateRoleRequest, UpdateUserRequest},
 };
 use secreton_crypto::{encryption, hashing};
 use secreton_storage::SecretEntry; // Moved from inside function to top-level
@@ -27,12 +27,12 @@ pub fn create_routes() -> Router<AppState> {
         // User management
         .route("/users", get(list_users))
         .route("/users", post(create_user))
-        .route("/users/{user_id}", get(get_user))
-        .route("/users/{user_id}", put(update_user))
-        .route("/users/{user_id}", delete(delete_user))
-        .route("/users/{user_id}/roles", get(get_user_roles))
-        .route("/users/{user_id}/roles", post(assign_user_roles))
-        .route("/users/{user_id}/permissions", get(get_user_permissions))
+        .route("/users/{username}", get(get_user))
+        .route("/users/{username}", put(update_user))
+        .route("/users/{username}", delete(delete_user))
+        .route("/users/{username}/roles", get(get_user_roles))
+        .route("/users/{username}/roles", post(assign_user_roles))
+        .route("/users/{username}/permissions", get(get_user_permissions))
         // Role management
         .route("/roles", get(list_roles))
         .route("/roles", post(create_role))
@@ -51,6 +51,8 @@ pub fn create_routes() -> Router<AppState> {
         .route("/maintenance/gc", post(run_garbage_collection))
         .route("/maintenance/compact", post(compact_database))
         .route("/maintenance/vacuum", post(vacuum_database))
+        // Audit logs
+        .route("/audit", get(list_audit_logs))
         // Backup operations
         .route("/backups", post(create_backup))
         .route("/backups", get(list_backups))
@@ -73,23 +75,34 @@ mod tests {
     use crate::config::ApiConfig;
     use crate::services::ApiServiceContainer;
     use axum_test::TestServer;
-    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
     use std::sync::Arc;
     use uuid::Uuid;
 
-    async fn server_with_routes() -> TestServer {
+    /// Create a test `ApiServiceContainer` with JWT auth configured.
+    async fn test_services() -> Arc<crate::services::ApiServiceContainer> {
         let mut config = ApiConfig::default();
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
+        Arc::new(
+            crate::services::ApiServiceContainer::new(&config)
                 .await
                 .expect("Failed to create services"),
-        );
+        )
+    }
 
-        // Seed admin user
-        let user = secreton_auth::User {
+    /// Create a `TestServer` from the given services.
+    fn test_server(services: Arc<crate::services::ApiServiceContainer>) -> TestServer {
+        let app = create_routes().with_state(services.into());
+        use std::net::SocketAddr;
+        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
+            .expect("Failed to start test server")
+    }
+
+    /// Generate a valid admin JWT token for use in tests.
+    async fn admin_token(services: &Arc<crate::services::ApiServiceContainer>) -> String {
+        let admin_user = secreton_auth::User {
             id: uuid::Uuid::new_v4().to_string(),
             username: "admin".to_string(),
             email: Some("admin@example.com".to_string()),
@@ -112,67 +125,51 @@ mod tests {
             is_superuser: true,
             permissions: vec![],
         };
-        // Simplified: Direct storage injection would be better if we knew the schema,
-        // but assuming we can't easily access storage internal map.
-        // Using auth service if available or just mocking the response if the test mocks the service.
-        // Actually, let's use the service if possible.
-        // But wait, the test fails because it returns 0 users.
-        // We need to inject into the MockStorageBackend.
-        // Since we can't easily access the inner mock map from here without casting,
-        // let's try to use the auth service to create a user if defined,
-        // or assumes MockStorageBackend is used.
+        services
+            .auth
+            .generate_token(&admin_user)
+            .await
+            .expect("Failed to generate admin token")
+    }
 
-        // Let's rely on `server_with_routes` using `InMemorySecretStorage` which is Mock compatible?
-        // No, ApiServiceContainer uses `MockStorageBackend`.
+    #[tokio::test]
+    async fn test_list_users_returns_placeholder_user() {
+        let services = test_services().await;
 
-        // Let's try to use a valid `User` struct from `secreton_auth` and save it to storage.
-        // Note: The failure is `test_list_users_returns_placeholder_user` failing on `users.len() == 1`.
-
-        // If I can't easily insert, I will change the test expectation to 0 for now to verify passing,
-        // but the test name says "returns_placeholder_user".
-
-        // A better approach: The failing test expects a user "admin".
-        // Let's manually inject it via the storage interface.
-        // Use crate::services::admin::UserInfo (as expected by list_users deserialization)
+        // Seed admin user
         let user_info = crate::services::admin::UserInfo {
-            id: user.id.clone(),
-            username: user.username.clone(),
-            email: user.email.clone().unwrap(),
+            id: uuid::Uuid::new_v4().to_string(),
+            username: "admin".to_string(),
+            email: "admin@example.com".to_string(),
             full_name: None,
             enabled: true,
-            roles: user.roles.clone(),
+            roles: vec!["admin".to_string()],
             permissions: vec![],
             last_login: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             metadata: Default::default(),
         };
-
         let user_json = serde_json::to_vec(&user_info).unwrap();
-        // Construct storage entry
         let entry = SecretEntry::new(
             "users/admin".to_string(),
             user_json,
-            EncryptionMetadata::default(),
+            secreton_storage::EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::new_v4(),
         );
-        services
-            .storage
-            .store(&entry)
-            .await
-            .expect("Failed to store seeded user");
+        services.storage.store(&entry).await.expect("Failed to store seeded user");
 
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("Failed to start test server")
-    }
+        let token = admin_token(&services).await;
+        let server = test_server(services);
 
-    #[tokio::test]
-    async fn test_list_users_returns_placeholder_user() {
-        let server = server_with_routes().await;
-        let response = server.get("/users").await;
+        let response = server
+            .get("/users")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<Vec<UserResponse>> = response.json();
@@ -184,7 +181,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_role_endpoint() {
-        let server = server_with_routes().await;
         let request = CreateRoleRequest {
             name: "auditor".to_string(),
             description: Some("Audit role".to_string()),
@@ -192,7 +188,18 @@ mod tests {
             metadata: None,
         };
 
-        let response = server.post("/roles").json(&request).await;
+        let services = test_services().await;
+        let token = admin_token(&services).await;
+        let server = test_server(services);
+
+        let response = server
+            .post("/roles")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .json(&request)
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<RoleResponse> = response.json();
@@ -204,8 +211,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_config_returns_security_info() {
-        let server = server_with_routes().await;
-        let response = server.get("/config").await;
+        let services = test_services().await;
+        let token = admin_token(&services).await;
+        let server = test_server(services);
+
+        let response = server
+            .get("/config")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<SystemConfig> = response.json();
@@ -217,9 +233,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_security_scan() {
-        let server = server_with_routes().await;
+        let services = test_services().await;
+        let token = admin_token(&services).await;
+        let server = test_server(services);
 
-        let response = server.post("/security/scan").await;
+        let response = server
+            .post("/security/scan")
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            )
+            .await;
         response.assert_status_ok();
 
         let body: ApiResponse<SecurityScanResult> = response.json();
@@ -254,14 +278,6 @@ pub struct AssignRolesRequest {
 }
 
 /// Role management models
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CreateRoleRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub permissions: Vec<String>,
-    pub metadata: Option<HashMap<String, String>>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoleResponse {
     pub name: String,
@@ -425,18 +441,16 @@ pub struct SecurityIncident {
 /// User management endpoints
 pub async fn list_users(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<UserResponse>>>> {
+    require_admin(&user)?;
     let users: Vec<crate::services::admin::UserInfo> =
         state
             .admin
             .list_users()
             .await
-            .map_err(|e: crate::services::admin::AdminError| {
-                secreton_errors::SecretonError::Internal {
-                    message: e.to_string(),
-                }
-            })?;
+            .map_err(map_admin_error)?;
 
     let user_responses: Vec<UserResponse> = users
         .into_iter()
@@ -460,25 +474,13 @@ pub async fn list_users(
 
 pub async fn create_user(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
-    let create_request = CreateUserRequest {
-        username: request.username,
-        email: request.email,
-        password: request.password,
-        full_name: request.full_name,
-        enabled: request.enabled,
-        roles: request.roles,
-        permissions: request.permissions,
-        metadata: HashMap::new(),
-    };
+    require_admin(&user)?;
 
     let user: crate::services::admin::UserInfo =
-        state.admin.create_user(create_request).await.map_err(
-            |e: crate::services::admin::AdminError| secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            },
-        )?;
+        state.admin.create_user(request).await.map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -499,21 +501,16 @@ pub async fn create_user(
 
 pub async fn get_user(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
-    // Assuming OAuthUserInfo is a type that can be converted to UserResponse or used to fetch UserInfo
-    // This snippet seems to be a placeholder or from a different context, as `oauth_provider` and `access_token` are not defined here.
-    // The original logic for fetching a user by ID is retained, as the provided snippet is incomplete and inconsistent.
+    require_admin(&user)?;
     let user: crate::services::admin::UserInfo =
         state
             .admin
-            .get_user(&user_id)
+            .get_user(&username)
             .await
-            .map_err(|e: crate::services::admin::AdminError| {
-                secreton_errors::SecretonError::Internal {
-                    message: e.to_string(),
-                }
-            })?;
+            .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -534,25 +531,33 @@ pub async fn get_user(
 
 pub async fn update_user(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
     Json(request): Json<UpdateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
-    let update_request = UpdateUserRequest {
-        email: request.email,
-        full_name: request.full_name,
-        enabled: request.enabled,
-        roles: request.roles,
-    };
+    require_admin(&user)?;
+
+    // Prevent admins from demoting themselves (removing their own admin role)
+    if username == user.username {
+        if let Some(ref roles) = request.roles {
+            if !roles.contains(&"admin".to_string()) && !roles.contains(&"root".to_string()) {
+                return Err(crate::ApiError::Authorization(
+                    "Cannot remove admin privileges from your own account".to_string(),
+                ));
+            }
+        }
+        if let Some(false) = request.enabled {
+            return Err(crate::ApiError::Authorization(
+                "Cannot disable your own account".to_string(),
+            ));
+        }
+    }
 
     let user: crate::services::admin::UserInfo = state
         .admin
-        .update_user(&user_id, update_request)
+        .update_user(&username, request)
         .await
-        .map_err(|e: crate::services::admin::AdminError| {
-            secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -573,18 +578,23 @@ pub async fn update_user(
 
 pub async fn delete_user(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
-    Query(_query): Query<ListQuery>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
+
+    // Prevent admins from deleting their own account
+    if username == user.username {
+        return Err(crate::ApiError::Authorization(
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
     state
         .admin
-        .delete_user(&user_id)
+        .delete_user(&username)
         .await
-        .map_err(|e: crate::services::admin::AdminError| {
-            secreton_errors::SecretonError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "User deleted successfully"
@@ -594,7 +604,9 @@ pub async fn delete_user(
 /// System configuration endpoints
 pub async fn get_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
+    require_admin(&user)?;
     // Get actual configuration from the services
     let config = SystemConfig {
         api: ApiConfigInfo {
@@ -633,8 +645,10 @@ use tokio::time::{Duration, timeout};
 
 pub async fn get_system_metrics(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<SystemMetrics>>> {
+    require_admin(&user)?;
     let stats = state
         .admin
         .get_system_stats()
@@ -753,7 +767,9 @@ pub async fn get_system_metrics(
 
 pub async fn get_system_status(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemStatus>>> {
+    require_admin(&user)?;
     // Check component health
     let database_status = check_database_health(&state).await;
     let cache_status = check_cache_health(&state).await;
@@ -800,7 +816,9 @@ pub async fn get_system_status(
 /// Security endpoints
 pub async fn run_security_scan(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SecurityScanResult>>> {
+    require_admin(&user)?;
     let report = state
         .admin
         .run_security_scan()
@@ -831,8 +849,10 @@ pub async fn run_security_scan(
 
 pub async fn get_security_incidents(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecurityIncident>>>> {
+    require_admin(&user)?;
     // For now, return empty list - in a real implementation,
     // this would query the security monitoring system
     let incidents = Vec::new();
@@ -843,12 +863,10 @@ pub async fn get_security_incidents(
 /// Maintenance operations
 pub async fn run_garbage_collection(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.run_garbage_collection().await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    require_admin(&user)?;
+    let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": "Garbage collection completed",
@@ -863,12 +881,10 @@ pub async fn run_garbage_collection(
 
 pub async fn compact_database(
     State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let result = state.admin.compact_database().await.map_err(|e| {
-        secreton_errors::SecretonError::Internal {
-            message: e.to_string(),
-        }
-    })?;
+    require_admin(&user)?;
+    let result = state.admin.compact_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": "Database compaction completed",
@@ -949,101 +965,231 @@ async fn check_auth_health(_state: &AppState) -> String {
     }
 }
 
+/// Map AdminError to the appropriate SecretonError variant for proper HTTP status codes.
+fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::SecretonError {
+    match e {
+        crate::services::admin::AdminError::NotFound(msg) => {
+            secreton_errors::SecretonError::NotFound { resource: msg }
+        }
+        crate::services::admin::AdminError::AlreadyExists(msg) => {
+            secreton_errors::SecretonError::AlreadyExists { resource: msg }
+        }
+        crate::services::admin::AdminError::NotPermitted(msg) => {
+            secreton_errors::SecretonError::Authorization { message: msg }
+        }
+        crate::services::admin::AdminError::InvalidConfig(msg) => {
+            secreton_errors::SecretonError::Validation { message: msg }
+        }
+        crate::services::admin::AdminError::MaintenanceInProgress => {
+            secreton_errors::SecretonError::ServiceUnavailable {
+                service: "admin".to_string(),
+            }
+        }
+        crate::services::admin::AdminError::Auth(auth_err) => {
+            match auth_err {
+                crate::services::auth::AuthError::UserAlreadyExists => {
+                    secreton_errors::SecretonError::AlreadyExists {
+                        resource: "user".to_string(),
+                    }
+                }
+                crate::services::auth::AuthError::UserNotFound => {
+                    secreton_errors::SecretonError::NotFound {
+                        resource: "user".to_string(),
+                    }
+                }
+                crate::services::auth::AuthError::PermissionDenied => {
+                    secreton_errors::SecretonError::Authorization {
+                        message: "Permission denied".to_string(),
+                    }
+                }
+                other => secreton_errors::SecretonError::Internal {
+                    message: other.to_string(),
+                },
+            }
+        }
+        other => secreton_errors::SecretonError::Internal {
+            message: other.to_string(),
+        },
+    }
+}
+
+/// Verify that the authenticated user has admin privileges.
+/// Returns an authorization error if the user does not hold the "admin" or "root" role.
+///
+/// NOTE: `is_superuser` is checked for forward-compatibility but is currently
+/// always `false` for token-authenticated users because `validate_token`
+/// reconstructs the `User` from JWT claims which do not carry that flag.
+fn require_admin(user: &secreton_auth::User) -> Result<(), crate::ApiError> {
+    if !user.is_superuser
+        && !user.roles.contains(&"admin".to_string())
+        && !user.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Insufficient permissions".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 // Stub implementations for missing handlers
 
 pub async fn get_user_roles(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    require_admin(&user)?;
+    let roles = state.admin.get_user_roles(&username).await.map_err(map_admin_error)?;
+
+    Ok(Json(ApiResponse::success(roles)))
 }
 
 pub async fn assign_user_roles(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
-    Json(_request): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
+    Json(request): Json<AssignRolesRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
+
+    // Prevent admins from demoting themselves (removing their own admin role)
+    if username == user.username
+        && !request.roles.contains(&"admin".to_string())
+        && !request.roles.contains(&"root".to_string())
+    {
+        return Err(crate::ApiError::Authorization(
+            "Cannot remove admin privileges from your own account".to_string(),
+        ));
+    }
+
+    state
+        .admin
+        .assign_user_roles(&username, request.roles)
+        .await
+        .map_err(map_admin_error)?;
+
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "updated"}),
     )))
 }
 
 pub async fn get_user_permissions(
-    State(_state): State<AppState>,
-    Path(_user_id): Path<String>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    require_admin(&user)?;
+    let permissions = state.admin.get_user_permissions(&username).await.map_err(map_admin_error)?;
+
+    Ok(Json(ApiResponse::success(permissions)))
 }
 
 pub async fn list_roles(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<RoleResponse>>>> {
-    Ok(Json(ApiResponse::success(vec![])))
+    require_admin(&user)?;
+    let roles = state.admin.list_roles().await.map_err(map_admin_error)?;
+
+    let responses = roles
+        .into_iter()
+        .map(|r| RoleResponse {
+            name: r.name,
+            description: r.description,
+            permissions: r.permissions,
+            users: r.users,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            metadata: r.metadata,
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(responses)))
 }
 
 pub async fn create_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(request): Json<CreateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
+
+    let role = state.admin.create_role(request).await.map_err(map_admin_error)?;
+
     Ok(Json(ApiResponse::success(RoleResponse {
-        name: request.name,
-        description: request.description,
-        permissions: request.permissions,
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: request.metadata.unwrap_or_default(),
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 
 pub async fn get_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
+    let role = state.admin.get_role(&role_name).await.map_err(map_admin_error)?;
+
     Ok(Json(ApiResponse::success(RoleResponse {
-        name: role_name,
-        description: None,
-        permissions: vec![],
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: std::collections::HashMap::new(),
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 
 pub async fn update_role(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(role_name): Path<String>,
-    Json(request): Json<CreateRoleRequest>,
+    Json(request): Json<UpdateRoleRequest>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
+    require_admin(&user)?;
+
+    let role = state.admin.update_role(&role_name, request).await.map_err(map_admin_error)?;
+
     Ok(Json(ApiResponse::success(RoleResponse {
-        name: role_name,
-        description: request.description,
-        permissions: request.permissions,
-        users: vec![],
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        metadata: request.metadata.unwrap_or_default(),
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        users: role.users,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        metadata: role.metadata,
     })))
 }
 
 pub async fn delete_role(
-    State(_state): State<AppState>,
-    Path(_role_name): Path<String>,
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
+    state.admin.delete_role(&role_name).await.map_err(map_admin_error)?;
+
     Ok(Json(ApiResponse::success(
-        serde_json::json!({"status": "deleted"}),
+        serde_json::json!({"status": "deleted", "role": role_name}),
     )))
 }
 
 pub async fn update_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Json(_request): Json<serde_json::Value>,
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
+    require_admin(&user)?;
     // Return mock config
     Ok(Json(ApiResponse::success(SystemConfig {
         api: ApiConfigInfo {
-            version: "1.0.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             bind_address: "0.0.0.0:8080".to_string(),
             max_connections: 1000,
             timeout: 30,
@@ -1074,7 +1220,9 @@ pub async fn update_config(
 
 pub async fn reload_config(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "reloaded"}),
     )))
@@ -1082,14 +1230,18 @@ pub async fn reload_config(
 
 pub async fn get_system_logs(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(vec![])))
 }
 
 pub async fn vacuum_database(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "vacuumed"}),
     )))
@@ -1097,14 +1249,18 @@ pub async fn vacuum_database(
 
 pub async fn get_security_reports(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<serde_json::Value>>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(vec![])))
 }
 
 pub async fn get_security_incident(
     State(_state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     Path(incident_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecurityIncident>>> {
+    require_admin(&user)?;
     Ok(Json(ApiResponse::success(SecurityIncident {
         id: incident_id,
         severity: "low".to_string(),
@@ -1118,20 +1274,44 @@ pub async fn get_security_incident(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    pub start_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub end_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub user_id: Option<String>,
+    pub action: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn list_audit_logs(
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+    Query(query): Query<AuditQuery>,
+) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::AuditLogEntry>>>> {
+    require_admin(&user)?;
+    let limit = Some(query.limit.unwrap_or(1000));
+    let logs = state
+        .admin
+        .get_audit_logs(
+            query.start_time,
+            query.end_time,
+            query.user_id.as_deref(),
+            query.action.as_deref(),
+            limit,
+        )
+        .await
+        .map_err(map_admin_error)?;
+
+    Ok(Json(ApiResponse::success(logs)))
+}
+
 // --- Backup Endpoints ---
 
 pub async fn create_backup(
     axum::extract::State(state): axum::extract::State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backup_info = state
         .admin
@@ -1146,14 +1326,7 @@ pub async fn list_backups(
     axum::extract::State(state): axum::extract::State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<crate::services::admin::BackupInfo>>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backups = state
         .admin
@@ -1169,14 +1342,7 @@ pub async fn get_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::BackupInfo>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let backup = state
         .admin
@@ -1197,14 +1363,7 @@ pub async fn restore_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<crate::services::admin::MaintenanceResult>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     let result = state
         .admin
@@ -1220,14 +1379,7 @@ pub async fn delete_backup(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
     axum::extract::Path(backup_id): axum::extract::Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    if !user.is_superuser
-        && !user.roles.contains(&"admin".to_string())
-        && !user.roles.contains(&"root".to_string())
-    {
-        return Err(crate::ApiError::Authorization(
-            "Insufficient permissions".to_string(),
-        ));
-    }
+    require_admin(&user)?;
 
     state
         .admin
