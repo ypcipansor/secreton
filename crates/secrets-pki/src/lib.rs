@@ -14,7 +14,7 @@ pub mod model;
 pub mod service;
 
 // Re-export main types
-pub use engine::PkiEngine;
+pub use engine::{CertificateMetadata, PkiEngine};
 pub use error::PkiError;
 pub use model::{CertificateRequest, CertificateResponse, PkiConfig};
 pub use service::PkiService;

@@ -438,7 +438,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let axum_router = secreton_api::create_api_router(api_state);
+    let axum_router = secreton_api::create_api_router(api_state)?;
 
     // STRATEGY: Use Axum as the main server, mount Warp routes as a fallback.
     // 1. Create Axum router.

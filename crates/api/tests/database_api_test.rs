@@ -155,7 +155,7 @@ async fn test_database_api_endpoints() {
     };
 
     // Create router using the main factory to include middleware
-    let router = secreton_api::create_api_router(state);
+    let router = secreton_api::create_api_router(state).expect("Failed to create API router");
 
     let server = TestServer::new(router).unwrap();
 

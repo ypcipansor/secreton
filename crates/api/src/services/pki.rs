@@ -85,12 +85,13 @@ impl PkiPersistentService {
         Ok(())
     }
 
-    /// Generate a new Root CA
+    /// Generate a new Root CA and return a full `CertificateResponse` with
+    /// real serial number and expiration parsed from the generated certificate.
     pub async fn generate_root_ca(
         &self,
         common_name: &str,
         organization: &str,
-    ) -> Result<(String, String)> {
+    ) -> Result<CertificateResponse> {
         // Ensure initialized to load any existing CA from storage before checking/generating
         self.ensure_initialized().await?;
 
@@ -110,6 +111,11 @@ impl PkiPersistentService {
             .generate_root_ca(common_name, organization)
             .await
             .map_err(|e| anyhow!("Failed to generate Root CA: {}", e))?;
+
+        // Parse the generated certificate to extract real metadata
+        let ca_info = engine_lock
+            .parse_ca_cert_from_pem(&cert_pem)
+            .map_err(|e| anyhow!("Failed to parse generated Root CA: {}", e))?;
 
         // Store in storage
         let ca_data = json!({
@@ -151,7 +157,15 @@ impl PkiPersistentService {
 
         info!("Generated and persisted new Root CA: {}", common_name);
 
-        Ok((cert_pem, key_pem))
+        Ok(CertificateResponse {
+            certificate: cert_pem.clone(),
+            private_key: key_pem,
+            serial_number: ca_info.serial_number,
+            issuing_ca: cert_pem,
+            ca_chain: vec![],
+            expiration: ca_info.valid_until,
+            revocation_time: None,
+        })
     }
 
     /// Get the current CA Certificate (PEM)

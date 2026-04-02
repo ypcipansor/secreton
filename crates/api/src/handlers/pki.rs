@@ -8,6 +8,7 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_pki::{CertificateRequest, CertificateResponse};
@@ -27,6 +28,7 @@ pub struct GenerateRootCaRequest {
 
 async fn get_ca_pem(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<String>>> {
     let pem = state.pki.get_ca_pem().await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
@@ -39,26 +41,25 @@ async fn get_ca_pem(
 
 async fn generate_root_ca(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<GenerateRootCaRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<CertificateResponse>>> {
-    let (cert, key) = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
+    // Only admin/root users may generate a Root CA
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to generate Root CA".to_string(),
+        ));
+    }
+
+    let response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    let now = chrono::Utc::now();
-    let expiration = now + chrono::Duration::days(3650);
-    Ok(AxumJson(ApiResponse::success(CertificateResponse {
-        certificate: cert.clone(),
-        private_key: key,
-        serial_number: "ROOT".to_string(),
-        issuing_ca: cert,
-        ca_chain: vec![],
-        expiration,
-        revocation_time: None,
-    })))
+    Ok(AxumJson(ApiResponse::success(response)))
 }
 
 async fn issue_certificate(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Json(payload): Json<CertificateRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<CertificateResponse>>> {
     let response = state.pki.issue_certificate(payload).await
