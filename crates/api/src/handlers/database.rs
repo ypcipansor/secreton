@@ -65,7 +65,9 @@ async fn generate_credentials(
     let creds = state.database.generate_credentials(&role).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(ApiResponse::success(serde_json::to_value(creds).unwrap())))
+    let value = serde_json::to_value(creds)
+        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(value)))
 }
 
 async fn list_leases(

@@ -1336,6 +1336,21 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
             .cloned()
             .expect("policy service required"),
         admin: state.audit.clone(),
+        database: state
+            .secreton
+            .get_service("database")
+            .cloned()
+            .expect("database service required"),
+        pki: state
+            .secreton
+            .get_service("pki")
+            .cloned()
+            .expect("pki service required"),
+        totp_engine: state
+            .secreton
+            .get_service("totp_engine")
+            .cloned()
+            .expect("totp_engine service required"),
         mfa: state
             .secreton
             .get_service("mfa")
