@@ -869,14 +869,20 @@ pub async fn run_garbage_collection(
     let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
-        "message": "Garbage collection completed",
+        "message": if result.success { "Garbage collection completed" } else { "Garbage collection failed" },
         "operation": result.operation,
         "success": result.success,
         "duration_ms": result.duration_ms,
         "details": result.details
     });
 
-    Ok(Json(ApiResponse::success(data)))
+    if result.success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            serde_json::to_string(&data).unwrap_or_else(|_| "Garbage collection failed".to_string()),
+        ))
+    }
 }
 
 pub async fn compact_database(

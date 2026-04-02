@@ -595,21 +595,28 @@ impl AuditLogger {
                         if event.timestamp > end { continue; }
                     }
 
+                    let id = Uuid::parse_str(&event.id).unwrap_or_default();
                     let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
+                    let original_user = event.user.clone();
+                    let timestamp = event.timestamp;
+                    let action = event.operation.clone();
+                    let resource_type = event.resource.clone();
+                    let ip_address = event.client_ip.clone();
+                    let success = matches!(event.status, AuditStatus::Success);
                     let details: HashMap<String, serde_json::Value> = event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
                     results.push(RichAuditEntry {
-                        original_user: event.user.clone(),
+                        original_user,
                         entry: secreton_storage::models::storage_models::AuditEntry {
-                            id: Uuid::parse_str(&event.id).unwrap_or_default(),
-                            timestamp: event.timestamp,
+                            id,
+                            timestamp,
                             user_id,
-                            action: event.operation.clone(),
-                            resource_type: event.resource.clone(),
+                            action,
+                            resource_type,
                             resource_id: None,
                             details,
-                            ip_address: event.client_ip.clone(),
+                            ip_address,
                             user_agent: None,
-                            success: matches!(event.status, AuditStatus::Success),
+                            success,
                             error_message: None,
                         },
                     });
@@ -660,7 +667,7 @@ impl AuditLogger {
                     let e = &rich.entry;
                     csv.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
-                        e.timestamp,
+                        e.timestamp.to_string().replace('"', "\"\""),
                         rich.original_user.replace('"', "\"\""),
                         e.action.replace('"', "\"\""),
                         e.resource_type.replace('"', "\"\""),

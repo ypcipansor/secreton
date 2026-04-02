@@ -770,7 +770,7 @@ impl AdminService {
                 for log in audit_logs {
                     csv_content.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
-                        log.timestamp,
+                        log.timestamp.to_string().replace('"', "\"\""),
                         log.user_id.replace('"', "\"\""),
                         log.action.replace('"', "\"\""),
                         log.resource.replace('"', "\"\""),
