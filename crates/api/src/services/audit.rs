@@ -603,7 +603,10 @@ impl AuditLogger {
                     let resource_type = event.resource.clone();
                     let ip_address = event.client_ip.clone();
                     let success = matches!(event.status, AuditStatus::Success);
-                    let details: HashMap<String, serde_json::Value> = event.metadata.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
+                    let details: HashMap<String, serde_json::Value> = event.metadata
+                        .into_iter()
+                        .map(|(k, v)| (k, serde_json::Value::String(v)))
+                        .collect();
                     results.push(RichAuditEntry {
                         original_user,
                         entry: secreton_storage::models::storage_models::AuditEntry {
@@ -662,17 +665,19 @@ impl AuditLogger {
                 Ok(json)
             }
             ExportFormat::CSV => {
-                let mut csv = String::from("timestamp,user,action,resource,success,ip_address\n");
+                let mut csv = String::from("timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n");
                 for rich in &entries {
                     let e = &rich.entry;
                     csv.push_str(&format!(
-                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
                         e.timestamp.to_string().replace('"', "\"\""),
                         rich.original_user.replace('"', "\"\""),
                         e.action.replace('"', "\"\""),
                         e.resource_type.replace('"', "\"\""),
-                        e.success,
-                        e.ip_address.as_deref().unwrap_or_default().replace('"', "\"\"")
+                        e.resource_id.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.ip_address.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.user_agent.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.success
                     ));
                 }
                 Ok(csv.into_bytes())

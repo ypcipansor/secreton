@@ -560,38 +560,68 @@ impl AdminService {
     pub async fn run_garbage_collection(&self) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
 
+        let mut success = true;
+        let mut details = HashMap::new();
+
         // Clean expired sessions
-        let expired_sessions = self
-            .auth
-            .cleanup_expired_sessions()
-            .await
-            .map_err(AdminError::Auth)?;
+        match self.auth.cleanup_expired_sessions().await {
+            Ok(expired_sessions) => {
+                details.insert(
+                    "expired_sessions".to_string(),
+                    serde_json::Value::Number(expired_sessions.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup expired sessions: {}", e);
+                success = false;
+                details.insert(
+                    "expired_sessions_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         // Clean expired secrets (this would need to be implemented in storage)
-        let expired_secrets = self.cleanup_expired_secrets().await?;
+        match self.cleanup_expired_secrets().await {
+            Ok(expired_secrets) => {
+                details.insert(
+                    "expired_secrets".to_string(),
+                    serde_json::Value::Number(expired_secrets.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup expired secrets: {}", e);
+                success = false;
+                details.insert(
+                    "expired_secrets_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         // Compact storage if supported
-        let storage_cleaned = self.storage_cleanup().await?;
+        match self.storage_cleanup().await {
+            Ok(storage_cleaned) => {
+                details.insert(
+                    "storage_cleaned_bytes".to_string(),
+                    serde_json::Value::Number(storage_cleaned.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup storage: {}", e);
+                success = false;
+                details.insert(
+                    "storage_cleanup_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         let duration = start_time.elapsed();
 
-        let mut details = HashMap::new();
-        details.insert(
-            "expired_sessions".to_string(),
-            serde_json::Value::Number(expired_sessions.into()),
-        );
-        details.insert(
-            "expired_secrets".to_string(),
-            serde_json::Value::Number(expired_secrets.into()),
-        );
-        details.insert(
-            "storage_cleaned_bytes".to_string(),
-            serde_json::Value::Number(storage_cleaned.into()),
-        );
-
         Ok(MaintenanceResult {
             operation: "garbage_collection".to_string(),
-            success: true,
+            success,
             duration_ms: duration.as_millis() as u64,
             details,
         })
