@@ -2488,16 +2488,13 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?;
 
-        // Perform compaction and vacuum using the storage backend trait methods
+        // Perform compaction using the storage backend trait method.
+        // Vacuum is handled separately by the dedicated vacuum_database endpoint.
         let compact_result = self.storage.compact().await;
-        let vacuum_result = self.storage.vacuum().await;
-        let compaction_successful = compact_result.is_ok() && vacuum_result.is_ok();
+        let compaction_successful = compact_result.is_ok();
 
         if let Err(e) = compact_result {
             tracing::warn!("Storage compact failed: {}", e);
-        }
-        if let Err(e) = vacuum_result {
-            tracing::warn!("Storage vacuum failed: {}", e);
         }
 
         // Get stats after compaction
