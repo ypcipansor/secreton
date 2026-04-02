@@ -103,8 +103,13 @@ impl DatabaseService {
         );
         self.storage.store(&entry).await?;
 
-        // Load roles from storage BEFORE swapping the engine so that a
-        // transient storage failure leaves the old engine (with its roles) intact.
+        // Acquire the write lock FIRST, then load roles from storage while
+        // holding it.  This prevents a concurrent `add_role` from persisting a
+        // role and adding it to the old engine between the storage read and the
+        // engine swap — which would silently drop that role from the in-memory
+        // engine.
+        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
+
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
             ..Default::default()
@@ -121,8 +126,6 @@ impl DatabaseService {
             }
         }
 
-        // Now that roles are successfully loaded, swap the engine.
-        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
         let mut new_engine = DatabaseEngine::new(config);
         new_engine.enable();
 

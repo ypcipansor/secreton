@@ -13,6 +13,24 @@ use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
 use crate::{ApiResponse, ApiResult};
 
+/// Validate that a user-supplied name is safe for use in storage paths.
+fn validate_name(name: &str) -> Result<(), crate::ApiError> {
+    if name.is_empty() {
+        return Err(crate::ApiError::BadRequest("Name must not be empty".to_string()));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(crate::ApiError::BadRequest(
+            "Name must not contain '/', '\\', or '..'".to_string(),
+        ));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(crate::ApiError::BadRequest(
+            "Name must not contain control characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn create_routes() -> Router<AppState> {
     Router::new()
         .route("/keys", get(list_keys))
@@ -45,6 +63,8 @@ async fn create_key(
     Path(name): Path<String>,
     Json(payload): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    validate_name(&name)?;
+
     state.totp_engine.create_key(
         &user.id,
         &name,
@@ -64,6 +84,8 @@ async fn generate_code(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    validate_name(&name)?;
+
     let code = state.totp_engine.generate_code(&user.id, &name).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
@@ -77,6 +99,8 @@ async fn delete_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    validate_name(&name)?;
+
     state.totp_engine.delete_key(&user.id, &name).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 

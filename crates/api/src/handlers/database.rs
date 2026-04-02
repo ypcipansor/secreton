@@ -13,6 +13,24 @@ use crate::handlers::AppState;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_database::{DatabaseConfig, DatabaseRole};
 
+/// Validate that a user-supplied name is safe for use in storage paths.
+fn validate_name(name: &str) -> Result<(), crate::ApiError> {
+    if name.is_empty() {
+        return Err(crate::ApiError::BadRequest("Name must not be empty".to_string()));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(crate::ApiError::BadRequest(
+            "Name must not contain '/', '\\', or '..'".to_string(),
+        ));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(crate::ApiError::BadRequest(
+            "Name must not contain control characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn create_routes() -> Router<AppState> {
     Router::new()
         .route("/config", post(set_config))
@@ -68,6 +86,8 @@ async fn add_role(
         ));
     }
 
+    validate_name(&name)?;
+
     state.database.add_role(&name, payload).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
@@ -81,6 +101,8 @@ async fn generate_credentials(
     AuthenticatedUser(_user): AuthenticatedUser,
     Path(role): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    validate_name(&role)?;
+
     let creds = state.database.generate_credentials(&role).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
@@ -110,6 +132,8 @@ async fn revoke_lease(
             "Admin privileges required to revoke leases".to_string(),
         ));
     }
+
+    validate_name(&id)?;
 
     state.database.revoke_lease(&id).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
