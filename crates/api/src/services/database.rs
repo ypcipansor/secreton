@@ -40,35 +40,47 @@ impl DatabaseService {
             return Ok(());
         }
 
-        // Load config
-        if let Some(entry) = self.storage.get_by_path(DB_CONFIG_PATH).await? {
-            let decrypted = self.crypto.decrypt(&entry.encrypted_data).await?;
-            let config: DatabaseConfig = serde_json::from_slice(&decrypted)?;
+        // Load config from storage (if any) BEFORE acquiring the write lock so
+        // that a storage failure does not leave the engine in a half-initialised
+        // state.
+        let maybe_config: Option<DatabaseConfig> =
+            if let Some(entry) = self.storage.get_by_path(DB_CONFIG_PATH).await? {
+                let decrypted = self.crypto.decrypt(&entry.encrypted_data).await?;
+                Some(serde_json::from_slice(&decrypted)?)
+            } else {
+                None
+            };
 
-            let mut engine = self.engine.write().await;
-            *engine = DatabaseEngine::new(config);
-            engine.enable();
-        }
-
-        // Load roles
+        // Load roles from storage
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
             ..Default::default()
         };
         let entries = self.storage.list(&query).await?;
-        {
-            let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
-            for entry in entries {
-                if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
-                    match self.crypto.decrypt(&entry.encrypted_data).await {
-                        Ok(decrypted) => {
-                            if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
-                                engine.add_role(name.to_string(), role);
-                            }
+        let mut loaded_roles: Vec<(String, DatabaseRole)> = Vec::new();
+        for entry in entries {
+            if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
+                match self.crypto.decrypt(&entry.encrypted_data).await {
+                    Ok(decrypted) => {
+                        if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
+                            loaded_roles.push((name.to_string(), role));
                         }
-                        Err(e) => warn!("Failed to decrypt role {}: {}", name, e),
                     }
+                    Err(e) => warn!("Failed to decrypt role {}: {}", name, e),
                 }
+            }
+        }
+
+        // Now apply config + roles under a single write lock so concurrent
+        // readers never see an engine with the right config but zero roles.
+        {
+            let mut engine = self.engine.write().await;
+            if let Some(config) = maybe_config {
+                *engine = DatabaseEngine::new(config);
+                engine.enable();
+            }
+            for (name, role) in loaded_roles {
+                engine.add_role(name, role);
             }
         }
 
@@ -158,16 +170,21 @@ impl DatabaseService {
         // Hold the read lock only for the engine call, then drop it before
         // performing storage I/O so that concurrent set_config/add_role calls
         // are not blocked.
-        let mut creds: HashMap<String, Value> = {
+        let (mut creds, lease_duration) = {
             let engine = self.engine.read().await;
-            engine.generate_credentials(role_name).await
-                .map_err(|e| anyhow!("Engine failed: {}", e))?
+            let creds = engine.generate_credentials(role_name).await
+                .map_err(|e| anyhow!("Engine failed: {}", e))?;
+            // Read the role's default_ttl while we still hold the lock, since
+            // the engine's returned HashMap does not include lease_duration.
+            let ttl = engine.get_role_default_ttl(role_name).unwrap_or(3600);
+            (creds, ttl)
         };
 
         // Create lease — use underscores instead of slashes so the ID is a single
         // path segment and can be used directly in DELETE /leases/{id}.
         let lease_id = format!("db_{}_{}", role_name, uuid::Uuid::new_v4().simple());
         creds.insert("lease_id".to_string(), Value::String(lease_id.clone()));
+        creds.insert("lease_duration".to_string(), Value::Number(serde_json::Number::from(lease_duration)));
 
         // Store lease info
         let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
@@ -176,7 +193,7 @@ impl DatabaseService {
             "role": role_name,
             "username": creds.get("username").and_then(|v| v.as_str()).unwrap_or_default(),
             "created_at": chrono::Utc::now().to_rfc3339(),
-            "lease_duration": creds.get("lease_duration").and_then(|v: &Value| v.as_u64()).unwrap_or(3600),
+            "lease_duration": lease_duration,
         });
 
         let data = serde_json::to_vec(&lease_data)?;

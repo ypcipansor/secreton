@@ -428,6 +428,11 @@ impl DatabaseEngine {
         self.roles.keys().cloned().collect()
     }
 
+    /// Get the default TTL for a role, if the role exists.
+    pub fn get_role_default_ttl(&self, name: &str) -> Option<u64> {
+        self.roles.get(name).map(|r| r.default_ttl)
+    }
+
     /// Enable the engine
     pub fn enable(&mut self) {
         self.enabled = true;
