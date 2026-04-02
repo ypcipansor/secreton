@@ -316,7 +316,7 @@ impl AdminService {
 
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
-            limit: Some(10000),
+            limit: None,
             ..Default::default()
         };
 
