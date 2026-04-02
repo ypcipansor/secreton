@@ -10,26 +10,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::extractors::AuthenticatedUser;
-use crate::handlers::AppState;
+use crate::handlers::{AppState, validate_name};
 use crate::{ApiResponse, ApiResult};
-
-/// Validate that a user-supplied name is safe for use in storage paths.
-fn validate_name(name: &str) -> Result<(), crate::ApiError> {
-    if name.is_empty() {
-        return Err(crate::ApiError::BadRequest("Name must not be empty".to_string()));
-    }
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err(crate::ApiError::BadRequest(
-            "Name must not contain '/', '\\', or '..'".to_string(),
-        ));
-    }
-    if name.chars().any(|c| c.is_control()) {
-        return Err(crate::ApiError::BadRequest(
-            "Name must not contain control characters".to_string(),
-        ));
-    }
-    Ok(())
-}
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()

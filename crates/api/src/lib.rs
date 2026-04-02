@@ -1335,13 +1335,22 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         .nest("/api/v1/kv", kv::create_kv_router())
         .nest(
             "/api/v1/secret",
-            crate::handlers::secret::create_routes().with_state(app_state),
+            crate::handlers::secret::create_routes().with_state(app_state.clone()),
         ) // Add secret routes
         .nest("/api/v1/transit", transit::create_transit_router())
-        .nest("/api/v1/database", database::create_database_router())
-        .nest("/api/v1/pki", pki::create_pki_router())
+        .nest(
+            "/api/v1/database",
+            crate::handlers::database::create_routes().with_state(app_state.clone()),
+        )
+        .nest(
+            "/api/v1/pki",
+            crate::handlers::pki::create_routes().with_state(app_state.clone()),
+        )
         .nest("/api/v1/ssh", ssh::create_ssh_router())
-        .nest("/api/v1/totp", totp::create_totp_router())
+        .nest(
+            "/api/v1/totp",
+            crate::handlers::totp_engine::create_routes().with_state(app_state),
+        )
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

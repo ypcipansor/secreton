@@ -29,12 +29,33 @@ use crate::services::{
     admin::AdminService, audit::AuditLogger, auth::AuthenticationService, crypto::CryptoService,
     seal::SealService, secret::SecretService,
 };
-use crate::{ApiResponse, ApiResult};
+use crate::{ApiError, ApiResponse, ApiResult};
 use axum::middleware::{self};
 use secreton_auth::mfa::CombinedMfaService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_performance::SecretPerformanceOptimizer;
 use secreton_storage::StorageBackend;
+
+/// Validate that a user-supplied name is safe for use in storage paths.
+///
+/// Rejects empty names, names containing path-traversal characters (`/`, `\`,
+/// `..`), and names with control characters.
+pub fn validate_name(name: &str) -> Result<(), ApiError> {
+    if name.is_empty() {
+        return Err(ApiError::BadRequest("Name must not be empty".to_string()));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(ApiError::BadRequest(
+            "Name must not contain '/', '\\', or '..'".to_string(),
+        ));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(ApiError::BadRequest(
+            "Name must not contain control characters".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Application state shared across handlers
 #[derive(Clone)]
