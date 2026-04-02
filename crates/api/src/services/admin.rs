@@ -2523,8 +2523,12 @@ impl AdminService {
         let compact_result = self.storage.compact().await;
         let compaction_successful = compact_result.is_ok();
 
-        if let Err(e) = compact_result {
+        if let Err(ref e) = compact_result {
             tracing::warn!("Storage compact failed: {}", e);
+            details.insert(
+                "error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
         }
 
         // Get stats after compaction
