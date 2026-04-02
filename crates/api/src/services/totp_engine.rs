@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use totp_rs::{Algorithm, TOTP};
 use uuid::Uuid;
 
-const TOTP_ENGINE_PREFIX: &str = "totp/";
+const TOTP_ENGINE_PREFIX: &str = "sys/totp/";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TotpKeyMetadata {

@@ -25,10 +25,12 @@ mod tests {
         assert!(ca_pem.is_none());
 
         // 4. Generate Root CA
-        let (cert, key) = service
+        let response = service
             .generate_root_ca("Test Root CA", "Test Org")
             .await
             .unwrap();
+        let cert = response.certificate.clone();
+        let key = response.private_key;
         assert!(!cert.is_empty());
         assert!(!key.is_empty());
 

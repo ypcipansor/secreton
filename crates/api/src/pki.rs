@@ -7,7 +7,6 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
-use chrono::Utc;
 use secreton_secrets_pki::CertificateRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -147,12 +146,12 @@ pub async fn generate_root_ca(
         .generate_root_ca(&request.common_name, &request.organization)
         .await
     {
-        Ok((cert, _key)) => {
+        Ok(res) => {
             Ok(Json(ApiResponse::success(CertResponse {
-                certificate: cert,
+                certificate: res.certificate,
                 private_key: String::new(), // Do not return private key in API response for security
-                serial_number: "ROOT".to_string(),
-                expiration: Utc::now().timestamp() + (3650 * 86400),
+                serial_number: res.serial_number,
+                expiration: res.expiration.timestamp(),
             })))
         }
         Err(e) => {

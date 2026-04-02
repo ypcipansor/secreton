@@ -91,27 +91,33 @@ impl DatabaseService {
         );
         self.storage.store(&entry).await?;
 
-        // Update engine
+        // Load roles from storage BEFORE swapping the engine so that a
+        // transient storage failure leaves the old engine (with its roles) intact.
+        let query = secreton_storage::QueryParams {
+            path_prefix: Some(DB_ROLE_PREFIX.to_string()),
+            ..Default::default()
+        };
+        let entries = self.storage.list(&query).await?;
+        let mut loaded_roles: Vec<(String, DatabaseRole)> = Vec::new();
+        for entry in entries {
+            if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
+                if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                    if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
+                        loaded_roles.push((name.to_string(), role));
+                    }
+                }
+            }
+        }
+
+        // Now that roles are successfully loaded, swap the engine.
         let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
         let mut new_engine = DatabaseEngine::new(config);
         new_engine.enable();
 
         *engine = new_engine;
 
-        // Re-add roles
-        let query = secreton_storage::QueryParams {
-            path_prefix: Some(DB_ROLE_PREFIX.to_string()),
-            ..Default::default()
-        };
-        let entries = self.storage.list(&query).await?;
-        for entry in entries {
-            if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
-                if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                    if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
-                        engine.add_role(name.to_string(), role);
-                    }
-                }
-            }
+        for (name, role) in loaded_roles {
+            engine.add_role(name, role);
         }
 
         Ok(())
@@ -148,10 +154,15 @@ impl DatabaseService {
 
     pub async fn generate_credentials(&self, role_name: &str) -> Result<HashMap<String, Value>> {
         self.ensure_initialized().await?;
-        let engine: tokio::sync::RwLockReadGuard<'_, DatabaseEngine> = self.engine.read().await;
 
-        let mut creds: HashMap<String, Value> = engine.generate_credentials(role_name).await
-            .map_err(|e| anyhow!("Engine failed: {}", e))?;
+        // Hold the read lock only for the engine call, then drop it before
+        // performing storage I/O so that concurrent set_config/add_role calls
+        // are not blocked.
+        let mut creds: HashMap<String, Value> = {
+            let engine = self.engine.read().await;
+            engine.generate_credentials(role_name).await
+                .map_err(|e| anyhow!("Engine failed: {}", e))?
+        };
 
         // Create lease — use underscores instead of slashes so the ID is a single
         // path segment and can be used directly in DELETE /leases/{id}.
