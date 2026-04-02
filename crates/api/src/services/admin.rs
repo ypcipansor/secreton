@@ -2545,22 +2545,27 @@ impl AdminService {
 
     /// Perform database compaction
     async fn perform_database_compaction(&self) -> Result<CompactionResult, AdminError> {
+        let mut details = HashMap::new();
+        let mut compaction_successful = true;
+
         // Get stats before compaction
-        let stats_before = self
-            .storage
-            .get_stats()
-            .await
-            .map_err(AdminError::Storage)?;
+        let stats_before = match self.storage.get_stats().await {
+            Ok(stats) => Some(stats),
+            Err(e) => {
+                tracing::warn!("Failed to get stats before compaction: {}", e);
+                details.insert(
+                    "stats_before_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+                None
+            }
+        };
 
         // Perform compaction using the storage backend trait method.
         // Vacuum is handled separately by the dedicated vacuum_database endpoint.
-        let compact_result = self.storage.compact().await;
-        let compaction_successful = compact_result.is_ok();
-
-        let mut details = HashMap::new();
-
-        if let Err(ref e) = compact_result {
+        if let Err(e) = self.storage.compact().await {
             tracing::warn!("Storage compact failed: {}", e);
+            compaction_successful = false;
             details.insert(
                 "error".to_string(),
                 serde_json::Value::String(e.to_string()),
@@ -2568,32 +2573,40 @@ impl AdminService {
         }
 
         // Get stats after compaction
-        let stats_after = self
-            .storage
-            .get_stats()
-            .await
-            .map_err(AdminError::Storage)?;
-        details.insert(
-            "original_size_bytes".to_string(),
-            serde_json::Value::Number(stats_before.total_size_bytes.into()),
-        );
-        details.insert(
-            "compacted_size_bytes".to_string(),
-            serde_json::Value::Number(stats_after.total_size_bytes.into()),
-        );
-        details.insert(
-            "space_saved_bytes".to_string(),
-            serde_json::Value::Number(
-                (stats_before
-                    .total_size_bytes
-                    .saturating_sub(stats_after.total_size_bytes))
-                .into(),
-            ),
-        );
-        details.insert(
-            "entries_processed".to_string(),
-            serde_json::Value::Number(stats_before.total_entries.into()),
-        );
+        match self.storage.get_stats().await {
+            Ok(stats_after) => {
+                if let Some(ref stats_before) = stats_before {
+                    details.insert(
+                        "original_size_bytes".to_string(),
+                        serde_json::Value::Number(stats_before.total_size_bytes.into()),
+                    );
+                    details.insert(
+                        "compacted_size_bytes".to_string(),
+                        serde_json::Value::Number(stats_after.total_size_bytes.into()),
+                    );
+                    details.insert(
+                        "space_saved_bytes".to_string(),
+                        serde_json::Value::Number(
+                            (stats_before
+                                .total_size_bytes
+                                .saturating_sub(stats_after.total_size_bytes))
+                            .into(),
+                        ),
+                    );
+                    details.insert(
+                        "entries_processed".to_string(),
+                        serde_json::Value::Number(stats_before.total_entries.into()),
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get stats after compaction: {}", e);
+                details.insert(
+                    "stats_after_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         Ok(CompactionResult {
             success: compaction_successful,
