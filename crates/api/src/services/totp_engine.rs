@@ -46,7 +46,11 @@ impl TotpEngineService {
         issuer: Option<String>,
         account_name: Option<String>,
     ) -> Result<()> {
-        let owner_id = Uuid::parse_str(user_id).map_err(|e| anyhow!("Invalid user ID: {}", e))?;
+        // Try to parse user_id as UUID for the owner field; fall back to a
+        // deterministic UUID-v5 derived from the user_id string so that
+        // non-UUID user IDs still work.
+        let owner_id = Uuid::parse_str(user_id)
+            .unwrap_or_else(|_| Uuid::new_v5(&Uuid::NAMESPACE_OID, user_id.as_bytes()));
 
         // Validate secret by attempting to decode it
         let _ = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)

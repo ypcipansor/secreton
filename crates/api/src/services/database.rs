@@ -91,7 +91,16 @@ impl DatabaseService {
     pub async fn set_config(&self, config: DatabaseConfig) -> Result<()> {
         self.ensure_initialized().await?;
 
-        // Persist
+        // Acquire the write lock FIRST, then persist config and load roles from
+        // storage while holding it.  This prevents a concurrent `add_role` from
+        // persisting a role and adding it to the old engine between the storage
+        // read and the engine swap — which would silently drop that role from
+        // the in-memory engine.  It also prevents two concurrent `set_config`
+        // calls from ending up with the in-memory engine holding a stale config
+        // that differs from what was last written to storage.
+        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
+
+        // Persist config to storage while holding the lock
         let data = serde_json::to_vec(&config)?;
         let encrypted = self.crypto.encrypt_data(&data).await?;
         let entry = SecretEntry::new(
@@ -103,13 +112,7 @@ impl DatabaseService {
         );
         self.storage.store(&entry).await?;
 
-        // Acquire the write lock FIRST, then load roles from storage while
-        // holding it.  This prevents a concurrent `add_role` from persisting a
-        // role and adding it to the old engine between the storage read and the
-        // engine swap — which would silently drop that role from the in-memory
-        // engine.
-        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
-
+        // Load roles from storage while still holding the lock
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
             ..Default::default()
@@ -126,14 +129,14 @@ impl DatabaseService {
             }
         }
 
+        // Build the new engine and apply roles atomically
         let mut new_engine = DatabaseEngine::new(config);
         new_engine.enable();
+        for (name, role) in loaded_roles {
+            new_engine.add_role(name, role);
+        }
 
         *engine = new_engine;
-
-        for (name, role) in loaded_roles {
-            engine.add_role(name, role);
-        }
 
         Ok(())
     }

@@ -359,8 +359,15 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("PKI initialization failed: {}", e));
     }
 
-    // Initialize DatabaseApiState
-    let database_state = secreton_api::database::DatabaseApiState::new(storage.clone()).await;
+    // The old DatabaseApiState (with its background TTL task) is no longer
+    // needed — the /api/v1/database routes now use the new
+    // handlers::database + services::database::DatabaseService.  We pass a
+    // mock storage so the old engine does no real work; its background TTL
+    // task will find zero leases and idle harmlessly.
+    let database_state = secreton_api::database::DatabaseApiState::new(
+        Arc::new(secreton_storage::MockStorageBackend::new()),
+    )
+    .await;
 
     let admin = Arc::new(
         secreton_api::services::admin::AdminService::new(

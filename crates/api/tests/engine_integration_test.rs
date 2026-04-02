@@ -7,11 +7,13 @@ use secreton_api::handlers::{create_router, AppState};
 
 async fn setup_test_server() -> TestServer {
     // Set root key for crypto service auto-unseal.
-    // SAFETY: This is only called during test setup before any concurrent
-    // threads read this variable.  In practice the env var should be set
-    // outside the process (e.g. in CI config) to avoid the unsoundness of
-    // set_var in multi-threaded programs.
-    unsafe { std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!") };
+    // NOTE: set_var is not thread-safe and should ideally be set outside the
+    // process (e.g. in CI config).  We call it here before spawning any
+    // concurrent work that reads this variable.
+    #[allow(unused_unsafe)]
+    unsafe {
+        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+    }
 
     let mut config = ApiConfig::default();
     config.auth.jwt.secret = Some("test_secret".to_string());
