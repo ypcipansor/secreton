@@ -144,6 +144,11 @@ impl DatabaseService {
     pub async fn add_role(&self, name: &str, role: DatabaseRole) -> Result<()> {
         self.ensure_initialized().await?;
 
+        // Acquire the write lock FIRST (same strategy as set_config) to
+        // prevent concurrent add_role calls from creating a divergence
+        // between the persisted role and the in-memory engine.
+        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
+
         // Persist
         let path = format!("{}{}", DB_ROLE_PREFIX, name);
         let data = serde_json::to_vec(&role)?;
@@ -158,10 +163,10 @@ impl DatabaseService {
         self.storage.store(&entry).await?;
 
         // Update engine
-        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
         engine.add_role(name.to_string(), role);
 
         Ok(())
+    }
     }
 
     pub async fn list_roles(&self) -> Result<Vec<String>> {
