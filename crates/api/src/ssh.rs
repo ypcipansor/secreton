@@ -5,7 +5,7 @@ use axum::{
     extract::Extension,
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::post,
 };
 use secreton_secrets::{SecretEngine, SshConfig, SshEngine};
 use serde::{Deserialize, Serialize};

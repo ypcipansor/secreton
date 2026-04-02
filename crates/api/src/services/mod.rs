@@ -6,8 +6,10 @@
 pub mod admin;
 pub mod auth;
 pub mod config;
+pub mod database;
 pub mod pki;
 pub mod secret;
+pub mod totp_engine;
 
 use anyhow::Result;
 use secreton_common::{InitResult, ServiceContainer, ServiceHealth, StandardServiceContainer};
@@ -34,8 +36,7 @@ use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
 // MFA Services
 use secreton_auth::mfa::{
     CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
-    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService,
-    InMemoryTotpService, SmsConfig, SmsProvider,
+    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig, SmsProvider,
 };
 
 /// Service container holding all application services
@@ -58,6 +59,9 @@ pub struct ApiServiceContainer {
     pub policy: Arc<PolicyService>,
     pub secreton: Arc<secret::SecretService>,
     pub admin: Arc<admin::AdminService>,
+    pub database: Arc<database::DatabaseService>,
+    pub pki: Arc<pki::PkiPersistentService>,
+    pub totp_engine: Arc<totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
     pub identity: Arc<dyn IdentityService + Send + Sync>,
@@ -201,6 +205,24 @@ impl ApiServiceContainer {
             .await?,
         );
 
+        // Initialize database service
+        let database = Arc::new(database::DatabaseService::new(
+            storage.clone(),
+            crypto.clone(),
+        ));
+
+        // Initialize PKI service
+        let pki = Arc::new(pki::PkiPersistentService::new(
+            storage.clone(),
+            crypto.clone(),
+        ));
+
+        // Initialize TOTP Engine service
+        let totp_engine = Arc::new(totp_engine::TotpEngineService::new(
+            storage.clone(),
+            crypto.clone(),
+        ));
+
         // Initialize admin service
         let admin = Arc::new(
             admin::AdminService::new(
@@ -230,6 +252,9 @@ impl ApiServiceContainer {
         registry.register_service("mfa".to_string(), mfa.clone());
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
+        registry.register_service("database".to_string(), database.clone());
+        registry.register_service("pki".to_string(), pki.clone());
+        registry.register_service("totp_engine".to_string(), totp_engine.clone());
         registry.register_service("telemetry".to_string(), telemetry);
         registry.register_service("identity".to_string(), identity.clone());
 
@@ -245,6 +270,9 @@ impl ApiServiceContainer {
             policy: policy_service,
             secreton,
             admin,
+            database,
+            pki,
+            totp_engine,
             performance,
             mfa,
             identity,

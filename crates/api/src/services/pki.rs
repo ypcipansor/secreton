@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::services::crypto::CryptoService;
 use secreton_secrets_pki::{CertificateRequest, CertificateResponse, PkiConfig, PkiEngine};

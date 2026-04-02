@@ -8,7 +8,7 @@ use sha3::Sha3_256;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
@@ -393,7 +393,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, existing_owner, previous_version) =
+        let (version, _existing_owner, previous_version) =
             if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
                 // Check ownership first
                 if existing.owner_id != owner_id {
