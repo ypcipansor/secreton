@@ -2523,6 +2523,8 @@ impl AdminService {
         let compact_result = self.storage.compact().await;
         let compaction_successful = compact_result.is_ok();
 
+        let mut details = HashMap::new();
+
         if let Err(ref e) = compact_result {
             tracing::warn!("Storage compact failed: {}", e);
             details.insert(
@@ -2537,8 +2539,6 @@ impl AdminService {
             .get_stats()
             .await
             .map_err(AdminError::Storage)?;
-
-        let mut details = HashMap::new();
         details.insert(
             "original_size_bytes".to_string(),
             serde_json::Value::Number(stats_before.total_size_bytes.into()),
