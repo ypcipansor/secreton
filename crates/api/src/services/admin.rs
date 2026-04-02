@@ -163,6 +163,7 @@ pub struct AdminService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     auth: Arc<AuthenticationService>,
     performance: Arc<SecretPerformanceOptimizer>,
+    audit: Arc<crate::services::audit::AuditLogger>,
     crypto: Option<Arc<CryptoService>>,
 }
 
@@ -172,11 +173,13 @@ impl AdminService {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         auth: Arc<AuthenticationService>,
         performance: Arc<SecretPerformanceOptimizer>,
+        audit: Arc<crate::services::audit::AuditLogger>,
     ) -> Result<Self> {
         Ok(Self {
             storage,
             auth,
             performance,
+            audit,
             crypto: None,
         })
     }
@@ -279,33 +282,67 @@ impl AdminService {
     }
 
     /// Get requests per minute (actual implementation based on audit logs)
+    ///
+    /// This method queries storage directly instead of going through
+    /// `get_audit_logs` → `AuditLogger::get_entries` to avoid triggering an
+    /// audit buffer flush on every call. Since `get_system_stats` may be
+    /// called frequently (e.g., from a monitoring dashboard), the flush +
+    /// full scan overhead would be excessive for a lightweight metric.
     async fn get_requests_per_minute(&self) -> f64 {
-        // Get audit logs from the last 5 minutes
+        use chrono::Datelike;
+
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::minutes(5);
 
-        match self
-            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000))
-            .await
-        {
-            Ok(audit_logs) => {
-                let total_requests = audit_logs.len() as f64;
-                let minutes_elapsed = 5.0; // 5 minutes window
-
-                // Calculate requests per minute
-                let rpm = total_requests / minutes_elapsed;
-
-                // If no recent activity, fall back to a minimum rate
-                if rpm > 0.0 {
-                    rpm
+        // Build a date-based prefix to narrow the storage scan
+        let prefix = if start_time.year() == end_time.year() {
+            if start_time.month() == end_time.month() {
+                if start_time.day() == end_time.day() {
+                    format!(
+                        "sys/audit/{}/{:02}/{:02}/",
+                        start_time.year(),
+                        start_time.month(),
+                        start_time.day()
+                    )
                 } else {
-                    1.0 // Minimum rate to indicate system is active
+                    format!("sys/audit/{}/{:02}/", start_time.year(), start_time.month())
                 }
+            } else {
+                format!("sys/audit/{}/", start_time.year())
             }
-            Err(_) => {
-                // If we can't access audit logs, fall back to a reasonable default
-                10.0
+        } else {
+            "sys/audit/".to_string()
+        };
+
+        let query_params = secreton_storage::QueryParams {
+            path_prefix: Some(prefix),
+            limit: None,
+            ..Default::default()
+        };
+
+        match self.storage.list(&query_params).await {
+            Ok(entries) => {
+                // Count entries whose timestamp falls within the 5-minute window
+                let count = entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.metadata.get("log_data").map_or(false, |data| {
+                            serde_json::from_str::<serde_json::Value>(data)
+                                .ok()
+                                .and_then(|v| v.get("timestamp")?.as_str().map(String::from))
+                                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+                                .map_or(false, |ts| {
+                                    let ts_utc = ts.with_timezone(&chrono::Utc);
+                                    ts_utc >= start_time && ts_utc <= end_time
+                                })
+                        })
+                    })
+                    .count() as f64;
+
+                let rpm = count / 5.0;
+                if rpm > 0.0 { rpm } else { 1.0 }
             }
+            Err(_) => 10.0,
         }
     }
 
@@ -557,38 +594,68 @@ impl AdminService {
     pub async fn run_garbage_collection(&self) -> Result<MaintenanceResult, AdminError> {
         let start_time = std::time::Instant::now();
 
+        let mut success = true;
+        let mut details = HashMap::new();
+
         // Clean expired sessions
-        let expired_sessions = self
-            .auth
-            .cleanup_expired_sessions()
-            .await
-            .map_err(AdminError::Auth)?;
+        match self.auth.cleanup_expired_sessions().await {
+            Ok(expired_sessions) => {
+                details.insert(
+                    "expired_sessions".to_string(),
+                    serde_json::Value::Number(expired_sessions.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup expired sessions: {}", e);
+                success = false;
+                details.insert(
+                    "expired_sessions_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         // Clean expired secrets (this would need to be implemented in storage)
-        let expired_secrets = self.cleanup_expired_secrets().await?;
+        match self.cleanup_expired_secrets().await {
+            Ok(expired_secrets) => {
+                details.insert(
+                    "expired_secrets".to_string(),
+                    serde_json::Value::Number(expired_secrets.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup expired secrets: {}", e);
+                success = false;
+                details.insert(
+                    "expired_secrets_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         // Compact storage if supported
-        let storage_cleaned = self.storage_cleanup().await?;
+        match self.storage_cleanup().await {
+            Ok(storage_cleaned) => {
+                details.insert(
+                    "storage_cleaned_bytes".to_string(),
+                    serde_json::Value::Number(storage_cleaned.into()),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to cleanup storage: {}", e);
+                success = false;
+                details.insert(
+                    "storage_cleanup_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         let duration = start_time.elapsed();
 
-        let mut details = HashMap::new();
-        details.insert(
-            "expired_sessions".to_string(),
-            serde_json::Value::Number(expired_sessions.into()),
-        );
-        details.insert(
-            "expired_secrets".to_string(),
-            serde_json::Value::Number(expired_secrets.into()),
-        );
-        details.insert(
-            "storage_cleaned_bytes".to_string(),
-            serde_json::Value::Number(storage_cleaned.into()),
-        );
-
         Ok(MaintenanceResult {
             operation: "garbage_collection".to_string(),
-            success: true,
+            success,
             duration_ms: duration.as_millis() as u64,
             details,
         })
@@ -670,6 +737,32 @@ impl AdminService {
         })
     }
 
+    /// Vacuum the database storage backend
+    pub async fn vacuum_database(&self) -> Result<MaintenanceResult, AdminError> {
+        let start_time = std::time::Instant::now();
+
+        let result = self.storage.vacuum().await;
+        let success = result.is_ok();
+
+        let duration = start_time.elapsed();
+
+        let mut details = HashMap::new();
+        if let Err(ref e) = result {
+            tracing::warn!("Vacuum operation failed: {}", e);
+            details.insert(
+                "error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
+        }
+
+        Ok(MaintenanceResult {
+            operation: "vacuum_database".to_string(),
+            success,
+            duration_ms: duration.as_millis() as u64,
+            details,
+        })
+    }
+
     /// Get audit logs with filtering
     pub async fn get_audit_logs(
         &self,
@@ -679,116 +772,44 @@ impl AdminService {
         action: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, AdminError> {
-        // Optimize query by using a more specific prefix if time range allows
-        use chrono::Datelike;
-        let prefix = if let (Some(start), Some(end)) = (start_time, end_time) {
-            if start.year() == end.year() {
-                if start.month() == end.month() {
-                    if start.day() == end.day() {
-                        // Same day: sys/audit/YYYY/MM/DD/
-                        format!(
-                            "sys/audit/{}/{:02}/{:02}/",
-                            start.year(),
-                            start.month(),
-                            start.day()
-                        )
-                    } else {
-                        // Same month: sys/audit/YYYY/MM/
-                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
-                    }
-                } else {
-                    // Same year: sys/audit/YYYY/
-                    format!("sys/audit/{}/", start.year())
-                }
-            } else {
-                // Different years: fallback to root
-                "sys/audit/".to_string()
-            }
-        } else {
-            // No range specified
-            "sys/audit/".to_string()
-        };
-
-        // Do not pass limit to storage because we filter in memory after fetching.
-        // Storage limit would truncate results before filtering, leading to incomplete results.
-        let query_params = secreton_storage::QueryParams {
-            path_prefix: Some(prefix),
-            limit: None,
-            offset: Some(0),
+        let filters = crate::services::audit::AuditFilters {
+            user: user_id.map(|s| s.to_string()),
+            action: action.map(|s| s.to_string()),
+            start_date: start_time,
+            end_date: end_time,
             ..Default::default()
         };
 
-        let entries: Vec<_> = self
-            .storage
-            .list(&query_params)
+        let entries = self
+            .audit
+            .get_entries(filters)
             .await
-            .map_err(AdminError::Storage)?
-            .into_iter()
-            .collect();
+            .map_err(|e| AdminError::Internal(e.into()))?;
 
-        let mut audit_logs: Vec<AuditLogEntry> = entries
+        let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
-            .filter_map(|entry| {
-                entry.metadata.get("log_data").and_then(|data| {
-                    // First deserialize to AuditEvent to match stored format
-                    if let Ok(event) =
-                        serde_json::from_str::<secreton_security::policies::audit::AuditEvent>(data)
-                    {
-                        // Map AuditEvent to AuditLogEntry
-                        Some(AuditLogEntry {
-                            id: event.id,
-                            timestamp: event.timestamp,
-                            user_id: event.user,
-                            action: event.operation,
-                            resource: event.resource,
-                            resource_id: None, // Not directly available in AuditEvent
-                            ip_address: event.client_ip.unwrap_or_default(),
-                            user_agent: String::new(), // Not available in AuditEvent
-                            success: match event.status {
-                                secreton_security::policies::audit::AuditStatus::Success => true,
-                                _ => false,
-                            },
-                            details: Some(serde_json::Value::Object(
-                                event
-                                    .metadata
-                                    .into_iter()
-                                    .map(|(k, v)| (k, serde_json::Value::String(v)))
-                                    .collect(),
-                            )),
-                        })
-                    } else {
-                        // Fallback: try direct deserialization if format changes or legacy data
-                        serde_json::from_str(data).ok()
-                    }
-                })
+            .map(|rich| {
+                let e = rich.entry;
+                AuditLogEntry {
+                    id: e.id.to_string(),
+                    timestamp: e.timestamp,
+                    user_id: rich.original_user,
+                    action: e.action,
+                    resource: e.resource_type,
+                    resource_id: e.resource_id,
+                    ip_address: e.ip_address.unwrap_or_default(),
+                    user_agent: e.user_agent.unwrap_or_default(),
+                    success: e.success,
+                    details: Some(serde_json::to_value(e.details).unwrap_or_default()),
+                }
             })
             .collect();
 
-        // Apply filters
-        if let Some(start) = start_time {
-            audit_logs.retain(|log| log.timestamp >= start);
-        }
-        if let Some(end) = end_time {
-            audit_logs.retain(|log| log.timestamp <= end);
-        }
-        if let Some(user) = user_id {
-            audit_logs.retain(|log| log.user_id == user);
-        }
-        if let Some(act) = action {
-            audit_logs.retain(|log| log.action == act);
-        }
-
-        // Sort by timestamp descending
-        audit_logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-        // Apply limit after filtering and sorting
         if let Some(l) = limit {
-            if audit_logs.len() > l as usize {
-                audit_logs.truncate(l as usize);
-            }
+            logs.truncate(l as usize);
         }
 
-        Ok(audit_logs)
+        Ok(logs)
     }
 
     /// Export audit logs in specified format
@@ -808,33 +829,40 @@ impl AdminService {
                 .map_err(|e| AdminError::Internal(e.into())),
             "csv" => {
                 let mut csv_content = String::from(
-                    "timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n",
+                    "timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n",
                 );
                 for log in audit_logs {
                     csv_content.push_str(&format!(
                         "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
-                        log.timestamp,
-                        log.user_id,
-                        log.action,
-                        log.resource,
-                        log.resource_id.unwrap_or_default(),
-                        log.ip_address,
-                        log.user_agent,
+                        log.timestamp.to_string().replace('"', "\"\""),
+                        log.user_id.replace('"', "\"\""),
+                        log.action.replace('"', "\"\""),
+                        log.resource.replace('"', "\"\""),
+                        log.resource_id.unwrap_or_default().replace('"', "\"\""),
+                        log.ip_address.replace('"', "\"\""),
+                        log.user_agent.replace('"', "\"\""),
                         log.success
                     ));
                 }
                 Ok(csv_content)
             }
             "xml" => {
+                fn escape_xml(s: &str) -> String {
+                    s.replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                        .replace('"', "&quot;")
+                        .replace('\'', "&apos;")
+                }
                 let mut xml_content =
                     String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
                 for log in audit_logs {
                     xml_content.push_str(&format!(
-                        "  <entry>\n    <timestamp>{}</timestamp>\n    <user_id>{}</user_id>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
-                        log.timestamp,
-                        log.user_id,
-                        log.action,
-                        log.resource,
+                        "  <entry>\n    <timestamp>{}</timestamp>\n    <user>{}</user>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
+                        escape_xml(&log.timestamp.to_string()),
+                        escape_xml(&log.user_id),
+                        escape_xml(&log.action),
+                        escape_xml(&log.resource),
                         log.success
                     ));
                 }
@@ -2517,46 +2545,68 @@ impl AdminService {
 
     /// Perform database compaction
     async fn perform_database_compaction(&self) -> Result<CompactionResult, AdminError> {
-        // Get stats before compaction
-        let stats_before = self
-            .storage
-            .get_stats()
-            .await
-            .map_err(AdminError::Storage)?;
-
-        // Perform compaction based on storage backend type
-        // For now, this is a placeholder - real implementation would depend on backend
-        let compaction_successful = true;
-
-        // Get stats after compaction (simulated)
-        let stats_after = self
-            .storage
-            .get_stats()
-            .await
-            .map_err(AdminError::Storage)?;
-
         let mut details = HashMap::new();
-        details.insert(
-            "original_size_bytes".to_string(),
-            serde_json::Value::Number(stats_before.total_size_bytes.into()),
-        );
-        details.insert(
-            "compacted_size_bytes".to_string(),
-            serde_json::Value::Number(stats_after.total_size_bytes.into()),
-        );
-        details.insert(
-            "space_saved_bytes".to_string(),
-            serde_json::Value::Number(
-                (stats_before
-                    .total_size_bytes
-                    .saturating_sub(stats_after.total_size_bytes))
-                .into(),
-            ),
-        );
-        details.insert(
-            "entries_processed".to_string(),
-            serde_json::Value::Number(stats_before.total_entries.into()),
-        );
+        let mut compaction_successful = true;
+
+        // Get stats before compaction
+        let stats_before = match self.storage.get_stats().await {
+            Ok(stats) => Some(stats),
+            Err(e) => {
+                tracing::warn!("Failed to get stats before compaction: {}", e);
+                details.insert(
+                    "stats_before_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+                None
+            }
+        };
+
+        // Perform compaction using the storage backend trait method.
+        // Vacuum is handled separately by the dedicated vacuum_database endpoint.
+        if let Err(e) = self.storage.compact().await {
+            tracing::warn!("Storage compact failed: {}", e);
+            compaction_successful = false;
+            details.insert(
+                "error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
+        }
+
+        // Get stats after compaction
+        match self.storage.get_stats().await {
+            Ok(stats_after) => {
+                if let Some(ref stats_before) = stats_before {
+                    details.insert(
+                        "original_size_bytes".to_string(),
+                        serde_json::Value::Number(stats_before.total_size_bytes.into()),
+                    );
+                    details.insert(
+                        "compacted_size_bytes".to_string(),
+                        serde_json::Value::Number(stats_after.total_size_bytes.into()),
+                    );
+                    details.insert(
+                        "space_saved_bytes".to_string(),
+                        serde_json::Value::Number(
+                            (stats_before
+                                .total_size_bytes
+                                .saturating_sub(stats_after.total_size_bytes))
+                            .into(),
+                        ),
+                    );
+                    details.insert(
+                        "entries_processed".to_string(),
+                        serde_json::Value::Number(stats_before.total_entries.into()),
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get stats after compaction: {}", e);
+                details.insert(
+                    "stats_after_error".to_string(),
+                    serde_json::Value::String(e.to_string()),
+                );
+            }
+        }
 
         Ok(CompactionResult {
             success: compaction_successful,
@@ -2634,8 +2684,13 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
 
-        let admin_service = AdminService::new(storage, auth, performance).await;
+        let admin_service = AdminService::new(storage, auth, performance, audit).await;
         assert!(admin_service.is_ok());
     }
 
@@ -2657,7 +2712,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance).await.unwrap();
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
 
         let stats = service
             .get_system_stats()
@@ -2711,7 +2771,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance)
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit)
             .await
             .unwrap()
             .with_crypto(crypto);
@@ -2739,7 +2804,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage, auth, performance).await.unwrap();
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");
@@ -2793,7 +2863,12 @@ mod tests {
                 .unwrap(),
         );
         let performance = Arc::new(SecretPerformanceOptimizer::default());
-        let service = AdminService::new(storage.clone(), auth, performance)
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 90, 1000, false)
+                .await
+                .unwrap(),
+        );
+        let service = AdminService::new(storage.clone(), auth, performance, audit)
             .await
             .unwrap();
 

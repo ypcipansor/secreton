@@ -331,6 +331,16 @@ pub trait StorageBackend: Send + Sync {
     /// Run migrations
     async fn migrate(&self) -> StorageResult<()>;
 
+    /// Compact the storage backend to reclaim space
+    async fn compact(&self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    /// Perform a vacuum/cleanup operation on the database
+    async fn vacuum(&self) -> StorageResult<()> {
+        Ok(())
+    }
+
     /// Delete expired entries
     async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
         let params = QueryParams {
@@ -628,6 +638,14 @@ impl StorageBackend for MockStorageBackend {
 
     async fn migrate(&self) -> StorageResult<()> {
         // Mock migration - nothing to do
+        Ok(())
+    }
+
+    async fn compact(&self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    async fn vacuum(&self) -> StorageResult<()> {
         Ok(())
     }
 

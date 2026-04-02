@@ -869,14 +869,20 @@ pub async fn run_garbage_collection(
     let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
-        "message": "Garbage collection completed",
+        "message": if result.success { "Garbage collection completed" } else { "Garbage collection failed" },
         "operation": result.operation,
         "success": result.success,
         "duration_ms": result.duration_ms,
         "details": result.details
     });
 
-    Ok(Json(ApiResponse::success(data)))
+    if result.success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            serde_json::to_string(&data).unwrap_or_else(|_| "Garbage collection failed".to_string()),
+        ))
+    }
 }
 
 pub async fn compact_database(
@@ -887,14 +893,20 @@ pub async fn compact_database(
     let result = state.admin.compact_database().await.map_err(map_admin_error)?;
 
     let data = serde_json::json!({
-        "message": "Database compaction completed",
+        "message": if result.success { "Database compaction completed" } else { "Database compaction failed" },
         "operation": result.operation,
         "success": result.success,
         "duration_ms": result.duration_ms,
         "details": result.details
     });
 
-    Ok(Json(ApiResponse::success(data)))
+    if result.success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            serde_json::to_string(&data).unwrap_or_else(|_| "Database compaction failed".to_string()),
+        ))
+    }
 }
 
 /// Component health check functions
@@ -1238,13 +1250,27 @@ pub async fn get_system_logs(
 }
 
 pub async fn vacuum_database(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    Ok(Json(ApiResponse::success(
-        serde_json::json!({"status": "vacuumed"}),
-    )))
+    let result = state.admin.vacuum_database().await.map_err(map_admin_error)?;
+
+    let data = serde_json::json!({
+        "message": if result.success { "Database vacuum completed" } else { "Database vacuum failed" },
+        "operation": result.operation,
+        "success": result.success,
+        "duration_ms": result.duration_ms,
+        "details": result.details
+    });
+
+    if result.success {
+        Ok(Json(ApiResponse::success(data)))
+    } else {
+        Err(crate::ApiError::Internal(
+            serde_json::to_string(&data).unwrap_or_else(|_| "Database vacuum failed".to_string()),
+        ))
+    }
 }
 
 pub async fn get_security_reports(

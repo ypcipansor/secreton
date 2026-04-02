@@ -21,7 +21,6 @@ use crate::services::audit::{AuditFilters, ExportFormat, SecurityEventType};
 use crate::services::secret;
 use crate::{ApiResponse, ApiResult};
 use secreton_crypto::EncryptedData;
-use secreton_storage::models::storage_models::AuditEntry;
 
 /// Create secret operation routes
 pub fn create_routes() -> Router<AppState> {
@@ -82,7 +81,7 @@ pub async fn get_audit_logs(
     State(state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Query(query): Query<AuditQuery>,
-) -> ApiResult<Json<ApiResponse<Vec<AuditEntry>>>> {
+) -> ApiResult<Json<ApiResponse<Vec<serde_json::Value>>>> {
     let filters = AuditFilters {
         user: query.user_id.clone(),
         action: query.action.clone(),
@@ -97,7 +96,41 @@ pub async fn get_audit_logs(
         .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(ApiResponse::success(entries)))
+    // Convert entries to clean JSON values with the original username.
+    let mut clean_entries: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|rich| {
+            let e = rich.entry;
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "timestamp": e.timestamp,
+                "user": rich.original_user,
+                "action": e.action,
+                "resource_type": e.resource_type,
+                "resource_id": e.resource_id,
+                "details": e.details,
+                "ip_address": e.ip_address,
+                "user_agent": e.user_agent,
+                "success": e.success,
+                "error_message": e.error_message,
+            })
+        })
+        .collect();
+
+    // Apply offset and limit
+    if let Some(offset) = query.offset {
+        let offset = offset as usize;
+        if offset < clean_entries.len() {
+            clean_entries = clean_entries.split_off(offset);
+        } else {
+            clean_entries.clear();
+        }
+    }
+    if let Some(limit) = query.limit {
+        clean_entries.truncate(limit as usize);
+    }
+
+    Ok(Json(ApiResponse::success(clean_entries)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,19 +153,20 @@ pub async fn export_audit_logs(
         end_date: None,
     };
 
-    let format = match query
+    let format_str = query
         .format
         .as_deref()
         .unwrap_or("JSON")
-        .to_ascii_uppercase()
-        .as_str()
-    {
+        .to_ascii_uppercase();
+    let format = match format_str.as_str() {
         "CSV" => ExportFormat::CSV,
-        "XML" => ExportFormat::XML,
-        "SIEM" => ExportFormat::SIEM,
-        "CEF" => ExportFormat::CEF,
-        "LEEF" => ExportFormat::LEEF,
-        _ => ExportFormat::JSON,
+        "JSON" => ExportFormat::JSON,
+        other => {
+            return Err(crate::ApiError::BadRequest(format!(
+                "Unsupported export format: {}. Supported formats: JSON, CSV",
+                other
+            )));
+        }
     };
 
     let bytes: Vec<u8> = state

@@ -4,11 +4,14 @@ use secreton_security::policies::audit::{
     AuditEvent, AuditEventType as CoreAuditEventType, AuditService, AuditStatus,
 };
 use secreton_storage::StorageBackend;
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Audit logger service adapter
 pub struct AuditLogger {
     service: Arc<AuditService>,
+    storage: Arc<dyn StorageBackend + Send + Sync>,
     enabled: bool,
 }
 
@@ -21,10 +24,14 @@ impl AuditLogger {
     ) -> Result<Self> {
         let service = Arc::new(AuditService::new(max_batch_size));
         if enabled {
-            let device = StorageAuditDevice::new(storage, retention_days);
+            let device = StorageAuditDevice::new(storage.clone(), retention_days);
             service.add_device(Box::new(device)).await;
         }
-        Ok(Self { service, enabled })
+        Ok(Self {
+            service,
+            storage,
+            enabled,
+        })
     }
 
     pub async fn flush(&self) -> Result<()> {
@@ -475,11 +482,21 @@ pub enum SecurityEventType {
 #[derive(Debug, Clone)]
 pub enum ExportFormat {
     CSV,
-    XML,
     JSON,
-    CEF,
-    LEEF,
-    SIEM,
+}
+
+/// Wrapper that pairs an `AuditEntry` with the original username string.
+///
+/// `AuditEntry.user_id` is a `Uuid`, but the source `AuditEvent.user` is a
+/// free-form string (e.g. `"admin"`) that almost never parses as a valid UUID.
+/// This struct carries the original value so callers don't have to rely on a
+/// convention key stashed inside `details`.
+#[derive(Debug, Clone)]
+pub struct RichAuditEntry {
+    /// The original username from the audit event.
+    pub original_user: String,
+    /// The underlying storage-level audit entry.
+    pub entry: secreton_storage::models::storage_models::AuditEntry,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -513,19 +530,158 @@ impl AuditLogger {
     /// Get audit entries based on filters
     pub async fn get_entries(
         &self,
-        _filters: AuditFilters,
-    ) -> Result<Vec<secreton_storage::models::storage_models::AuditEntry>> {
-        // Placeholder
-        Ok(vec![])
+        filters: AuditFilters,
+    ) -> Result<Vec<RichAuditEntry>> {
+        // Optimize query by using a more specific prefix if time range allows
+        use chrono::Datelike;
+        let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
+            if start.year() == end.year() {
+                if start.month() == end.month() {
+                    if start.day() == end.day() {
+                        format!(
+                            "sys/audit/{}/{:02}/{:02}/",
+                            start.year(),
+                            start.month(),
+                            start.day()
+                        )
+                    } else {
+                        format!("sys/audit/{}/{:02}/", start.year(), start.month())
+                    }
+                } else {
+                    format!("sys/audit/{}/", start.year())
+                }
+            } else {
+                "sys/audit/".to_string()
+            }
+        } else {
+            "sys/audit/".to_string()
+        };
+
+        let query_params = secreton_storage::QueryParams {
+            path_prefix: Some(prefix),
+            limit: None,
+            ..Default::default()
+        };
+
+        // Flush buffered events to storage before querying so recent entries are visible.
+        // Only flush when auditing is enabled — when disabled, no devices are registered
+        // so there is nothing to flush, but we still want to query historical data.
+        if self.enabled {
+            if let Err(e) = self.service.flush().await {
+                tracing::warn!("Audit flush failed before query, recent events may be missing: {}", e);
+            }
+        }
+
+        let entries = self.storage.list(&query_params).await?;
+        let mut results = Vec::new();
+
+        for entry in entries {
+            if let Some(log_data) = entry.metadata.get("log_data") {
+                if let Ok(event) = serde_json::from_str::<AuditEvent>(log_data) {
+                    // Apply filters
+                    if let Some(user) = &filters.user {
+                        if &event.user != user { continue; }
+                    }
+                    if let Some(action) = &filters.action {
+                        if &event.operation != action { continue; }
+                    }
+                    if let Some(path) = &filters.path {
+                        if &event.resource != path { continue; }
+                    }
+                    if let Some(start) = filters.start_date {
+                        if event.timestamp < start { continue; }
+                    }
+                    if let Some(end) = filters.end_date {
+                        if event.timestamp > end { continue; }
+                    }
+
+                    let id = Uuid::parse_str(&event.id).unwrap_or_default();
+                    let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
+                    let original_user = event.user.clone();
+                    let timestamp = event.timestamp;
+                    let action = event.operation.clone();
+                    let resource_type = event.resource.clone();
+                    let ip_address = event.client_ip.clone();
+                    let success = matches!(event.status, AuditStatus::Success);
+                    let details: HashMap<String, serde_json::Value> = event.metadata
+                        .into_iter()
+                        .map(|(k, v)| (k, serde_json::Value::String(v)))
+                        .collect();
+                    results.push(RichAuditEntry {
+                        original_user,
+                        entry: secreton_storage::models::storage_models::AuditEntry {
+                            id,
+                            timestamp,
+                            user_id,
+                            action,
+                            resource_type,
+                            resource_id: None,
+                            details,
+                            ip_address,
+                            user_agent: None,
+                            success,
+                            error_message: None,
+                        },
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| b.entry.timestamp.cmp(&a.entry.timestamp));
+        Ok(results)
     }
 
     /// Export audit data
     pub async fn export_data(
         &self,
-        _format: ExportFormat,
-        _filters: AuditFilters,
+        format: ExportFormat,
+        filters: AuditFilters,
     ) -> Result<Vec<u8>> {
-        // Placeholder
-        Ok(vec![])
+        let entries = self.get_entries(filters).await?;
+
+        match format {
+            ExportFormat::JSON => {
+                // Build export-friendly structs with the real username
+                let export_entries: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|rich| {
+                        let e = &rich.entry;
+                        serde_json::json!({
+                            "id": e.id.to_string(),
+                            "timestamp": e.timestamp,
+                            "user": rich.original_user,
+                            "action": e.action,
+                            "resource_type": e.resource_type,
+                            "resource_id": e.resource_id,
+                            "details": e.details,
+                            "ip_address": e.ip_address,
+                            "user_agent": e.user_agent,
+                            "success": e.success,
+                            "error_message": e.error_message,
+                        })
+                    })
+                    .collect();
+                let json = serde_json::to_vec_pretty(&export_entries)?;
+                Ok(json)
+            }
+            ExportFormat::CSV => {
+                let mut csv = String::from("timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n");
+                for rich in &entries {
+                    let e = &rich.entry;
+                    csv.push_str(&format!(
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                        e.timestamp.to_string().replace('"', "\"\""),
+                        rich.original_user.replace('"', "\"\""),
+                        e.action.replace('"', "\"\""),
+                        e.resource_type.replace('"', "\"\""),
+                        e.resource_id.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.ip_address.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.user_agent.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.success
+                    ));
+                }
+                Ok(csv.into_bytes())
+            }
+        }
     }
 }
