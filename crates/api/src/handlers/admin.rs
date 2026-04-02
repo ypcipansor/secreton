@@ -898,7 +898,7 @@ pub async fn compact_database(
         Ok(Json(ApiResponse::success(data)))
     } else {
         Err(crate::ApiError::Internal(
-            "Database compaction failed".to_string(),
+            serde_json::to_string(&data).unwrap_or_else(|_| "Database compaction failed".to_string()),
         ))
     }
 }
@@ -1262,7 +1262,7 @@ pub async fn vacuum_database(
         Ok(Json(ApiResponse::success(data)))
     } else {
         Err(crate::ApiError::Internal(
-            "Database vacuum failed".to_string(),
+            serde_json::to_string(&data).unwrap_or_else(|_| "Database vacuum failed".to_string()),
         ))
     }
 }
