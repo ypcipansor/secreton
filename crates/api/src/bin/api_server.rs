@@ -400,7 +400,29 @@ async fn main() -> anyhow::Result<()> {
         "performance".to_string(),
         performance.clone(),
     );
-    // container.register_service("identity".to_string(), identity.clone()); // Assuming identity not strictly needed by handlers yet, but good practice
+
+    // Register new engine services
+    let database_service = Arc::new(
+        secreton_api::services::database::DatabaseService::new(storage.clone(), crypto.clone()),
+    );
+    container.register_service::<Arc<secreton_api::services::database::DatabaseService>>(
+        "database".to_string(),
+        database_service.clone(),
+    );
+    container.register_service::<Arc<PkiPersistentService>>(
+        "pki".to_string(),
+        pki_service.clone(),
+    );
+    let totp_engine_service = Arc::new(
+        secreton_api::services::totp_engine::TotpEngineService::new(
+            storage.clone(),
+            crypto.clone(),
+        ),
+    );
+    container.register_service::<Arc<secreton_api::services::totp_engine::TotpEngineService>>(
+        "totp_engine".to_string(),
+        totp_engine_service.clone(),
+    );
 
     // Use default in-memory states for now, matching ApiState::new implementation
     let api_state = ApiState::new(

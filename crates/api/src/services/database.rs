@@ -153,12 +153,13 @@ impl DatabaseService {
         let mut creds: HashMap<String, Value> = engine.generate_credentials(role_name).await
             .map_err(|e| anyhow!("Engine failed: {}", e))?;
 
-        // Create lease
-        let lease_id = format!("db/{}/{}", role_name, uuid::Uuid::new_v4().simple());
+        // Create lease — use underscores instead of slashes so the ID is a single
+        // path segment and can be used directly in DELETE /leases/{id}.
+        let lease_id = format!("db_{}_{}", role_name, uuid::Uuid::new_v4().simple());
         creds.insert("lease_id".to_string(), Value::String(lease_id.clone()));
 
         // Store lease info
-        let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id.replace('/', "_"));
+        let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
         let lease_data = json!({
             "lease_id": lease_id,
             "role": role_name,
@@ -206,7 +207,7 @@ impl DatabaseService {
         self.ensure_initialized().await?;
         // In a real implementation, we would call the engine to drop the user
         // For now, we just delete the lease record
-        let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id.replace('/', "_"));
+        let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
         self.storage.delete_by_path(&lease_path).await?;
         Ok(())
     }
