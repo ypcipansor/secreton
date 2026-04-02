@@ -665,7 +665,7 @@ impl AuditLogger {
                 Ok(json)
             }
             ExportFormat::CSV => {
-                let mut csv = String::from("timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n");
+                let mut csv = String::from("timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n");
                 for rich in &entries {
                     let e = &rich.entry;
                     csv.push_str(&format!(

@@ -282,33 +282,67 @@ impl AdminService {
     }
 
     /// Get requests per minute (actual implementation based on audit logs)
+    ///
+    /// This method queries storage directly instead of going through
+    /// `get_audit_logs` → `AuditLogger::get_entries` to avoid triggering an
+    /// audit buffer flush on every call. Since `get_system_stats` may be
+    /// called frequently (e.g., from a monitoring dashboard), the flush +
+    /// full scan overhead would be excessive for a lightweight metric.
     async fn get_requests_per_minute(&self) -> f64 {
-        // Get audit logs from the last 5 minutes
+        use chrono::Datelike;
+
         let end_time = chrono::Utc::now();
         let start_time = end_time - chrono::Duration::minutes(5);
 
-        match self
-            .get_audit_logs(Some(start_time), Some(end_time), None, None, Some(10000))
-            .await
-        {
-            Ok(audit_logs) => {
-                let total_requests = audit_logs.len() as f64;
-                let minutes_elapsed = 5.0; // 5 minutes window
-
-                // Calculate requests per minute
-                let rpm = total_requests / minutes_elapsed;
-
-                // If no recent activity, fall back to a minimum rate
-                if rpm > 0.0 {
-                    rpm
+        // Build a date-based prefix to narrow the storage scan
+        let prefix = if start_time.year() == end_time.year() {
+            if start_time.month() == end_time.month() {
+                if start_time.day() == end_time.day() {
+                    format!(
+                        "sys/audit/{}/{:02}/{:02}/",
+                        start_time.year(),
+                        start_time.month(),
+                        start_time.day()
+                    )
                 } else {
-                    1.0 // Minimum rate to indicate system is active
+                    format!("sys/audit/{}/{:02}/", start_time.year(), start_time.month())
                 }
+            } else {
+                format!("sys/audit/{}/", start_time.year())
             }
-            Err(_) => {
-                // If we can't access audit logs, fall back to a reasonable default
-                10.0
+        } else {
+            "sys/audit/".to_string()
+        };
+
+        let query_params = secreton_storage::QueryParams {
+            path_prefix: Some(prefix),
+            limit: Some(10000),
+            ..Default::default()
+        };
+
+        match self.storage.list(&query_params).await {
+            Ok(entries) => {
+                // Count entries whose timestamp falls within the 5-minute window
+                let count = entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.metadata.get("log_data").map_or(false, |data| {
+                            serde_json::from_str::<serde_json::Value>(data)
+                                .ok()
+                                .and_then(|v| v.get("timestamp")?.as_str().map(String::from))
+                                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+                                .map_or(false, |ts| {
+                                    let ts_utc = ts.with_timezone(&chrono::Utc);
+                                    ts_utc >= start_time && ts_utc <= end_time
+                                })
+                        })
+                    })
+                    .count() as f64;
+
+                let rpm = count / 5.0;
+                if rpm > 0.0 { rpm } else { 1.0 }
             }
+            Err(_) => 10.0,
         }
     }
 
@@ -795,7 +829,7 @@ impl AdminService {
                 .map_err(|e| AdminError::Internal(e.into())),
             "csv" => {
                 let mut csv_content = String::from(
-                    "timestamp,user_id,action,resource,resource_id,ip_address,user_agent,success\n",
+                    "timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n",
                 );
                 for log in audit_logs {
                     csv_content.push_str(&format!(
@@ -824,7 +858,7 @@ impl AdminService {
                     String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<audit_logs>\n");
                 for log in audit_logs {
                     xml_content.push_str(&format!(
-                        "  <entry>\n    <timestamp>{}</timestamp>\n    <user_id>{}</user_id>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
+                        "  <entry>\n    <timestamp>{}</timestamp>\n    <user>{}</user>\n    <action>{}</action>\n    <resource>{}</resource>\n    <success>{}</success>\n  </entry>\n",
                         escape_xml(&log.timestamp.to_string()),
                         escape_xml(&log.user_id),
                         escape_xml(&log.action),
