@@ -51,17 +51,27 @@ async fn generate_root_ca(
         ));
     }
 
-    let response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
+    let mut response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+
+    // Do not return private key in API response for security
+    response.private_key = String::new();
 
     Ok(AxumJson(ApiResponse::success(response)))
 }
 
 async fn issue_certificate(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<CertificateRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<CertificateResponse>>> {
+    // Only admin/root users may issue certificates
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to issue certificates".to_string(),
+        ));
+    }
+
     let response = state.pki.issue_certificate(payload).await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
