@@ -145,7 +145,6 @@ impl TotpEngineService {
                 (MIN_SECRET_BYTES * 8 + 4) / 5,
             )));
         }
-        }
 
         // Validate issuer and account_name by constructing a trial TOTP
         // instance.  With the `otpauth` feature enabled, `totp-rs` rejects
