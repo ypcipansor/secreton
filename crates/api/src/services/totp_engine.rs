@@ -218,8 +218,8 @@ impl TotpEngineService {
             1,
             period,
             secret_bytes,
-            None,
-            "".to_string(),
+            metadata_val["issuer"].as_str().map(|s| s.to_string()),
+            metadata_val["account_name"].as_str().unwrap_or("secreton").to_string(),
         ).map_err(|e| TotpServiceError::Internal(format!("TOTP error: {}", e)))?;
 
         totp.generate_current()
