@@ -15,8 +15,22 @@ pub enum DatabaseType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseRole {
     pub sql: String,
+    /// Maximum allowed TTL in seconds.  Defaults to 86400 (24 h) when omitted
+    /// in JSON, preserving backward compatibility with older API clients that
+    /// used `Option<u64>`.
+    #[serde(default = "default_max_ttl")]
     pub max_ttl: u64,
+    /// Default lease TTL in seconds.  Defaults to 3600 (1 h) when omitted.
+    #[serde(default = "default_ttl")]
     pub default_ttl: u64,
+}
+
+fn default_max_ttl() -> u64 {
+    86400
+}
+
+fn default_ttl() -> u64 {
+    3600
 }
 
 /// Database secret engine configuration

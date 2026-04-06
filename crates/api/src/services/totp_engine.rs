@@ -9,6 +9,7 @@ use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBa
 use serde::{Deserialize, Serialize};
 use totp_rs::{Algorithm, TOTP};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 /// Categorised service error that handlers can map to the appropriate HTTP status.
 #[derive(Debug)]
@@ -115,11 +116,12 @@ impl TotpEngineService {
         // minimum of 16 bytes for SHA1, 32 for SHA256, and 64 for SHA512.
         // We default to SHA1, so enforce 16 bytes here.  Rejecting at creation
         // time avoids a confusing Internal error at code-generation time.
-        let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
+        let mut secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
             .ok_or_else(|| TotpServiceError::BadRequest("Invalid base32 secret".to_string()))?;
 
         const MIN_SECRET_BYTES: usize = 16; // SHA1 HMAC minimum (RFC 4226)
         if secret_bytes.len() < MIN_SECRET_BYTES {
+            secret_bytes.zeroize();
             return Err(TotpServiceError::BadRequest(format!(
                 "Secret too short: decoded to {} bytes, minimum is {} bytes. \
                  Provide a base32-encoded secret of at least {} characters.",
@@ -136,7 +138,7 @@ impl TotpEngineService {
         // this at creation time avoids persisting a key that will always
         // fail at code-generation time with a confusing 500 error.
         let effective_account = account_name.clone().unwrap_or_else(|| "secreton".to_string());
-        TOTP::new(
+        let trial_result = TOTP::new(
             Algorithm::SHA1,
             6,
             1,
@@ -144,8 +146,10 @@ impl TotpEngineService {
             secret_bytes,
             issuer.clone(),
             effective_account,
-        )
-        .map_err(|e| TotpServiceError::BadRequest(format!(
+        );
+        // TOTP::new consumes secret_bytes — on error the bytes are dropped
+        // inside the TOTP instance which we discard.
+        trial_result.map_err(|e| TotpServiceError::BadRequest(format!(
             "Invalid TOTP parameters (check issuer/account_name): {}", e
         )))?;
 
@@ -233,15 +237,21 @@ impl TotpEngineService {
         let digits = metadata_val["digits"].as_u64().unwrap_or(6) as usize;
         let period = metadata_val["period"].as_u64().unwrap_or(30);
 
-        let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
+        let mut secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
             .ok_or_else(|| TotpServiceError::Internal("Invalid stored secret".to_string()))?;
+
+        // TOTP::new takes ownership of secret_bytes (Vec<u8>), so we cannot
+        // zeroize after the call.  Clone into the constructor and zeroize the
+        // local copy immediately.
+        let totp_secret = secret_bytes.clone();
+        secret_bytes.zeroize();
 
         let totp = TOTP::new(
             algorithm,
             digits,
             1,
             period,
-            secret_bytes,
+            totp_secret,
             metadata_val["issuer"].as_str().map(|s| s.to_string()),
             metadata_val["account_name"].as_str().unwrap_or("secreton").to_string(),
         ).map_err(|e| TotpServiceError::Internal(format!("TOTP error: {}", e)))?;

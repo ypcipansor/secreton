@@ -13,6 +13,7 @@ use crate::handlers::AppState;
 use crate::services::pki::PkiServiceError;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_pki::{CertificateRequest, CertificateResponse};
+use zeroize::Zeroize;
 
 /// Map a [`PkiServiceError`] to the appropriate [`crate::ApiError`] variant
 /// so that the HTTP response carries the correct status code.
@@ -69,8 +70,10 @@ async fn generate_root_ca(
     let mut response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
         .map_err(map_pki_err)?;
 
-    // Do not return private key in API response for security
-    response.private_key = String::new();
+    // Do not return private key in API response for security.
+    // Zeroize the old value before replacing it so the CA key does not
+    // linger in freed memory.
+    response.private_key.zeroize();
 
     Ok(AxumJson(ApiResponse::success(response)))
 }
