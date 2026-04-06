@@ -161,10 +161,15 @@ impl DatabaseService {
         let mut loaded_roles: Vec<(String, DatabaseRole)> = Vec::new();
         for entry in entries {
             if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
-                if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                    if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
-                        loaded_roles.push((name.to_string(), role));
+                match self.crypto.decrypt(&entry.encrypted_data).await {
+                    Ok(decrypted) => {
+                        if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
+                            loaded_roles.push((name.to_string(), role));
+                        } else {
+                            warn!("Failed to deserialize role '{}' during set_config; it will be missing from the engine", name);
+                        }
                     }
+                    Err(e) => warn!("Failed to decrypt role '{}' during set_config: {}", name, e),
                 }
             }
         }
