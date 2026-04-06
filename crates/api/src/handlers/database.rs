@@ -14,6 +14,42 @@ use crate::services::database::DatabaseServiceError;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_database::{DatabaseConfig, DatabaseRole};
 
+/// Validate a system-generated lease ID.
+///
+/// Lease IDs are produced by [`DatabaseService::generate_credentials`] in the
+/// format `db_{role_name}_{uuid}`.  Because the role name can be up to 128
+/// characters (the `validate_name` limit) and the UUID suffix is 32 hex chars,
+/// the total can reach 164 characters — exceeding `validate_name`'s 128-char
+/// cap.  This dedicated validator uses the same character allowlist but raises
+/// the length ceiling so that every generated lease ID remains revocable.
+fn validate_lease_id(id: &str) -> Result<(), crate::ApiError> {
+    if id.is_empty() {
+        return Err(crate::ApiError::BadRequest(
+            "Lease ID must not be empty".to_string(),
+        ));
+    }
+    // 128 (max role name) + 3 ("db_") + 1 ("_") + 32 (UUID simple) = 164
+    if id.len() > 200 {
+        return Err(crate::ApiError::BadRequest(
+            "Lease ID must not exceed 200 characters".to_string(),
+        ));
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(crate::ApiError::BadRequest(
+            "Lease ID contains invalid characters".to_string(),
+        ));
+    }
+    if id.contains("..") {
+        return Err(crate::ApiError::BadRequest(
+            "Lease ID must not contain '..'".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Map a [`DatabaseServiceError`] to the appropriate [`crate::ApiError`] variant
 /// so that the HTTP response carries the correct status code.
 fn map_db_err(err: DatabaseServiceError) -> crate::ApiError {
@@ -146,7 +182,7 @@ async fn revoke_lease(
         ));
     }
 
-    validate_name(&id)?;
+    validate_lease_id(&id)?;
 
     state.database.revoke_lease(&id).await
         .map_err(map_db_err)?;
