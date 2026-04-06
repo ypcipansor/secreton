@@ -134,15 +134,17 @@ impl TotpEngineService {
 
         const MIN_SECRET_BYTES: usize = 16; // SHA1 HMAC minimum (RFC 4226)
         if secret_bytes.len() < MIN_SECRET_BYTES {
+            let actual_len = secret_bytes.len();
             secret_bytes.zeroize();
             return Err(TotpServiceError::BadRequest(format!(
                 "Secret too short: decoded to {} bytes, minimum is {} bytes. \
                  Provide a base32-encoded secret of at least {} characters.",
-                secret_bytes.len(),
+                actual_len,
                 MIN_SECRET_BYTES,
                 // ceil(16 * 8 / 5) = 26 base32 characters (no padding)
                 (MIN_SECRET_BYTES * 8 + 4) / 5,
             )));
+        }
         }
 
         // Validate issuer and account_name by constructing a trial TOTP
