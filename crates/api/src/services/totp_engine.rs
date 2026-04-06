@@ -137,18 +137,23 @@ impl TotpEngineService {
         // empty account names and names/issuers containing ':'.  Catching
         // this at creation time avoids persisting a key that will always
         // fail at code-generation time with a confusing 500 error.
+        //
+        // TOTP::new takes ownership of the Vec<u8>, so we clone the bytes
+        // into the constructor and zeroize the local copy immediately —
+        // same pattern used by generate_code.
         let effective_account = account_name.clone().unwrap_or_else(|| "secreton".to_string());
+        let trial_secret = secret_bytes.clone();
+        secret_bytes.zeroize();
         let trial_result = TOTP::new(
             Algorithm::SHA1,
             6,
             1,
             30,
-            secret_bytes,
+            trial_secret,
             issuer.clone(),
             effective_account,
         );
-        // TOTP::new consumes secret_bytes — on error the bytes are dropped
-        // inside the TOTP instance which we discard.
+        // On error the bytes owned by the TOTP instance are dropped.
         trial_result.map_err(|e| TotpServiceError::BadRequest(format!(
             "Invalid TOTP parameters (check issuer/account_name): {}", e
         )))?;
