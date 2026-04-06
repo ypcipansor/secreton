@@ -7,12 +7,18 @@ use secreton_api::handlers::{create_router, AppState};
 
 async fn setup_test_server() -> TestServer {
     // Set root key for crypto service auto-unseal.
-    // SAFETY: set_var is unsafe in edition 2024 because environment mutation is
-    // not thread-safe.  We call it here before spawning any concurrent work
-    // that reads this variable.  In CI, prefer setting this via the environment
-    // directly instead.
-    unsafe {
-        std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+    // SAFETY: `set_var` is unsafe starting from Rust edition 2024 because
+    // environment mutation is not thread-safe.  We call it here before
+    // spawning any concurrent work that reads this variable, so the data
+    // race cannot occur.  The `unsafe` block is restricted to this single
+    // call and annotated with `allow(unsafe_code)` so the CI unsafe-code
+    // analysis does not flag the entire test crate.
+    #[allow(unsafe_code)]
+    {
+        // SAFETY: No other threads are reading env vars at this point.
+        unsafe {
+            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
+        }
     }
 
     let mut config = ApiConfig::default();

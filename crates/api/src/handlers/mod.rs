@@ -38,20 +38,36 @@ use secreton_storage::StorageBackend;
 
 /// Validate that a user-supplied name is safe for use in storage paths.
 ///
-/// Rejects empty names, names containing path-traversal characters (`/`, `\`,
-/// `..`), and names with control characters.
+/// Only allows alphanumeric characters, hyphens, underscores, and dots (but
+/// not leading dots or the sequence `..`).  This strict allowlist prevents
+/// path-traversal attacks, storage key collisions, and encoding issues with
+/// special characters like `%`, spaces, or unicode.
 pub fn validate_name(name: &str) -> Result<(), ApiError> {
     if name.is_empty() {
         return Err(ApiError::BadRequest("Name must not be empty".to_string()));
     }
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
+    if name.len() > 128 {
         return Err(ApiError::BadRequest(
-            "Name must not contain '/', '\\', or '..'".to_string(),
+            "Name must not exceed 128 characters".to_string(),
         ));
     }
-    if name.chars().any(|c| c.is_control()) {
+    if name.starts_with('.') || name.starts_with('-') {
         return Err(ApiError::BadRequest(
-            "Name must not contain control characters".to_string(),
+            "Name must not start with '.' or '-'".to_string(),
+        ));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(ApiError::BadRequest(
+            "Name must contain only ASCII alphanumeric characters, hyphens, underscores, or dots"
+                .to_string(),
+        ));
+    }
+    if name.contains("..") {
+        return Err(ApiError::BadRequest(
+            "Name must not contain '..'".to_string(),
         ));
     }
     Ok(())

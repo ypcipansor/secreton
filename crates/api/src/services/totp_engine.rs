@@ -64,21 +64,27 @@ impl TotpEngineService {
     ///
     /// Defence-in-depth: user IDs are expected to be UUIDs (hex + hyphens),
     /// but if a non-UUID auth backend is ever integrated, a malicious user_id
-    /// containing `../` could escape the TOTP namespace.
+    /// containing `../` could escape the TOTP namespace.  We use a strict
+    /// allowlist (ASCII alphanumeric + hyphen + underscore) consistent with
+    /// the handler-level `validate_name`.
     fn validate_user_id(user_id: &str) -> std::result::Result<(), TotpServiceError> {
         if user_id.is_empty() {
             return Err(TotpServiceError::BadRequest(
                 "User ID must not be empty".to_string(),
             ));
         }
-        if user_id.contains('/') || user_id.contains('\\') || user_id.contains("..") {
+        if user_id.len() > 128 {
             return Err(TotpServiceError::BadRequest(
-                "User ID must not contain '/', '\\', or '..'".to_string(),
+                "User ID must not exceed 128 characters".to_string(),
             ));
         }
-        if user_id.chars().any(|c| c.is_control()) {
+        if !user_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(TotpServiceError::BadRequest(
-                "User ID must not contain control characters".to_string(),
+                "User ID must contain only ASCII alphanumeric characters, hyphens, or underscores"
+                    .to_string(),
             ));
         }
         Ok(())

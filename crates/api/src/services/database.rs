@@ -127,6 +127,31 @@ impl DatabaseService {
         self.ensure_initialized().await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
+        // Validate the connection URL early so the admin gets immediate feedback
+        // instead of a deferred error at credential-generation time.
+        if config.connection_url.is_empty() {
+            return Err(DatabaseServiceError::BadRequest(
+                "connection_url must not be empty".to_string(),
+            ));
+        }
+        let known_prefixes = [
+            "postgresql://",
+            "postgres://",
+            "mysql://",
+            "mongodb://",
+            "redis://",
+        ];
+        if !known_prefixes
+            .iter()
+            .any(|p| config.connection_url.starts_with(p))
+        {
+            return Err(DatabaseServiceError::BadRequest(format!(
+                "Unsupported database type in connection_url. \
+                 Must start with one of: {}",
+                known_prefixes.join(", "),
+            )));
+        }
+
         // Acquire the write lock FIRST, then persist config and load roles from
         // storage while holding it.  This prevents a concurrent `add_role` from
         // persisting a role and adding it to the old engine between the storage

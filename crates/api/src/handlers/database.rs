@@ -95,9 +95,18 @@ async fn add_role(
 
 async fn generate_credentials(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(role): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    // Credential generation creates real users on the target database.
+    // Restrict to admin/root users until policy-based authorization is
+    // implemented.
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to generate database credentials".to_string(),
+        ));
+    }
+
     validate_name(&role)?;
 
     let creds = state.database.generate_credentials(&role).await
