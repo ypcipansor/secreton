@@ -105,9 +105,25 @@ impl TotpEngineService {
         let owner_id = Uuid::parse_str(user_id)
             .unwrap_or_else(|_| Uuid::new_v5(&Uuid::NAMESPACE_OID, user_id.as_bytes()));
 
-        // Validate secret by attempting to decode it
-        let _ = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
+        // Validate secret by attempting to decode it and checking the minimum
+        // length required by the TOTP algorithm.  `totp-rs` v5.6.0 enforces a
+        // minimum of 16 bytes for SHA1, 32 for SHA256, and 64 for SHA512.
+        // We default to SHA1, so enforce 16 bytes here.  Rejecting at creation
+        // time avoids a confusing Internal error at code-generation time.
+        let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
             .ok_or_else(|| TotpServiceError::BadRequest("Invalid base32 secret".to_string()))?;
+
+        const MIN_SECRET_BYTES: usize = 16; // SHA1 HMAC minimum (RFC 4226)
+        if secret_bytes.len() < MIN_SECRET_BYTES {
+            return Err(TotpServiceError::BadRequest(format!(
+                "Secret too short: decoded to {} bytes, minimum is {} bytes. \
+                 Provide a base32-encoded secret of at least {} characters.",
+                secret_bytes.len(),
+                MIN_SECRET_BYTES,
+                // ceil(16 * 8 / 5) = 26 base32 characters (no padding)
+                (MIN_SECRET_BYTES * 8 + 4) / 5,
+            )));
+        }
 
         let metadata = TotpKeyMetadata {
             name: name.to_string(),
