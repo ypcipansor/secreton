@@ -43,7 +43,13 @@ pub struct DatabaseConfig {
     pub max_open_connections: Option<u32>,
     pub max_idle_connections: Option<u32>,
     pub connection_timeout: Option<u64>,
+    #[serde(default = "default_verify_connection")]
     pub verify_connection: bool,
+}
+
+fn default_verify_connection() -> bool {
+    true
+}
 }
 
 impl Default for DatabaseConfig {
