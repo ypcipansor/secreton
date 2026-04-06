@@ -51,7 +51,7 @@ async fn set_config(
     }
 
     state.database.set_config(payload).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "Database configuration updated"
@@ -63,7 +63,7 @@ async fn list_roles(
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     let roles = state.database.list_roles().await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "roles": roles
@@ -86,7 +86,7 @@ async fn add_role(
     validate_name(&name)?;
 
     state.database.add_role(&name, payload).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": format!("Role {} created/updated", name)
@@ -110,10 +110,17 @@ async fn generate_credentials(
 
 async fn list_leases(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<Value>>>> {
+    // Only admin/root users may list leases (they contain database usernames)
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to list leases".to_string(),
+        ));
+    }
+
     let leases = state.database.list_leases().await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(leases)))
 }

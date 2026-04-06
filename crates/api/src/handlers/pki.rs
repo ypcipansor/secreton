@@ -46,7 +46,7 @@ async fn get_ca_pem(
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<String>>> {
     let pem = state.pki.get_ca_pem().await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_pki_err)?;
 
     match pem {
         Some(p) => Ok(AxumJson(ApiResponse::success(p))),

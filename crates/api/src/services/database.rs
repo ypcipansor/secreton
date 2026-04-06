@@ -123,8 +123,9 @@ impl DatabaseService {
         Ok(())
     }
 
-    pub async fn set_config(&self, config: DatabaseConfig) -> Result<()> {
-        self.ensure_initialized().await?;
+    pub async fn set_config(&self, config: DatabaseConfig) -> std::result::Result<(), DatabaseServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Acquire the write lock FIRST, then persist config and load roles from
         // storage while holding it.  This prevents a concurrent `add_role` from
@@ -136,8 +137,10 @@ impl DatabaseService {
         let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
 
         // Persist config to storage while holding the lock
-        let data = serde_json::to_vec(&config)?;
-        let encrypted = self.crypto.encrypt_data(&data).await?;
+        let data = serde_json::to_vec(&config)
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let encrypted = self.crypto.encrypt_data(&data).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let entry = SecretEntry::new(
             DB_CONFIG_PATH.to_string(),
             encrypted,
@@ -145,14 +148,16 @@ impl DatabaseService {
             SecurityLevel::TopSecret,
             uuid::Uuid::nil(),
         );
-        self.storage.store(&entry).await?;
+        self.storage.store(&entry).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Load roles from storage while still holding the lock
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
             ..Default::default()
         };
-        let entries = self.storage.list(&query).await?;
+        let entries = self.storage.list(&query).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let mut loaded_roles: Vec<(String, DatabaseRole)> = Vec::new();
         for entry in entries {
             if let Some(name) = entry.path.strip_prefix(DB_ROLE_PREFIX) {
@@ -176,8 +181,9 @@ impl DatabaseService {
         Ok(())
     }
 
-    pub async fn add_role(&self, name: &str, role: DatabaseRole) -> Result<()> {
-        self.ensure_initialized().await?;
+    pub async fn add_role(&self, name: &str, role: DatabaseRole) -> std::result::Result<(), DatabaseServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Acquire the write lock FIRST (same strategy as set_config) to
         // prevent concurrent add_role calls from creating a divergence
@@ -186,8 +192,10 @@ impl DatabaseService {
 
         // Persist
         let path = format!("{}{}", DB_ROLE_PREFIX, name);
-        let data = serde_json::to_vec(&role)?;
-        let encrypted = self.crypto.encrypt_data(&data).await?;
+        let data = serde_json::to_vec(&role)
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let encrypted = self.crypto.encrypt_data(&data).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let entry = SecretEntry::new(
             path,
             encrypted,
@@ -195,7 +203,8 @@ impl DatabaseService {
             SecurityLevel::Secret,
             uuid::Uuid::nil(),
         );
-        self.storage.store(&entry).await?;
+        self.storage.store(&entry).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Update engine
         engine.add_role(name.to_string(), role);
@@ -203,8 +212,9 @@ impl DatabaseService {
         Ok(())
     }
 
-    pub async fn list_roles(&self) -> Result<Vec<String>> {
-        self.ensure_initialized().await?;
+    pub async fn list_roles(&self) -> std::result::Result<Vec<String>, DatabaseServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let engine: tokio::sync::RwLockReadGuard<'_, DatabaseEngine> = self.engine.read().await;
         Ok(engine.list_roles())
     }
@@ -302,13 +312,15 @@ impl DatabaseService {
         Ok(creds)
     }
 
-    pub async fn list_leases(&self) -> Result<Vec<Value>> {
-        self.ensure_initialized().await?;
+    pub async fn list_leases(&self) -> std::result::Result<Vec<Value>, DatabaseServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_LEASE_PREFIX.to_string()),
             ..Default::default()
         };
-        let entries = self.storage.list(&query).await?;
+        let entries = self.storage.list(&query).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let mut leases = Vec::new();
         for entry in entries {
             match self.crypto.decrypt(&entry.encrypted_data).await {

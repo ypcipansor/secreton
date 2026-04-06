@@ -43,7 +43,7 @@ async fn list_keys(
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     let keys = state.totp_engine.list_keys(&user.id).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "keys": keys

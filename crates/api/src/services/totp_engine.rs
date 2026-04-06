@@ -2,7 +2,6 @@
 //!
 //! Manages TOTP keys for external services and generates codes.
 
-use anyhow::Result;
 use std::sync::Arc;
 
 use crate::services::crypto::CryptoService;
@@ -180,16 +179,16 @@ impl TotpEngineService {
         Ok(())
     }
 
-    pub async fn list_keys(&self, user_id: &str) -> Result<Vec<String>> {
-        Self::validate_user_id(user_id)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    pub async fn list_keys(&self, user_id: &str) -> std::result::Result<Vec<String>, TotpServiceError> {
+        Self::validate_user_id(user_id)?;
         let prefix = self.get_user_prefix(user_id);
         let query = secreton_storage::QueryParams {
             path_prefix: Some(prefix.clone()),
             ..Default::default()
         };
 
-        let entries = self.storage.list(&query).await?;
+        let entries = self.storage.list(&query).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
         let mut keys = Vec::new();
         for entry in entries {
             if let Some(name) = entry.path.strip_prefix(&prefix) {

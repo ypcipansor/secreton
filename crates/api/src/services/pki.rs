@@ -213,8 +213,9 @@ impl PkiPersistentService {
     }
 
     /// Get the current CA Certificate (PEM)
-    pub async fn get_ca_pem(&self) -> Result<Option<String>> {
-        self.ensure_initialized().await?;
+    pub async fn get_ca_pem(&self) -> std::result::Result<Option<String>, PkiServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
         let engine = self.engine.read().await;
 
         if !engine.has_ca_configured() {
