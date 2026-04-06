@@ -892,7 +892,7 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse X509: {}", e)))?;
 
         // Serial number as hex string
-        let serial_number = format!("{}", cert.tbs_certificate.serial_number);
+        let serial_number = hex::encode(cert.tbs_certificate.serial_number.as_bytes());
 
         // Validity
         let valid_from_secs = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
