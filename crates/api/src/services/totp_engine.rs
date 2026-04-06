@@ -105,6 +105,19 @@ impl TotpEngineService {
     ) -> std::result::Result<(), TotpServiceError> {
         Self::validate_user_id(user_id)?;
 
+        // Reject if a key with this name already exists for this user.
+        // Silent overwrites could cause accidental loss of a TOTP key,
+        // locking the user out of the associated third-party service.
+        let path = format!("{}{}", self.get_user_prefix(user_id), name);
+        let existing = self.storage.get_by_path(&path).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
+        if existing.is_some() {
+            return Err(TotpServiceError::BadRequest(format!(
+                "Key '{}' already exists. Delete it first to replace it.",
+                name
+            )));
+        }
+
         // Try to parse user_id as UUID for the owner field; fall back to a
         // deterministic UUID-v5 derived from the user_id string so that
         // non-UUID user IDs still work.
@@ -180,7 +193,6 @@ impl TotpEngineService {
         let encrypted = self.crypto.encrypt_data(&bytes).await
             .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
 
-        let path = format!("{}{}", self.get_user_prefix(user_id), name);
         let entry = SecretEntry::new(
             path,
             encrypted,

@@ -252,6 +252,7 @@ impl ApiServiceContainer {
         registry.register_service("mfa".to_string(), mfa.clone());
         registry.register_service("secret".to_string(), secreton.clone());
         registry.register_service("admin".to_string(), admin.clone());
+        registry.register_service("performance".to_string(), performance.clone());
         registry.register_service("database".to_string(), database.clone());
         registry.register_service("pki".to_string(), pki.clone());
         registry.register_service("totp_engine".to_string(), totp_engine.clone());
