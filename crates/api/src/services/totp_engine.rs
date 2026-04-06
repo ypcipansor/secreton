@@ -245,11 +245,24 @@ impl TotpEngineService {
             .map_err(|e| TotpServiceError::Internal(format!("Failed to generate code: {}", e)))
     }
 
-    pub async fn delete_key(&self, user_id: &str, name: &str) -> Result<()> {
-        Self::validate_user_id(user_id)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    pub async fn delete_key(
+        &self,
+        user_id: &str,
+        name: &str,
+    ) -> std::result::Result<(), TotpServiceError> {
+        Self::validate_user_id(user_id)?;
         let path = format!("{}{}", self.get_user_prefix(user_id), name);
-        self.storage.delete_by_path(&path).await?;
+        let deleted = self
+            .storage
+            .delete_by_path(&path)
+            .await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
+        if !deleted {
+            return Err(TotpServiceError::NotFound(format!(
+                "Key '{}' not found",
+                name
+            )));
+        }
         Ok(())
     }
 }

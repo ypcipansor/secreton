@@ -323,7 +323,10 @@ impl DatabaseService {
         Ok(leases)
     }
 
-    pub async fn revoke_lease(&self, lease_id: &str) -> Result<()> {
+    pub async fn revoke_lease(
+        &self,
+        lease_id: &str,
+    ) -> std::result::Result<(), DatabaseServiceError> {
         self.ensure_initialized().await?;
         // TODO: The engine does not currently expose a revoke/drop-user API.
         // This only deletes the lease tracking record — the database user
@@ -337,7 +340,17 @@ impl DatabaseService {
              the database credential may still be active on the target database",
             lease_id
         );
-        self.storage.delete_by_path(&lease_path).await?;
+        let deleted = self
+            .storage
+            .delete_by_path(&lease_path)
+            .await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        if !deleted {
+            return Err(DatabaseServiceError::NotFound(format!(
+                "Lease '{}' not found",
+                lease_id
+            )));
+        }
         Ok(())
     }
 }

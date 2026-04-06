@@ -133,7 +133,7 @@ async fn revoke_lease(
     validate_name(&id)?;
 
     state.database.revoke_lease(&id).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "Lease revoked"

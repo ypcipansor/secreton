@@ -95,7 +95,7 @@ async fn delete_key(
     validate_name(&name)?;
 
     state.totp_engine.delete_key(&user.id, &name).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": format!("Key '{}' deleted", name)
