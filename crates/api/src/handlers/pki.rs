@@ -10,8 +10,23 @@ use serde::Deserialize;
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
+use crate::services::pki::PkiServiceError;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_pki::{CertificateRequest, CertificateResponse};
+
+/// Map a [`PkiServiceError`] to the appropriate [`crate::ApiError`] variant
+/// so that the HTTP response carries the correct status code.
+fn map_pki_err(err: PkiServiceError) -> crate::ApiError {
+    match err {
+        PkiServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
+        PkiServiceError::Conflict(msg) => {
+            // SecretonError::Conflict maps to 409 CONFLICT in IntoResponse
+            crate::ApiError(secreton_errors::SecretonError::Conflict { message: msg })
+        }
+        PkiServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
+        PkiServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+    }
+}
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()
@@ -52,7 +67,7 @@ async fn generate_root_ca(
     }
 
     let mut response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_pki_err)?;
 
     // Do not return private key in API response for security
     response.private_key = String::new();
@@ -73,7 +88,7 @@ async fn issue_certificate(
     }
 
     let response = state.pki.issue_certificate(payload).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_pki_err)?;
 
     Ok(AxumJson(ApiResponse::success(response)))
 }

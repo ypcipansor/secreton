@@ -112,8 +112,12 @@ pub async fn issue_certificate(
             })))
         }
         Err(e) => {
-            error!("Failed to issue certificate: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            error!("Failed to issue certificate: {}", e);
+            match e {
+                crate::services::pki::PkiServiceError::NotFound(_) => Err(StatusCode::NOT_FOUND),
+                crate::services::pki::PkiServiceError::BadRequest(_) => Err(StatusCode::BAD_REQUEST),
+                _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
         }
     }
 }
@@ -156,7 +160,11 @@ pub async fn generate_root_ca(
         }
         Err(e) => {
             error!("Failed to generate Root CA: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            match e {
+                crate::services::pki::PkiServiceError::Conflict(_) => Err(StatusCode::CONFLICT),
+                crate::services::pki::PkiServiceError::BadRequest(_) => Err(StatusCode::BAD_REQUEST),
+                _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
         }
     }
 }

@@ -13,6 +13,36 @@ use secreton_secrets_database::{DatabaseConfig, DatabaseEngine, DatabaseRole};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use serde_json::{json, Value};
 
+/// Categorised service error that handlers can map to the appropriate HTTP status.
+#[derive(Debug)]
+pub enum DatabaseServiceError {
+    /// The requested resource was not found (→ 404).
+    NotFound(String),
+    /// The engine is disabled / not ready (→ 503).
+    Unavailable(String),
+    /// A client-supplied value is invalid (→ 400).
+    BadRequest(String),
+    /// Any other unexpected failure (→ 500).
+    Internal(String),
+}
+
+impl std::fmt::Display for DatabaseServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(msg) => write!(f, "{}", msg),
+            Self::Unavailable(msg) => write!(f, "{}", msg),
+            Self::BadRequest(msg) => write!(f, "{}", msg),
+            Self::Internal(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl From<anyhow::Error> for DatabaseServiceError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
 const DB_CONFIG_PATH: &str = "sys/database/config";
 const DB_ROLE_PREFIX: &str = "sys/database/roles/";
 const DB_LEASE_PREFIX: &str = "sys/database/leases/";
@@ -179,7 +209,10 @@ impl DatabaseService {
         Ok(engine.list_roles())
     }
 
-    pub async fn generate_credentials(&self, role_name: &str) -> Result<HashMap<String, Value>> {
+    pub async fn generate_credentials(
+        &self,
+        role_name: &str,
+    ) -> std::result::Result<HashMap<String, Value>, DatabaseServiceError> {
         self.ensure_initialized().await?;
 
         // Hold the read lock only for the engine call, then drop it before
@@ -187,8 +220,25 @@ impl DatabaseService {
         // are not blocked.
         let (mut creds, lease_duration) = {
             let engine = self.engine.read().await;
-            let creds = engine.generate_credentials(role_name).await
-                .map_err(|e| anyhow!("Engine failed: {}", e))?;
+            let creds = engine
+                .generate_credentials(role_name)
+                .await
+                .map_err(|e| {
+                    use secreton_secrets_database::DatabaseError;
+                    match &e {
+                        DatabaseError::RoleNotFound(_) => {
+                            DatabaseServiceError::NotFound(e.to_string())
+                        }
+                        DatabaseError::EngineDisabled => {
+                            DatabaseServiceError::Unavailable(e.to_string())
+                        }
+                        DatabaseError::InvalidConfiguration(_)
+                        | DatabaseError::UnsupportedDatabaseType(_) => {
+                            DatabaseServiceError::BadRequest(e.to_string())
+                        }
+                        _ => DatabaseServiceError::Internal(e.to_string()),
+                    }
+                })?;
             // Read the role's default_ttl while we still hold the lock, since
             // the engine's returned HashMap does not include lease_duration.
             let ttl = engine.get_role_default_ttl(role_name).unwrap_or(3600);
@@ -199,9 +249,14 @@ impl DatabaseService {
         // path segment and can be used directly in DELETE /leases/{id}.
         let lease_id = format!("db_{}_{}", role_name, uuid::Uuid::new_v4().simple());
         creds.insert("lease_id".to_string(), Value::String(lease_id.clone()));
-        creds.insert("lease_duration".to_string(), Value::Number(serde_json::Number::from(lease_duration)));
+        creds.insert(
+            "lease_duration".to_string(),
+            Value::Number(serde_json::Number::from(lease_duration)),
+        );
 
-        // Store lease info
+        // Store lease info.  If this fails the database user has already been
+        // created — attempt a best-effort cleanup so we don't leave an orphaned
+        // credential on the target database.
         let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
         let lease_data = json!({
             "lease_id": lease_id,
@@ -211,8 +266,16 @@ impl DatabaseService {
             "lease_duration": lease_duration,
         });
 
-        let data = serde_json::to_vec(&lease_data)?;
-        let encrypted = self.crypto.encrypt_data(&data).await?;
+        let data = serde_json::to_vec(&lease_data)
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let encrypted = self.crypto.encrypt_data(&data).await.map_err(|e| {
+            warn!(
+                "Failed to encrypt lease data for role '{}'; \
+                 a database user may have been orphaned: {}",
+                role_name, e
+            );
+            DatabaseServiceError::Internal(e.to_string())
+        })?;
         let entry = SecretEntry::new(
             lease_path,
             encrypted,
@@ -220,7 +283,14 @@ impl DatabaseService {
             SecurityLevel::Secret,
             uuid::Uuid::nil(),
         );
-        self.storage.store(&entry).await?;
+        if let Err(e) = self.storage.store(&entry).await {
+            warn!(
+                "Failed to persist lease for role '{}'; \
+                 a database user may have been orphaned: {}",
+                role_name, e
+            );
+            return Err(DatabaseServiceError::Internal(e.to_string()));
+        }
 
         Ok(creds)
     }

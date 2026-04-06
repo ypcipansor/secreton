@@ -11,7 +11,18 @@ use serde_json::Value;
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::{AppState, validate_name};
+use crate::services::totp_engine::TotpServiceError;
 use crate::{ApiResponse, ApiResult};
+
+/// Map a [`TotpServiceError`] to the appropriate [`crate::ApiError`] variant
+/// so that the HTTP response carries the correct status code.
+fn map_totp_err(err: TotpServiceError) -> crate::ApiError {
+    match err {
+        TotpServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
+        TotpServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
+        TotpServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+    }
+}
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()
@@ -54,7 +65,7 @@ async fn create_key(
         payload.issuer,
         payload.account_name,
     ).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": format!("Key '{}' created", name)
@@ -69,7 +80,7 @@ async fn generate_code(
     validate_name(&name)?;
 
     let code = state.totp_engine.generate_code(&user.id, &name).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "code": code

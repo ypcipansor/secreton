@@ -10,8 +10,23 @@ use serde_json::Value;
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::{AppState, validate_name};
+use crate::services::database::DatabaseServiceError;
 use crate::{ApiResponse, ApiResult};
 use secreton_secrets_database::{DatabaseConfig, DatabaseRole};
+
+/// Map a [`DatabaseServiceError`] to the appropriate [`crate::ApiError`] variant
+/// so that the HTTP response carries the correct status code.
+fn map_db_err(err: DatabaseServiceError) -> crate::ApiError {
+    match err {
+        DatabaseServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
+        DatabaseServiceError::Unavailable(msg) => {
+            // SecretonError::ServiceUnavailable maps to 503 in IntoResponse
+            crate::ApiError(secreton_errors::SecretonError::ServiceUnavailable { service: msg })
+        }
+        DatabaseServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
+        DatabaseServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+    }
+}
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()
@@ -86,7 +101,7 @@ async fn generate_credentials(
     validate_name(&role)?;
 
     let creds = state.database.generate_credentials(&role).await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(map_db_err)?;
 
     let value = serde_json::to_value(creds)
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;

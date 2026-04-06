@@ -11,6 +11,33 @@ use serde::{Deserialize, Serialize};
 use totp_rs::{Algorithm, TOTP};
 use uuid::Uuid;
 
+/// Categorised service error that handlers can map to the appropriate HTTP status.
+#[derive(Debug)]
+pub enum TotpServiceError {
+    /// The requested key was not found (→ 404).
+    NotFound(String),
+    /// A client-supplied value is invalid (→ 400).
+    BadRequest(String),
+    /// Any other unexpected failure (→ 500).
+    Internal(String),
+}
+
+impl std::fmt::Display for TotpServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(msg) => write!(f, "{}", msg),
+            Self::BadRequest(msg) => write!(f, "{}", msg),
+            Self::Internal(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl From<anyhow::Error> for TotpServiceError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
 const TOTP_ENGINE_PREFIX: &str = "sys/totp/";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -45,7 +72,7 @@ impl TotpEngineService {
         secret_b32: &str,
         issuer: Option<String>,
         account_name: Option<String>,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), TotpServiceError> {
         // Try to parse user_id as UUID for the owner field; fall back to a
         // deterministic UUID-v5 derived from the user_id string so that
         // non-UUID user IDs still work.
@@ -54,7 +81,7 @@ impl TotpEngineService {
 
         // Validate secret by attempting to decode it
         let _ = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
-            .ok_or_else(|| anyhow!("Invalid base32 secret"))?;
+            .ok_or_else(|| TotpServiceError::BadRequest("Invalid base32 secret".to_string()))?;
 
         let metadata = TotpKeyMetadata {
             name: name.to_string(),
@@ -73,8 +100,10 @@ impl TotpEngineService {
             "secret": secret_b32,
         });
 
-        let bytes = serde_json::to_vec(&data)?;
-        let encrypted = self.crypto.encrypt_data(&bytes).await?;
+        let bytes = serde_json::to_vec(&data)
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
+        let encrypted = self.crypto.encrypt_data(&bytes).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
 
         let path = format!("{}{}", self.get_user_prefix(user_id), name);
         let entry = SecretEntry::new(
@@ -85,7 +114,8 @@ impl TotpEngineService {
             owner_id,
         );
 
-        self.storage.store(&entry).await?;
+        self.storage.store(&entry).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
         Ok(())
     }
 
@@ -106,15 +136,23 @@ impl TotpEngineService {
         Ok(keys)
     }
 
-    pub async fn generate_code(&self, user_id: &str, name: &str) -> Result<String> {
+    pub async fn generate_code(
+        &self,
+        user_id: &str,
+        name: &str,
+    ) -> std::result::Result<String, TotpServiceError> {
         let path = format!("{}{}", self.get_user_prefix(user_id), name);
-        let entry = self.storage.get_by_path(&path).await?
-            .ok_or_else(|| anyhow!("Key not found"))?;
+        let entry = self.storage.get_by_path(&path).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?
+            .ok_or_else(|| TotpServiceError::NotFound(format!("Key '{}' not found", name)))?;
 
-        let decrypted = self.crypto.decrypt(&entry.encrypted_data).await?;
-        let data: serde_json::Value = serde_json::from_slice(&decrypted)?;
+        let decrypted = self.crypto.decrypt(&entry.encrypted_data).await
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
+        let data: serde_json::Value = serde_json::from_slice(&decrypted)
+            .map_err(|e| TotpServiceError::Internal(e.to_string()))?;
 
-        let secret_b32 = data["secret"].as_str().ok_or_else(|| anyhow!("Missing secret"))?;
+        let secret_b32 = data["secret"].as_str()
+            .ok_or_else(|| TotpServiceError::Internal("Missing secret in stored data".to_string()))?;
         let metadata_val = &data["metadata"];
 
         let algorithm = match metadata_val["algorithm"].as_str().unwrap_or("SHA1") {
@@ -127,7 +165,7 @@ impl TotpEngineService {
         let period = metadata_val["period"].as_u64().unwrap_or(30);
 
         let secret_bytes = base32::decode(base32::Alphabet::Rfc4648 { padding: false }, secret_b32)
-            .ok_or_else(|| anyhow!("Invalid stored secret"))?;
+            .ok_or_else(|| TotpServiceError::Internal("Invalid stored secret".to_string()))?;
 
         let totp = TOTP::new(
             algorithm,
@@ -137,9 +175,10 @@ impl TotpEngineService {
             secret_bytes,
             None,
             "".to_string(),
-        ).map_err(|e| anyhow!("TOTP error: {}", e))?;
+        ).map_err(|e| TotpServiceError::Internal(format!("TOTP error: {}", e)))?;
 
-        Ok(totp.generate_current().map_err(|e| anyhow!("Failed to generate code: {}", e))?)
+        totp.generate_current()
+            .map_err(|e| TotpServiceError::Internal(format!("Failed to generate code: {}", e)))
     }
 
     pub async fn delete_key(&self, user_id: &str, name: &str) -> Result<()> {
