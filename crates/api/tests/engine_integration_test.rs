@@ -7,10 +7,10 @@ use secreton_api::handlers::{create_router, AppState};
 
 async fn setup_test_server() -> TestServer {
     // Set root key for crypto service auto-unseal.
-    // NOTE: set_var is not thread-safe and should ideally be set outside the
-    // process (e.g. in CI config).  We call it here before spawning any
-    // concurrent work that reads this variable.
-    #[allow(unused_unsafe)]
+    // SAFETY: set_var is unsafe in edition 2024 because environment mutation is
+    // not thread-safe.  We call it here before spawning any concurrent work
+    // that reads this variable.  In CI, prefer setting this via the environment
+    // directly instead.
     unsafe {
         std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
     }

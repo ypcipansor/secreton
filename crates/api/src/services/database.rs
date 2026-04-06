@@ -36,7 +36,7 @@ impl DatabaseService {
     }
 
     pub async fn ensure_initialized(&self) -> Result<()> {
-        if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.initialized.load(std::sync::atomic::Ordering::Acquire) {
             return Ok(());
         }
 
@@ -73,8 +73,13 @@ impl DatabaseService {
 
         // Now apply config + roles under a single write lock so concurrent
         // readers never see an engine with the right config but zero roles.
+        // Re-check the flag inside the lock to prevent redundant initialization
+        // when multiple callers race past the initial check.
         {
             let mut engine = self.engine.write().await;
+            if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(());
+            }
             if let Some(config) = maybe_config {
                 *engine = DatabaseEngine::new(config);
                 engine.enable();
@@ -82,9 +87,9 @@ impl DatabaseService {
             for (name, role) in loaded_roles {
                 engine.add_role(name, role);
             }
+            self.initialized.store(true, std::sync::atomic::Ordering::Release);
         }
 
-        self.initialized.store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
@@ -166,7 +171,6 @@ impl DatabaseService {
         engine.add_role(name.to_string(), role);
 
         Ok(())
-    }
     }
 
     pub async fn list_roles(&self) -> Result<Vec<String>> {

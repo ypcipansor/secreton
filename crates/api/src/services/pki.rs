@@ -45,7 +45,7 @@ impl PkiPersistentService {
 
     /// Ensure the service is initialized by loading CA from storage
     pub async fn ensure_initialized(&self) -> Result<()> {
-        if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.initialized.load(std::sync::atomic::Ordering::Acquire) {
             return Ok(());
         }
 
@@ -71,8 +71,13 @@ impl PkiPersistentService {
                 crl: None,
             };
 
-            // Acquire write lock to update engine
+            // Acquire write lock to update engine; re-check the flag inside the
+            // lock to prevent redundant initialization when concurrent callers
+            // race past the initial check.
             let mut engine_lock = self.engine.write().await;
+            if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(());
+            }
             *engine_lock = PkiEngine::new(config);
 
             info!("PKI Engine initialized with loaded CA");
@@ -81,7 +86,7 @@ impl PkiPersistentService {
         }
 
         self.initialized
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 
