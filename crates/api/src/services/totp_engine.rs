@@ -125,6 +125,25 @@ impl TotpEngineService {
             )));
         }
 
+        // Validate issuer and account_name by constructing a trial TOTP
+        // instance.  With the `otpauth` feature enabled, `totp-rs` rejects
+        // empty account names and names/issuers containing ':'.  Catching
+        // this at creation time avoids persisting a key that will always
+        // fail at code-generation time with a confusing 500 error.
+        let effective_account = account_name.clone().unwrap_or_else(|| "secreton".to_string());
+        TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            secret_bytes,
+            issuer.clone(),
+            effective_account,
+        )
+        .map_err(|e| TotpServiceError::BadRequest(format!(
+            "Invalid TOTP parameters (check issuer/account_name): {}", e
+        )))?;
+
         let metadata = TotpKeyMetadata {
             name: name.to_string(),
             issuer,
