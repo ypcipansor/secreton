@@ -2,7 +2,7 @@
 //!
 //! Manages TOTP keys for external services and generates codes.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::sync::Arc;
 
 use crate::services::crypto::CryptoService;
@@ -61,6 +61,30 @@ impl TotpEngineService {
         Self { storage, crypto }
     }
 
+    /// Validate that a user_id is safe for use in storage paths.
+    ///
+    /// Defence-in-depth: user IDs are expected to be UUIDs (hex + hyphens),
+    /// but if a non-UUID auth backend is ever integrated, a malicious user_id
+    /// containing `../` could escape the TOTP namespace.
+    fn validate_user_id(user_id: &str) -> std::result::Result<(), TotpServiceError> {
+        if user_id.is_empty() {
+            return Err(TotpServiceError::BadRequest(
+                "User ID must not be empty".to_string(),
+            ));
+        }
+        if user_id.contains('/') || user_id.contains('\\') || user_id.contains("..") {
+            return Err(TotpServiceError::BadRequest(
+                "User ID must not contain '/', '\\', or '..'".to_string(),
+            ));
+        }
+        if user_id.chars().any(|c| c.is_control()) {
+            return Err(TotpServiceError::BadRequest(
+                "User ID must not contain control characters".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn get_user_prefix(&self, user_id: &str) -> String {
         format!("{}{}/", TOTP_ENGINE_PREFIX, user_id)
     }
@@ -73,6 +97,8 @@ impl TotpEngineService {
         issuer: Option<String>,
         account_name: Option<String>,
     ) -> std::result::Result<(), TotpServiceError> {
+        Self::validate_user_id(user_id)?;
+
         // Try to parse user_id as UUID for the owner field; fall back to a
         // deterministic UUID-v5 derived from the user_id string so that
         // non-UUID user IDs still work.
@@ -120,6 +146,8 @@ impl TotpEngineService {
     }
 
     pub async fn list_keys(&self, user_id: &str) -> Result<Vec<String>> {
+        Self::validate_user_id(user_id)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let prefix = self.get_user_prefix(user_id);
         let query = secreton_storage::QueryParams {
             path_prefix: Some(prefix.clone()),
@@ -141,6 +169,7 @@ impl TotpEngineService {
         user_id: &str,
         name: &str,
     ) -> std::result::Result<String, TotpServiceError> {
+        Self::validate_user_id(user_id)?;
         let path = format!("{}{}", self.get_user_prefix(user_id), name);
         let entry = self.storage.get_by_path(&path).await
             .map_err(|e| TotpServiceError::Internal(e.to_string()))?
@@ -182,6 +211,8 @@ impl TotpEngineService {
     }
 
     pub async fn delete_key(&self, user_id: &str, name: &str) -> Result<()> {
+        Self::validate_user_id(user_id)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let path = format!("{}{}", self.get_user_prefix(user_id), name);
         self.storage.delete_by_path(&path).await?;
         Ok(())

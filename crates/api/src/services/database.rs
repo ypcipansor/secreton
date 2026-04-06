@@ -2,7 +2,7 @@
 //!
 //! Handles persistence and management of database configurations and roles.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -255,13 +255,20 @@ impl DatabaseService {
         );
 
         // Store lease info.  If this fails the database user has already been
-        // created — attempt a best-effort cleanup so we don't leave an orphaned
-        // credential on the target database.
+        // created.  The engine does not currently expose a revoke/drop-user API,
+        // so we cannot perform automatic cleanup here.  We log the orphaned
+        // username at WARN level so that operators can remove it manually.
+        let username_for_log = creds
+            .get("username")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
         let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
         let lease_data = json!({
             "lease_id": lease_id,
             "role": role_name,
-            "username": creds.get("username").and_then(|v| v.as_str()).unwrap_or_default(),
+            "username": &username_for_log,
             "created_at": chrono::Utc::now().to_rfc3339(),
             "lease_duration": lease_duration,
         });
@@ -271,8 +278,8 @@ impl DatabaseService {
         let encrypted = self.crypto.encrypt_data(&data).await.map_err(|e| {
             warn!(
                 "Failed to encrypt lease data for role '{}'; \
-                 a database user may have been orphaned: {}",
-                role_name, e
+                 database user '{}' may have been orphaned: {}",
+                role_name, username_for_log, e
             );
             DatabaseServiceError::Internal(e.to_string())
         })?;
@@ -286,8 +293,8 @@ impl DatabaseService {
         if let Err(e) = self.storage.store(&entry).await {
             warn!(
                 "Failed to persist lease for role '{}'; \
-                 a database user may have been orphaned: {}",
-                role_name, e
+                 database user '{}' may have been orphaned: {}",
+                role_name, username_for_log, e
             );
             return Err(DatabaseServiceError::Internal(e.to_string()));
         }
@@ -318,9 +325,18 @@ impl DatabaseService {
 
     pub async fn revoke_lease(&self, lease_id: &str) -> Result<()> {
         self.ensure_initialized().await?;
-        // In a real implementation, we would call the engine to drop the user
-        // For now, we just delete the lease record
+        // TODO: The engine does not currently expose a revoke/drop-user API.
+        // This only deletes the lease tracking record — the database user
+        // created on the target database remains active until its VALID UNTIL
+        // expires (PostgreSQL) or is manually removed.  A future improvement
+        // should add `DatabaseEngine::revoke_credentials(username)` to DROP
+        // the user on the target database before removing the lease record.
         let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
+        warn!(
+            "Revoking lease '{}': only the tracking record is deleted; \
+             the database credential may still be active on the target database",
+            lease_id
+        );
         self.storage.delete_by_path(&lease_path).await?;
         Ok(())
     }
