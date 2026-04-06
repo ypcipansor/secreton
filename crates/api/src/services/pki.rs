@@ -49,44 +49,50 @@ impl PkiPersistentService {
             return Ok(());
         }
 
-        // Try to load CA from storage
-        if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
-            // Decrypt the data
+        // Try to load CA from storage BEFORE acquiring the write lock so that a
+        // storage failure does not leave the engine in a half-initialised state.
+        let maybe_config = if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
             let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
             let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
 
             let cert_pem = ca_data["certificate"]
                 .as_str()
-                .ok_or_else(|| anyhow!("Missing certificate in storage"))?;
+                .ok_or_else(|| anyhow!("Missing certificate in storage"))?
+                .to_string();
             let key_pem = ca_data["private_key"]
                 .as_str()
-                .ok_or_else(|| anyhow!("Missing private key in storage"))?;
+                .ok_or_else(|| anyhow!("Missing private key in storage"))?
+                .to_string();
 
-            // Re-initialize engine with loaded CA
-            let config = PkiConfig {
+            Some(PkiConfig {
                 default_lease_ttl: 3600,
                 max_lease_ttl: 86400 * 365,
-                ca_cert: Some(cert_pem.to_string()),
-                ca_key: Some(key_pem.to_string()),
+                ca_cert: Some(cert_pem),
+                ca_key: Some(key_pem),
                 crl: None,
-            };
+            })
+        } else {
+            None
+        };
 
-            // Acquire write lock to update engine; re-check the flag inside the
-            // lock to prevent redundant initialization when concurrent callers
-            // race past the initial check.
+        // Acquire write lock to update engine; re-check the flag inside the
+        // lock to prevent redundant initialization when concurrent callers
+        // race past the initial check.
+        {
             let mut engine_lock = self.engine.write().await;
             if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
                 return Ok(());
             }
-            *engine_lock = PkiEngine::new(config);
-
-            info!("PKI Engine initialized with loaded CA");
-        } else {
-            info!("No CA found in storage. PKI Engine running in uninitialized mode.");
+            if let Some(config) = maybe_config {
+                *engine_lock = PkiEngine::new(config);
+                info!("PKI Engine initialized with loaded CA");
+            } else {
+                info!("No CA found in storage. PKI Engine running in uninitialized mode.");
+            }
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::Release);
         }
 
-        self.initialized
-            .store(true, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 
