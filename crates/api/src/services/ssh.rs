@@ -89,9 +89,12 @@ impl SshPersistentService {
 
         let maybe_ca = if let Some(entry) = self.storage.get_by_path(SSH_CA_STORAGE_PATH).await? {
             let mut decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
-            let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
-            // Zeroize decrypted plaintext containing the CA private key
+            let parse_result = serde_json::from_slice(&decrypted_data);
+            // Zeroize decrypted plaintext containing the CA private key before
+            // propagating any parse error, so key material is never left in
+            // freed heap memory.
             zeroize::Zeroize::zeroize(&mut decrypted_data);
+            let ca_data: serde_json::Value = parse_result?;
 
             let priv_key = ca_data["private_key"].as_str().map(|s| s.to_string());
             let pub_key = ca_data["public_key"].as_str().map(|s| s.to_string());
