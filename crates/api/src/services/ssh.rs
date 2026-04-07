@@ -215,6 +215,10 @@ impl SshPersistentService {
         let mut ca_bytes = match serialize_result {
             Ok(bytes) => bytes,
             Err(e) => {
+                // Zeroize the CA private key inside the temp engine on error.
+                if let Some(ref mut pk) = temp_engine.config_mut().ca_private_key {
+                    zeroize::Zeroize::zeroize(pk);
+                }
                 return Err(SshServiceError::Internal(e.to_string()));
             }
         };
@@ -224,6 +228,10 @@ impl SshPersistentService {
         let encrypted_data = match encrypt_result {
             Ok(data) => data,
             Err(e) => {
+                // Zeroize the CA private key inside the temp engine on error.
+                if let Some(ref mut pk) = temp_engine.config_mut().ca_private_key {
+                    zeroize::Zeroize::zeroize(pk);
+                }
                 return Err(SshServiceError::Internal(e.to_string()));
             }
         };
@@ -236,8 +244,14 @@ impl SshPersistentService {
             uuid::Uuid::new_v4(), // System owned
         );
 
-        self.storage.store(&entry).await
-            .map_err(|e| SshServiceError::Internal(format!("Failed to persist SSH CA: {}", e)))?;
+        if let Err(e) = self.storage.store(&entry).await {
+            // Zeroize the CA private key held inside the temp engine before
+            // dropping it, so key material is not left in freed heap memory.
+            if let Some(ref mut pk) = temp_engine.config_mut().ca_private_key {
+                zeroize::Zeroize::zeroize(pk);
+            }
+            return Err(SshServiceError::Internal(format!("Failed to persist SSH CA: {}", e)));
+        }
 
         // Storage succeeded — now atomically replace the real engine with the
         // one that holds the new CA keys (mirrors the PKI service pattern).
@@ -262,14 +276,25 @@ impl SshPersistentService {
         }
     }
 
+    /// Sign a user public key with the CA.
+    ///
+    /// Returns `(signed_certificate, effective_ttl)`.  The effective TTL may
+    /// be lower than the requested value because the engine clamps it to
+    /// `max_lease_ttl`.  Callers should use the returned TTL in API responses
+    /// so clients know the actual certificate validity period.
     pub async fn sign_key(
         &self,
         public_key: &str,
         valid_principals: Vec<String>,
         ttl: u64,
-    ) -> std::result::Result<String, SshServiceError> {
+    ) -> std::result::Result<(String, u64), SshServiceError> {
         self.ensure_initialized().await?;
         let engine = self.engine.read().await;
+
+        // Compute the effective TTL that the engine will actually apply so we
+        // can return it to the caller.  This keeps the handler and engine in
+        // sync even if `max_lease_ttl` is changed in only one place.
+        let effective_ttl = ttl.min(SSH_MAX_LEASE_TTL);
 
         let signed_cert = engine.sign_key(public_key, valid_principals, ttl)
             .map_err(|e| match &e {
@@ -282,6 +307,6 @@ impl SshPersistentService {
                 _ => SshServiceError::Internal(format!("Failed to sign key: {}", e)),
             })?;
 
-        Ok(signed_cert)
+        Ok((signed_cert, effective_ttl))
     }
 }

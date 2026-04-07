@@ -25,6 +25,15 @@ impl SshEngine {
         }
     }
 
+    /// Mutable access to the engine configuration.
+    ///
+    /// Primarily used by the persistent service layer to zeroize CA private
+    /// key material when an engine instance is about to be discarded (e.g.
+    /// after a failed storage write).
+    pub fn config_mut(&mut self) -> &mut SshConfig {
+        &mut self.config
+    }
+
     /// Generate a new Ed25519 CA key pair
     pub fn generate_ca(&mut self) -> SecretResult<(String, String)> {
         let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)

@@ -121,7 +121,7 @@ async fn sign_key(
         _ => vec![user.username.clone()],
     };
 
-    let signed_key = state
+    let (signed_key, effective_ttl) = state
         .ssh
         .sign_key(&payload.public_key, principals.clone(), ttl)
         .await
@@ -131,11 +131,11 @@ async fn sign_key(
     state.audit.log_event(SecurityEventType::SshKeySign {
         user: user.username.clone(),
         principals,
-        ttl,
+        ttl: effective_ttl,
     }).await;
 
     Ok(AxumJson(ApiResponse::success(SignedKeyResponse {
         signed_key,
-        ttl,
+        ttl: effective_ttl,
     })))
 }

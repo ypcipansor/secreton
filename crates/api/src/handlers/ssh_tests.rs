@@ -10,8 +10,12 @@ use std::collections::HashMap;
 
 async fn server_with_ssh() -> (TestServer, String) {
     // Set root key for crypto service auto-unseal.
-    // SAFETY: This test is run serially by the test harness and no other
-    // threads are reading this env var concurrently at this point.
+    // SAFETY: #[tokio::test] defaults to a single-threaded runtime and no
+    // other test reads/writes this env var concurrently, so this satisfies
+    // the Rust 2024 edition safety requirement that no other thread is
+    // inspecting the environment at the same time.
+    // See: https://doc.rust-lang.org/std/env/fn.set_var.html#safety
+    #[allow(unused_unsafe)]
     unsafe {
         std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
     }
