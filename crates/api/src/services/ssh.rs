@@ -159,7 +159,21 @@ impl SshPersistentService {
             ));
         }
 
-        let (priv_pem, pub_str) = engine_lock.generate_ca()
+        // Generate the CA on a temporary engine so that the real engine is NOT
+        // mutated until storage persistence succeeds.  This avoids an
+        // irrecoverable inconsistency where the in-memory engine holds a CA
+        // that was never persisted (blocking retries via the conflict guard).
+        let mut temp_engine = SshEngine::new(SshConfig {
+            default_lease_ttl: 3600,
+            max_lease_ttl: 86400 * 30,
+            allowed_users: vec![],
+            allowed_extensions: vec![],
+            ca_private_key: None,
+            ca_public_key: None,
+        });
+        temp_engine.enable();
+
+        let (priv_pem, pub_str) = temp_engine.generate_ca()
             .map_err(|e| SshServiceError::Internal(format!("Failed to generate SSH CA: {}", e)))?;
 
         let ca_data = json!({
@@ -181,6 +195,10 @@ impl SshPersistentService {
 
         self.storage.store(&entry).await
             .map_err(|e| SshServiceError::Internal(format!("Failed to persist SSH CA: {}", e)))?;
+
+        // Storage succeeded — now atomically replace the real engine with the
+        // one that holds the new CA keys (mirrors the PKI service pattern).
+        *engine_lock = temp_engine;
 
         info!("Generated and persisted new SSH CA");
         Ok(pub_str)
