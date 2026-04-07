@@ -5,7 +5,7 @@ use axum::{
     extract::{Extension, Path},
     http::StatusCode,
     response::Json,
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 use secreton_secrets::{SecretEngine, TotpEngine};
 use serde::{Deserialize, Serialize};

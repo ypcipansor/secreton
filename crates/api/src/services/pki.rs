@@ -7,14 +7,43 @@ use anyhow::{Result, anyhow};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::services::crypto::CryptoService;
 use secreton_secrets_pki::{CertificateRequest, CertificateResponse, PkiConfig, PkiEngine};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 
+/// Categorised service error that handlers can map to the appropriate HTTP status.
+#[derive(Debug)]
+pub enum PkiServiceError {
+    /// The requested resource was not found (→ 404).
+    NotFound(String),
+    /// A conflicting state prevents the operation (→ 409).
+    Conflict(String),
+    /// A client-supplied value is invalid (→ 400).
+    BadRequest(String),
+    /// Any other unexpected failure (→ 500).
+    Internal(String),
+}
+
+impl std::fmt::Display for PkiServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(msg) => write!(f, "{}", msg),
+            Self::Conflict(msg) => write!(f, "{}", msg),
+            Self::BadRequest(msg) => write!(f, "{}", msg),
+            Self::Internal(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl From<anyhow::Error> for PkiServiceError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
 const CA_STORAGE_PATH: &str = "sys/pki/ca";
-const CA_CONFIG_PATH: &str = "sys/pki/config";
 
 pub struct PkiPersistentService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -45,54 +74,67 @@ impl PkiPersistentService {
 
     /// Ensure the service is initialized by loading CA from storage
     pub async fn ensure_initialized(&self) -> Result<()> {
-        if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.initialized.load(std::sync::atomic::Ordering::Acquire) {
             return Ok(());
         }
 
-        // Try to load CA from storage
-        if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
-            // Decrypt the data
+        // Try to load CA from storage BEFORE acquiring the write lock so that a
+        // storage failure does not leave the engine in a half-initialised state.
+        let maybe_config = if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
             let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
             let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
 
             let cert_pem = ca_data["certificate"]
                 .as_str()
-                .ok_or_else(|| anyhow!("Missing certificate in storage"))?;
+                .ok_or_else(|| anyhow!("Missing certificate in storage"))?
+                .to_string();
             let key_pem = ca_data["private_key"]
                 .as_str()
-                .ok_or_else(|| anyhow!("Missing private key in storage"))?;
+                .ok_or_else(|| anyhow!("Missing private key in storage"))?
+                .to_string();
 
-            // Re-initialize engine with loaded CA
-            let config = PkiConfig {
+            Some(PkiConfig {
                 default_lease_ttl: 3600,
                 max_lease_ttl: 86400 * 365,
-                ca_cert: Some(cert_pem.to_string()),
-                ca_key: Some(key_pem.to_string()),
+                ca_cert: Some(cert_pem),
+                ca_key: Some(key_pem),
                 crl: None,
-            };
-
-            // Acquire write lock to update engine
-            let mut engine_lock = self.engine.write().await;
-            *engine_lock = PkiEngine::new(config);
-
-            info!("PKI Engine initialized with loaded CA");
+            })
         } else {
-            info!("No CA found in storage. PKI Engine running in uninitialized mode.");
+            None
+        };
+
+        // Acquire write lock to update engine; re-check the flag inside the
+        // lock to prevent redundant initialization when concurrent callers
+        // race past the initial check.
+        {
+            let mut engine_lock = self.engine.write().await;
+            if self.initialized.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(());
+            }
+            if let Some(config) = maybe_config {
+                *engine_lock = PkiEngine::new(config);
+                info!("PKI Engine initialized with loaded CA");
+            } else {
+                info!("No CA found in storage. PKI Engine running in uninitialized mode.");
+            }
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::Release);
         }
 
-        self.initialized
-            .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
-    /// Generate a new Root CA
+    /// Generate a new Root CA and return a full `CertificateResponse` with
+    /// real serial number and expiration parsed from the generated certificate.
     pub async fn generate_root_ca(
         &self,
         common_name: &str,
         organization: &str,
-    ) -> Result<(String, String)> {
+    ) -> std::result::Result<CertificateResponse, PkiServiceError> {
         // Ensure initialized to load any existing CA from storage before checking/generating
-        self.ensure_initialized().await?;
+        self.ensure_initialized().await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         // Acquire write lock immediately to prevent race conditions (TOCTOU)
         // We hold this lock for the entire duration of the check-generate-store sequence.
@@ -100,8 +142,8 @@ impl PkiPersistentService {
 
         // Guard: Check if CA already exists in the engine config
         if engine_lock.has_ca_configured() {
-            return Err(anyhow!(
-                "Root CA already exists. Use force if you really intend to overwrite."
+            return Err(PkiServiceError::Conflict(
+                "Root CA already exists. Use force if you really intend to overwrite.".to_string(),
             ));
         }
 
@@ -109,7 +151,12 @@ impl PkiPersistentService {
         let (cert_pem, key_pem) = engine_lock
             .generate_root_ca(common_name, organization)
             .await
-            .map_err(|e| anyhow!("Failed to generate Root CA: {}", e))?;
+            .map_err(|e| PkiServiceError::Internal(format!("Failed to generate Root CA: {}", e)))?;
+
+        // Parse the generated certificate to extract real metadata
+        let ca_info = engine_lock
+            .parse_ca_cert_from_pem(&cert_pem)
+            .map_err(|e| PkiServiceError::Internal(format!("Failed to parse generated Root CA: {}", e)))?;
 
         // Store in storage
         let ca_data = json!({
@@ -120,8 +167,10 @@ impl PkiPersistentService {
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        let ca_bytes = serde_json::to_vec(&ca_data)?;
-        let encrypted_data = self.crypto.encrypt_data(&ca_bytes).await?;
+        let ca_bytes = serde_json::to_vec(&ca_data)
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
+        let encrypted_data = self.crypto.encrypt_data(&ca_bytes).await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let entry = SecretEntry::new(
             CA_STORAGE_PATH.to_string(),
@@ -134,7 +183,7 @@ impl PkiPersistentService {
         // This storage operation is async and outside the lock? No, we are holding the lock.
         // This blocks other readers/writers which is what we want for correctness here.
         if let Err(e) = self.storage.store(&entry).await {
-            return Err(anyhow!("Failed to persist Root CA: {}", e));
+            return Err(PkiServiceError::Internal(format!("Failed to persist Root CA: {}", e)));
         }
 
         // Update in-memory engine configuration
@@ -151,12 +200,21 @@ impl PkiPersistentService {
 
         info!("Generated and persisted new Root CA: {}", common_name);
 
-        Ok((cert_pem, key_pem))
+        Ok(CertificateResponse {
+            certificate: cert_pem.clone(),
+            private_key: key_pem,
+            serial_number: ca_info.serial_number,
+            issuing_ca: cert_pem,
+            ca_chain: vec![],
+            expiration: ca_info.valid_until,
+            revocation_time: None,
+        })
     }
 
     /// Get the current CA Certificate (PEM)
-    pub async fn get_ca_pem(&self) -> Result<Option<String>> {
-        self.ensure_initialized().await?;
+    pub async fn get_ca_pem(&self) -> std::result::Result<Option<String>, PkiServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
         let engine = self.engine.read().await;
 
         if !engine.has_ca_configured() {
@@ -172,22 +230,26 @@ impl PkiPersistentService {
     }
 
     /// Issue a certificate
-    pub async fn issue_certificate(&self, req: CertificateRequest) -> Result<CertificateResponse> {
-        self.ensure_initialized().await?;
+    pub async fn issue_certificate(
+        &self,
+        req: CertificateRequest,
+    ) -> std::result::Result<CertificateResponse, PkiServiceError> {
+        self.ensure_initialized().await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let engine = self.engine.read().await;
 
         // Ensure CA is configured
         if !engine.has_ca_configured() {
-            return Err(anyhow!(
-                "PKI Engine not initialized with a Root CA. Please generate one first."
+            return Err(PkiServiceError::BadRequest(
+                "PKI Engine not initialized with a Root CA. Please generate one first.".to_string(),
             ));
         }
 
         let response = engine
             .generate_certificate(&req)
             .await
-            .map_err(|e| anyhow!("Failed to issue certificate: {}", e))?;
+            .map_err(|e| PkiServiceError::Internal(format!("Failed to issue certificate: {}", e)))?;
 
         // Persist the issued certificate
         // Path: sys/pki/certs/{serial_number}
@@ -205,8 +267,10 @@ impl PkiPersistentService {
             "expires_at": response.expiration.to_rfc3339(),
         });
 
-        let cert_bytes = serde_json::to_vec(&cert_data)?;
-        let encrypted_data = self.crypto.encrypt_data(&cert_bytes).await?;
+        let cert_bytes = serde_json::to_vec(&cert_data)
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
+        let encrypted_data = self.crypto.encrypt_data(&cert_bytes).await
+            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let entry = SecretEntry::new(
             cert_path,

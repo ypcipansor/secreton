@@ -1292,69 +1292,65 @@ impl ApiState {
     }
 }
 
-/// Create the main API router combining KV and Transit engines
-pub fn create_api_router(state: ApiState) -> axum::Router {
+/// Create the main API router combining KV and Transit engines.
+///
+/// Returns an error if any required service is missing from the container.
+pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError> {
     use axum::middleware;
     use tower_http::cors::{Any, CorsLayer};
 
+    // Helper to resolve a required service from the container.
+    // `ServiceContainer` trait is imported at crate level.
+    fn resolve<T: Clone + 'static>(
+        container: &secreton_common::StandardServiceContainer,
+        name: &str,
+    ) -> Result<T, SecretonError> {
+        container
+            .get_service::<T>(name)
+            .cloned()
+            .ok_or_else(|| SecretonError::Configuration {
+                message: format!("required service '{}' not registered in container", name),
+            })
+    }
+
     // Create services map for AppState
     let app_state = crate::handlers::AppState {
-        storage: state
-            .secreton
-            .get_service("storage")
-            .cloned()
-            .expect("storage service required"),
+        storage: resolve(&state.secreton, "storage")?,
         auth: state.auth.clone(),
-        audit: state
-            .secreton
-            .get_service("audit")
-            .cloned()
-            .expect("audit service required"),
-        crypto: state
-            .secreton
-            .get_service("crypto")
-            .cloned()
-            .expect("crypto service required"),
-        secreton: state
-            .secreton
-            .get_service("secret")
-            .cloned()
-            .expect("secret service required"),
-        performance: state
-            .secreton
-            .get_service("performance")
-            .cloned()
-            .expect("performance service required"),
-        seal: state
-            .secreton
-            .get_service("seal")
-            .cloned()
-            .expect("seal service required"),
-        policy: state
-            .secreton
-            .get_service("policy")
-            .cloned()
-            .expect("policy service required"),
+        audit: resolve(&state.secreton, "audit")?,
+        crypto: resolve(&state.secreton, "crypto")?,
+        secreton: resolve(&state.secreton, "secret")?,
+        performance: resolve(&state.secreton, "performance")?,
+        seal: resolve(&state.secreton, "seal")?,
+        policy: resolve(&state.secreton, "policy")?,
         admin: state.audit.clone(),
-        mfa: state
-            .secreton
-            .get_service("mfa")
-            .cloned()
-            .expect("mfa service required"),
+        database: resolve(&state.secreton, "database")?,
+        pki: resolve(&state.secreton, "pki")?,
+        totp_engine: resolve(&state.secreton, "totp_engine")?,
+        mfa: resolve(&state.secreton, "mfa")?,
         config: state.config.clone(),
     };
 
-    axum::Router::new()
+    Ok(axum::Router::new()
         .nest("/api/v1/kv", kv::create_kv_router())
         .nest(
             "/api/v1/secret",
-            crate::handlers::secret::create_routes().with_state(app_state),
+            crate::handlers::secret::create_routes().with_state(app_state.clone()),
         ) // Add secret routes
         .nest("/api/v1/transit", transit::create_transit_router())
-        .nest("/api/v1/database", database::create_database_router())
-        .nest("/api/v1/pki", pki::create_pki_router())
+        .nest(
+            "/api/v1/database",
+            crate::handlers::database::create_routes().with_state(app_state.clone()),
+        )
+        .nest(
+            "/api/v1/pki",
+            crate::handlers::pki::create_routes().with_state(app_state.clone()),
+        )
         .nest("/api/v1/ssh", ssh::create_ssh_router())
-        .nest("/api/v1/totp", totp::create_totp_router())
+        .nest(
+            "/api/v1/totp",
+            crate::handlers::totp_engine::create_routes().with_state(app_state),
+        )
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1367,7 +1363,7 @@ pub fn create_api_router(state: ApiState) -> axum::Router {
                 .allow_headers(Any),
         )
         .layer(axum::Extension(state.kv.clone()))
-        .layer(axum::Extension(state))
+        .layer(axum::Extension(state)))
 }
 
 /// Axum authentication middleware

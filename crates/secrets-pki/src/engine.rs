@@ -33,6 +33,14 @@ pub struct PkiEngine {
     issued_certificates: Arc<RwLock<HashMap<String, IssuedCertificate>>>,
 }
 
+/// Lightweight certificate metadata extracted from a PEM certificate.
+#[derive(Debug, Clone)]
+pub struct CertificateMetadata {
+    pub serial_number: String,
+    pub valid_from: DateTime<Utc>,
+    pub valid_until: DateTime<Utc>,
+}
+
 /// Issued certificate record
 #[derive(Debug, Clone)]
 pub struct IssuedCertificate {
@@ -866,6 +874,40 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
 
         Ok((cert.pem(), key_pair.serialize_pem()))
+    }
+
+    /// Parse a certificate PEM and return lightweight metadata (serial number
+    /// and expiration).  This is a public helper so that callers (e.g. the
+    /// persistent service layer) can extract real values from a generated cert
+    /// without duplicating the DER parsing logic.
+    pub fn parse_ca_cert_from_pem(&self, pem: &str) -> Result<CertificateMetadata, PkiError> {
+        let (label, cert_bytes) = der::pem::decode_vec(pem.as_bytes())
+            .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse PEM: {}", e)))?;
+
+        if label != "CERTIFICATE" {
+            return Err(PkiError::CertificateParsing(format!("Invalid PEM label: {}", label)));
+        }
+
+        let cert = Certificate::from_der(&cert_bytes)
+            .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse X509: {}", e)))?;
+
+        // Serial number as hex string
+        let serial_number = hex::encode(cert.tbs_certificate.serial_number.as_bytes());
+
+        // Validity
+        let valid_from_secs = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
+        let valid_until_secs = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+
+        let valid_from = chrono::DateTime::from_timestamp(valid_from_secs, 0)
+            .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_from timestamp".to_string()))?;
+        let valid_until = chrono::DateTime::from_timestamp(valid_until_secs, 0)
+            .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_until timestamp".to_string()))?;
+
+        Ok(CertificateMetadata {
+            serial_number,
+            valid_from,
+            valid_until,
+        })
     }
 
     /// Generate default CA info for development/testing

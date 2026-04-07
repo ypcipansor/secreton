@@ -359,8 +359,15 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("PKI initialization failed: {}", e));
     }
 
-    // Initialize DatabaseApiState
-    let database_state = secreton_api::database::DatabaseApiState::new(storage.clone()).await;
+    // The old DatabaseApiState (with its background TTL task) is no longer
+    // needed — the /api/v1/database routes now use the new
+    // handlers::database + services::database::DatabaseService.  We pass a
+    // mock storage so the old engine does no real work; its background TTL
+    // task will find zero leases and idle harmlessly.
+    let database_state = secreton_api::database::DatabaseApiState::new(
+        Arc::new(secreton_storage::MockStorageBackend::new()),
+    )
+    .await;
 
     let admin = Arc::new(
         secreton_api::services::admin::AdminService::new(
@@ -400,7 +407,29 @@ async fn main() -> anyhow::Result<()> {
         "performance".to_string(),
         performance.clone(),
     );
-    // container.register_service("identity".to_string(), identity.clone()); // Assuming identity not strictly needed by handlers yet, but good practice
+
+    // Register new engine services
+    let database_service = Arc::new(
+        secreton_api::services::database::DatabaseService::new(storage.clone(), crypto.clone()),
+    );
+    container.register_service::<Arc<secreton_api::services::database::DatabaseService>>(
+        "database".to_string(),
+        database_service.clone(),
+    );
+    container.register_service::<Arc<PkiPersistentService>>(
+        "pki".to_string(),
+        pki_service.clone(),
+    );
+    let totp_engine_service = Arc::new(
+        secreton_api::services::totp_engine::TotpEngineService::new(
+            storage.clone(),
+            crypto.clone(),
+        ),
+    );
+    container.register_service::<Arc<secreton_api::services::totp_engine::TotpEngineService>>(
+        "totp_engine".to_string(),
+        totp_engine_service.clone(),
+    );
 
     // Use default in-memory states for now, matching ApiState::new implementation
     let api_state = ApiState::new(
@@ -416,7 +445,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let axum_router = secreton_api::create_api_router(api_state);
+    let axum_router = secreton_api::create_api_router(api_state)?;
 
     // STRATEGY: Use Axum as the main server, mount Warp routes as a fallback.
     // 1. Create Axum router.

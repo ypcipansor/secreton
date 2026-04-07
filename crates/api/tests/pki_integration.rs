@@ -10,6 +10,8 @@ mod tests {
     async fn test_pki_persistent_flow() {
         // 1. Setup Mock Storage and Crypto
         // Set root key for crypto service auto-unseal
+        // SAFETY: No other threads are reading env vars at this point.
+        #[allow(unsafe_code)]
         unsafe {
             std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         }
@@ -25,10 +27,12 @@ mod tests {
         assert!(ca_pem.is_none());
 
         // 4. Generate Root CA
-        let (cert, key) = service
+        let response = service
             .generate_root_ca("Test Root CA", "Test Org")
             .await
             .unwrap();
+        let cert = response.certificate.clone();
+        let key = response.private_key;
         assert!(!cert.is_empty());
         assert!(!key.is_empty());
 

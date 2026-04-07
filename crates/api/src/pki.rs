@@ -7,7 +7,6 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
-use chrono::Utc;
 use secreton_secrets_pki::CertificateRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -15,6 +14,7 @@ use tracing::{error, info};
 
 use crate::ApiResponse;
 use crate::services::pki::PkiPersistentService;
+use zeroize::Zeroize;
 
 /// API state for PKI engine
 #[derive(Clone)]
@@ -113,8 +113,12 @@ pub async fn issue_certificate(
             })))
         }
         Err(e) => {
-            error!("Failed to issue certificate: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            error!("Failed to issue certificate: {}", e);
+            match e {
+                crate::services::pki::PkiServiceError::NotFound(_) => Err(StatusCode::NOT_FOUND),
+                crate::services::pki::PkiServiceError::BadRequest(_) => Err(StatusCode::BAD_REQUEST),
+                _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
         }
     }
 }
@@ -147,17 +151,26 @@ pub async fn generate_root_ca(
         .generate_root_ca(&request.common_name, &request.organization)
         .await
     {
-        Ok((cert, _key)) => {
+        Ok(mut res) => {
+            // Zeroize the private key in memory before dropping so the CA key
+            // does not linger in freed heap memory.  The new handler at
+            // handlers/pki.rs already does this; keep the old handler
+            // consistent for defense-in-depth.
+            res.private_key.zeroize();
             Ok(Json(ApiResponse::success(CertResponse {
-                certificate: cert,
+                certificate: res.certificate,
                 private_key: String::new(), // Do not return private key in API response for security
-                serial_number: "ROOT".to_string(),
-                expiration: Utc::now().timestamp() + (3650 * 86400),
+                serial_number: res.serial_number,
+                expiration: res.expiration.timestamp(),
             })))
         }
         Err(e) => {
             error!("Failed to generate Root CA: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            match e {
+                crate::services::pki::PkiServiceError::Conflict(_) => Err(StatusCode::CONFLICT),
+                crate::services::pki::PkiServiceError::BadRequest(_) => Err(StatusCode::BAD_REQUEST),
+                _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
         }
     }
 }
