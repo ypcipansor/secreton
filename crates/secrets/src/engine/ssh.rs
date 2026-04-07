@@ -8,7 +8,7 @@ use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
-use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding, Certificate};
+use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding};
 use ssh_key::rand_core::{OsRng, RngCore};
 
 /// ssh secret engine
@@ -176,7 +176,7 @@ impl SecretEngine for SshEngine {
                 let principals_val = data.get("valid_principals");
                 let principals: Vec<String> = if let Some(v) = principals_val {
                     if let Some(arr) = v.as_array() {
-                        arr.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect()
+                        arr.iter().filter_map(|s| s.as_str().map(|s| s.to_string())).collect()
                     } else if let Some(s) = v.as_str() {
                         vec![s.to_string()]
                     } else {
@@ -279,6 +279,9 @@ impl SshEngine {
 
         // Create signing key directly from bytes
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret_bytes);
+        // Zeroize the raw secret bytes now that the signing key has been
+        // constructed — avoids leaving key material in freed stack memory.
+        zeroize::Zeroize::zeroize(&mut secret_bytes);
         let verifying_key = signing_key.verifying_key();
 
         // Get key name from data or use default
@@ -293,8 +296,10 @@ impl SshEngine {
         let ssh_public_key = format!("ssh-ed25519 {} {}", encoded_pub, key_name);
 
         // Create OpenSSH private key format
-        let private_key_bytes = signing_key.to_bytes();
+        let mut private_key_bytes = signing_key.to_bytes();
         let encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
+        // Zeroize private key bytes after encoding
+        zeroize::Zeroize::zeroize(&mut private_key_bytes);
 
         // OpenSSH private key format (simplified)
         let openssh_private_key = format!(
