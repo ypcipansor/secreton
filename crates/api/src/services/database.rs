@@ -129,6 +129,13 @@ impl DatabaseService {
 
         // Validate the connection URL early so the admin gets immediate feedback
         // instead of a deferred error at credential-generation time.
+        //
+        // NOTE: `config.verify_connection` is accepted and persisted but not yet
+        // acted upon — the service does not attempt to open a real connection to
+        // the target database at configuration time.  Connection errors will
+        // surface later at credential-generation time.  A future improvement
+        // should honour the flag by performing a test connection here when it is
+        // `true`.
         if config.connection_url.is_empty() {
             return Err(DatabaseServiceError::BadRequest(
                 "connection_url must not be empty".to_string(),
@@ -187,11 +194,25 @@ impl DatabaseService {
             }
         }
 
-        // Persist config to storage after roles are loaded successfully.
+        // Build the new engine and apply roles BEFORE persisting the config.
+        // If serialization or engine construction fails we return an error
+        // without having written anything — keeping storage and the in-memory
+        // engine consistent.  We also pre-serialize/encrypt the config so that
+        // if encryption fails, we haven't swapped the engine yet.
         let data = serde_json::to_vec(&config)
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let encrypted = self.crypto.encrypt_data(&data).await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+
+        let mut new_engine = DatabaseEngine::new(config);
+        new_engine.enable();
+        for (name, role) in loaded_roles {
+            new_engine.add_role(name, role);
+        }
+
+        // Persist config to storage only after the new engine is fully built.
+        // If this storage write fails, the in-memory engine is still the old
+        // one — consistent with what's in storage.
         let entry = SecretEntry::new(
             DB_CONFIG_PATH.to_string(),
             encrypted,
@@ -202,13 +223,7 @@ impl DatabaseService {
         self.storage.store(&entry).await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
-        // Build the new engine and apply roles atomically
-        let mut new_engine = DatabaseEngine::new(config);
-        new_engine.enable();
-        for (name, role) in loaded_roles {
-            new_engine.add_role(name, role);
-        }
-
+        // Swap the engine only after storage persistence succeeds.
         *engine = new_engine;
 
         Ok(())

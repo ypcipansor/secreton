@@ -54,7 +54,7 @@ pub struct CertificateRequest {
 }
 
 /// Certificate response
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CertificateResponse {
     /// Certificate in PEM format
     pub certificate: String,
@@ -63,13 +63,31 @@ pub struct CertificateResponse {
     /// Certificate serial number
     pub serial_number: String,
     /// Issuing CA certificate
+    #[serde(default)]
     pub issuing_ca: String,
     /// CA chain
+    #[serde(default)]
     pub ca_chain: Vec<String>,
     /// Expiration time
     pub expiration: DateTime<Utc>,
     /// Revocation time (if revoked)
+    #[serde(default)]
     pub revocation_time: Option<DateTime<Utc>>,
+}
+
+// Manual Debug impl to prevent accidental logging of the private key.
+impl std::fmt::Debug for CertificateResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertificateResponse")
+            .field("certificate", &format!("{}...", &self.certificate.chars().take(40).collect::<String>()))
+            .field("private_key", &"[REDACTED]")
+            .field("serial_number", &self.serial_number)
+            .field("issuing_ca", &format!("{}...", &self.issuing_ca.chars().take(40).collect::<String>()))
+            .field("ca_chain", &format!("[{} certs]", self.ca_chain.len()))
+            .field("expiration", &self.expiration)
+            .field("revocation_time", &self.revocation_time)
+            .finish()
+    }
 }
 
 /// SSH key types
