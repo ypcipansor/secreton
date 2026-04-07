@@ -223,7 +223,9 @@ impl PkiPersistentService {
             return Err(PkiServiceError::Internal(format!("Failed to persist Root CA: {}", e)));
         }
 
-        // Update in-memory engine configuration
+        // Update in-memory engine configuration.
+        // Clone key_pem for the engine config; the original is moved into
+        // the response below so no extra unzeroized copy lingers on the heap.
         let config = PkiConfig {
             default_lease_ttl: 3600,
             max_lease_ttl: 86400 * 365,
@@ -237,21 +239,19 @@ impl PkiPersistentService {
 
         info!("Generated and persisted new Root CA: {}", common_name);
 
-        let response = CertificateResponse {
-            certificate: cert_pem.clone(),
-            private_key: key_pem.clone(),
+        // Move cert_pem and key_pem into the response instead of cloning
+        // them again.  This avoids creating an additional heap copy of the
+        // private key that would escape zeroization.
+        let issuing_ca = cert_pem.clone();
+        Ok(CertificateResponse {
+            certificate: cert_pem,
+            private_key: key_pem,
             serial_number: ca_info.serial_number,
-            issuing_ca: cert_pem,
+            issuing_ca,
             ca_chain: vec![],
             expiration: ca_info.valid_until,
             revocation_time: None,
-        };
-        // Zeroize the local copy of the CA private key after all uses.
-        // The engine's internal copy is retained for signing; this only
-        // scrubs the extra heap allocation.
-        zeroize::Zeroize::zeroize(&mut key_pem);
-
-        Ok(response)
+        })
     }
 
     /// Get the current CA Certificate (PEM)
