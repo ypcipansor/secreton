@@ -14,6 +14,7 @@ use tracing::{error, info};
 
 use crate::ApiResponse;
 use crate::services::pki::PkiPersistentService;
+use zeroize::Zeroize;
 
 /// API state for PKI engine
 #[derive(Clone)]
@@ -150,7 +151,12 @@ pub async fn generate_root_ca(
         .generate_root_ca(&request.common_name, &request.organization)
         .await
     {
-        Ok(res) => {
+        Ok(mut res) => {
+            // Zeroize the private key in memory before dropping so the CA key
+            // does not linger in freed heap memory.  The new handler at
+            // handlers/pki.rs already does this; keep the old handler
+            // consistent for defense-in-depth.
+            res.private_key.zeroize();
             Ok(Json(ApiResponse::success(CertResponse {
                 certificate: res.certificate,
                 private_key: String::new(), // Do not return private key in API response for security
