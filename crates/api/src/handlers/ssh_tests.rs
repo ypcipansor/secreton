@@ -110,5 +110,7 @@ async fn test_ssh_ca_lifecycle() {
     resp.assert_status_ok();
     let body: ApiResponse<SignedKeyResponse> = resp.json();
     assert!(body.success);
-    assert!(body.data.unwrap().signed_key.contains("ssh-ed25519-cert-v01@openssh.com"));
+    let sign_data = body.data.unwrap();
+    assert!(sign_data.signed_key.contains("ssh-ed25519-cert-v01@openssh.com"));
+    assert_eq!(sign_data.ttl, 3600);
 }

@@ -279,6 +279,33 @@ impl AuditLogger {
                     .collect(),
                 ),
             ),
+            SecurityEventType::SshCaGeneration { user } => (
+                CoreAuditEventType::Custom("ssh.ca.generate".to_string()),
+                AuditStatus::Success,
+                user,
+                "ssh/ca".to_string(),
+                "generate".to_string(),
+                None,
+            ),
+            SecurityEventType::SshKeySign {
+                user,
+                principals,
+                ttl,
+            } => (
+                CoreAuditEventType::Custom("ssh.key.sign".to_string()),
+                AuditStatus::Success,
+                user,
+                "ssh/sign".to_string(),
+                "sign".to_string(),
+                Some(
+                    vec![
+                        ("principals".to_string(), principals.join(",")),
+                        ("ttl".to_string(), ttl.to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            ),
             SecurityEventType::SigningOperation {
                 key_id,
                 user,
@@ -476,6 +503,14 @@ pub enum SecurityEventType {
         session_id: String,
         ip_address: Option<String>,
         user_agent: Option<String>,
+    },
+    SshCaGeneration {
+        user: String,
+    },
+    SshKeySign {
+        user: String,
+        principals: Vec<String>,
+        ttl: u64,
     },
 }
 

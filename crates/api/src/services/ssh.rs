@@ -182,8 +182,10 @@ impl SshPersistentService {
             "created_at": Utc::now().to_rfc3339(),
         });
 
-        let ca_bytes = serde_json::to_vec(&ca_data)?;
+        let mut ca_bytes = serde_json::to_vec(&ca_data)?;
         let encrypted_data = self.crypto.encrypt_data(&ca_bytes).await?;
+        // Zeroize sensitive plaintext containing the CA private key after encryption
+        zeroize::Zeroize::zeroize(&mut ca_bytes);
 
         let entry = SecretEntry::new(
             SSH_CA_STORAGE_PATH.to_string(),

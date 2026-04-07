@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
+use crate::services::audit::SecurityEventType;
 use crate::services::ssh::SshServiceError;
 use crate::{ApiResponse, ApiResult};
 
@@ -46,6 +47,9 @@ pub struct SignKeyRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignedKeyResponse {
     pub signed_key: String,
+    /// The effective TTL applied to the certificate (may differ from the
+    /// requested value due to clamping).
+    pub ttl: u64,
 }
 
 async fn get_ca_public_key(
@@ -74,6 +78,11 @@ async fn generate_ca(
 
     let pub_key = state.ssh.generate_ca().await
         .map_err(map_ssh_err)?;
+
+    // Audit log the CA generation
+    state.audit.log_event(SecurityEventType::SshCaGeneration {
+        user: user.username.clone(),
+    }).await;
 
     Ok(AxumJson(ApiResponse::success(CaResponse { public_key: pub_key })))
 }
@@ -110,11 +119,19 @@ async fn sign_key(
 
     let signed_key = state
         .ssh
-        .sign_key(&payload.public_key, principals, ttl)
+        .sign_key(&payload.public_key, principals.clone(), ttl)
         .await
         .map_err(map_ssh_err)?;
 
+    // Audit log the key signing operation
+    state.audit.log_event(SecurityEventType::SshKeySign {
+        user: user.username.clone(),
+        principals,
+        ttl,
+    }).await;
+
     Ok(AxumJson(ApiResponse::success(SignedKeyResponse {
         signed_key,
+        ttl,
     })))
 }
