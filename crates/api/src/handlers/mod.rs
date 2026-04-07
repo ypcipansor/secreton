@@ -10,8 +10,11 @@ pub mod database;
 pub mod health;
 pub mod pki;
 pub mod secret;
+pub mod ssh;
 pub mod sys;
 pub mod totp_engine;
+#[cfg(test)]
+pub mod ssh_tests;
 
 use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 
@@ -86,6 +89,7 @@ pub struct AppState {
     pub admin: Arc<AdminService>,
     pub database: Arc<crate::services::database::DatabaseService>,
     pub pki: Arc<crate::services::pki::PkiPersistentService>,
+    pub ssh: Arc<crate::services::ssh::SshPersistentService>,
     pub totp_engine: Arc<crate::services::totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
@@ -105,6 +109,7 @@ impl From<Arc<ApiServiceContainer>> for AppState {
             admin: container.admin.clone(),
             database: container.database.clone(),
             pki: container.pki.clone(),
+            ssh: container.ssh.clone(),
             totp_engine: container.totp_engine.clone(),
             performance: container.performance.clone(),
             mfa: container.mfa.clone(),
@@ -125,6 +130,7 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
         .nest("/sys", sys::create_routes())
         .nest("/database", database::create_routes())
         .nest("/pki", pki::create_routes())
+        .nest("/ssh", ssh::create_routes())
         .nest("/totp", totp_engine::create_routes())
         .route("/health", get(health::health_check))
         .route("/version", get(get_version))

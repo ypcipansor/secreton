@@ -16,8 +16,9 @@ use tokio::sync::RwLock;
 use tracing::{error, info};
 
 use crate::ApiResponse;
+use crate::services::ssh::SSH_MAX_LEASE_TTL;
 
-/// API state for SSH engine
+/// API state for SSH engine (legacy — kept for `ApiState` compatibility)
 #[derive(Clone)]
 pub struct SshApiState {
     pub engine: Arc<RwLock<SshEngine>>,
@@ -27,7 +28,7 @@ impl Default for SshApiState {
     fn default() -> Self {
         let config = SshConfig {
             default_lease_ttl: 3600,
-            max_lease_ttl: 86400,
+            max_lease_ttl: SSH_MAX_LEASE_TTL,
             allowed_users: vec![],
             allowed_extensions: vec![],
             ca_private_key: None,

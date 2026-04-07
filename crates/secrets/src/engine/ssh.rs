@@ -8,13 +8,23 @@ use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
-use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding, Certificate};
-use ssh_key::rand_core::OsRng;
+use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding};
+use ssh_key::rand_core::{OsRng, RngCore};
 
 /// ssh secret engine
 pub struct SshEngine {
     config: SshConfig,
     enabled: bool,
+}
+
+impl Drop for SshEngine {
+    fn drop(&mut self) {
+        // Zeroize CA private key material so it is not left in freed heap
+        // memory when an engine instance is replaced or discarded.
+        if let Some(ref mut pk) = self.config.ca_private_key {
+            zeroize::Zeroize::zeroize(pk);
+        }
+    }
 }
 
 impl SshEngine {
@@ -23,6 +33,15 @@ impl SshEngine {
             config,
             enabled: false,
         }
+    }
+
+    /// Mutable access to the engine configuration.
+    ///
+    /// Primarily used by the persistent service layer to zeroize CA private
+    /// key material when an engine instance is about to be discarded (e.g.
+    /// after a failed storage write).
+    pub fn config_mut(&mut self) -> &mut SshConfig {
+        &mut self.config
     }
 
     /// Generate a new Ed25519 CA key pair
@@ -47,13 +66,17 @@ impl SshEngine {
         Ok((priv_pem, pub_str))
     }
 
-    /// Sign a public key
+    /// Sign a public key.
+    ///
+    /// Returns `(signed_certificate, effective_ttl)`.  The effective TTL may be
+    /// lower than the requested value because the engine clamps it to
+    /// `max_lease_ttl`.
     pub fn sign_key(
         &self,
         public_key_str: &str,
         valid_principals: Vec<String>,
         ttl: u64,
-    ) -> SecretResult<String> {
+    ) -> SecretResult<(String, u64)> {
         // Load CA Key
         let ca_priv_pem = self.config.ca_private_key.as_ref()
             .ok_or_else(|| SecretError::InvalidConfiguration("CA private key not configured".to_string()))?;
@@ -65,8 +88,16 @@ impl SshEngine {
         let user_pub_key = PublicKey::from_openssh(public_key_str)
             .map_err(|e| SecretError::InvalidSecretData(format!("Invalid public key: {}", e)))?;
 
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        let expire = now + ttl;
+        // Enforce max_lease_ttl as defense-in-depth — callers (e.g. handlers)
+        // should clamp before calling, but the engine must not blindly trust
+        // the value it receives.
+        let effective_ttl = ttl.min(self.config.max_lease_ttl);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| SecretError::CryptoError(format!("System clock error: {}", e)))?
+            .as_secs();
+        let expire = now.saturating_add(effective_ttl);
 
         // Build Certificate
         // new_with_random_nonce(rng, pub_key, valid_after, valid_before)
@@ -77,7 +108,12 @@ impl SshEngine {
             expire,
         ).map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
 
-        cert_builder.serial(0).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        let serial = {
+            let mut buf = [0u8; 8];
+            OsRng.fill_bytes(&mut buf);
+            u64::from_be_bytes(buf)
+        };
+        cert_builder.serial(serial).map_err(|e| SecretError::CryptoError(e.to_string()))?;
         cert_builder.cert_type(ssh_key::certificate::CertType::User).map_err(|e| SecretError::CryptoError(e.to_string()))?;
 
         for p in valid_principals {
@@ -88,7 +124,7 @@ impl SshEngine {
         let cert = cert_builder.sign(&ca_key)
             .map_err(|e| SecretError::CryptoError(format!("Signing failed: {}", e)))?;
 
-        Ok(cert.to_string())
+        Ok((cert.to_string(), effective_ttl))
     }
 }
 
@@ -110,7 +146,7 @@ impl SecretEngine for SshEngine {
 
         match path {
             "config/ca" => {
-                if let (Some(pub_key), _) = (&self.config.ca_public_key, &self.config.ca_private_key) {
+                if let (Some(pub_key), Some(_priv_key)) = (&self.config.ca_public_key, &self.config.ca_private_key) {
                      let mut data = HashMap::new();
                      data.insert("public_key".to_string(), Value::String(pub_key.clone()));
                      // Do not return private key on read usually, unless explicitly requested or for backup
@@ -163,7 +199,7 @@ impl SecretEngine for SshEngine {
                 let principals_val = data.get("valid_principals");
                 let principals: Vec<String> = if let Some(v) = principals_val {
                     if let Some(arr) = v.as_array() {
-                        arr.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect()
+                        arr.iter().filter_map(|s| s.as_str().map(|s| s.to_string())).collect()
                     } else if let Some(s) = v.as_str() {
                         vec![s.to_string()]
                     } else {
@@ -177,7 +213,11 @@ impl SecretEngine for SshEngine {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(self.config.default_lease_ttl);
 
-                let signed_cert = self.sign_key(public_key, principals, ttl)?;
+                // sign_key internally clamps to max_lease_ttl; compute the
+                // same effective value so the metadata stays consistent.
+                let effective_ttl = ttl.min(self.config.max_lease_ttl);
+
+                let (signed_cert, effective_ttl) = self.sign_key(public_key, principals, effective_ttl)?;
 
                 let mut resp_data = HashMap::new();
                 resp_data.insert("signed_key".to_string(), Value::String(signed_cert));
@@ -191,7 +231,7 @@ impl SecretEngine for SshEngine {
                         created_by: "ssh-engine".to_string(),
                         updated_by: "ssh-engine".to_string(),
                         lease_id: None,
-                        lease_duration: Some(ttl),
+                        lease_duration: Some(effective_ttl),
                         ..Default::default()
                     },
                     created_at: chrono::Utc::now(),
@@ -266,6 +306,9 @@ impl SshEngine {
 
         // Create signing key directly from bytes
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret_bytes);
+        // Zeroize the raw secret bytes now that the signing key has been
+        // constructed — avoids leaving key material in freed stack memory.
+        zeroize::Zeroize::zeroize(&mut secret_bytes);
         let verifying_key = signing_key.verifying_key();
 
         // Get key name from data or use default
@@ -280,20 +323,28 @@ impl SshEngine {
         let ssh_public_key = format!("ssh-ed25519 {} {}", encoded_pub, key_name);
 
         // Create OpenSSH private key format
-        let private_key_bytes = signing_key.to_bytes();
-        let encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
+        let mut private_key_bytes = signing_key.to_bytes();
+        let mut encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
+        // Zeroize private key bytes after encoding
+        zeroize::Zeroize::zeroize(&mut private_key_bytes);
 
         // OpenSSH private key format (simplified)
-        let openssh_private_key = format!(
+        let mut openssh_private_key = format!(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n{}-----END OPENSSH PRIVATE KEY-----\n",
             encoded_priv
         );
+        // Zeroize intermediate encoded private key now that the PEM string is built
+        zeroize::Zeroize::zeroize(&mut encoded_priv);
 
         let mut key_data = HashMap::new();
+        // Move the private key into the Value; zeroize the local copy afterwards.
+        // Note: the Value::String copy cannot be zeroized, but scrubbing the
+        // local allocation reduces the number of copies in memory.
         key_data.insert(
             "private_key".to_string(),
-            Value::String(openssh_private_key),
+            Value::String(openssh_private_key.clone()),
         );
+        zeroize::Zeroize::zeroize(&mut openssh_private_key);
         key_data.insert("public_key".to_string(), Value::String(ssh_public_key));
         key_data.insert("key_type".to_string(), Value::String("ed25519".to_string()));
         key_data.insert("key_name".to_string(), Value::String(key_name.to_string()));

@@ -420,6 +420,18 @@ async fn main() -> anyhow::Result<()> {
         "pki".to_string(),
         pki_service.clone(),
     );
+
+    let ssh_service = Arc::new(
+        secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone()),
+    );
+    if let Err(e) = ssh_service.ensure_initialized().await {
+        tracing::error!("Failed to initialize SSH service from storage: {}", e);
+        return Err(anyhow::anyhow!("SSH initialization failed: {}", e));
+    }
+    container.register_service::<Arc<secreton_api::services::ssh::SshPersistentService>>(
+        "ssh".to_string(),
+        ssh_service.clone(),
+    );
     let totp_engine_service = Arc::new(
         secreton_api::services::totp_engine::TotpEngineService::new(
             storage.clone(),
