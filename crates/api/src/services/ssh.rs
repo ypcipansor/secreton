@@ -212,11 +212,21 @@ impl SshPersistentService {
         // is complete (or failed).  The engine's internal copy is retained for
         // signing; this only scrubs the extra heap allocation.
         zeroize::Zeroize::zeroize(&mut priv_pem);
-        let mut ca_bytes = serialize_result?;
+        let mut ca_bytes = match serialize_result {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Err(SshServiceError::Internal(e.to_string()));
+            }
+        };
         let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;
         // Zeroize sensitive plaintext containing the CA private key after encryption
         zeroize::Zeroize::zeroize(&mut ca_bytes);
-        let encrypted_data = encrypt_result?;
+        let encrypted_data = match encrypt_result {
+            Ok(data) => data,
+            Err(e) => {
+                return Err(SshServiceError::Internal(e.to_string()));
+            }
+        };
 
         let entry = SecretEntry::new(
             SSH_CA_STORAGE_PATH.to_string(),

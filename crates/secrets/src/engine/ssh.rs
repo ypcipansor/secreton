@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding, Certificate};
-use ssh_key::rand_core::OsRng;
+use ssh_key::rand_core::{OsRng, RngCore};
 
 /// ssh secret engine
 pub struct SshEngine {
@@ -80,7 +80,12 @@ impl SshEngine {
             expire,
         ).map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
 
-        cert_builder.serial(0).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        let serial = {
+            let mut buf = [0u8; 8];
+            OsRng.fill_bytes(&mut buf);
+            u64::from_be_bytes(buf)
+        };
+        cert_builder.serial(serial).map_err(|e| SecretError::CryptoError(e.to_string()))?;
         cert_builder.cert_type(ssh_key::certificate::CertType::User).map_err(|e| SecretError::CryptoError(e.to_string()))?;
 
         for p in valid_principals {
@@ -113,7 +118,7 @@ impl SecretEngine for SshEngine {
 
         match path {
             "config/ca" => {
-                if let (Some(pub_key), _) = (&self.config.ca_public_key, &self.config.ca_private_key) {
+                if let (Some(pub_key), Some(_priv_key)) = (&self.config.ca_public_key, &self.config.ca_private_key) {
                      let mut data = HashMap::new();
                      data.insert("public_key".to_string(), Value::String(pub_key.clone()));
                      // Do not return private key on read usually, unless explicitly requested or for backup

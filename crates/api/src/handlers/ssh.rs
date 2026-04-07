@@ -90,6 +90,13 @@ async fn sign_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<SignKeyRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<SignedKeyResponse>>> {
+    // Validate that a public key was actually provided.
+    if payload.public_key.trim().is_empty() {
+        return Err(crate::ApiError::BadRequest(
+            "public_key must not be empty".to_string(),
+        ));
+    }
+
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
     // certificates and potential u64 overflow in the engine's timestamp math.
     let min_ttl: u64 = 1; // Prevent immediately-expired certificates
