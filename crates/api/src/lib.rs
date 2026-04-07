@@ -1326,6 +1326,7 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         admin: state.audit.clone(),
         database: resolve(&state.secreton, "database")?,
         pki: resolve(&state.secreton, "pki")?,
+        ssh: resolve(&state.secreton, "ssh")?,
         totp_engine: resolve(&state.secreton, "totp_engine")?,
         mfa: resolve(&state.secreton, "mfa")?,
         config: state.config.clone(),
@@ -1346,7 +1347,10 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
             "/api/v1/pki",
             crate::handlers::pki::create_routes().with_state(app_state.clone()),
         )
-        .nest("/api/v1/ssh", ssh::create_ssh_router())
+        .nest(
+            "/api/v1/ssh",
+            crate::handlers::ssh::create_routes().with_state(app_state.clone()),
+        )
         .nest(
             "/api/v1/totp",
             crate::handlers::totp_engine::create_routes().with_state(app_state),

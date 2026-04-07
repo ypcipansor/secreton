@@ -9,6 +9,7 @@ pub mod config;
 pub mod database;
 pub mod pki;
 pub mod secret;
+pub mod ssh;
 pub mod totp_engine;
 
 use anyhow::Result;
@@ -61,6 +62,7 @@ pub struct ApiServiceContainer {
     pub admin: Arc<admin::AdminService>,
     pub database: Arc<database::DatabaseService>,
     pub pki: Arc<pki::PkiPersistentService>,
+    pub ssh: Arc<ssh::SshPersistentService>,
     pub totp_engine: Arc<totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
@@ -217,6 +219,12 @@ impl ApiServiceContainer {
             crypto.clone(),
         ));
 
+        // Initialize SSH service
+        let ssh = Arc::new(ssh::SshPersistentService::new(
+            storage.clone(),
+            crypto.clone(),
+        ));
+
         // Initialize TOTP Engine service
         let totp_engine = Arc::new(totp_engine::TotpEngineService::new(
             storage.clone(),
@@ -255,6 +263,7 @@ impl ApiServiceContainer {
         registry.register_service("performance".to_string(), performance.clone());
         registry.register_service("database".to_string(), database.clone());
         registry.register_service("pki".to_string(), pki.clone());
+        registry.register_service("ssh".to_string(), ssh.clone());
         registry.register_service("totp_engine".to_string(), totp_engine.clone());
         registry.register_service("telemetry".to_string(), telemetry);
         registry.register_service("identity".to_string(), identity.clone());
@@ -273,6 +282,7 @@ impl ApiServiceContainer {
             admin,
             database,
             pki,
+            ssh,
             totp_engine,
             performance,
             mfa,

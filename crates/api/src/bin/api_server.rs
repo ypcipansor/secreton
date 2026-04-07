@@ -420,6 +420,14 @@ async fn main() -> anyhow::Result<()> {
         "pki".to_string(),
         pki_service.clone(),
     );
+
+    let ssh_service = Arc::new(
+        secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone()),
+    );
+    container.register_service::<Arc<secreton_api::services::ssh::SshPersistentService>>(
+        "ssh".to_string(),
+        ssh_service.clone(),
+    );
     let totp_engine_service = Arc::new(
         secreton_api::services::totp_engine::TotpEngineService::new(
             storage.clone(),
