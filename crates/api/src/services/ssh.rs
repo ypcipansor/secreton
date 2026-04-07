@@ -4,7 +4,7 @@
 //! and CryptoService. Wraps the in-memory SshEngine.
 
 use anyhow::Result;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -93,22 +93,28 @@ impl SshPersistentService {
             return Ok(());
         }
 
+        // Deserialize into a typed struct so the CA private key is never held
+        // in a serde_json::Value::String (which cannot be zeroized).  The
+        // struct fields are plain Strings that we move directly into the
+        // SshConfig, avoiding extra copies.
+        #[derive(Deserialize)]
+        struct CaLoadData {
+            private_key: Option<String>,
+            public_key: Option<String>,
+        }
+
         let maybe_ca = if let Some(entry) = self.storage.get_by_path(SSH_CA_STORAGE_PATH).await? {
             let mut decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
-            let parse_result = serde_json::from_slice(&decrypted_data);
+            let parse_result: Result<CaLoadData, _> = serde_json::from_slice(&decrypted_data);
             // Zeroize decrypted plaintext containing the CA private key before
             // propagating any parse error, so key material is never left in
             // freed heap memory.
             zeroize::Zeroize::zeroize(&mut decrypted_data);
-            let ca_data: serde_json::Value = parse_result?;
+            let ca_data = parse_result?;
 
-            let priv_key = ca_data["private_key"].as_str().map(|s| s.to_string());
-            let pub_key = ca_data["public_key"].as_str().map(|s| s.to_string());
-
-            if let (Some(priv_k), Some(pub_k)) = (priv_key, pub_key) {
-                Some((priv_k, pub_k))
-            } else {
-                None
+            match (ca_data.private_key, ca_data.public_key) {
+                (Some(priv_k), Some(pub_k)) => Some((priv_k, pub_k)),
+                _ => None,
             }
         } else {
             None
@@ -187,17 +193,25 @@ impl SshPersistentService {
         let (mut priv_pem, pub_str) = temp_engine.generate_ca()
             .map_err(|e| SshServiceError::Internal(format!("Failed to generate SSH CA: {}", e)))?;
 
-        let ca_data = json!({
-            "private_key": priv_pem.clone(),
-            "public_key": pub_str.clone(),
-            "created_at": Utc::now().to_rfc3339(),
-        });
+        // Serialize directly via a short-lived struct instead of an intermediate
+        // serde_json::Value, so the CA private key is never held in a
+        // Value::String that cannot be zeroized.
+        #[derive(Serialize)]
+        struct CaStorageData<'a> {
+            private_key: &'a str,
+            public_key: &'a str,
+            created_at: String,
+        }
+        let ca_storage = CaStorageData {
+            private_key: &priv_pem,
+            public_key: &pub_str,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        let mut ca_bytes = serde_json::to_vec(&ca_storage)?;
         // Zeroize the local copy of the CA private key now that it has been
-        // serialised into ca_data.  The engine's internal copy is retained for
+        // serialised into ca_bytes.  The engine's internal copy is retained for
         // signing; this only scrubs the extra heap allocation.
         zeroize::Zeroize::zeroize(&mut priv_pem);
-
-        let mut ca_bytes = serde_json::to_vec(&ca_data)?;
         let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;
         // Zeroize sensitive plaintext containing the CA private key after encryption
         zeroize::Zeroize::zeroize(&mut ca_bytes);
