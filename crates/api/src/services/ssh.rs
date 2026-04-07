@@ -14,6 +14,12 @@ use secreton_secrets::{SecretError, SshConfig, SshEngine, SecretEngine};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use chrono::Utc;
 
+/// Maximum lease TTL for SSH certificates (30 days in seconds).
+///
+/// Shared between the service configuration and the handler TTL clamping logic
+/// to avoid silent drift when one side is updated without the other.
+pub const SSH_MAX_LEASE_TTL: u64 = 86400 * 30;
+
 /// Categorised service error that handlers can map to the appropriate HTTP status.
 #[derive(Debug)]
 pub enum SshServiceError {
@@ -65,7 +71,7 @@ impl SshPersistentService {
     pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>) -> Self {
         let config = SshConfig {
             default_lease_ttl: 3600,
-            max_lease_ttl: 86400 * 30, // 30 days
+            max_lease_ttl: SSH_MAX_LEASE_TTL,
             allowed_users: vec![],
             allowed_extensions: vec![],
             ca_private_key: None,
@@ -117,7 +123,7 @@ impl SshPersistentService {
             if let Some((priv_key, pub_key)) = maybe_ca {
                 let config = SshConfig {
                     default_lease_ttl: 3600,
-                    max_lease_ttl: 86400 * 30,
+                    max_lease_ttl: SSH_MAX_LEASE_TTL,
                     allowed_users: vec![],
                     allowed_extensions: vec![],
                     ca_private_key: Some(priv_key),
@@ -132,7 +138,7 @@ impl SshPersistentService {
                 // Initialize engine but disabled or without CA
                 let mut engine = SshEngine::new(SshConfig {
                     default_lease_ttl: 3600,
-                    max_lease_ttl: 86400 * 30,
+                    max_lease_ttl: SSH_MAX_LEASE_TTL,
                     allowed_users: vec![],
                     allowed_extensions: vec![],
                     ca_private_key: None,
@@ -170,7 +176,7 @@ impl SshPersistentService {
         // that was never persisted (blocking retries via the conflict guard).
         let mut temp_engine = SshEngine::new(SshConfig {
             default_lease_ttl: 3600,
-            max_lease_ttl: 86400 * 30,
+            max_lease_ttl: SSH_MAX_LEASE_TTL,
             allowed_users: vec![],
             allowed_extensions: vec![],
             ca_private_key: None,
@@ -183,7 +189,7 @@ impl SshPersistentService {
 
         let ca_data = json!({
             "private_key": priv_pem,
-            "public_key": pub_str,
+            "public_key": pub_str.clone(),
             "created_at": Utc::now().to_rfc3339(),
         });
 

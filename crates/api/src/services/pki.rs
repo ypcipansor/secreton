@@ -81,8 +81,13 @@ impl PkiPersistentService {
         // Try to load CA from storage BEFORE acquiring the write lock so that a
         // storage failure does not leave the engine in a half-initialised state.
         let maybe_config = if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
-            let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
-            let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
+            let mut decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
+            let parse_result = serde_json::from_slice(&decrypted_data);
+            // Zeroize decrypted plaintext containing the CA private key before
+            // propagating any parse error, so key material is never left in
+            // freed heap memory.
+            zeroize::Zeroize::zeroize(&mut decrypted_data);
+            let ca_data: serde_json::Value = parse_result?;
 
             let cert_pem = ca_data["certificate"]
                 .as_str()
@@ -167,9 +172,12 @@ impl PkiPersistentService {
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        let ca_bytes = serde_json::to_vec(&ca_data)
+        let mut ca_bytes = serde_json::to_vec(&ca_data)
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
-        let encrypted_data = self.crypto.encrypt_data(&ca_bytes).await
+        let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;
+        // Zeroize sensitive plaintext containing the CA private key after encryption
+        zeroize::Zeroize::zeroize(&mut ca_bytes);
+        let encrypted_data = encrypt_result
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let entry = SecretEntry::new(

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
 use crate::services::audit::SecurityEventType;
-use crate::services::ssh::SshServiceError;
+use crate::services::ssh::{SshServiceError, SSH_MAX_LEASE_TTL};
 use crate::{ApiResponse, ApiResult};
 
 /// Map a [`SshServiceError`] to the appropriate [`crate::ApiError`] variant
@@ -95,8 +95,7 @@ async fn sign_key(
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
     // certificates and potential u64 overflow in the engine's timestamp math.
     let min_ttl: u64 = 1; // Prevent immediately-expired certificates
-    let max_ttl: u64 = 86400 * 30; // 30 days — must match SshConfig::max_lease_ttl
-    let ttl = payload.ttl.unwrap_or(3600).clamp(min_ttl, max_ttl);
+    let ttl = payload.ttl.unwrap_or(3600).clamp(min_ttl, SSH_MAX_LEASE_TTL);
 
     // Security: Only allow users to sign for their own username by default.
     // If specific principals are requested, verify they are allowed.
