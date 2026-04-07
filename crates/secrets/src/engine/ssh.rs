@@ -203,7 +203,7 @@ impl SecretEngine for SshEngine {
                 // same effective value so the metadata stays consistent.
                 let effective_ttl = ttl.min(self.config.max_lease_ttl);
 
-                let signed_cert = self.sign_key(public_key, principals, ttl)?;
+                let signed_cert = self.sign_key(public_key, principals, effective_ttl)?;
 
                 let mut resp_data = HashMap::new();
                 resp_data.insert("signed_key".to_string(), Value::String(signed_cert));
