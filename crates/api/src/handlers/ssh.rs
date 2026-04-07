@@ -18,9 +18,7 @@ use crate::{ApiResponse, ApiResult};
 fn map_ssh_err(err: SshServiceError) -> crate::ApiError {
     match err {
         SshServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
-        SshServiceError::Conflict(msg) => {
-            crate::ApiError(secreton_errors::SecretonError::Conflict { message: msg })
-        }
+        SshServiceError::Conflict(msg) => crate::ApiError::Conflict(msg),
         SshServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
         SshServiceError::Internal(msg) => crate::ApiError::Internal(msg),
     }

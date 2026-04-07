@@ -153,7 +153,7 @@ impl PkiPersistentService {
         }
 
         // Generate via engine logic
-        let (cert_pem, key_pem) = engine_lock
+        let (cert_pem, mut key_pem) = engine_lock
             .generate_root_ca(common_name, organization)
             .await
             .map_err(|e| PkiServiceError::Internal(format!("Failed to generate Root CA: {}", e)))?;
@@ -166,7 +166,7 @@ impl PkiPersistentService {
         // Store in storage
         let ca_data = json!({
             "certificate": cert_pem,
-            "private_key": key_pem,
+            "private_key": key_pem.clone(),
             "common_name": common_name,
             "organization": organization,
             "created_at": chrono::Utc::now().to_rfc3339(),
@@ -208,15 +208,21 @@ impl PkiPersistentService {
 
         info!("Generated and persisted new Root CA: {}", common_name);
 
-        Ok(CertificateResponse {
+        let response = CertificateResponse {
             certificate: cert_pem.clone(),
-            private_key: key_pem,
+            private_key: key_pem.clone(),
             serial_number: ca_info.serial_number,
             issuing_ca: cert_pem,
             ca_chain: vec![],
             expiration: ca_info.valid_until,
             revocation_time: None,
-        })
+        };
+        // Zeroize the local copy of the CA private key after all uses.
+        // The engine's internal copy is retained for signing; this only
+        // scrubs the extra heap allocation.
+        zeroize::Zeroize::zeroize(&mut key_pem);
+
+        Ok(response)
     }
 
     /// Get the current CA Certificate (PEM)

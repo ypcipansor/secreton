@@ -184,14 +184,18 @@ impl SshPersistentService {
         });
         temp_engine.enable();
 
-        let (priv_pem, pub_str) = temp_engine.generate_ca()
+        let (mut priv_pem, pub_str) = temp_engine.generate_ca()
             .map_err(|e| SshServiceError::Internal(format!("Failed to generate SSH CA: {}", e)))?;
 
         let ca_data = json!({
-            "private_key": priv_pem,
+            "private_key": priv_pem.clone(),
             "public_key": pub_str.clone(),
             "created_at": Utc::now().to_rfc3339(),
         });
+        // Zeroize the local copy of the CA private key now that it has been
+        // serialised into ca_data.  The engine's internal copy is retained for
+        // signing; this only scrubs the extra heap allocation.
+        zeroize::Zeroize::zeroize(&mut priv_pem);
 
         let mut ca_bytes = serde_json::to_vec(&ca_data)?;
         let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;

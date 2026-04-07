@@ -9,7 +9,9 @@ use uuid::Uuid;
 use std::collections::HashMap;
 
 async fn server_with_ssh() -> (TestServer, String) {
-    // Set root key for crypto service auto-unseal
+    // Set root key for crypto service auto-unseal.
+    // SAFETY: This test is run serially by the test harness and no other
+    // threads are reading this env var concurrently at this point.
     unsafe {
         std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
     }

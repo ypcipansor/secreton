@@ -1102,6 +1102,11 @@ impl ApiError {
     pub fn BadRequest(message: String) -> Self {
         Self(SecretonError::Validation { message })
     }
+
+    #[allow(non_snake_case)]
+    pub fn Conflict(message: String) -> Self {
+        Self(SecretonError::Conflict { message })
+    }
 }
 
 impl axum::response::IntoResponse for ApiError {
