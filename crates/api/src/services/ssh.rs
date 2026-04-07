@@ -291,12 +291,7 @@ impl SshPersistentService {
         self.ensure_initialized().await?;
         let engine = self.engine.read().await;
 
-        // Compute the effective TTL that the engine will actually apply so we
-        // can return it to the caller.  This keeps the handler and engine in
-        // sync even if `max_lease_ttl` is changed in only one place.
-        let effective_ttl = ttl.min(SSH_MAX_LEASE_TTL);
-
-        let signed_cert = engine.sign_key(public_key, valid_principals, effective_ttl)
+        let (signed_cert, effective_ttl) = engine.sign_key(public_key, valid_principals, ttl)
             .map_err(|e| match &e {
                 SecretError::InvalidSecretData(_) => {
                     SshServiceError::BadRequest(format!("Failed to sign key: {}", e))

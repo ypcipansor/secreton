@@ -17,6 +17,16 @@ pub struct SshEngine {
     enabled: bool,
 }
 
+impl Drop for SshEngine {
+    fn drop(&mut self) {
+        // Zeroize CA private key material so it is not left in freed heap
+        // memory when an engine instance is replaced or discarded.
+        if let Some(ref mut pk) = self.config.ca_private_key {
+            zeroize::Zeroize::zeroize(pk);
+        }
+    }
+}
+
 impl SshEngine {
     pub fn new(config: SshConfig) -> Self {
         Self {
@@ -56,13 +66,17 @@ impl SshEngine {
         Ok((priv_pem, pub_str))
     }
 
-    /// Sign a public key
+    /// Sign a public key.
+    ///
+    /// Returns `(signed_certificate, effective_ttl)`.  The effective TTL may be
+    /// lower than the requested value because the engine clamps it to
+    /// `max_lease_ttl`.
     pub fn sign_key(
         &self,
         public_key_str: &str,
         valid_principals: Vec<String>,
         ttl: u64,
-    ) -> SecretResult<String> {
+    ) -> SecretResult<(String, u64)> {
         // Load CA Key
         let ca_priv_pem = self.config.ca_private_key.as_ref()
             .ok_or_else(|| SecretError::InvalidConfiguration("CA private key not configured".to_string()))?;
@@ -110,7 +124,7 @@ impl SshEngine {
         let cert = cert_builder.sign(&ca_key)
             .map_err(|e| SecretError::CryptoError(format!("Signing failed: {}", e)))?;
 
-        Ok(cert.to_string())
+        Ok((cert.to_string(), effective_ttl))
     }
 }
 
@@ -203,7 +217,7 @@ impl SecretEngine for SshEngine {
                 // same effective value so the metadata stays consistent.
                 let effective_ttl = ttl.min(self.config.max_lease_ttl);
 
-                let signed_cert = self.sign_key(public_key, principals, effective_ttl)?;
+                let (signed_cert, effective_ttl) = self.sign_key(public_key, principals, effective_ttl)?;
 
                 let mut resp_data = HashMap::new();
                 resp_data.insert("signed_key".to_string(), Value::String(signed_cert));
@@ -310,21 +324,27 @@ impl SshEngine {
 
         // Create OpenSSH private key format
         let mut private_key_bytes = signing_key.to_bytes();
-        let encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
+        let mut encoded_priv = general_purpose::STANDARD.encode(private_key_bytes);
         // Zeroize private key bytes after encoding
         zeroize::Zeroize::zeroize(&mut private_key_bytes);
 
         // OpenSSH private key format (simplified)
-        let openssh_private_key = format!(
+        let mut openssh_private_key = format!(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n{}-----END OPENSSH PRIVATE KEY-----\n",
             encoded_priv
         );
+        // Zeroize intermediate encoded private key now that the PEM string is built
+        zeroize::Zeroize::zeroize(&mut encoded_priv);
 
         let mut key_data = HashMap::new();
+        // Move the private key into the Value; zeroize the local copy afterwards.
+        // Note: the Value::String copy cannot be zeroized, but scrubbing the
+        // local allocation reduces the number of copies in memory.
         key_data.insert(
             "private_key".to_string(),
-            Value::String(openssh_private_key),
+            Value::String(openssh_private_key.clone()),
         );
+        zeroize::Zeroize::zeroize(&mut openssh_private_key);
         key_data.insert("public_key".to_string(), Value::String(ssh_public_key));
         key_data.insert("key_type".to_string(), Value::String("ed25519".to_string()));
         key_data.insert("key_name".to_string(), Value::String(key_name.to_string()));
