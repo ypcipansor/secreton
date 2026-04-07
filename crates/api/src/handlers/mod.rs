@@ -18,6 +18,7 @@ pub mod ssh_tests;
 
 use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 
+use secreton_common::ServiceContainer;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
@@ -93,11 +94,16 @@ pub struct AppState {
     pub totp_engine: Arc<crate::services::totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
+    pub telemetry: Arc<secreton_core::telemetry::TelemetryCollector>,
     pub config: Arc<ApiConfig>,
 }
 
 impl From<Arc<ApiServiceContainer>> for AppState {
     fn from(container: Arc<ApiServiceContainer>) -> Self {
+        let telemetry = container.registry.get_service::<Arc<secreton_core::telemetry::TelemetryCollector>>("telemetry")
+            .expect("telemetry service must be registered")
+            .clone();
+
         Self {
             storage: container.storage.clone(),
             crypto: container.crypto.clone(),
@@ -113,6 +119,7 @@ impl From<Arc<ApiServiceContainer>> for AppState {
             totp_engine: container.totp_engine.clone(),
             performance: container.performance.clone(),
             mfa: container.mfa.clone(),
+            telemetry,
             config: Arc::new(container.config.clone()),
         }
     }

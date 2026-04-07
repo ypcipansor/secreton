@@ -1082,6 +1082,11 @@ impl AdminService {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true);
 
+                    let require_lowercase = config
+                        .get("password_policy_require_lowercase")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
                     let require_numbers = config
                         .get("password_policy_require_numbers")
                         .and_then(|v| v.as_bool())
@@ -1096,7 +1101,7 @@ impl AdminService {
                         min_length,
                         max_length: None, // Not used in this context
                         require_uppercase,
-                        require_lowercase: true, // Assume always required
+                        require_lowercase,
                         require_numbers,
                         require_special,
                         allowed_special_chars: None, // Not used in this context
@@ -1581,6 +1586,26 @@ impl AdminService {
         Ok(findings)
     }
 
+    /// Get system configuration from storage
+    pub async fn get_config(&self) -> Result<HashMap<String, serde_json::Value>, AdminError> {
+        let config_path = "system/config";
+        let entry = self
+            .storage
+            .get_by_path(config_path)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        let config_data: HashMap<String, serde_json::Value> = entry
+            .and_then(|e| {
+                e.metadata
+                    .get("config_data")
+                    .and_then(|data| serde_json::from_str(data).ok())
+            })
+            .unwrap_or_default();
+
+        Ok(config_data)
+    }
+
     /// Update system configuration
     pub async fn update_config(
         &self,
@@ -1599,6 +1624,7 @@ impl AdminService {
                     | "max_failed_attempts"
                     | "password_policy_min_length"
                     | "password_policy_require_uppercase"
+                    | "password_policy_require_lowercase"
                     | "password_policy_require_numbers"
                     | "password_policy_require_special"
                     | "rate_limit_requests_per_minute"
