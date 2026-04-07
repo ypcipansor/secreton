@@ -296,7 +296,7 @@ impl SshPersistentService {
         // sync even if `max_lease_ttl` is changed in only one place.
         let effective_ttl = ttl.min(SSH_MAX_LEASE_TTL);
 
-        let signed_cert = engine.sign_key(public_key, valid_principals, ttl)
+        let signed_cert = engine.sign_key(public_key, valid_principals, effective_ttl)
             .map_err(|e| match &e {
                 SecretError::InvalidSecretData(_) => {
                     SshServiceError::BadRequest(format!("Failed to sign key: {}", e))

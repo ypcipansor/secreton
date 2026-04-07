@@ -199,6 +199,10 @@ impl SecretEngine for SshEngine {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(self.config.default_lease_ttl);
 
+                // sign_key internally clamps to max_lease_ttl; compute the
+                // same effective value so the metadata stays consistent.
+                let effective_ttl = ttl.min(self.config.max_lease_ttl);
+
                 let signed_cert = self.sign_key(public_key, principals, ttl)?;
 
                 let mut resp_data = HashMap::new();
@@ -213,7 +217,7 @@ impl SecretEngine for SshEngine {
                         created_by: "ssh-engine".to_string(),
                         updated_by: "ssh-engine".to_string(),
                         lease_id: None,
-                        lease_duration: Some(ttl),
+                        lease_duration: Some(effective_ttl),
                         ..Default::default()
                     },
                     created_at: chrono::Utc::now(),
