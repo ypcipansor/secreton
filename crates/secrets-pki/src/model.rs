@@ -25,10 +25,13 @@ pub struct CertificateRequest {
     /// Common name
     pub common_name: String,
     /// Alternative names (DNS names, IP addresses)
+    #[serde(default)]
     pub alt_names: Vec<String>,
     /// IP addresses
+    #[serde(default)]
     pub ip_addresses: Vec<String>,
     /// Email addresses
+    #[serde(default)]
     pub email_addresses: Vec<String>,
     /// Organization
     pub organization: Option<String>,
@@ -41,8 +44,10 @@ pub struct CertificateRequest {
     /// Locality
     pub locality: Option<String>,
     /// Key usage extensions
+    #[serde(default)]
     pub key_usages: Vec<String>,
     /// Extended key usage extensions
+    #[serde(default)]
     pub extended_key_usages: Vec<String>,
     /// TTL in seconds
     pub ttl: Option<i64>,

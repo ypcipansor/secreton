@@ -152,31 +152,19 @@ impl DatabaseService {
             )));
         }
 
-        // Acquire the write lock FIRST, then persist config and load roles from
-        // storage while holding it.  This prevents a concurrent `add_role` from
-        // persisting a role and adding it to the old engine between the storage
-        // read and the engine swap — which would silently drop that role from
-        // the in-memory engine.  It also prevents two concurrent `set_config`
-        // calls from ending up with the in-memory engine holding a stale config
-        // that differs from what was last written to storage.
+        // Acquire the write lock FIRST, then load roles, persist config, and
+        // rebuild the engine while holding it.  This prevents a concurrent
+        // `add_role` from persisting a role and adding it to the old engine
+        // between the storage read and the engine swap — which would silently
+        // drop that role from the in-memory engine.  It also prevents two
+        // concurrent `set_config` calls from ending up with the in-memory
+        // engine holding a stale config that differs from what was last
+        // written to storage.
         let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
 
-        // Persist config to storage while holding the lock
-        let data = serde_json::to_vec(&config)
-            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
-        let encrypted = self.crypto.encrypt_data(&data).await
-            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
-        let entry = SecretEntry::new(
-            DB_CONFIG_PATH.to_string(),
-            encrypted,
-            EncryptionMetadata::default(),
-            SecurityLevel::TopSecret,
-            uuid::Uuid::nil(),
-        );
-        self.storage.store(&entry).await
-            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
-
-        // Load roles from storage while still holding the lock
+        // Load roles from storage BEFORE persisting the new config.  If the
+        // role-loading step fails, we return an error without having written
+        // the config — keeping storage and the in-memory engine consistent.
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
             ..Default::default()
@@ -198,6 +186,21 @@ impl DatabaseService {
                 }
             }
         }
+
+        // Persist config to storage after roles are loaded successfully.
+        let data = serde_json::to_vec(&config)
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let encrypted = self.crypto.encrypt_data(&data).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let entry = SecretEntry::new(
+            DB_CONFIG_PATH.to_string(),
+            encrypted,
+            EncryptionMetadata::default(),
+            SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        );
+        self.storage.store(&entry).await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Build the new engine and apply roles atomically
         let mut new_engine = DatabaseEngine::new(config);

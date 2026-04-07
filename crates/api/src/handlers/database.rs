@@ -96,8 +96,16 @@ async fn set_config(
 
 async fn list_roles(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
+    // Only admin/root users may list roles (consistent with list_leases and
+    // other database engine endpoints that expose infrastructure details)
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to list database roles".to_string(),
+        ));
+    }
+
     let roles = state.database.list_roles().await
         .map_err(map_db_err)?;
 

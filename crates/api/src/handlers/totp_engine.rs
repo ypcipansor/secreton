@@ -31,11 +31,22 @@ pub fn create_routes() -> Router<AppState> {
         .route("/code/{name}", get(generate_code))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateKeyRequest {
     pub secret: String,
     pub issuer: Option<String>,
     pub account_name: Option<String>,
+}
+
+// Manual Debug impl to prevent accidental logging of the TOTP secret.
+impl std::fmt::Debug for CreateKeyRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateKeyRequest")
+            .field("secret", &"[REDACTED]")
+            .field("issuer", &self.issuer)
+            .field("account_name", &self.account_name)
+            .finish()
+    }
 }
 
 async fn list_keys(

@@ -44,7 +44,6 @@ impl From<anyhow::Error> for PkiServiceError {
 }
 
 const CA_STORAGE_PATH: &str = "sys/pki/ca";
-const CA_CONFIG_PATH: &str = "sys/pki/config";
 
 pub struct PkiPersistentService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
