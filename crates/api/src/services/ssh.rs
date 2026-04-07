@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::services::crypto::CryptoService;
-use secreton_secrets::{SshConfig, SshEngine, SecretEngine};
+use secreton_secrets::{SecretError, SshConfig, SshEngine, SecretEngine};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use chrono::Utc;
 
@@ -88,8 +88,10 @@ impl SshPersistentService {
         }
 
         let maybe_ca = if let Some(entry) = self.storage.get_by_path(SSH_CA_STORAGE_PATH).await? {
-            let decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
+            let mut decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
             let ca_data: serde_json::Value = serde_json::from_slice(&decrypted_data)?;
+            // Zeroize decrypted plaintext containing the CA private key
+            zeroize::Zeroize::zeroize(&mut decrypted_data);
 
             let priv_key = ca_data["private_key"].as_str().map(|s| s.to_string());
             let pub_key = ca_data["public_key"].as_str().map(|s| s.to_string());
@@ -232,7 +234,15 @@ impl SshPersistentService {
         let engine = self.engine.read().await;
 
         let signed_cert = engine.sign_key(public_key, valid_principals, ttl)
-            .map_err(|e| SshServiceError::BadRequest(format!("Failed to sign key: {}", e)))?;
+            .map_err(|e| match &e {
+                SecretError::InvalidSecretData(_) => {
+                    SshServiceError::BadRequest(format!("Failed to sign key: {}", e))
+                }
+                SecretError::InvalidConfiguration(_) => {
+                    SshServiceError::Internal(format!("SSH CA not properly configured: {}", e))
+                }
+                _ => SshServiceError::Internal(format!("Failed to sign key: {}", e)),
+            })?;
 
         Ok(signed_cert)
     }
