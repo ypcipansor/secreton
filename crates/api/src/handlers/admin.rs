@@ -620,7 +620,7 @@ pub async fn get_config(
         api: ApiConfigInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
             bind_address: state.config.http.bind_address.to_string(),
-            max_connections: state.config.http.max_body_size as u32, // Placeholder
+            max_connections: 1000, // TODO: add max_connections to HttpConfig
             timeout: state.config.http.timeout,
         },
         security: SecurityConfigInfo {
@@ -643,7 +643,7 @@ pub async fn get_config(
                     .unwrap_or(true),
                 require_special: dynamic_config.get("password_policy_require_special")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
+                    .unwrap_or(false),
             },
             session_timeout: dynamic_config.get("session_timeout")
                 .and_then(|v| v.as_u64())
@@ -775,9 +775,9 @@ pub async fn get_system_status(
         && auth_status == "healthy"
     {
         "healthy"
-    } else if database_status == "unhealthy"
-        || storage_status == "unhealthy"
-        || crypto_status == "unhealthy"
+    } else if database_status != "healthy"
+        || storage_status != "healthy"
+        || crypto_status != "healthy"
     {
         "unhealthy"
     } else {
@@ -1200,7 +1200,7 @@ pub async fn update_config(
         .await
         .map_err(map_admin_error)?;
 
-    Ok(Json(ApiResponse::success(serde_json::to_value(result).unwrap())))
+    Ok(Json(ApiResponse::success(serde_json::to_value(result).map_err(|e| crate::ApiError::Internal(e.to_string()))?)))
 }
 
 pub async fn reload_config(
