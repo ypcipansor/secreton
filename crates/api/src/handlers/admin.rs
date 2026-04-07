@@ -630,7 +630,7 @@ pub async fn get_config(
             password_policy: PasswordPolicyInfo {
                 min_length: dynamic_config.get("password_policy_min_length")
                     .and_then(|v| v.as_u64())
-                    .map(|v| v as u8)
+                    .map(|v| v.min(255) as u8)
                     .unwrap_or(8),
                 require_uppercase: dynamic_config.get("password_policy_require_uppercase")
                     .and_then(|v| v.as_bool())
