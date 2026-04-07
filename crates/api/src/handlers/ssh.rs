@@ -36,7 +36,7 @@ pub struct CaResponse {
     pub public_key: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SignKeyRequest {
     pub public_key: String,
     pub valid_principals: Option<Vec<String>>,
@@ -85,8 +85,9 @@ async fn sign_key(
 ) -> ApiResult<AxumJson<ApiResponse<SignedKeyResponse>>> {
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
     // certificates and potential u64 overflow in the engine's timestamp math.
+    let min_ttl: u64 = 1; // Prevent immediately-expired certificates
     let max_ttl: u64 = 86400 * 30; // 30 days — must match SshConfig::max_lease_ttl
-    let ttl = payload.ttl.unwrap_or(3600).min(max_ttl);
+    let ttl = payload.ttl.unwrap_or(3600).clamp(min_ttl, max_ttl);
 
     // Security: Only allow users to sign for their own username by default.
     // If specific principals are requested, verify they are allowed.
