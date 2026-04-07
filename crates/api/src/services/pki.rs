@@ -223,9 +223,8 @@ impl PkiPersistentService {
             return Err(PkiServiceError::Internal(format!("Failed to persist Root CA: {}", e)));
         }
 
-        // Update in-memory engine configuration.
-        // Clone key_pem for the engine config; the original is moved into
-        // the response below so no extra unzeroized copy lingers on the heap.
+        // Build the engine config by cloning both values.  The originals are
+        // moved into the response below so no extra unzeroized copy lingers.
         let config = PkiConfig {
             default_lease_ttl: 3600,
             max_lease_ttl: 86400 * 365,
@@ -239,9 +238,10 @@ impl PkiPersistentService {
 
         info!("Generated and persisted new Root CA: {}", common_name);
 
-        // Move cert_pem and key_pem into the response instead of cloning
-        // them again.  This avoids creating an additional heap copy of the
-        // private key that would escape zeroization.
+        // `issuing_ca` needs its own copy; reuse the engine-config clone
+        // that was just moved into the engine.  We already cloned above, so
+        // clone once more for issuing_ca — `cert_pem` itself is moved into
+        // `certificate` to avoid yet another copy.
         let issuing_ca = cert_pem.clone();
         Ok(CertificateResponse {
             certificate: cert_pem,
