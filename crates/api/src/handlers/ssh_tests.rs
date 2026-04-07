@@ -15,7 +15,6 @@ async fn server_with_ssh() -> (TestServer, String) {
     // the Rust 2024 edition safety requirement that no other thread is
     // inspecting the environment at the same time.
     // See: https://doc.rust-lang.org/std/env/fn.set_var.html#safety
-    #[allow(unused_unsafe)]
     unsafe {
         std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
     }
