@@ -94,8 +94,8 @@ impl SshPersistentService {
             let priv_key = ca_data["private_key"].as_str().map(|s| s.to_string());
             let pub_key = ca_data["public_key"].as_str().map(|s| s.to_string());
 
-            if priv_key.is_some() && pub_key.is_some() {
-                Some((priv_key.unwrap(), pub_key.unwrap()))
+            if let (Some(priv_k), Some(pub_k)) = (priv_key, pub_key) {
+                Some((priv_k, pub_k))
             } else {
                 None
             }
@@ -148,6 +148,16 @@ impl SshPersistentService {
         self.ensure_initialized().await?;
 
         let mut engine_lock = self.engine.write().await;
+
+        // Guard: prevent overwriting an existing CA which would silently
+        // invalidate all previously signed certificates.
+        let existing = engine_lock.read("config/ca").await
+            .map_err(|e| SshServiceError::Internal(e.to_string()))?;
+        if existing.is_some() {
+            return Err(SshServiceError::Conflict(
+                "SSH CA already exists. Delete the existing CA first to regenerate.".to_string(),
+            ));
+        }
 
         let (priv_pem, pub_str) = engine_lock.generate_ca()
             .map_err(|e| SshServiceError::Internal(format!("Failed to generate SSH CA: {}", e)))?;
