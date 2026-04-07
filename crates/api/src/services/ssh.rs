@@ -297,7 +297,7 @@ impl SshPersistentService {
                     SshServiceError::BadRequest(format!("Failed to sign key: {}", e))
                 }
                 SecretError::InvalidConfiguration(_) => {
-                    SshServiceError::Internal(format!("SSH CA not properly configured: {}", e))
+                    SshServiceError::BadRequest(format!("SSH CA not properly configured: {}", e))
                 }
                 _ => SshServiceError::Internal(format!("Failed to sign key: {}", e)),
             })?;
