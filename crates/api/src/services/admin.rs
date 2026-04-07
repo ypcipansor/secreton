@@ -1649,11 +1649,6 @@ impl AdminService {
         // Validate value types and ranges
         if let Some(val) = config_updates.get("session_timeout") {
             match val.as_u64() {
-                Some(0) => {
-                    return Err(AdminError::InvalidConfig(
-                        "session_timeout must be at least 60 seconds".to_string(),
-                    ));
-                }
                 Some(v) if v < 60 => {
                     return Err(AdminError::InvalidConfig(
                         "session_timeout must be at least 60 seconds".to_string(),
@@ -1680,6 +1675,29 @@ impl AdminService {
                     ));
                 }
                 _ => {}
+            }
+        }
+        // Validate remaining numeric config keys
+        for (num_key, min, max, label) in &[
+            ("jwt_expiration", 1u64, 8760u64, "jwt_expiration must be a positive integer (hours) no greater than 8760"),
+            ("max_failed_attempts", 1u64, 100u64, "max_failed_attempts must be a positive integer between 1 and 100"),
+            ("rate_limit_requests_per_minute", 1u64, 100000u64, "rate_limit_requests_per_minute must be a positive integer between 1 and 100000"),
+            ("backup_retention_days", 1u64, 3650u64, "backup_retention_days must be a positive integer between 1 and 3650"),
+            ("log_retention_days", 1u64, 3650u64, "log_retention_days must be a positive integer between 1 and 3650"),
+        ] {
+            if let Some(val) = config_updates.get(*num_key) {
+                match val.as_u64() {
+                    Some(v) if v < *min || v > *max => {
+                        return Err(AdminError::InvalidConfig(label.to_string()));
+                    }
+                    None => {
+                        return Err(AdminError::InvalidConfig(format!(
+                            "{} must be a positive integer",
+                            num_key
+                        )));
+                    }
+                    _ => {}
+                }
             }
         }
         for bool_key in &[
