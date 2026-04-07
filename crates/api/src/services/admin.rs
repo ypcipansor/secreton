@@ -1332,9 +1332,11 @@ impl AdminService {
         }
 
         // Check session timeout configuration
+        // NOTE: session_timeout is stored in seconds (e.g. 3600 = 60 minutes)
         if let Some(config) = &config_data {
             if let Some(session_timeout) = config.get("session_timeout") {
-                if let Some(timeout_minutes) = session_timeout.as_u64() {
+                if let Some(timeout_seconds) = session_timeout.as_u64() {
+                    let timeout_minutes = timeout_seconds / 60;
                     if timeout_minutes > 480 {
                         // 8 hours
                         findings.push(SecurityFinding {
@@ -1644,6 +1646,60 @@ impl AdminService {
             )));
         }
 
+        // Validate value types and ranges
+        if let Some(val) = config_updates.get("session_timeout") {
+            match val.as_u64() {
+                Some(0) => {
+                    return Err(AdminError::InvalidConfig(
+                        "session_timeout must be at least 60 seconds".to_string(),
+                    ));
+                }
+                Some(v) if v < 60 => {
+                    return Err(AdminError::InvalidConfig(
+                        "session_timeout must be at least 60 seconds".to_string(),
+                    ));
+                }
+                None => {
+                    return Err(AdminError::InvalidConfig(
+                        "session_timeout must be a positive integer (seconds)".to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if let Some(val) = config_updates.get("password_policy_min_length") {
+            match val.as_u64() {
+                Some(v) if v == 0 || v > 255 => {
+                    return Err(AdminError::InvalidConfig(
+                        "password_policy_min_length must be between 1 and 255".to_string(),
+                    ));
+                }
+                None => {
+                    return Err(AdminError::InvalidConfig(
+                        "password_policy_min_length must be a positive integer".to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        for bool_key in &[
+            "enable_mfa",
+            "enable_audit_logging",
+            "password_policy_require_uppercase",
+            "password_policy_require_lowercase",
+            "password_policy_require_numbers",
+            "password_policy_require_special",
+        ] {
+            if let Some(val) = config_updates.get(*bool_key) {
+                if !val.is_boolean() {
+                    return Err(AdminError::InvalidConfig(format!(
+                        "{} must be a boolean",
+                        bool_key
+                    )));
+                }
+            }
+        }
+
         // Store configuration in system config path
         let config_path = "system/config";
         let current_config = self
@@ -1663,7 +1719,9 @@ impl AdminService {
 
         // Apply updates
         let mut updated_count = 0;
+        let mut updated_keys: Vec<String> = Vec::new();
         for (key, value) in config_updates {
+            updated_keys.push(key.clone());
             config_data.insert(key, value);
             updated_count += 1;
         }
@@ -1713,8 +1771,8 @@ impl AdminService {
                 details.insert(
                     "updated_keys".to_string(),
                     serde_json::Value::Array(
-                        config_data
-                            .keys()
+                        updated_keys
+                            .iter()
                             .map(|k| serde_json::Value::String(k.clone()))
                             .collect(),
                     ),

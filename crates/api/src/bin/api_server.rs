@@ -410,12 +410,9 @@ async fn main() -> anyhow::Result<()> {
 
     use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
     let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
-    let telemetry_clone = telemetry.clone();
-    tokio::spawn(async move {
-        if let Err(e) = telemetry_clone.start_collection().await {
-            warn!("Failed to start telemetry collection: {}", e);
-        }
-    });
+    if let Err(e) = telemetry.start_collection().await {
+        warn!("Failed to start telemetry collection: {}", e);
+    }
 
     container.register_service::<Arc<TelemetryCollector>>(
         "telemetry".to_string(),

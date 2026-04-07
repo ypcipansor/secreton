@@ -923,16 +923,17 @@ async fn check_database_health(state: &AppState) -> String {
     match timeout(Duration::from_secs(5), state.storage.health_check()).await {
         Ok(Ok(status)) if status.is_healthy => "healthy".to_string(),
         Ok(Ok(_)) => "unhealthy".to_string(),
-        Ok(Err(e)) => format!("error: {}", e),
+        Ok(Err(_)) => "unhealthy".to_string(),
         Err(_) => "timeout".to_string(),
     }
 }
 
 async fn check_cache_health(state: &AppState) -> String {
     // Performance optimizer uses internal cache
-    match state.performance.analyze_performance().await {
-        Ok(_) => "healthy".to_string(),
-        Err(e) => format!("error: {}", e),
+    match timeout(Duration::from_secs(5), state.performance.analyze_performance()).await {
+        Ok(Ok(_)) => "healthy".to_string(),
+        Ok(Err(_)) => "unhealthy".to_string(),
+        Err(_) => "timeout".to_string(),
     }
 }
 
@@ -960,7 +961,7 @@ async fn check_crypto_health(_state: &AppState) -> String {
 async fn check_storage_health(state: &AppState) -> String {
     match timeout(Duration::from_secs(5), state.storage.get_stats()).await {
         Ok(Ok(_)) => "healthy".to_string(),
-        Ok(Err(e)) => format!("error: {}", e),
+        Ok(Err(_)) => "unhealthy".to_string(),
         Err(_) => "timeout".to_string(),
     }
 }
@@ -968,7 +969,7 @@ async fn check_storage_health(state: &AppState) -> String {
 async fn check_auth_health(state: &AppState) -> String {
     match timeout(Duration::from_secs(5), state.auth.get_user_count()).await {
         Ok(Ok(_)) => "healthy".to_string(),
-        Ok(Err(e)) => format!("error: {}", e),
+        Ok(Err(_)) => "unhealthy".to_string(),
         Err(_) => "timeout".to_string(),
     }
 }

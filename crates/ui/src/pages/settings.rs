@@ -206,8 +206,12 @@ pub fn SettingsPage() -> impl IntoView {
                                                 <span class="text-sm text-gray-500">"Session Timeout (minutes)"</span>
                                                 <input
                                                     type="number"
+                                                    min="1"
                                                     value=move || (session_timeout.get() / 60).to_string()
-                                                    on:input=move |ev| set_session_timeout.set(event_target_value(&ev).parse::<u64>().unwrap_or(60) * 60)
+                                                    on:input=move |ev| {
+                                                        let mins = event_target_value(&ev).parse::<u64>().unwrap_or(60).max(1);
+                                                        set_session_timeout.set(mins * 60)
+                                                    }
                                                     class="w-20 px-2 py-1 text-sm border rounded focus:ring-blue-500 focus:border-blue-500"
                                                 />
                                             </div>
