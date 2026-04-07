@@ -68,6 +68,7 @@ pub fn SettingsPage() -> impl IntoView {
     let (req_numbers, set_req_numbers) = signal(true);
     let (req_special, set_req_special) = signal(false);
     let (session_timeout, set_session_timeout) = signal(3600u64);
+    let (config_loaded, set_config_loaded) = signal(false);
 
     Effect::new(move |_| {
         if let Some(Ok(config)) = config_resource.get() {
@@ -78,6 +79,7 @@ pub fn SettingsPage() -> impl IntoView {
             set_req_numbers.set(config.security.password_policy.require_numbers);
             set_req_special.set(config.security.password_policy.require_special);
             set_session_timeout.set(config.security.session_timeout);
+            set_config_loaded.set(true);
         }
     });
 
@@ -130,7 +132,12 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
                 <button
                     on:click=move |_| save_config.dispatch(())
-                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                    disabled=move || !config_loaded.get()
+                    class=move || if config_loaded.get() {
+                        "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                    } else {
+                        "px-4 py-2 bg-gray-400 text-white rounded cursor-not-allowed"
+                    }
                 >
                     "Save Changes"
                 </button>

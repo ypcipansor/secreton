@@ -228,7 +228,8 @@ mod tests {
         let body: ApiResponse<SystemConfig> = response.json();
         assert!(body.success);
         let config = body.data.expect("config payload");
-        assert!(config.security.mfa_enabled);
+        // MfaConfig derives Default, so mfa.enabled defaults to false
+        assert!(!config.security.mfa_enabled);
         assert_eq!(config.api.version, "0.1.0");
     }
 
