@@ -65,8 +65,11 @@ impl SshEngine {
         let user_pub_key = PublicKey::from_openssh(public_key_str)
             .map_err(|e| SecretError::InvalidSecretData(format!("Invalid public key: {}", e)))?;
 
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        let expire = now + ttl;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| SecretError::CryptoError(format!("System clock error: {}", e)))?
+            .as_secs();
+        let expire = now.saturating_add(ttl);
 
         // Build Certificate
         // new_with_random_nonce(rng, pub_key, valid_after, valid_before)

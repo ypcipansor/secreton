@@ -4,6 +4,7 @@
 //! and CryptoService. Wraps the in-memory PkiEngine.
 
 use anyhow::{Result, anyhow};
+use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -81,22 +82,26 @@ impl PkiPersistentService {
         // Try to load CA from storage BEFORE acquiring the write lock so that a
         // storage failure does not leave the engine in a half-initialised state.
         let maybe_config = if let Some(entry) = self.storage.get_by_path(CA_STORAGE_PATH).await? {
+            // Deserialize into a typed struct so the CA private key is never
+            // held in a serde_json::Value::String (which cannot be zeroized).
+            #[derive(serde::Deserialize)]
+            struct CaLoadData {
+                certificate: Option<String>,
+                private_key: Option<String>,
+            }
+
             let mut decrypted_data = self.crypto.decrypt(&entry.encrypted_data).await?;
-            let parse_result = serde_json::from_slice(&decrypted_data);
+            let parse_result: Result<CaLoadData, _> = serde_json::from_slice(&decrypted_data);
             // Zeroize decrypted plaintext containing the CA private key before
             // propagating any parse error, so key material is never left in
             // freed heap memory.
             zeroize::Zeroize::zeroize(&mut decrypted_data);
-            let ca_data: serde_json::Value = parse_result?;
+            let ca_data = parse_result?;
 
-            let cert_pem = ca_data["certificate"]
-                .as_str()
-                .ok_or_else(|| anyhow!("Missing certificate in storage"))?
-                .to_string();
-            let key_pem = ca_data["private_key"]
-                .as_str()
-                .ok_or_else(|| anyhow!("Missing private key in storage"))?
-                .to_string();
+            let cert_pem = ca_data.certificate
+                .ok_or_else(|| anyhow!("Missing certificate in storage"))?;
+            let key_pem = ca_data.private_key
+                .ok_or_else(|| anyhow!("Missing private key in storage"))?;
 
             Some(PkiConfig {
                 default_lease_ttl: 3600,
@@ -163,22 +168,45 @@ impl PkiPersistentService {
             .parse_ca_cert_from_pem(&cert_pem)
             .map_err(|e| PkiServiceError::Internal(format!("Failed to parse generated Root CA: {}", e)))?;
 
-        // Store in storage
-        let ca_data = json!({
-            "certificate": cert_pem,
-            "private_key": key_pem.clone(),
-            "common_name": common_name,
-            "organization": organization,
-            "created_at": chrono::Utc::now().to_rfc3339(),
-        });
+        // Serialize directly via a short-lived struct instead of an intermediate
+        // serde_json::Value, so the CA private key is never held in a
+        // Value::String that cannot be zeroized.
+        #[derive(Serialize)]
+        struct CaStorageData<'a> {
+            certificate: &'a str,
+            private_key: &'a str,
+            common_name: &'a str,
+            organization: &'a str,
+            created_at: String,
+        }
+        let ca_storage = CaStorageData {
+            certificate: &cert_pem,
+            private_key: &key_pem,
+            common_name,
+            organization,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
 
-        let mut ca_bytes = serde_json::to_vec(&ca_data)
-            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
+        let serialize_result = serde_json::to_vec(&ca_storage);
+        // Zeroize the serialized bytes eagerly; key_pem itself is kept alive
+        // until the response and engine config have been built.
+        let mut ca_bytes = match serialize_result {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                zeroize::Zeroize::zeroize(&mut key_pem);
+                return Err(PkiServiceError::Internal(e.to_string()));
+            }
+        };
         let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;
         // Zeroize sensitive plaintext containing the CA private key after encryption
         zeroize::Zeroize::zeroize(&mut ca_bytes);
-        let encrypted_data = encrypt_result
-            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
+        let encrypted_data = match encrypt_result {
+            Ok(data) => data,
+            Err(e) => {
+                zeroize::Zeroize::zeroize(&mut key_pem);
+                return Err(PkiServiceError::Internal(e.to_string()));
+            }
+        };
 
         let entry = SecretEntry::new(
             CA_STORAGE_PATH.to_string(),
@@ -191,6 +219,7 @@ impl PkiPersistentService {
         // This storage operation is async and outside the lock? No, we are holding the lock.
         // This blocks other readers/writers which is what we want for correctness here.
         if let Err(e) = self.storage.store(&entry).await {
+            zeroize::Zeroize::zeroize(&mut key_pem);
             return Err(PkiServiceError::Internal(format!("Failed to persist Root CA: {}", e)));
         }
 

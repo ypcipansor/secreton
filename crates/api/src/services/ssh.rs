@@ -207,11 +207,12 @@ impl SshPersistentService {
             public_key: &pub_str,
             created_at: Utc::now().to_rfc3339(),
         };
-        let mut ca_bytes = serde_json::to_vec(&ca_storage)?;
-        // Zeroize the local copy of the CA private key now that it has been
-        // serialised into ca_bytes.  The engine's internal copy is retained for
+        let serialize_result = serde_json::to_vec(&ca_storage);
+        // Zeroize the local copy of the CA private key now that serialization
+        // is complete (or failed).  The engine's internal copy is retained for
         // signing; this only scrubs the extra heap allocation.
         zeroize::Zeroize::zeroize(&mut priv_pem);
+        let mut ca_bytes = serialize_result?;
         let encrypt_result = self.crypto.encrypt_data(&ca_bytes).await;
         // Zeroize sensitive plaintext containing the CA private key after encryption
         zeroize::Zeroize::zeroize(&mut ca_bytes);
