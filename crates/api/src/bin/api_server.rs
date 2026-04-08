@@ -461,9 +461,13 @@ async fn main() -> anyhow::Result<()> {
         totp_engine_service.clone(),
     );
 
-    // Use default in-memory states for now, matching ApiState::new implementation
+    // Use the shared transit engine for ApiState so it matches the one in the container.
+    // TransitApiState::default() would create a separate, disconnected TransitEngine.
+    let transit_api_state = TransitApiState {
+        engine: transit_engine.clone(),
+    };
     let api_state = ApiState::new(
-        TransitApiState::default(),
+        transit_api_state,
         KVApiState::default(),
         database_state,
         Some(pki_service),

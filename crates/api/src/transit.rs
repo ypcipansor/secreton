@@ -118,6 +118,10 @@ pub async fn get_key_info(
     Path(key_name): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<KeyInfo>>, StatusCode> {
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     match state.transit.get_key_info(&key_name).await {
         Ok(info) => Ok(Json(ApiResponse::success(info))),
         Err(_) => Err(StatusCode::NOT_FOUND),
@@ -129,6 +133,12 @@ pub async fn create_key(
     State(state): State<AppState>,
     Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
+    // Validate key name to prevent path-traversal and encoding issues
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Parse key type from string to KeyType enum
     let key_type = match request.key_type.as_deref().unwrap_or("aes256-gcm") {
         "aes256-gcm" => KeyType::Aes256Gcm,
@@ -177,6 +187,10 @@ pub async fn encrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<ApiResponse<EncryptResponse>>, StatusCode> {
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 plaintext
@@ -217,6 +231,10 @@ pub async fn decrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<ApiResponse<DecryptResponse>>, StatusCode> {
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode context if provided
@@ -253,6 +271,10 @@ pub async fn sign_data(
     Path(key_name): Path<String>,
     Json(request): Json<SignRequest>,
 ) -> Result<Json<ApiResponse<SignResponse>>, StatusCode> {
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 input
@@ -353,6 +375,10 @@ pub async fn verify_data(
     Path(key_name): Path<String>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<ApiResponse<VerifyResponse>>, StatusCode> {
+    if let Err(_) = crate::handlers::validate_name(&key_name) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 input

@@ -1398,22 +1398,15 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
-        // Generate nonce/IV
-        let nonce = secreton_crypto::generate_random_bytes(12)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-
-        // Encrypt data using crypto engine
-        let ciphertext = self
+        // Encrypt data using crypto engine.
+        // `self.crypto.encrypt` returns an `EncryptedData` that already contains
+        // the internally-generated nonce, ciphertext, and tag. Use it directly
+        // instead of substituting a separately-generated nonce (which would cause
+        // a nonce mismatch on decryption).
+        let encrypted_data = self
             .crypto
             .encrypt(&key_data, plaintext, None)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-
-        let encrypted_data = EncryptedData {
-            algorithm: secreton_crypto::AlgorithmId::Aes256Gcm,
-            nonce: nonce.clone(),
-            ciphertext: ciphertext.ciphertext,
-            tag: ciphertext.tag,
-        };
 
         // Create key ID for audit
         let key_id = format!("{}/{}", user.id, key_name);
@@ -1464,15 +1457,12 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
 
-        // Decrypt the user data using the key
+        // Decrypt the user data using the key.
+        // `decrypt_full` is deprecated and always returns an error.
+        // Use `decrypt_with_key` which accepts the full `EncryptedData` struct.
         let plaintext = self
             .crypto
-            .decrypt_full(
-                &key_data,
-                &encrypted_data.nonce,
-                &encrypted_data.ciphertext,
-                None,
-            )
+            .decrypt_with_key(&key_data, encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Log audit trail
