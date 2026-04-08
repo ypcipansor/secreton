@@ -1795,10 +1795,17 @@ impl AdminService {
             expires_at: None,
         };
 
-        self.storage
-            .store(&config_entry)
-            .await
-            .map_err(AdminError::Storage)?;
+        if current_config.is_some() {
+            self.storage
+                .update(&config_entry)
+                .await
+                .map_err(AdminError::Storage)?;
+        } else {
+            self.storage
+                .store(&config_entry)
+                .await
+                .map_err(AdminError::Storage)?;
+        }
 
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
