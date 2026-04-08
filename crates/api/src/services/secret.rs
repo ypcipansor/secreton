@@ -567,7 +567,7 @@ impl SecretService {
         version: u32,
         user: &secreton_auth::User,
     ) -> Result<SecretData, SecretError> {
-        self.check_permission(user, path, "rollback").await?;
+        self.check_permission(user, path, "write").await?;
 
         // 1. Fetch the historical version
         let historical_data = self.get_secret(path, user, Some(version)).await?;
@@ -1324,11 +1324,16 @@ impl SecretService {
 
         // 2. Delete all versioned key material
         let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
-        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix);
+        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
         let entries = self.storage.list(&query).await.map_err(SecretError::Storage)?;
 
         for entry in entries {
-            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            // Only delete entries whose suffix after the prefix is a pure version number
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
+                if v_str.parse::<u32>().is_ok() {
+                    self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+                }
+            }
         }
 
         // 3. Delete legacy non-versioned key material if any
