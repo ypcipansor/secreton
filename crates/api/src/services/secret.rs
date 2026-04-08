@@ -1099,11 +1099,18 @@ impl SecretService {
             .await
             .map_err(SecretError::Storage)?;
 
+        // Encrypt the new key data before storing (must match create_key behavior)
+        let encrypted_new_key_data = self
+            .crypto
+            .encrypt_data(&new_key_data)
+            .await
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+
         // Store new key data with version
         let new_key_data_path = format!("key_data/{}/{}_v{}", user.id, key_id, new_version);
         let key_data_entry = secreton_storage::SecretEntry::new(
             new_key_data_path,
-            new_key_data,
+            encrypted_new_key_data,
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::TopSecret,
             owner_id,
@@ -1631,41 +1638,6 @@ impl SecretService {
             .await;
 
         Ok((is_valid, key_info.version))
-    }
-
-    /// List transit keys
-    pub async fn list_transit_keys(&self) -> Vec<String> {
-        self.crypto.transit_engine().list_keys().await
-    }
-
-    /// Get transit key info
-    pub async fn get_transit_key_info(&self, name: &str) -> Result<secreton_crypto::transit::KeyInfo, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().get_key_info(name).await
-    }
-
-    /// Transit encrypt
-    pub async fn transit_encrypt(&self, key_name: &str, plaintext: &[u8], context: Option<&[u8]>, key_version: Option<u32>) -> Result<String, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().encrypt(key_name, plaintext, context, key_version).await
-    }
-
-    /// Transit decrypt
-    pub async fn transit_decrypt(&self, key_name: &str, ciphertext: &str, context: Option<&[u8]>) -> Result<Vec<u8>, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().decrypt(key_name, ciphertext, context).await
-    }
-
-    /// Transit sign
-    pub async fn transit_sign(&self, key_name: &str, data: &[u8], algorithm: Option<secreton_crypto::transit::SignatureAlgorithm>, key_version: Option<u32>) -> Result<String, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().sign(key_name, data, algorithm, key_version).await
-    }
-
-    /// Transit verify
-    pub async fn transit_verify(&self, key_name: &str, data: &[u8], signature: &str, algorithm: Option<secreton_crypto::transit::SignatureAlgorithm>) -> Result<bool, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().verify(key_name, data, signature, algorithm).await
-    }
-
-    /// Transit hash
-    pub async fn transit_hash(&self, data: &[u8], algorithm: secreton_crypto::transit::HashAlgorithm) -> Result<String, secreton_crypto::CryptoError> {
-        self.crypto.transit_engine().hash(data, algorithm).await
     }
 
     /// Compute hash of data

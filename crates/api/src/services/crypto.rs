@@ -130,7 +130,6 @@ type CacheEntry = (String, Vec<u8>, std::time::Instant);
 
 /// Crypto service for API operations
 pub struct CryptoService {
-    transit_engine: Arc<secreton_crypto::transit::TransitEngine>,
     key_manager: Arc<KeyManager>,
     crypto_engine: Arc<CryptoEngine>,
     // Cache: (key_id, key_bytes, timestamp)
@@ -182,7 +181,6 @@ impl CryptoService {
         }
 
         Ok(Self {
-            transit_engine: Arc::new(secreton_crypto::transit::TransitEngine::new()),
             key_manager,
             crypto_engine: Arc::new(CryptoEngine::new()),
             active_key_cache: Arc::new(RwLock::new(None)),
@@ -222,11 +220,6 @@ impl CryptoService {
     /// Check if system is unsealed
     pub async fn is_unsealed(&self) -> bool {
         self.root_key_store.read().await.is_some()
-    }
-
-    /// Get transit engine
-    pub fn transit_engine(&self) -> Arc<secreton_crypto::transit::TransitEngine> {
-        self.transit_engine.clone()
     }
 
     /// Encrypt using a specific key (low-level)

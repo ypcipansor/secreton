@@ -894,7 +894,7 @@ pub async fn rollback_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(90)),
+        expires_at: None,
     };
 
     Ok(Json(ApiResponse::success(response)))
