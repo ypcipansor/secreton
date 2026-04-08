@@ -1403,9 +1403,17 @@ impl SecretService {
         // the internally-generated nonce, ciphertext, and tag. Use it directly
         // instead of substituting a separately-generated nonce (which would cause
         // a nonce mismatch on decryption).
+        //
+        // Map the key type to the correct encryption algorithm so that keys
+        // created as chacha20-poly1305 actually encrypt with ChaCha20-Poly1305
+        // instead of always defaulting to AES-256-GCM.
+        let algorithm = match key_info.key_type.as_str() {
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            _ => secreton_crypto::AlgorithmId::Aes256Gcm,
+        };
         let encrypted_data = self
             .crypto
-            .encrypt(&key_data, plaintext, None)
+            .encrypt_with_algorithm(&key_data, plaintext, algorithm)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Create key ID for audit

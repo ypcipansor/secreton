@@ -118,7 +118,7 @@ pub async fn get_key_info(
     Path(key_name): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<KeyInfo>>, StatusCode> {
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -134,7 +134,7 @@ pub async fn create_key(
     Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
     // Validate key name to prevent path-traversal and encoding issues
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         warn!("Invalid key name: {}", key_name);
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -187,7 +187,7 @@ pub async fn encrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<ApiResponse<EncryptResponse>>, StatusCode> {
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -231,7 +231,7 @@ pub async fn decrypt_data(
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<ApiResponse<DecryptResponse>>, StatusCode> {
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -271,7 +271,7 @@ pub async fn sign_data(
     Path(key_name): Path<String>,
     Json(request): Json<SignRequest>,
 ) -> Result<Json<ApiResponse<SignResponse>>, StatusCode> {
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -342,7 +342,12 @@ pub async fn hash_data(
 
     let algorithm = match request.algorithm.as_deref().unwrap_or("sha256") {
         "sha256" | "SHA-256" => secreton_crypto::transit::HashAlgorithm::Sha256,
+        "sha384" | "SHA-384" => secreton_crypto::transit::HashAlgorithm::Sha384,
         "sha512" | "SHA-512" => secreton_crypto::transit::HashAlgorithm::Sha512,
+        "sha3-256" | "SHA3-256" => secreton_crypto::transit::HashAlgorithm::Sha3_256,
+        "sha3-384" | "SHA3-384" => secreton_crypto::transit::HashAlgorithm::Sha3_384,
+        "sha3-512" | "SHA3-512" => secreton_crypto::transit::HashAlgorithm::Sha3_512,
+        "blake3" | "BLAKE3" => secreton_crypto::transit::HashAlgorithm::Blake3,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
@@ -375,7 +380,7 @@ pub async fn verify_data(
     Path(key_name): Path<String>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<ApiResponse<VerifyResponse>>, StatusCode> {
-    if let Err(_) = crate::handlers::validate_name(&key_name) {
+    if crate::handlers::validate_name(&key_name).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
 

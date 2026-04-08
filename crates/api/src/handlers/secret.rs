@@ -665,7 +665,7 @@ pub async fn get_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(90)), // Default 90 days TTL
+        expires_at: None, // Only set when the secret was created with a TTL
     };
 
     // Audit: SecretAccess (handled by service too, but handler logs redundant? removed redundancy)
@@ -1275,7 +1275,16 @@ pub async fn encrypt_data(
 
     // Serialize the full EncryptedData (including nonce, tag, algorithm) so the
     // client can pass it back to the decrypt endpoint for a successful round-trip.
-    let envelope_json = serde_json::to_vec(&encrypted_data)
+    // Use a compact envelope that base64-encodes the byte fields instead of
+    // relying on serde's default Vec<u8> → JSON number-array serialization,
+    // which is ~3-4× larger on the wire.
+    let compact_envelope = serde_json::json!({
+        "algorithm": encrypted_data.algorithm,
+        "nonce": BASE64_STANDARD.encode(&encrypted_data.nonce),
+        "ciphertext": BASE64_STANDARD.encode(&encrypted_data.ciphertext),
+        "tag": encrypted_data.tag.as_ref().map(|t| BASE64_STANDARD.encode(t)),
+    });
+    let envelope_json = serde_json::to_vec(&compact_envelope)
         .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e)))?;
     let ciphertext_b64 = BASE64_STANDARD.encode(&envelope_json);
 
@@ -1299,9 +1308,39 @@ pub async fn decrypt_data(
         .decode(&request.ciphertext)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
 
-    // Deserialize the full EncryptedData envelope (nonce, ciphertext, tag, algorithm)
-    let encrypted_data: EncryptedData = serde_json::from_slice(&ciphertext_bytes)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e)))?;
+    // Deserialize the EncryptedData envelope. Try the compact base64-field format
+    // first (produced by the updated encrypt endpoint), then fall back to the raw
+    // serde format (Vec<u8> as number arrays) for backward compatibility.
+    let encrypted_data: EncryptedData = {
+        // Try compact format: byte fields are base64-encoded strings
+        #[derive(Deserialize)]
+        struct CompactEnvelope {
+            algorithm: secreton_crypto::AlgorithmId,
+            nonce: String,
+            ciphertext: String,
+            tag: Option<String>,
+        }
+        if let Ok(compact) = serde_json::from_slice::<CompactEnvelope>(&ciphertext_bytes) {
+            let nonce = BASE64_STANDARD.decode(&compact.nonce)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 nonce: {}", e)))?;
+            let ct = BASE64_STANDARD.decode(&compact.ciphertext)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
+            let tag = compact.tag
+                .map(|t| BASE64_STANDARD.decode(&t))
+                .transpose()
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 tag: {}", e)))?;
+            EncryptedData {
+                algorithm: compact.algorithm,
+                nonce,
+                ciphertext: ct,
+                tag,
+            }
+        } else {
+            // Fall back to raw serde format (Vec<u8> as number arrays)
+            serde_json::from_slice(&ciphertext_bytes)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e)))?
+        }
+    };
 
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
