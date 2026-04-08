@@ -969,6 +969,7 @@ pub async fn create_key(
         .create_key(&request.name, &request.key_type, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to create key: {}", e)),
         })?;
@@ -1108,6 +1109,7 @@ pub async fn rotate_key(
                 crate::services::secret::SecretError::KeyNotFound { .. } => {
                     crate::ApiError::NotFound(format!("Key not found: {}", key_id))
                 }
+                secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
                 secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
                 _ => crate::ApiError::Internal(format!("Failed to rotate key: {}", e)),
             })?;
@@ -1272,6 +1274,7 @@ pub async fn encrypt_data(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)),
         })?;
@@ -1357,6 +1360,7 @@ pub async fn decrypt_data(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)),
         })?;
@@ -1391,6 +1395,7 @@ pub async fn sign_data(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to sign data: {}", e)),
         })?;
@@ -1427,6 +1432,7 @@ pub async fn verify_signature(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to verify signature: {}", e)),
         })?;

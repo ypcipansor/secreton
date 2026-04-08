@@ -804,6 +804,14 @@ impl SecretService {
         let key_path = format!("keys/{}/{}", user.id, key_name);
         self.check_permission(user, &key_path, "create").await?;
 
+        // Check if key already exists to prevent silent overwrites
+        if let Ok(Some(_)) = self.storage.get_by_path(&key_path).await {
+            return Err(SecretError::InvalidOperation(format!(
+                "Key '{}' already exists. Delete it first or use a different name.",
+                key_name
+            )));
+        }
+
         // Map key type to algorithm
         let algorithm = match key_type {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
@@ -1486,8 +1494,16 @@ impl SecretService {
         // Map the key type to the correct encryption algorithm so that keys
         // created as chacha20-poly1305 actually encrypt with ChaCha20-Poly1305
         // instead of always defaulting to AES-256-GCM.
+        // Reject asymmetric key types that cannot be used for symmetric encryption.
         let algorithm = match key_info.key_type.as_str() {
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support encryption. Use sign/verify instead.",
+                    key_info.key_type
+                )));
+            }
             _ => secreton_crypto::AlgorithmId::Aes256Gcm,
         };
         let encrypted_data = self
