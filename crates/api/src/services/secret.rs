@@ -1127,7 +1127,7 @@ impl SecretService {
             None => current_key.key_type.clone(),
         };
         let key_metadata = serde_json::json!({
-            "key_id": key_id,
+            "key_id": current_key.id,
             "key_type": current_key.key_type,
             "algorithm": algorithm_str,
             "created_by": user.id,
