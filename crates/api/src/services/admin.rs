@@ -1718,7 +1718,10 @@ impl AdminService {
             }
         }
 
-        // Store configuration in system config path
+        // Read-modify-write the system config entry.
+        // NOTE: concurrent admin updates could race here; acceptable for an
+        // admin-only endpoint but a future improvement could add optimistic
+        // concurrency via version checks.
         let config_path = "system/config";
         let current_config = self
             .storage
@@ -1727,6 +1730,7 @@ impl AdminService {
             .map_err(AdminError::Storage)?;
 
         let mut config_data: HashMap<String, serde_json::Value> = current_config
+            .as_ref()
             .and_then(|entry| {
                 entry
                     .metadata
@@ -1752,8 +1756,25 @@ impl AdminService {
         metadata.insert("config_data".to_string(), config_json);
         metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
 
+        // Preserve the existing entry's id/owner_id so that storage backends
+        // that index by UUID perform an upsert rather than creating orphan rows.
+        let (entry_id, owner_id, version, created_at) = match &current_config {
+            Some(existing) => (
+                existing.id,
+                existing.owner_id,
+                existing.version,
+                existing.created_at,
+            ),
+            None => (
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::nil(), // system-owned
+                1,
+                chrono::Utc::now(),
+            ),
+        };
+
         let config_entry = secreton_storage::SecretEntry {
-            id: uuid::Uuid::new_v4(),
+            id: entry_id,
             path: config_path.to_string(),
             encrypted_data: Vec::new(),
             encryption_metadata: secreton_storage::EncryptionMetadata {
@@ -1767,9 +1788,9 @@ impl AdminService {
             security_level: secreton_storage::SecurityLevel::Secret,
             metadata,
             tags: vec!["system".to_string(), "config".to_string()],
-            version: 1,
-            owner_id: uuid::Uuid::new_v4(),
-            created_at: chrono::Utc::now(),
+            version,
+            owner_id,
+            created_at,
             updated_at: chrono::Utc::now(),
             expires_at: None,
         };

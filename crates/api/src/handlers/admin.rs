@@ -616,7 +616,20 @@ pub async fn get_config(
         .await
         .map_err(map_admin_error)?;
 
-    // Get actual configuration from the services, merging with dynamic config if present
+    // Default password policy values — keep in sync with
+    // `AdminService::get_password_policy` in services/admin.rs.
+    const DEFAULT_MIN_LENGTH: u8 = 8;
+    const DEFAULT_REQUIRE_UPPERCASE: bool = true;
+    const DEFAULT_REQUIRE_LOWERCASE: bool = true;
+    const DEFAULT_REQUIRE_NUMBERS: bool = true;
+    const DEFAULT_REQUIRE_SPECIAL: bool = false;
+
+    // Get actual configuration from the services, merging with dynamic config if present.
+    //
+    // NOTE: Dynamic config values are currently display-only. Changing them via
+    // the admin UI does NOT alter the running service behaviour (e.g. session
+    // timeout, MFA enforcement). A server restart or a dedicated reload
+    // mechanism is required for changes to take effect at runtime.
     let config = SystemConfig {
         api: ApiConfigInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -632,19 +645,19 @@ pub async fn get_config(
                 min_length: dynamic_config.get("password_policy_min_length")
                     .and_then(|v| v.as_u64())
                     .map(|v| v.min(255) as u8)
-                    .unwrap_or(8),
+                    .unwrap_or(DEFAULT_MIN_LENGTH),
                 require_uppercase: dynamic_config.get("password_policy_require_uppercase")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
+                    .unwrap_or(DEFAULT_REQUIRE_UPPERCASE),
                 require_lowercase: dynamic_config.get("password_policy_require_lowercase")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
+                    .unwrap_or(DEFAULT_REQUIRE_LOWERCASE),
                 require_numbers: dynamic_config.get("password_policy_require_numbers")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
+                    .unwrap_or(DEFAULT_REQUIRE_NUMBERS),
                 require_special: dynamic_config.get("password_policy_require_special")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
+                    .unwrap_or(DEFAULT_REQUIRE_SPECIAL),
             },
             session_timeout: dynamic_config.get("session_timeout")
                 .and_then(|v| v.as_u64())
@@ -785,13 +798,13 @@ pub async fn get_system_status(
         "degraded"
     };
 
+    // Use telemetry for actual system uptime (consistent with get_system_metrics)
+    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+
     let status = SystemStatus {
         status: overall_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: std::time::SystemTime::UNIX_EPOCH
-            .elapsed()
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        uptime,
         components: ComponentStatus {
             database: database_status,
             cache: cache_status,
@@ -947,7 +960,10 @@ async fn check_crypto_health(_state: &AppState) -> String {
     }
 
     // Test symmetric encryption
-    let key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm).unwrap();
+    let key = match secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm) {
+        Ok(k) => k,
+        Err(_) => return "unhealthy".to_string(),
+    };
     let engine = encryption::CryptoEngine::new();
     match engine.encrypt(secreton_crypto::AlgorithmId::Aes256Gcm, test_data, &key) {
         Ok(encrypted) => match engine.decrypt(&encrypted, &key) {

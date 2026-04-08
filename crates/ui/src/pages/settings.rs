@@ -179,8 +179,13 @@ pub fn SettingsPage() -> impl IntoView {
                                                         <span class="text-sm">"Minimum Length"</span>
                                                         <input
                                                             type="number"
+                                                            min="1"
+                                                            max="255"
                                                             value=move || min_length.get().to_string()
-                                                            on:input=move |ev| set_min_length.set(event_target_value(&ev).parse().unwrap_or(8))
+                                                            on:input=move |ev| {
+                                                                let v = event_target_value(&ev).parse::<u8>().unwrap_or(8).max(1);
+                                                                set_min_length.set(v)
+                                                            }
                                                             class="w-16 px-2 py-1 text-sm border rounded focus:ring-blue-500 focus:border-blue-500"
                                                         />
                                                     </div>
@@ -207,9 +212,10 @@ pub fn SettingsPage() -> impl IntoView {
                                                 <input
                                                     type="number"
                                                     min="1"
+                                                    max="1440"
                                                     value=move || (session_timeout.get() / 60).to_string()
                                                     on:input=move |ev| {
-                                                        let mins = event_target_value(&ev).parse::<u64>().unwrap_or(60).max(1);
+                                                        let mins = event_target_value(&ev).parse::<u64>().unwrap_or(60).max(1).min(1440);
                                                         set_session_timeout.set(mins * 60)
                                                     }
                                                     class="w-20 px-2 py-1 text-sm border rounded focus:ring-blue-500 focus:border-blue-500"
