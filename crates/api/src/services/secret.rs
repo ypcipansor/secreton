@@ -1283,11 +1283,11 @@ impl SecretService {
             }
         }
 
-        // If no versioned entries found (e.g. old keys without _v prefix), handle it
-        if versions.is_empty() {
-            // Check for the non-versioned entry
-            let legacy_path = format!("key_data/{}/{}", user.id, key_id);
-            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+        // Also check for the non-versioned (legacy) entry
+        let legacy_path = format!("key_data/{}/{}", user.id, key_id);
+        if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+            // Only add if we don't already have a v1 entry from the versioned search
+            if !versions.iter().any(|v| v.version == 1) {
                 versions.push(KeyInfo {
                     id: current_key.id.clone(),
                     name: current_key.name.clone(),

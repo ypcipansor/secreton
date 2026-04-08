@@ -26,7 +26,7 @@ pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
         .route("/secret-versions/{*path}", get(list_secret_versions))
-        .route("/secrets/rollback/{*path}", post(rollback_secret))
+        .route("/secret-rollback/{*path}", post(rollback_secret))
         // Specific path operations (CRUD)
         .route(
             "/secrets/{*path}",

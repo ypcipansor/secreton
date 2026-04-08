@@ -202,7 +202,7 @@ pub fn SecretsList() -> impl IntoView {
             if !confirm { return; }
 
             // Call the specialized rollback endpoint
-            let rollback_url = format!("/secret/secrets/rollback/{}?version={}", current_path, v);
+            let rollback_url = format!("/secret/secret-rollback/{}?version={}", current_path, v);
 
             match api::post::<serde_json::Value, _>(&rollback_url, serde_json::json!({})).await {
                 Ok(_) => {
