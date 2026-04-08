@@ -1662,7 +1662,6 @@ impl AdminService {
                 _ => {}
             }
         }
-        }
         if let Some(val) = config_updates.get("password_policy_min_length") {
             match val.as_u64() {
                 Some(v) if v == 0 || v > 255 => {
