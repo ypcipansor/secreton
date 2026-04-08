@@ -787,6 +787,20 @@ impl SecretService {
         key_type: &str,
         user: &secreton_auth::User,
     ) -> Result<KeyInfo, SecretError> {
+        // Reject key names that end with `_v` followed by digits.
+        // The versioned storage scheme uses `key_data/{uid}/{name}_v{N}` paths,
+        // so a key named e.g. "mykey_v1" would collide with key "mykey"'s
+        // version 1 data path.
+        if let Some(pos) = key_name.rfind("_v") {
+            let suffix = &key_name[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key name '{}' must not end with '_v' followed by digits (reserved for versioning)",
+                    key_name
+                )));
+            }
+        }
+
         let key_path = format!("keys/{}/{}", user.id, key_name);
         self.check_permission(user, &key_path, "create").await?;
 
