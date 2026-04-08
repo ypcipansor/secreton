@@ -812,15 +812,22 @@ impl SecretService {
             )));
         }
 
-        // Map key type to algorithm
+        // Map key type to algorithm.
+        // Some key types (xchacha20-poly1305, ecdsa-secp256k1, x25519) don't
+        // have a dedicated AlgorithmId variant. For these we generate a 32-byte
+        // random key directly, which matches the key size the transit engine
+        // expects.
         let algorithm = match key_type {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
-            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
-            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
-            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
-            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
-            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
+            "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
+            "xchacha20-poly1305" => None, // 32-byte random key
+            "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
+            "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
+            "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
+            "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
+            "ecdsa-secp256k1" => None, // 32-byte random seed
+            "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
+            "x25519" => None, // 32-byte random key
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
@@ -830,8 +837,12 @@ impl SecretService {
         };
 
         // Generate key using crypto service
-        let key_data = secreton_crypto::generate_key(algorithm)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+        let key_data = match algorithm {
+            Some(algo) => secreton_crypto::generate_key(algo)
+                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
+            None => secreton_crypto::generate_random_bytes(32)
+                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
+        };
 
         // Generate unique key ID
         let key_id = format!("key_{}", Uuid::new_v4().simple());
@@ -840,10 +851,14 @@ impl SecretService {
         let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
 
         // Store key metadata as SecretEntry
+        let algorithm_str = match &algorithm {
+            Some(algo) => format!("{:?}", algo),
+            None => key_type.to_string(),
+        };
         let key_metadata = serde_json::json!({
             "key_id": key_id,
             "key_type": key_type,
-            "algorithm": format!("{:?}", algorithm),
+            "algorithm": algorithm_str,
             "created_by": user.id,
             "created_at": chrono::Utc::now().to_rfc3339(),
             "version": 1
@@ -1067,15 +1082,18 @@ impl SecretService {
         // Get current key metadata
         let current_key = self.get_key(key_id, user).await?;
 
-        // Generate new key with same type
+        // Generate new key with same type (must match create_key's type mapping)
         let algorithm = match current_key.key_type.as_str() {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
-            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
-            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
-            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
-            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
-            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
+            "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
+            "xchacha20-poly1305" => None, // 32-byte random key
+            "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
+            "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
+            "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
+            "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
+            "ecdsa-secp256k1" => None, // 32-byte random seed
+            "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
+            "x25519" => None, // 32-byte random key
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
@@ -1085,8 +1103,12 @@ impl SecretService {
         };
 
         // Generate new key data
-        let new_key_data = secreton_crypto::generate_key(algorithm)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+        let new_key_data = match algorithm {
+            Some(algo) => secreton_crypto::generate_key(algo)
+                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
+            None => secreton_crypto::generate_random_bytes(32)
+                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
+        };
 
         // Parse user_id as UUID
         let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
@@ -1094,10 +1116,14 @@ impl SecretService {
         // Update metadata with new version
         let new_version = current_key.version + 1;
         let key_path = format!("keys/{}/{}", user.id, key_id);
+        let algorithm_str = match &algorithm {
+            Some(algo) => format!("{:?}", algo),
+            None => current_key.key_type.clone(),
+        };
         let key_metadata = serde_json::json!({
             "key_id": key_id,
             "key_type": current_key.key_type,
-            "algorithm": format!("{:?}", algorithm),
+            "algorithm": algorithm_str,
             "created_by": user.id,
             "created_at": current_key.created_at.to_rfc3339(),
             "version": new_version,
@@ -1449,10 +1475,31 @@ impl SecretService {
     /// To avoid breaking keys that were rotated before the fix, we try
     /// `crypto.decrypt()` first and, if it fails (e.g. because the stored bytes
     /// are not valid JSON), fall back to using the raw bytes directly.
+    ///
+    /// **Important:** If the stored bytes ARE a valid CryptoPacket (i.e. they
+    /// parse as JSON with a `key_id` field), the decryption error is real — for
+    /// example the system key may have been rotated or become unavailable. In
+    /// that case we must NOT fall back to using the raw CryptoPacket JSON bytes
+    /// as key material, because that would produce garbage encryption/signatures
+    /// that can never be reversed.
     async fn decrypt_key_material(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, SecretError> {
         match self.crypto.decrypt(encrypted_data).await {
             Ok(key_data) => Ok(key_data),
-            Err(_) => {
+            Err(decrypt_err) => {
+                // Check if the stored data looks like an encrypted CryptoPacket
+                // (JSON with a "key_id" field). If so, the decryption failure is
+                // genuine (e.g. system key unavailable) — propagate the error
+                // instead of silently using the raw JSON bytes as key material.
+                if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(encrypted_data) {
+                    if parsed.get("key_id").is_some() {
+                        return Err(SecretError::Internal(anyhow::anyhow!(
+                            "Failed to decrypt key material (CryptoPacket detected but \
+                             decryption failed — system key may be unavailable): {}",
+                            decrypt_err
+                        )));
+                    }
+                }
+
                 // Legacy fallback: the key material was stored unencrypted
                 // (pre-fix rotate_key). Use the raw bytes directly.
                 warn!(
@@ -1518,12 +1565,17 @@ impl SecretService {
         // Reject asymmetric key types that cannot be used for symmetric encryption.
         let algorithm = match key_info.key_type.as_str() {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
-            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+            "chacha20-poly1305" | "xchacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Key type '{}' does not support encryption. Use sign/verify instead.",
                     key_info.key_type
                 )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not direct encryption.".to_string(),
+                ));
             }
             _ => secreton_crypto::AlgorithmId::Aes256Gcm,
         };
