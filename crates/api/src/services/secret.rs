@@ -1285,6 +1285,21 @@ impl SecretService {
             // Extract version from path suffix
             if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
                 if let Ok(version) = v_str.parse::<u32>() {
+                    // Guard against prefix collision: the entry path
+                    // `key_data/{uid}/{key_id}_v{N}` could also be the legacy
+                    // (non-versioned) data of a *different* key whose name is
+                    // literally `{key_id}_v{N}`.  For example, listing versions
+                    // of key "mykey" with prefix `key_data/{uid}/mykey_v` would
+                    // match `key_data/{uid}/mykey_v1` — but that path may belong
+                    // to a pre-existing key named "mykey_v1" (created before the
+                    // `_v{digits}` name validation was added).  Skip the entry
+                    // when such a colliding key exists.
+                    let potential_key_name = format!("{}_v{}", key_id, version);
+                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                        continue;
+                    }
+
                     versions.push(KeyInfo {
                         id: current_key.id.clone(),
                         name: current_key.name.clone(),
@@ -1362,7 +1377,17 @@ impl SecretService {
         for entry in entries {
             // Only delete entries whose suffix after the prefix is a pure version number
             if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
-                if v_str.parse::<u32>().is_ok() {
+                if let Ok(version) = v_str.parse::<u32>() {
+                    // Guard against prefix collision: `key_data/{uid}/{key_id}_v{N}`
+                    // could also be the legacy data of a different key named
+                    // `{key_id}_v{N}` (created before the `_v{digits}` name
+                    // validation was added). Skip if such a colliding key exists.
+                    let potential_key_name = format!("{}_v{}", key_id, version);
+                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                        continue;
+                    }
+
                     self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
                 }
             }
