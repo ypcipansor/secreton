@@ -775,12 +775,14 @@ pub async fn get_system_status(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemStatus>>> {
     require_admin(&user)?;
-    // Check component health
-    let database_status = check_database_health(&state).await;
-    let cache_status = check_cache_health(&state).await;
-    let crypto_status = check_crypto_health(&state).await;
-    let storage_status = check_storage_health(&state).await;
-    let auth_status = check_auth_health(&state).await;
+    // Check component health concurrently to avoid sequential 5s timeouts
+    let (database_status, cache_status, crypto_status, storage_status, auth_status) = tokio::join!(
+        check_database_health(&state),
+        check_cache_health(&state),
+        check_crypto_health(&state),
+        check_storage_health(&state),
+        check_auth_health(&state),
+    );
 
     let overall_status = if database_status == "healthy"
         && cache_status == "healthy"
