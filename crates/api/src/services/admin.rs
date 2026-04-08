@@ -1649,9 +1649,9 @@ impl AdminService {
         // Validate value types and ranges
         if let Some(val) = config_updates.get("session_timeout") {
             match val.as_u64() {
-                Some(v) if v < 60 => {
+                Some(v) if v < 60 || v > 86400 => {
                     return Err(AdminError::InvalidConfig(
-                        "session_timeout must be at least 60 seconds".to_string(),
+                        "session_timeout must be between 60 and 86400 seconds (1 minute to 24 hours)".to_string(),
                     ));
                 }
                 None => {
@@ -1661,6 +1661,7 @@ impl AdminService {
                 }
                 _ => {}
             }
+        }
         }
         if let Some(val) = config_updates.get("password_policy_min_length") {
             match val.as_u64() {
