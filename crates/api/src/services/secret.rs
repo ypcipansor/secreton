@@ -1283,19 +1283,37 @@ impl SecretService {
             }
         }
 
-        // Also check for the non-versioned (legacy) entry
+        // Also check for the non-versioned (legacy) entry.
+        //
+        // Guard against path collision: if key_id matches `{other}_v{N}`, the
+        // legacy path `key_data/{uid}/{key_id}` could actually be another key's
+        // versioned data. Only consider it as a legacy entry when no such parent
+        // key exists.
         let legacy_path = format!("key_data/{}/{}", user.id, key_id);
-        if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
-            // Only add if we don't already have a v1 entry from the versioned search
-            if !versions.iter().any(|v| v.version == 1) {
-                versions.push(KeyInfo {
-                    id: current_key.id.clone(),
-                    name: current_key.name.clone(),
-                    key_type: current_key.key_type.clone(),
-                    version: 1,
-                    status: if current_key.version == 1 { "active" } else { "historical" }.to_string(),
-                    created_at: entry.created_at,
-                });
+        let mut check_legacy = true;
+        if let Some(pos) = key_id.rfind("_v") {
+            let suffix = &key_id[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let parent_key = &key_id[..pos];
+                let parent_meta_path = format!("keys/{}/{}", user.id, parent_key);
+                if let Ok(Some(_)) = self.storage.get_by_path(&parent_meta_path).await {
+                    check_legacy = false;
+                }
+            }
+        }
+        if check_legacy {
+            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+                // Only add if we don't already have a v1 entry from the versioned search
+                if !versions.iter().any(|v| v.version == 1) {
+                    versions.push(KeyInfo {
+                        id: current_key.id.clone(),
+                        name: current_key.name.clone(),
+                        key_type: current_key.key_type.clone(),
+                        version: 1,
+                        status: if current_key.version == 1 { "active" } else { "historical" }.to_string(),
+                        created_at: entry.created_at,
+                    });
+                }
             }
         }
 
@@ -1336,10 +1354,32 @@ impl SecretService {
             }
         }
 
-        // 3. Delete legacy non-versioned key material if any
+        // 3. Delete legacy non-versioned key material if any.
+        //
+        // Guard against path collision: the versioned scheme stores key data at
+        // `key_data/{uid}/{name}_v{N}`. If the key being deleted is itself named
+        // `{other_key}_v{N}` (e.g. "mykey_v1"), the legacy path
+        // `key_data/{uid}/mykey_v1` is identical to key "mykey"'s version 1 data.
+        // Only delete the legacy entry when the key_id cannot be interpreted as
+        // another key's versioned data path.
         let legacy_path = format!("key_data/{}/{}", user.id, key_id);
-        if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
-            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+        let mut safe_to_delete_legacy = true;
+        if let Some(pos) = key_id.rfind("_v") {
+            let suffix = &key_id[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let parent_key = &key_id[..pos];
+                // Check if a different key's metadata exists that would own this path
+                let parent_meta_path = format!("keys/{}/{}", user.id, parent_key);
+                if let Ok(Some(_)) = self.storage.get_by_path(&parent_meta_path).await {
+                    // Another key exists whose versioned data path collides — skip
+                    safe_to_delete_legacy = false;
+                }
+            }
+        }
+        if safe_to_delete_legacy {
+            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+                self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            }
         }
 
         // Log audit trail
