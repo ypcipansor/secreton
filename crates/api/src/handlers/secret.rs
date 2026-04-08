@@ -1639,6 +1639,11 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             384,
             vec!["sign".to_string(), "verify".to_string()],
         ),
+        "ecdsa-secp256k1" => (
+            "ECDSA-secp256k1".to_string(),
+            256,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
         "ed25519" => (
             "ED25519".to_string(),
             256,
@@ -1646,6 +1651,16 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
         ),
         "chacha20-poly1305" => (
             "CHACHA20-POLY1305".to_string(),
+            256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "xchacha20-poly1305" => (
+            "XCHACHA20-POLY1305".to_string(),
+            256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "x25519" => (
+            "X25519".to_string(),
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
@@ -1683,7 +1698,7 @@ async fn get_public_key_for_key(
 ) -> Option<String> {
     // Check if this is an asymmetric key type
     match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
             // Try to retrieve the public key from storage
             // Public keys are typically stored alongside private keys in secreton
             let key_path = format!("keys/{}/{}", user.id, key_info.id);
@@ -1703,6 +1718,7 @@ async fn get_public_key_for_key(
                         "rsa-4096" => "RSA 4096-bit",
                         "ecdsa-p256" => "ECDSA P-256",
                         "ecdsa-p384" => "ECDSA P-384",
+                        "ecdsa-secp256k1" => "ECDSA secp256k1",
                         "ed25519" => "Ed25519",
                         _ => "Asymmetric",
                     };
@@ -1719,6 +1735,7 @@ async fn get_public_key_for_key(
                         "rsa-4096" => "RSA 4096-bit",
                         "ecdsa-p256" => "ECDSA P-256",
                         "ecdsa-p384" => "ECDSA P-384",
+                        "ecdsa-secp256k1" => "ECDSA secp256k1",
                         "ed25519" => "Ed25519",
                         _ => "Asymmetric",
                     };
