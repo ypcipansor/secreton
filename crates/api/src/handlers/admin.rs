@@ -942,10 +942,14 @@ async fn check_database_health(state: &AppState) -> String {
 }
 
 async fn check_cache_health(state: &AppState) -> String {
-    // Performance optimizer uses internal cache
-    match timeout(Duration::from_secs(5), state.performance.analyze_performance()).await {
-        Ok(Ok(_)) => "healthy".to_string(),
-        Ok(Err(_)) => "unhealthy".to_string(),
+    // Use get_cache_stats() for a lightweight but meaningful cache probe.
+    // analyze_performance() always returns Ok, making its error arm dead code.
+    match timeout(Duration::from_secs(5), state.performance.get_cache_stats()).await {
+        Ok(stats) => {
+            // Successfully obtained cache stats — cache subsystem is responsive.
+            let _ = stats; // stats is a HashMap; presence alone signals health.
+            "healthy".to_string()
+        }
         Err(_) => "timeout".to_string(),
     }
 }

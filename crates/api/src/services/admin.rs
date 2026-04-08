@@ -995,6 +995,19 @@ impl AdminService {
             });
         }
 
+        if !password_policy.require_lowercase {
+            findings.push(SecurityFinding {
+                severity: "medium".to_string(),
+                category: "configuration".to_string(),
+                title: "Password policy doesn't require lowercase".to_string(),
+                description: "Password policy should require at least one lowercase character"
+                    .to_string(),
+                recommendation: "Enable lowercase character requirement in password policy"
+                    .to_string(),
+                affected_resources: vec!["password_policy".to_string()],
+            });
+        }
+
         if !password_policy.require_numbers {
             findings.push(SecurityFinding {
                 severity: "medium".to_string(),
