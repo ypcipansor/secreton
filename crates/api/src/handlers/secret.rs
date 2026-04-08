@@ -882,6 +882,26 @@ pub async fn rollback_secret(
             _ => crate::ApiError::Internal(format!("Failed to rollback secret: {}", e)),
         })?;
 
+    // Detect TOCTOU race: if the secret was deleted between get_secret and put_secret
+    // inside rollback_secret, put_secret will have created a brand-new v1 entry.
+    // Roll back the accidental creation and return NotFound.
+    if secret_data.previous_version.is_none() && secret_data.version == 1 {
+        if let Err(e) = state
+            .secreton
+            .delete_secret_internal(&path, &user, false, false)
+            .await
+        {
+            tracing::warn!(
+                "Failed to rollback accidentally created secret during rollback {}: {}",
+                path,
+                e
+            );
+        }
+        return Err(crate::ApiError::NotFound(
+            "Secret not found (deleted during rollback)".to_string(),
+        ));
+    }
+
     let response = SecretResponse {
         path: secret_data.path,
         data: secret_data.data,
