@@ -1291,7 +1291,10 @@ pub async fn encrypt_data(
     let response = EncryptResponse {
         ciphertext: ciphertext_b64,
         key_version, // Now using actual key version
-        algorithm: request.algorithm.unwrap_or("AES-GCM".to_string()),
+        algorithm: match encrypted_data.algorithm {
+            secreton_crypto::AlgorithmId::ChaCha20Poly1305 => "CHACHA20-POLY1305".to_string(),
+            _ => "AES-GCM".to_string(),
+        },
     };
 
     Ok(Json(ApiResponse::success(response)))
