@@ -1762,7 +1762,7 @@ impl AdminService {
             Some(existing) => (
                 existing.id,
                 existing.owner_id,
-                existing.version,
+                existing.version + 1,
                 existing.created_at,
             ),
             None => (
