@@ -169,6 +169,14 @@ impl AuditLogger {
                         .collect(),
                 ),
             ),
+            SecurityEventType::KeyDeletion { key_id, user } => (
+                CoreAuditEventType::Custom("key.delete".to_string()),
+                AuditStatus::Success,
+                user,
+                key_id,
+                "delete".to_string(),
+                None,
+            ),
             SecurityEventType::AuthenticationSuccess { user, method } => (
                 CoreAuditEventType::AuthLogin,
                 AuditStatus::Success,
@@ -492,6 +500,10 @@ pub enum SecurityEventType {
     MFARemoval {
         user: String,
         method: String,
+    },
+    KeyDeletion {
+        key_id: String,
+        user: String,
     },
     LoginSuccess {
         user: String,

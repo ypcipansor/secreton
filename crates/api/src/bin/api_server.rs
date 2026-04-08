@@ -408,6 +408,13 @@ async fn main() -> anyhow::Result<()> {
         performance.clone(),
     );
 
+    // Register Transit Engine service
+    let transit_engine = Arc::new(secreton_crypto::transit::TransitEngine::new());
+    container.register_service::<Arc<secreton_crypto::transit::TransitEngine>>(
+        "transit".to_string(),
+        transit_engine.clone(),
+    );
+
     use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
     let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
     if let Err(e) = telemetry.start_collection().await {

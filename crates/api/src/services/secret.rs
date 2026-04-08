@@ -81,7 +81,7 @@ pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     audit: Arc<AuditLogger>,
-    identity: Arc<dyn IdentityService + Send + Sync>,
+    _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
 }
@@ -100,7 +100,7 @@ impl SecretService {
             storage,
             crypto,
             audit,
-            identity,
+            _identity: identity,
             policy_service,
             performance,
         })
@@ -560,6 +560,36 @@ impl SecretService {
         Ok(())
     }
 
+    /// Rollback secret to a previous version
+    pub async fn rollback_secret(
+        &self,
+        path: &str,
+        version: u32,
+        user: &secreton_auth::User,
+    ) -> Result<SecretData, SecretError> {
+        self.check_permission(user, path, "rollback").await?;
+
+        // 1. Fetch the historical version
+        let historical_data = self.get_secret(path, user, Some(version)).await?;
+
+        // 2. Promotion: Put it as the new latest version.
+        // `put_secret` handles archiving the current one and incrementing the version.
+        let rolled_back = self.put_secret(path, historical_data.data, user).await?;
+
+        // Log audit trail for rollback specifically
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SecretVersionChange {
+                secret_path: path.to_string(),
+                old_version: version, // Promotion from this version
+                new_version: rolled_back.version,
+                user: user.id.to_string(),
+            })
+            .await;
+
+        Ok(rolled_back)
+    }
+
     /// Create a new policy
     pub async fn create_policy(
         &self,
@@ -821,7 +851,8 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
+        // Use versioned path for key data
+        let key_data_path = format!("key_data/{}/{}_v1", user.id, key_name);
         let key_data_entry = secreton_storage::SecretEntry::new(
             key_data_path,
             encrypted_key_data,
@@ -1215,11 +1246,56 @@ impl SecretService {
         self.check_permission(user, &key_path, "list_versions")
             .await?;
 
-        // Check if key exists
-        self.get_key(key_id, user).await?;
+        // Get current key info to ensure it exists and get base metadata
+        let current_key = self.get_key(key_id, user).await?;
 
-        // Return just the current version for now
-        self.get_key(key_id, user).await.map(|k| vec![k])
+        // Build query params for key versions in key_data
+        let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
+        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
+
+        let entries = self
+            .storage
+            .list(&query)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        let mut versions = Vec::new();
+        for entry in entries {
+            // Extract version from path suffix
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
+                if let Ok(version) = v_str.parse::<u32>() {
+                    versions.push(KeyInfo {
+                        id: current_key.id.clone(),
+                        name: current_key.name.clone(),
+                        key_type: current_key.key_type.clone(),
+                        version,
+                        status: if version == current_key.version { "active" } else { "historical" }.to_string(),
+                        created_at: entry.created_at,
+                    });
+                }
+            }
+        }
+
+        // If no versioned entries found (e.g. old keys without _v prefix), handle it
+        if versions.is_empty() {
+            // Check for the non-versioned entry
+            let legacy_path = format!("key_data/{}/{}", user.id, key_id);
+            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+                versions.push(KeyInfo {
+                    id: current_key.id.clone(),
+                    name: current_key.name.clone(),
+                    key_type: current_key.key_type.clone(),
+                    version: 1,
+                    status: if current_key.version == 1 { "active" } else { "historical" }.to_string(),
+                    created_at: entry.created_at,
+                });
+            }
+        }
+
+        // Sort by version descending
+        versions.sort_by(|a, b| b.version.cmp(&a.version));
+
+        Ok(versions)
     }
 
     /// Delete a key
@@ -1228,9 +1304,41 @@ impl SecretService {
         key_id: &str,
         user: &secreton_auth::User,
     ) -> Result<bool, SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "delete")
-            .await?;
-        // Placeholder
+        let key_path = format!("keys/{}/{}", user.id, key_id);
+        self.check_permission(user, &key_path, "delete").await?;
+
+        // 1. Delete metadata
+        let metadata_entry = self.storage.get_by_path(&key_path).await.map_err(SecretError::Storage)?;
+        if let Some(entry) = metadata_entry {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+        } else {
+             return Err(SecretError::KeyNotFound { key_id: key_id.to_string() });
+        }
+
+        // 2. Delete all versioned key material
+        let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
+        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix);
+        let entries = self.storage.list(&query).await.map_err(SecretError::Storage)?;
+
+        for entry in entries {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+        }
+
+        // 3. Delete legacy non-versioned key material if any
+        let legacy_path = format!("key_data/{}/{}", user.id, key_id);
+        if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+        }
+
+        // Log audit trail
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::KeyDeletion {
+                key_id: key_id.to_string(),
+                user: user.id.to_string(),
+            })
+            .await;
+
         Ok(true)
     }
 
@@ -1258,15 +1366,17 @@ impl SecretService {
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && key_info.version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
         // Decrypt the stored key data
@@ -1322,15 +1432,17 @@ impl SecretService {
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && key_info.version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
         // Decrypt the stored key data
@@ -1394,15 +1506,17 @@ impl SecretService {
             }
         };
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && key_info.version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
         // Decrypt the stored key data
@@ -1478,15 +1592,17 @@ impl SecretService {
                 SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e))
             })?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && key_info.version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
         // Decrypt the stored key data
@@ -1515,6 +1631,41 @@ impl SecretService {
             .await;
 
         Ok((is_valid, key_info.version))
+    }
+
+    /// List transit keys
+    pub async fn list_transit_keys(&self) -> Vec<String> {
+        self.crypto.transit_engine().list_keys().await
+    }
+
+    /// Get transit key info
+    pub async fn get_transit_key_info(&self, name: &str) -> Result<secreton_crypto::transit::KeyInfo, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().get_key_info(name).await
+    }
+
+    /// Transit encrypt
+    pub async fn transit_encrypt(&self, key_name: &str, plaintext: &[u8], context: Option<&[u8]>, key_version: Option<u32>) -> Result<String, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().encrypt(key_name, plaintext, context, key_version).await
+    }
+
+    /// Transit decrypt
+    pub async fn transit_decrypt(&self, key_name: &str, ciphertext: &str, context: Option<&[u8]>) -> Result<Vec<u8>, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().decrypt(key_name, ciphertext, context).await
+    }
+
+    /// Transit sign
+    pub async fn transit_sign(&self, key_name: &str, data: &[u8], algorithm: Option<secreton_crypto::transit::SignatureAlgorithm>, key_version: Option<u32>) -> Result<String, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().sign(key_name, data, algorithm, key_version).await
+    }
+
+    /// Transit verify
+    pub async fn transit_verify(&self, key_name: &str, data: &[u8], signature: &str, algorithm: Option<secreton_crypto::transit::SignatureAlgorithm>) -> Result<bool, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().verify(key_name, data, signature, algorithm).await
+    }
+
+    /// Transit hash
+    pub async fn transit_hash(&self, data: &[u8], algorithm: secreton_crypto::transit::HashAlgorithm) -> Result<String, secreton_crypto::CryptoError> {
+        self.crypto.transit_engine().hash(data, algorithm).await
     }
 
     /// Compute hash of data

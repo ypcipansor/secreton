@@ -168,7 +168,7 @@ mod tests {
             .get("/users")
             .add_header(
                 axum::http::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .await;
         response.assert_status_ok();
@@ -197,7 +197,7 @@ mod tests {
             .post("/roles")
             .add_header(
                 axum::http::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .json(&request)
             .await;
@@ -220,7 +220,7 @@ mod tests {
             .get("/config")
             .add_header(
                 axum::http::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .await;
         response.assert_status_ok();
@@ -243,7 +243,7 @@ mod tests {
             .post("/security/scan")
             .add_header(
                 axum::http::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .await;
         response.assert_status_ok();

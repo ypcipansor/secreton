@@ -69,6 +69,12 @@ impl TransitEngine {
         self
     }
 
+    /// Hash data using the specified algorithm
+    pub async fn hash(&self, data: &[u8], algorithm: HashAlgorithm) -> CryptoResult<String> {
+        let digest = hash_data(algorithm, data)?;
+        Ok(hex::encode(digest))
+    }
+
     /// Create a new transit key
     pub async fn create_key(
         &self,

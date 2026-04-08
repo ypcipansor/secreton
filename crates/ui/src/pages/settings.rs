@@ -131,7 +131,7 @@ pub fn SettingsPage() -> impl IntoView {
                     <p class="text-gray-600">"System-wide configuration and security policies"</p>
                 </div>
                 <button
-                    on:click=move |_| save_config.dispatch(())
+                    on:click=move |_| { save_config.dispatch(()); }
                     disabled=move || !config_loaded.get()
                     class=move || if config_loaded.get() {
                         "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
@@ -275,7 +275,7 @@ pub fn SettingsPage() -> impl IntoView {
                                                   </a>
                                                   <button
                                                       class="w-full text-center px-4 py-2 border border-gray-300 rounded shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition"
-                                                      on:click=move |_| clear_cache.dispatch(())
+                                                      on:click=move |_| { clear_cache.dispatch(()); }
                                                   >
                                                       "Clear Performance Cache"
                                                   </button>

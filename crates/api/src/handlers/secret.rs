@@ -6,7 +6,6 @@
 use axum::{
     Router,
     extract::{Path, Query, State},
-    http::HeaderMap,
     response::Json,
     routing::{delete, get, post, put},
 };
@@ -27,6 +26,7 @@ pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
         .route("/secret-versions/{*path}", get(list_secret_versions))
+        .route("/secrets/rollback/{*path}", post(rollback_secret))
         // Specific path operations (CRUD)
         .route(
             "/secrets/{*path}",
@@ -340,7 +340,7 @@ mod tests {
         let (server, token) = server_with_routes().await;
         let response = server
             .get("/secrets/app/config")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .await;
         response.assert_status_ok();
 
@@ -367,7 +367,7 @@ mod tests {
 
         let response = server
             .post("/secrets/app/admin")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&payload)
             .await;
         response.assert_status_ok();
@@ -392,7 +392,7 @@ mod tests {
 
         let response = server
             .post("/keys")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -415,7 +415,7 @@ mod tests {
 
         let response = server
             .post("/hash")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -859,6 +859,47 @@ pub async fn list_secret_versions(
     Ok(Json(ApiResponse::success(versions)))
 }
 
+/// Rollback secret to a specific version
+pub async fn rollback_secret(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(path): Path<String>,
+    Query(params): Query<GetSecretParams>,
+) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    let version = params.version.ok_or_else(|| {
+        crate::ApiError::BadRequest("Version parameter is required for rollback".to_string())
+    })?;
+
+    let secret_data = state
+        .secreton
+        .rollback_secret(&path, version, &user)
+        .await
+        .map_err(|e| match e {
+            secret::SecretError::SecretNotFound { .. } => {
+                crate::ApiError::NotFound("Secret version not found".to_string())
+            }
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to rollback secret: {}", e)),
+        })?;
+
+    let response = SecretResponse {
+        path: secret_data.path,
+        data: secret_data.data,
+        metadata: SecretMetadata {
+            description: Some(format!("Secret rolled back to version {}", version)),
+            tags: vec!["managed".to_string(), "rolled-back".to_string()],
+            owner: Some(user.username),
+            classification: Some("internal".to_string()),
+        },
+        version: secret_data.version,
+        created_at: secret_data.created_at,
+        updated_at: secret_data.updated_at,
+        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(90)),
+    };
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
 /// List secrets
 pub async fn list_secrets(
     State(state): State<AppState>,
@@ -939,25 +980,9 @@ pub async fn create_key(
 
 pub async fn get_key(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // Get key via secreton service
     let key_info: secret::KeyInfo =
         state
@@ -1001,25 +1026,9 @@ pub async fn get_key(
 
 pub async fn list_keys(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // List keys via secreton service
     let key_infos: Vec<secret::KeyInfo> = state
         .secreton
@@ -1063,25 +1072,9 @@ pub async fn list_keys(
 
 pub async fn rotate_key(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // Rotate key via secreton service
     let _old_key_id = key_id.clone();
     let key_info: secret::KeyInfo =
@@ -1217,8 +1210,11 @@ pub async fn list_key_versions(
         .list_key_versions(&key_id, &user)
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to list secrets: {}", e)),
+            _ => crate::ApiError::Internal(format!("Failed to list key versions: {}", e)),
         })?;
 
     // Convert to response format

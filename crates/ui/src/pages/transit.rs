@@ -120,8 +120,35 @@ pub fn TransitPage() -> impl IntoView {
     // Fetch Keys
     let fetch_keys = Action::new_local(move |_: &()| {
         async move {
-            match api::get::<Vec<KeyResponse>>("/secret/keys").await {
-                Ok(res) => set_keys.set(res),
+            // Using /api/v1/transit path for list keys if we want to align with Transit API
+            // Actually, backend has /api/v1/transit/keys. Let's use that.
+            #[derive(Deserialize)]
+            struct TransitListResponse {
+                keys: Vec<String>,
+            }
+            match api::get::<TransitListResponse>("/transit/keys").await {
+                Ok(res) => {
+                    // Transit list only returns names, we need to fetch info for each or just map names
+                    let mut k_responses = Vec::new();
+                    for name in res.keys {
+                        // For now, let's just create placeholder KeyResponse for each name
+                        // or fetch more info. Minimal alignment:
+                        k_responses.push(KeyResponse {
+                            id: name.clone(),
+                            name: name.clone(),
+                            key_type: "transit".to_string(), // Placeholder
+                            algorithm: "unknown".to_string(),
+                            size: 0,
+                            usage: vec![],
+                            metadata: KeyMetadata::default(),
+                            version: 1,
+                            created_at: "".to_string(),
+                            status: "active".to_string(),
+                            public_key: None,
+                        });
+                    }
+                    set_keys.set(k_responses);
+                },
                 Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
             }
         }
@@ -141,32 +168,14 @@ pub fn TransitPage() -> impl IntoView {
                 set_create_status.set(Some("Key name required".to_string()));
                 return;
             }
-            let algo = match k_type.as_str() {
-                "rsa-2048" => "RSA-2048",
-                "rsa-4096" => "RSA-4096",
-                "ecdsa-p256" => "ECDSA-P256",
-                "ecdsa-p384" => "ECDSA-P384",
-                "ed25519" => "ED25519",
-                "chacha20-poly1305" => "CHACHA20-POLY1305",
-                _ => "AES-GCM",
+            #[derive(Serialize)]
+            struct TransitCreateRequest {
+                key_type: Option<String>,
+            }
+            let req = TransitCreateRequest {
+                key_type: Some(k_type),
             };
-            let req = CreateKeyRequest {
-                name: name.clone(),
-                key_type: k_type.clone(),
-                algorithm: algo.to_string(),
-                size: match k_type.as_str() {
-                    "rsa-2048" => Some(2048),
-                    "rsa-4096" => Some(4096),
-                    "ecdsa-p384" => Some(384),
-                    _ => Some(256),
-                },
-                usage: match k_type.as_str() {
-                    "ed25519" | "ecdsa-p256" | "ecdsa-p384" | "rsa-2048" | "rsa-4096" => vec!["sign".to_string(), "verify".to_string()],
-                    _ => vec!["encrypt".to_string(), "decrypt".to_string()],
-                },
-                metadata: None,
-            };
-            match api::post::<KeyResponse, _>("/secret/keys", req).await {
+            match api::post::<serde_json::Value, _>(&format!("/transit/keys/{}", name), req).await {
                 Ok(_) => {
                     set_create_status.set(Some("Key created successfully".to_string()));
                     set_new_key_name.set(String::new());
@@ -181,17 +190,23 @@ pub fn TransitPage() -> impl IntoView {
     let encrypt_action = Action::new_local(move |_: &()| {
         let key = selected_key.get();
         let text = input_text.get();
-        let algo = selected_algo.get();
         async move {
             if let Some(k) = key {
                 let b64_text = BASE64.encode(text.as_bytes());
-                let req = EncryptRequest {
-                    key_id: k.id,
+                #[derive(Serialize)]
+                struct TransitEncryptRequest {
+                    plaintext: String,
+                    context: Option<String>,
+                }
+                let req = TransitEncryptRequest {
                     plaintext: b64_text,
                     context: None,
-                    algorithm: Some(algo),
                 };
-                match api::post::<EncryptResponse, _>("/secret/encrypt", req).await {
+                #[derive(Deserialize)]
+                struct TransitEncryptResponse {
+                    ciphertext: String,
+                }
+                match api::post::<TransitEncryptResponse, _>(&format!("/transit/encrypt/{}", k.name), req).await {
                     Ok(res) => {
                         set_output_result.set(res.ciphertext);
                         set_error_msg.set(None);
@@ -211,12 +226,20 @@ pub fn TransitPage() -> impl IntoView {
         let ciphertext = input_text.get();
         async move {
             if let Some(k) = key {
-                let req = DecryptRequest {
-                    key_id: k.id,
+                #[derive(Serialize)]
+                struct TransitDecryptRequest {
+                    ciphertext: String,
+                    context: Option<String>,
+                }
+                let req = TransitDecryptRequest {
                     ciphertext,
                     context: None,
                 };
-                match api::post::<DecryptResponse, _>("/secret/decrypt", req).await {
+                #[derive(Deserialize)]
+                struct TransitDecryptResponse {
+                    plaintext: String,
+                }
+                match api::post::<TransitDecryptResponse, _>(&format!("/transit/decrypt/{}", k.name), req).await {
                     Ok(res) => {
                         match BASE64.decode(&res.plaintext) {
                             Ok(bytes) => {
@@ -247,13 +270,22 @@ pub fn TransitPage() -> impl IntoView {
         async move {
             if let Some(k) = key {
                 let b64_input = BASE64.encode(text.as_bytes());
-                let req = SignRequest {
-                    key_id: k.id,
-                    data: b64_input,
-                    algorithm: Some(algo),
-                    format: None,
+                #[derive(Serialize)]
+                struct TransitSignRequest {
+                    input: String,
+                    algorithm: Option<String>,
+                    key_version: Option<u32>,
+                }
+                let req = TransitSignRequest {
+                    input: b64_input,
+                    algorithm: Some(algo.to_lowercase()),
+                    key_version: None,
                 };
-                match api::post::<SignResponse, _>("/secret/sign", req).await {
+                #[derive(Deserialize)]
+                struct TransitSignResponse {
+                    signature: String,
+                }
+                match api::post::<TransitSignResponse, _>(&format!("/transit/sign/{}", k.name), req).await {
                     Ok(res) => {
                         set_output_result.set(res.signature);
                         set_error_msg.set(None);
@@ -279,13 +311,22 @@ pub fn TransitPage() -> impl IntoView {
                 let sig_trimmed = sig.trim();
 
                 let b64_input = BASE64.encode(text_trimmed.as_bytes());
-                let req = VerifyRequest {
-                    key_id: k.id,
-                    data: b64_input,
+                #[derive(Serialize)]
+                struct TransitVerifyRequest {
+                    input: String,
+                    signature: String,
+                    algorithm: Option<String>,
+                }
+                let req = TransitVerifyRequest {
+                    input: b64_input,
                     signature: sig_trimmed.to_string(),
-                    algorithm: Some(algo)
+                    algorithm: Some(algo.to_lowercase())
                 };
-                match api::post::<VerifyResponse, _>("/secret/verify", req).await {
+                #[derive(Deserialize)]
+                struct TransitVerifyResponse {
+                    valid: bool,
+                }
+                match api::post::<TransitVerifyResponse, _>(&format!("/transit/verify/{}", k.name), req).await {
                     Ok(res) => {
                         set_verify_result.set(Some(res.valid));
                         set_error_msg.set(None);

@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Extension, Path},
+    extract::{Path, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -16,7 +16,8 @@ use secreton_crypto::transit::{
 };
 
 // Import ApiState from the parent module
-use crate::{ApiResponse, ApiState};
+use crate::ApiResponse;
+use crate::handlers::AppState;
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -95,7 +96,7 @@ pub struct VerifyResponse {
     pub valid: bool,
 }
 
-pub fn create_transit_router() -> Router<()> {
+pub fn create_transit_router() -> Router<AppState> {
     Router::new()
         .route("/keys", get(list_keys))
         .route("/keys/{key_name}", post(create_key).get(get_key_info))
@@ -103,20 +104,21 @@ pub fn create_transit_router() -> Router<()> {
         .route("/decrypt/{key_name}", post(decrypt_data))
         .route("/sign/{key_name}", post(sign_data))
         .route("/verify/{key_name}", post(verify_data))
+        .route("/hash", post(hash_data))
 }
 
 pub async fn list_keys(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
 ) -> Json<ApiResponse<ListKeysResponse>> {
-    let keys = state.transit.engine.list_keys().await;
+    let keys = state.transit.list_keys().await;
     Json(ApiResponse::success(ListKeysResponse { keys }))
 }
 
 pub async fn get_key_info(
     Path(key_name): Path<String>,
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<KeyInfo>>, StatusCode> {
-    match state.transit.engine.get_key_info(&key_name).await {
+    match state.transit.get_key_info(&key_name).await {
         Ok(info) => Ok(Json(ApiResponse::success(info))),
         Err(_) => Err(StatusCode::NOT_FOUND),
     }
@@ -124,7 +126,7 @@ pub async fn get_key_info(
 
 pub async fn create_key(
     Path(key_name): Path<String>,
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
     // Parse key type from string to KeyType enum
@@ -152,7 +154,6 @@ pub async fn create_key(
 
     match state
         .transit
-        .engine
         .create_key(key_name.clone(), key_type, Some(options))
         .await
     {
@@ -172,7 +173,7 @@ pub async fn create_key(
 
 #[axum::debug_handler]
 pub async fn encrypt_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<ApiResponse<EncryptResponse>>, StatusCode> {
@@ -196,7 +197,6 @@ pub async fn encrypt_data(
 
     match state
         .transit
-        .engine
         .encrypt(&key_name, &plaintext_bytes, context.as_deref(), None)
         .await
     {
@@ -213,7 +213,7 @@ pub async fn encrypt_data(
 
 #[axum::debug_handler]
 pub async fn decrypt_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<ApiResponse<DecryptResponse>>, StatusCode> {
@@ -231,7 +231,6 @@ pub async fn decrypt_data(
 
     match state
         .transit
-        .engine
         .decrypt(&key_name, &request.ciphertext, context.as_deref())
         .await
     {
@@ -250,7 +249,7 @@ pub async fn decrypt_data(
 
 #[axum::debug_handler]
 pub async fn sign_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<SignRequest>,
 ) -> Result<Json<ApiResponse<SignResponse>>, StatusCode> {
@@ -272,7 +271,7 @@ pub async fn sign_data(
 
     // If algorithm is not specified, try to infer it from key type for the response
     let response_algorithm = if request.algorithm.is_none() {
-        if let Ok(key_info) = state.transit.engine.get_key_info(&key_name).await {
+        if let Ok(key_info) = state.transit.get_key_info(&key_name).await {
             match key_info.key_type {
                 KeyType::Ed25519 => Some("ed25519".to_string()),
                 KeyType::EcdsaP256 => Some("ecdsa-p256".to_string()),
@@ -288,7 +287,6 @@ pub async fn sign_data(
 
     match state
         .transit
-        .engine
         .sign(&key_name, &input_bytes, algorithm, request.key_version)
         .await
     {
@@ -308,8 +306,50 @@ pub async fn sign_data(
 }
 
 #[axum::debug_handler]
+pub async fn hash_data(
+    State(state): State<AppState>,
+    Json(request): Json<HashRequest>,
+) -> Result<Json<ApiResponse<HashResponse>>, StatusCode> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    // Decode base64 input
+    let input_bytes = match BASE64.decode(&request.input) {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let algorithm = match request.algorithm.as_deref().unwrap_or("sha256") {
+        "sha256" | "SHA-256" => secreton_crypto::transit::HashAlgorithm::Sha256,
+        "sha512" | "SHA-512" => secreton_crypto::transit::HashAlgorithm::Sha512,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    match state.transit.hash(&input_bytes, algorithm).await {
+        Ok(hash) => {
+            Ok(Json(ApiResponse::success(HashResponse {
+                hash,
+                algorithm: request.algorithm.unwrap_or_else(|| "sha256".to_string()),
+            })))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HashRequest {
+    pub input: String, // base64 encoded
+    pub algorithm: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HashResponse {
+    pub hash: String,
+    pub algorithm: String,
+}
+
+#[axum::debug_handler]
 pub async fn verify_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<ApiResponse<VerifyResponse>>, StatusCode> {
@@ -331,7 +371,6 @@ pub async fn verify_data(
 
     match state
         .transit
-        .engine
         .verify(&key_name, &input_bytes, &request.signature, algorithm)
         .await
     {
