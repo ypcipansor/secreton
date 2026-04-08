@@ -579,9 +579,11 @@ impl SecretService {
         // Log audit trail for rollback specifically
         let _ = self
             .audit
+        let _ = self
+            .audit
             .log_event(SecurityEventType::SecretVersionChange {
                 secret_path: path.to_string(),
-                old_version: version, // Promotion from this version
+                old_version: rolled_back.previous_version.unwrap_or(0),
                 new_version: rolled_back.version,
                 user: user.id.to_string(),
             })
