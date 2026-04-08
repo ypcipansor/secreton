@@ -948,8 +948,14 @@ impl SecretService {
                 SecretError::Internal(anyhow::anyhow!("Failed to deserialize key metadata: {}", e))
             })?;
 
-        // Extract key information
-        let name = metadata
+        // Extract key information.
+        // `key_id` in the metadata JSON is the internal UUID-based identifier
+        // (e.g. "key_abc123"), while the `key_id` parameter to this function
+        // is the user-friendly name (from the URL path).  Match the field
+        // assignment used by `create_key` and `list_keys`:
+        //   id   = internal key_id from metadata
+        //   name = user-friendly name (the path parameter)
+        let internal_id = metadata
             .get("key_id")
             .and_then(|v| v.as_str())
             .unwrap_or(key_id)
@@ -977,8 +983,8 @@ impl SecretService {
             .unwrap_or_else(|_| chrono::Utc::now());
 
         Ok(KeyInfo {
-            id: key_id.to_string(),
-            name,
+            id: internal_id,
+            name: key_id.to_string(),
             key_type,
             version,
             status: "active".to_string(),
@@ -1672,15 +1678,31 @@ impl SecretService {
 
         let key_info = self.get_key(key_name, user).await?;
 
-        // Map key type to algorithm
+        // Map key type to algorithm.
+        // Symmetric key types (aes256-gcm, chacha20-poly1305, xchacha20-poly1305)
+        // and key-agreement types (x25519) don't support signing.
         let algorithm = match key_info.key_type.as_str() {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' signing is only supported via the transit engine.".to_string(),
+                ));
+            }
+            "aes256-gcm" | "chacha20-poly1305" | "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support signing. Use encrypt/decrypt instead.",
+                    key_info.key_type
+                )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not signing.".to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type for signing: {}",
@@ -1748,15 +1770,30 @@ impl SecretService {
         // Get key info to retrieve version and algorithm
         let key_info = self.get_key(key_name, user).await?;
 
-        // Map key type to algorithm
+        // Map key type to algorithm.
+        // Symmetric key types and key-agreement types don't support verification.
         let algorithm = match key_info.key_type.as_str() {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' verification is only supported via the transit engine.".to_string(),
+                ));
+            }
+            "aes256-gcm" | "chacha20-poly1305" | "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support verification. Use encrypt/decrypt instead.",
+                    key_info.key_type
+                )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not verification.".to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type for verification: {}",

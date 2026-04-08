@@ -1289,6 +1289,7 @@ pub async fn encrypt_data(
         "nonce": BASE64_STANDARD.encode(&encrypted_data.nonce),
         "ciphertext": BASE64_STANDARD.encode(&encrypted_data.ciphertext),
         "tag": encrypted_data.tag.as_ref().map(|t| BASE64_STANDARD.encode(t)),
+        "key_version": key_version,
     });
     let envelope_json = serde_json::to_vec(&compact_envelope)
         .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e)))?;
@@ -1320,6 +1321,7 @@ pub async fn decrypt_data(
     // Deserialize the EncryptedData envelope. Try the compact base64-field format
     // first (produced by the updated encrypt endpoint), then fall back to the raw
     // serde format (Vec<u8> as number arrays) for backward compatibility.
+    let mut envelope_key_version: Option<u32> = None;
     let encrypted_data: EncryptedData = {
         // Try compact format: byte fields are base64-encoded strings
         #[derive(Deserialize)]
@@ -1328,6 +1330,7 @@ pub async fn decrypt_data(
             nonce: String,
             ciphertext: String,
             tag: Option<String>,
+            key_version: Option<u32>,
         }
         if let Ok(compact) = serde_json::from_slice::<CompactEnvelope>(&ciphertext_bytes) {
             let nonce = BASE64_STANDARD.decode(&compact.nonce)
@@ -1338,6 +1341,12 @@ pub async fn decrypt_data(
                 .map(|t| BASE64_STANDARD.decode(&t))
                 .transpose()
                 .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 tag: {}", e)))?;
+            // If the envelope contains a key_version and the request didn't
+            // explicitly specify one, use the version from the envelope so
+            // that decryption uses the correct key material even after rotation.
+            if request.key_version.is_none() {
+                envelope_key_version = compact.key_version;
+            }
             EncryptedData {
                 algorithm: compact.algorithm,
                 nonce,
@@ -1351,10 +1360,15 @@ pub async fn decrypt_data(
         }
     };
 
+    // Use the key version from the request if explicitly provided, otherwise
+    // fall back to the version embedded in the ciphertext envelope, or None
+    // (which causes the service to use the latest version).
+    let effective_key_version = request.key_version.or(envelope_key_version);
+
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
         .secreton
-        .decrypt(&request.key_id, &encrypted_data, &user, request.key_version)
+        .decrypt(&request.key_id, &encrypted_data, &user, effective_key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
@@ -1403,7 +1417,7 @@ pub async fn sign_data(
     let response = SignResponse {
         signature: signature_result.signature,
         key_version: signature_result.key_version, // Already using actual key version
-        algorithm: request.algorithm.unwrap_or("RSA-PSS".to_string()), // Default algorithm
+        algorithm: request.algorithm.unwrap_or_else(|| "ED25519".to_string()),
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -1759,9 +1773,10 @@ async fn get_public_key_for_key(
     // Check if this is an asymmetric key type
     match key_info.key_type.as_str() {
         "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
-            // Try to retrieve the public key from storage
-            // Public keys are typically stored alongside private keys in secreton
-            let key_path = format!("keys/{}/{}", user.id, key_info.id);
+            // Try to retrieve the public key from storage.
+            // The storage path uses the user-friendly key name (key_info.name),
+            // not the internal UUID-based key_id (key_info.id).
+            let key_path = format!("keys/{}/{}", user.id, key_info.name);
 
             match state.storage.get_by_path(&key_path).await {
                 Ok(Some(entry)) => {
