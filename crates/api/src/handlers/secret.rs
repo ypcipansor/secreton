@@ -697,7 +697,7 @@ pub async fn create_secret(
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to operation: {}", e)),
+            _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
         })?;
 
     let response = SecretResponse {
@@ -1269,6 +1269,9 @@ pub async fn encrypt_data(
         .encrypt(&request.key_id, &plaintext, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)),
         })?;
@@ -1351,6 +1354,9 @@ pub async fn decrypt_data(
         .decrypt(&request.key_id, &encrypted_data, &user, request.key_version)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)),
         })?;
@@ -1382,8 +1388,11 @@ pub async fn sign_data(
         .sign_data(&request.key_id, &data, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to operation: {}", e)),
+            _ => crate::ApiError::Internal(format!("Failed to sign data: {}", e)),
         })?;
 
     let response = SignResponse {
@@ -1400,21 +1409,24 @@ pub async fn verify_signature(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
-    // Decode data and signature from base64
+    // Decode data from base64
     let data = BASE64_STANDARD
         .decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
 
-    let signature = BASE64_STANDARD
-        .decode(&request.signature)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
+    // Pass the base64-encoded signature string directly to verify_data,
+    // which performs its own base64 decoding internally.
+    let signature_bytes = request.signature.as_bytes();
 
     // Verify signature using secreton service
     let (is_valid, key_version) = state
         .secreton
-        .verify_data(&request.key_id, &data, &signature, &user)
+        .verify_data(&request.key_id, &data, signature_bytes, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to verify signature: {}", e)),
         })?;
