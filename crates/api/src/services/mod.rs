@@ -66,6 +66,7 @@ pub struct ApiServiceContainer {
     pub totp_engine: Arc<totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
+    pub telemetry: Arc<TelemetryCollector>,
     pub identity: Arc<dyn IdentityService + Send + Sync>,
 }
 
@@ -265,7 +266,7 @@ impl ApiServiceContainer {
         registry.register_service("pki".to_string(), pki.clone());
         registry.register_service("ssh".to_string(), ssh.clone());
         registry.register_service("totp_engine".to_string(), totp_engine.clone());
-        registry.register_service("telemetry".to_string(), telemetry);
+        registry.register_service("telemetry".to_string(), telemetry.clone());
         registry.register_service("identity".to_string(), identity.clone());
 
         Ok(Self {
@@ -286,6 +287,7 @@ impl ApiServiceContainer {
             totp_engine,
             performance,
             mfa,
+            telemetry,
             identity,
         })
     }

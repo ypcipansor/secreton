@@ -93,6 +93,7 @@ pub struct AppState {
     pub totp_engine: Arc<crate::services::totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
+    pub telemetry: Arc<secreton_core::telemetry::TelemetryCollector>,
     pub config: Arc<ApiConfig>,
 }
 
@@ -113,6 +114,7 @@ impl From<Arc<ApiServiceContainer>> for AppState {
             totp_engine: container.totp_engine.clone(),
             performance: container.performance.clone(),
             mfa: container.mfa.clone(),
+            telemetry: container.telemetry.clone(),
             config: Arc::new(container.config.clone()),
         }
     }

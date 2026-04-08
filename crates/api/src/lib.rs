@@ -1334,6 +1334,7 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         ssh: resolve(&state.secreton, "ssh")?,
         totp_engine: resolve(&state.secreton, "totp_engine")?,
         mfa: resolve(&state.secreton, "mfa")?,
+        telemetry: resolve(&state.secreton, "telemetry")?,
         config: state.config.clone(),
     };
 

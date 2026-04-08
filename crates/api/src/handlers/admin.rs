@@ -51,6 +51,7 @@ pub fn create_routes() -> Router<AppState> {
         .route("/maintenance/gc", post(run_garbage_collection))
         .route("/maintenance/compact", post(compact_database))
         .route("/maintenance/vacuum", post(vacuum_database))
+        .route("/maintenance/cache/clear", post(clear_performance_cache))
         // Audit logs
         .route("/audit", get(list_audit_logs))
         // Backup operations
@@ -227,7 +228,8 @@ mod tests {
         let body: ApiResponse<SystemConfig> = response.json();
         assert!(body.success);
         let config = body.data.expect("config payload");
-        assert!(config.security.mfa_enabled);
+        // MfaConfig derives Default, so mfa.enabled defaults to false
+        assert!(!config.security.mfa_enabled);
         assert_eq!(config.api.version, "0.1.0");
     }
 
@@ -603,38 +605,73 @@ pub async fn delete_user(
 
 /// System configuration endpoints
 pub async fn get_config(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
     require_admin(&user)?;
-    // Get actual configuration from the services
+
+    let dynamic_config = state
+        .admin
+        .get_config()
+        .await
+        .map_err(map_admin_error)?;
+
+    // Default password policy values — keep in sync with
+    // `AdminService::get_password_policy` in services/admin.rs.
+    const DEFAULT_MIN_LENGTH: u8 = 8;
+    const DEFAULT_REQUIRE_UPPERCASE: bool = true;
+    const DEFAULT_REQUIRE_LOWERCASE: bool = true;
+    const DEFAULT_REQUIRE_NUMBERS: bool = true;
+    const DEFAULT_REQUIRE_SPECIAL: bool = false;
+
+    // Get actual configuration from the services, merging with dynamic config if present.
+    //
+    // NOTE: Dynamic config values are currently display-only. Changing them via
+    // the admin UI does NOT alter the running service behaviour (e.g. session
+    // timeout, MFA enforcement). A server restart or a dedicated reload
+    // mechanism is required for changes to take effect at runtime.
     let config = SystemConfig {
         api: ApiConfigInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            bind_address: "0.0.0.0:8080".to_string(), // This should come from config
-            max_connections: 1000,
-            timeout: 30,
+            bind_address: state.config.http.bind_address.to_string(),
+            max_connections: 1000, // TODO: add max_connections to HttpConfig
+            timeout: state.config.http.timeout,
         },
         security: SecurityConfigInfo {
-            mfa_enabled: true, // This should come from config
+            mfa_enabled: dynamic_config.get("enable_mfa")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(state.config.auth.mfa.enabled),
             password_policy: PasswordPolicyInfo {
-                min_length: 8,
-                require_uppercase: true,
-                require_lowercase: true,
-                require_numbers: true,
-                require_special: true,
+                min_length: dynamic_config.get("password_policy_min_length")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.min(255) as u8)
+                    .unwrap_or(DEFAULT_MIN_LENGTH),
+                require_uppercase: dynamic_config.get("password_policy_require_uppercase")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(DEFAULT_REQUIRE_UPPERCASE),
+                require_lowercase: dynamic_config.get("password_policy_require_lowercase")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(DEFAULT_REQUIRE_LOWERCASE),
+                require_numbers: dynamic_config.get("password_policy_require_numbers")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(DEFAULT_REQUIRE_NUMBERS),
+                require_special: dynamic_config.get("password_policy_require_special")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(DEFAULT_REQUIRE_SPECIAL),
             },
-            session_timeout: 3600,
+            session_timeout: dynamic_config.get("session_timeout")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(state.config.auth.session.timeout),
         },
         storage: StorageConfigInfo {
-            backend: "postgresql".to_string(), // This should come from actual storage config
+            backend: format!("{:?}", state.config.storage.backend_type),
             encryption_enabled: true,
             backup_enabled: true,
         },
         monitoring: MonitoringConfigInfo {
-            metrics_enabled: true,
-            tracing_enabled: true,
-            log_level: "info".to_string(),
+            metrics_enabled: state.config.monitoring.metrics,
+            tracing_enabled: state.config.monitoring.tracing,
+            log_level: state.config.logging.level.clone(),
         },
     };
 
@@ -655,84 +692,52 @@ pub async fn get_system_metrics(
         .await
         .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
 
-    // Use shared telemetry collector if available
-    let (memory, cpu, disk, network, uptime) =
-        if let Some(telemetry) = Option::<secreton_core::telemetry::TelemetryCollector>::None {
-            // Stubbed due to compilation issue
-            let m: secreton_core::telemetry::SystemMetrics = telemetry.get_metrics().await;
+    // Use shared telemetry collector
+    let m = state.telemetry.get_metrics().await;
 
-            let mem = MemoryMetrics {
-                total: m.performance.total_memory_bytes,
-                used: m.performance.memory_usage_bytes,
-                free: m
-                    .performance
-                    .total_memory_bytes
-                    .saturating_sub(m.performance.memory_usage_bytes),
-                cached: 0, // Not currently tracked in core metrics
-            };
+    let memory = MemoryMetrics {
+        total: m.performance.total_memory_bytes,
+        used: m.performance.memory_usage_bytes,
+        free: m
+            .performance
+            .total_memory_bytes
+            .saturating_sub(m.performance.memory_usage_bytes),
+        cached: 0,
+    };
 
-            let cpu = CpuMetrics {
-                cores: num_cpus::get() as u32,
-                usage_percent: m.performance.cpu_usage_percent as f64,
-                load_average: [
-                    m.system.load_average_1m as f64,
-                    m.system.load_average_5m as f64,
-                    m.system.load_average_15m as f64,
-                ],
-            };
+    let cpu = CpuMetrics {
+        cores: num_cpus::get() as u32,
+        usage_percent: m.performance.cpu_usage_percent as f64,
+        load_average: [
+            m.system.load_average_1m as f64,
+            m.system.load_average_5m as f64,
+            m.system.load_average_15m as f64,
+        ],
+    };
 
-            let disk = DiskMetrics {
-                total: m.performance.total_disk_bytes,
-                used: m.performance.disk_usage_bytes,
-                free: m
-                    .performance
-                    .total_disk_bytes
-                    .saturating_sub(m.performance.disk_usage_bytes),
-                usage_percent: if m.performance.total_disk_bytes > 0 {
-                    (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64)
-                        * 100.0
-                } else {
-                    0.0
-                },
-            };
-
-            let net = NetworkMetrics {
-                bytes_sent: m.performance.network_tx_bytes,
-                bytes_received: m.performance.network_rx_bytes,
-                packets_sent: 0,     // Not tracked
-                packets_received: 0, // Not tracked
-            };
-
-            (mem, cpu, disk, net, m.system.uptime_seconds)
+    let disk = DiskMetrics {
+        total: m.performance.total_disk_bytes,
+        used: m.performance.disk_usage_bytes,
+        free: m
+            .performance
+            .total_disk_bytes
+            .saturating_sub(m.performance.disk_usage_bytes),
+        usage_percent: if m.performance.total_disk_bytes > 0 {
+            (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64)
+                * 100.0
         } else {
-            // Fallback for when telemetry service is missing
-            (
-                MemoryMetrics {
-                    total: 0,
-                    used: 0,
-                    free: 0,
-                    cached: 0,
-                },
-                CpuMetrics {
-                    cores: 1,
-                    usage_percent: 0.0,
-                    load_average: [0.0; 3],
-                },
-                DiskMetrics {
-                    total: 0,
-                    used: 0,
-                    free: 0,
-                    usage_percent: 0.0,
-                },
-                NetworkMetrics {
-                    bytes_sent: 0,
-                    bytes_received: 0,
-                    packets_sent: 0,
-                    packets_received: 0,
-                },
-                stats.uptime_seconds,
-            )
-        };
+            0.0
+        },
+    };
+
+    let network = NetworkMetrics {
+        bytes_sent: m.performance.network_tx_bytes,
+        bytes_received: m.performance.network_rx_bytes,
+        packets_sent: 0,
+        packets_received: 0,
+    };
+
+    let uptime = m.system.uptime_seconds;
 
     // Count total policies from storage
     let total_policies: u64 = state
@@ -770,12 +775,14 @@ pub async fn get_system_status(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SystemStatus>>> {
     require_admin(&user)?;
-    // Check component health
-    let database_status = check_database_health(&state).await;
-    let cache_status = check_cache_health(&state).await;
-    let crypto_status = check_crypto_health(&state).await;
-    let storage_status = check_storage_health(&state).await;
-    let auth_status = check_auth_health(&state).await;
+    // Check component health concurrently to avoid sequential 5s timeouts
+    let (database_status, cache_status, crypto_status, storage_status, auth_status) = tokio::join!(
+        check_database_health(&state),
+        check_cache_health(&state),
+        check_crypto_health(&state),
+        check_storage_health(&state),
+        check_auth_health(&state),
+    );
 
     let overall_status = if database_status == "healthy"
         && cache_status == "healthy"
@@ -784,22 +791,22 @@ pub async fn get_system_status(
         && auth_status == "healthy"
     {
         "healthy"
-    } else if database_status == "unhealthy"
-        || storage_status == "unhealthy"
-        || crypto_status == "unhealthy"
+    } else if database_status != "healthy"
+        || storage_status != "healthy"
+        || crypto_status != "healthy"
     {
         "unhealthy"
     } else {
         "degraded"
     };
 
+    // Use telemetry for actual system uptime (consistent with get_system_metrics)
+    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+
     let status = SystemStatus {
         status: overall_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: std::time::SystemTime::UNIX_EPOCH
-            .elapsed()
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        uptime,
         components: ComponentStatus {
             database: database_status,
             cache: cache_status,
@@ -885,6 +892,23 @@ pub async fn run_garbage_collection(
     }
 }
 
+pub async fn clear_performance_cache(
+    State(state): State<AppState>,
+    crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
+) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    require_admin(&user)?;
+
+    state
+        .performance
+        .clear_cache()
+        .await
+        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(serde_json::json!({
+        "message": "Performance cache cleared successfully"
+    }))))
+}
+
 pub async fn compact_database(
     State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
@@ -910,24 +934,26 @@ pub async fn compact_database(
 }
 
 /// Component health check functions
-async fn check_database_health(_state: &AppState) -> String {
-    // Try a simple database operation to check health
-    match timeout(Duration::from_secs(5), async {
-        // This would need to be implemented based on the actual storage backend
-        // For now, assume healthy if we can access the service
-        Ok::<(), ()>(())
-    })
-    .await
-    {
-        Ok(Ok(_)) => "healthy".to_string(),
-        _ => "unhealthy".to_string(),
+async fn check_database_health(state: &AppState) -> String {
+    match timeout(Duration::from_secs(5), state.storage.health_check()).await {
+        Ok(Ok(status)) if status.is_healthy => "healthy".to_string(),
+        Ok(Ok(_)) => "unhealthy".to_string(),
+        Ok(Err(_)) => "unhealthy".to_string(),
+        Err(_) => "timeout".to_string(),
     }
 }
 
-async fn check_cache_health(_state: &AppState) -> String {
-    // Check if cache is accessible
-    // For now, assume healthy
-    "healthy".to_string()
+async fn check_cache_health(state: &AppState) -> String {
+    // Use get_cache_stats() for a lightweight but meaningful cache probe.
+    // analyze_performance() always returns Ok, making its error arm dead code.
+    match timeout(Duration::from_secs(5), state.performance.get_cache_stats()).await {
+        Ok(stats) => {
+            // Successfully obtained cache stats — cache subsystem is responsive.
+            let _ = stats; // stats is a HashMap; presence alone signals health.
+            "healthy".to_string()
+        }
+        Err(_) => "timeout".to_string(),
+    }
 }
 
 async fn check_crypto_health(_state: &AppState) -> String {
@@ -940,7 +966,10 @@ async fn check_crypto_health(_state: &AppState) -> String {
     }
 
     // Test symmetric encryption
-    let key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm).unwrap();
+    let key = match secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm) {
+        Ok(k) => k,
+        Err(_) => return "unhealthy".to_string(),
+    };
     let engine = encryption::CryptoEngine::new();
     match engine.encrypt(secreton_crypto::AlgorithmId::Aes256Gcm, test_data, &key) {
         Ok(encrypted) => match engine.decrypt(&encrypted, &key) {
@@ -951,29 +980,19 @@ async fn check_crypto_health(_state: &AppState) -> String {
     }
 }
 
-async fn check_storage_health(_state: &AppState) -> String {
-    // Try a simple storage operation
-    match timeout(Duration::from_secs(5), async {
-        // This would test the storage backend
-        Ok::<(), ()>(())
-    })
-    .await
-    {
+async fn check_storage_health(state: &AppState) -> String {
+    match timeout(Duration::from_secs(5), state.storage.get_stats()).await {
         Ok(Ok(_)) => "healthy".to_string(),
-        _ => "unhealthy".to_string(),
+        Ok(Err(_)) => "unhealthy".to_string(),
+        Err(_) => "timeout".to_string(),
     }
 }
 
-async fn check_auth_health(_state: &AppState) -> String {
-    // Check if auth service is responsive
-    match timeout(Duration::from_secs(5), async {
-        // Test auth service availability
-        Ok::<(), ()>(())
-    })
-    .await
-    {
+async fn check_auth_health(state: &AppState) -> String {
+    match timeout(Duration::from_secs(5), state.auth.get_user_count()).await {
         Ok(Ok(_)) => "healthy".to_string(),
-        _ => "degraded".to_string(),
+        Ok(Err(_)) => "unhealthy".to_string(),
+        Err(_) => "timeout".to_string(),
     }
 }
 
@@ -1193,41 +1212,19 @@ pub async fn delete_role(
 }
 
 pub async fn update_config(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
-    Json(_request): Json<serde_json::Value>,
-) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
+    Json(request): Json<HashMap<String, serde_json::Value>>,
+) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    // Return mock config
-    Ok(Json(ApiResponse::success(SystemConfig {
-        api: ApiConfigInfo {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            bind_address: "0.0.0.0:8080".to_string(),
-            max_connections: 1000,
-            timeout: 30,
-        },
-        security: SecurityConfigInfo {
-            mfa_enabled: true,
-            password_policy: PasswordPolicyInfo {
-                min_length: 8,
-                require_uppercase: true,
-                require_lowercase: true,
-                require_numbers: true,
-                require_special: true,
-            },
-            session_timeout: 3600,
-        },
-        storage: StorageConfigInfo {
-            backend: "postgresql".to_string(),
-            encryption_enabled: true,
-            backup_enabled: true,
-        },
-        monitoring: MonitoringConfigInfo {
-            metrics_enabled: true,
-            tracing_enabled: true,
-            log_level: "info".to_string(),
-        },
-    })))
+
+    let result = state
+        .admin
+        .update_config(request)
+        .await
+        .map_err(map_admin_error)?;
+
+    Ok(Json(ApiResponse::success(serde_json::to_value(result).map_err(|e| crate::ApiError::Internal(e.to_string()))?)))
 }
 
 pub async fn reload_config(

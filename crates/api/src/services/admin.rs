@@ -995,6 +995,19 @@ impl AdminService {
             });
         }
 
+        if !password_policy.require_lowercase {
+            findings.push(SecurityFinding {
+                severity: "medium".to_string(),
+                category: "configuration".to_string(),
+                title: "Password policy doesn't require lowercase".to_string(),
+                description: "Password policy should require at least one lowercase character"
+                    .to_string(),
+                recommendation: "Enable lowercase character requirement in password policy"
+                    .to_string(),
+                affected_resources: vec!["password_policy".to_string()],
+            });
+        }
+
         if !password_policy.require_numbers {
             findings.push(SecurityFinding {
                 severity: "medium".to_string(),
@@ -1082,6 +1095,11 @@ impl AdminService {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true);
 
+                    let require_lowercase = config
+                        .get("password_policy_require_lowercase")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
                     let require_numbers = config
                         .get("password_policy_require_numbers")
                         .and_then(|v| v.as_bool())
@@ -1096,7 +1114,7 @@ impl AdminService {
                         min_length,
                         max_length: None, // Not used in this context
                         require_uppercase,
-                        require_lowercase: true, // Assume always required
+                        require_lowercase,
                         require_numbers,
                         require_special,
                         allowed_special_chars: None, // Not used in this context
@@ -1327,9 +1345,11 @@ impl AdminService {
         }
 
         // Check session timeout configuration
+        // NOTE: session_timeout is stored in seconds (e.g. 3600 = 60 minutes)
         if let Some(config) = &config_data {
             if let Some(session_timeout) = config.get("session_timeout") {
-                if let Some(timeout_minutes) = session_timeout.as_u64() {
+                if let Some(timeout_seconds) = session_timeout.as_u64() {
+                    let timeout_minutes = timeout_seconds / 60;
                     if timeout_minutes > 480 {
                         // 8 hours
                         findings.push(SecurityFinding {
@@ -1581,6 +1601,26 @@ impl AdminService {
         Ok(findings)
     }
 
+    /// Get system configuration from storage
+    pub async fn get_config(&self) -> Result<HashMap<String, serde_json::Value>, AdminError> {
+        let config_path = "system/config";
+        let entry = self
+            .storage
+            .get_by_path(config_path)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        let config_data: HashMap<String, serde_json::Value> = entry
+            .and_then(|e| {
+                e.metadata
+                    .get("config_data")
+                    .and_then(|data| serde_json::from_str(data).ok())
+            })
+            .unwrap_or_default();
+
+        Ok(config_data)
+    }
+
     /// Update system configuration
     pub async fn update_config(
         &self,
@@ -1599,6 +1639,7 @@ impl AdminService {
                     | "max_failed_attempts"
                     | "password_policy_min_length"
                     | "password_policy_require_uppercase"
+                    | "password_policy_require_lowercase"
                     | "password_policy_require_numbers"
                     | "password_policy_require_special"
                     | "rate_limit_requests_per_minute"
@@ -1618,7 +1659,82 @@ impl AdminService {
             )));
         }
 
-        // Store configuration in system config path
+        // Validate value types and ranges
+        if let Some(val) = config_updates.get("session_timeout") {
+            match val.as_u64() {
+                Some(v) if v < 60 || v > 86400 => {
+                    return Err(AdminError::InvalidConfig(
+                        "session_timeout must be between 60 and 86400 seconds (1 minute to 24 hours)".to_string(),
+                    ));
+                }
+                None => {
+                    return Err(AdminError::InvalidConfig(
+                        "session_timeout must be a positive integer (seconds)".to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if let Some(val) = config_updates.get("password_policy_min_length") {
+            match val.as_u64() {
+                Some(v) if v == 0 || v > 255 => {
+                    return Err(AdminError::InvalidConfig(
+                        "password_policy_min_length must be between 1 and 255".to_string(),
+                    ));
+                }
+                None => {
+                    return Err(AdminError::InvalidConfig(
+                        "password_policy_min_length must be a positive integer".to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        // Validate remaining numeric config keys
+        for (num_key, min, max, label) in &[
+            ("jwt_expiration", 1u64, 8760u64, "jwt_expiration must be a positive integer (hours) no greater than 8760"),
+            ("max_failed_attempts", 1u64, 100u64, "max_failed_attempts must be a positive integer between 1 and 100"),
+            ("rate_limit_requests_per_minute", 1u64, 100000u64, "rate_limit_requests_per_minute must be a positive integer between 1 and 100000"),
+            ("backup_retention_days", 1u64, 3650u64, "backup_retention_days must be a positive integer between 1 and 3650"),
+            ("log_retention_days", 1u64, 3650u64, "log_retention_days must be a positive integer between 1 and 3650"),
+        ] {
+            if let Some(val) = config_updates.get(*num_key) {
+                match val.as_u64() {
+                    Some(v) if v < *min || v > *max => {
+                        return Err(AdminError::InvalidConfig(label.to_string()));
+                    }
+                    None => {
+                        return Err(AdminError::InvalidConfig(format!(
+                            "{} must be a positive integer",
+                            num_key
+                        )));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for bool_key in &[
+            "enable_mfa",
+            "enable_audit_logging",
+            "password_policy_require_uppercase",
+            "password_policy_require_lowercase",
+            "password_policy_require_numbers",
+            "password_policy_require_special",
+        ] {
+            if let Some(val) = config_updates.get(*bool_key) {
+                if !val.is_boolean() {
+                    return Err(AdminError::InvalidConfig(format!(
+                        "{} must be a boolean",
+                        bool_key
+                    )));
+                }
+            }
+        }
+
+        // Read-modify-write the system config entry.
+        // NOTE: concurrent admin updates could race here; acceptable for an
+        // admin-only endpoint but a future improvement could add optimistic
+        // concurrency via version checks.
         let config_path = "system/config";
         let current_config = self
             .storage
@@ -1627,6 +1743,7 @@ impl AdminService {
             .map_err(AdminError::Storage)?;
 
         let mut config_data: HashMap<String, serde_json::Value> = current_config
+            .as_ref()
             .and_then(|entry| {
                 entry
                     .metadata
@@ -1637,7 +1754,9 @@ impl AdminService {
 
         // Apply updates
         let mut updated_count = 0;
+        let mut updated_keys: Vec<String> = Vec::new();
         for (key, value) in config_updates {
+            updated_keys.push(key.clone());
             config_data.insert(key, value);
             updated_count += 1;
         }
@@ -1650,8 +1769,25 @@ impl AdminService {
         metadata.insert("config_data".to_string(), config_json);
         metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
 
+        // Preserve the existing entry's id/owner_id so that storage backends
+        // that index by UUID perform an upsert rather than creating orphan rows.
+        let (entry_id, owner_id, version, created_at) = match &current_config {
+            Some(existing) => (
+                existing.id,
+                existing.owner_id,
+                existing.version + 1,
+                existing.created_at,
+            ),
+            None => (
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::nil(), // system-owned
+                1,
+                chrono::Utc::now(),
+            ),
+        };
+
         let config_entry = secreton_storage::SecretEntry {
-            id: uuid::Uuid::new_v4(),
+            id: entry_id,
             path: config_path.to_string(),
             encrypted_data: Vec::new(),
             encryption_metadata: secreton_storage::EncryptionMetadata {
@@ -1665,17 +1801,24 @@ impl AdminService {
             security_level: secreton_storage::SecurityLevel::Secret,
             metadata,
             tags: vec!["system".to_string(), "config".to_string()],
-            version: 1,
-            owner_id: uuid::Uuid::new_v4(),
-            created_at: chrono::Utc::now(),
+            version,
+            owner_id,
+            created_at,
             updated_at: chrono::Utc::now(),
             expires_at: None,
         };
 
-        self.storage
-            .store(&config_entry)
-            .await
-            .map_err(AdminError::Storage)?;
+        if current_config.is_some() {
+            self.storage
+                .update(&config_entry)
+                .await
+                .map_err(AdminError::Storage)?;
+        } else {
+            self.storage
+                .store(&config_entry)
+                .await
+                .map_err(AdminError::Storage)?;
+        }
 
         let duration = start_time.elapsed();
         Ok(MaintenanceResult {
@@ -1687,8 +1830,8 @@ impl AdminService {
                 details.insert(
                     "updated_keys".to_string(),
                     serde_json::Value::Array(
-                        config_data
-                            .keys()
+                        updated_keys
+                            .iter()
                             .map(|k| serde_json::Value::String(k.clone()))
                             .collect(),
                     ),
