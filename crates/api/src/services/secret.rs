@@ -1441,6 +1441,29 @@ impl SecretService {
         Ok(true)
     }
 
+    /// Decrypt stored key material, with fallback for legacy unencrypted entries.
+    ///
+    /// Before this versioning change, `rotate_key` stored raw (unencrypted) key
+    /// bytes at `key_data/{uid}/{name}_v{N}`. After the fix, all key data is
+    /// encrypted via `crypto.encrypt_data()` (producing a JSON `CryptoPacket`).
+    /// To avoid breaking keys that were rotated before the fix, we try
+    /// `crypto.decrypt()` first and, if it fails (e.g. because the stored bytes
+    /// are not valid JSON), fall back to using the raw bytes directly.
+    async fn decrypt_key_material(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, SecretError> {
+        match self.crypto.decrypt(encrypted_data).await {
+            Ok(key_data) => Ok(key_data),
+            Err(_) => {
+                // Legacy fallback: the key material was stored unencrypted
+                // (pre-fix rotate_key). Use the raw bytes directly.
+                warn!(
+                    "Key data could not be decrypted as CryptoPacket; \
+                     treating as legacy unencrypted key material"
+                );
+                Ok(encrypted_data.to_vec())
+            }
+        }
+    }
+
     /// Delete a backup
     pub async fn delete_backup(
         &self,
@@ -1478,12 +1501,10 @@ impl SecretService {
                 key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Encrypt data using crypto engine.
         // `self.crypto.encrypt` returns an `EncryptedData` that already contains
@@ -1560,12 +1581,10 @@ impl SecretService {
                 key_id: format!("{} (v{})", key_name, version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Decrypt the user data using the key.
         // `decrypt_full` is deprecated and always returns an error.
@@ -1631,12 +1650,10 @@ impl SecretService {
                 key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Sign data using crypto engine
         let signature = self
@@ -1717,12 +1734,10 @@ impl SecretService {
                 key_id: format!("{} (v{})", key_name, key_info.version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Verify signature
         let is_valid = self
