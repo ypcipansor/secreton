@@ -1425,29 +1425,36 @@ impl SecretService {
     }
 
     /// Decrypt data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn decrypt(
         &self,
         key_name: &str,
         encrypted_data: &EncryptedData,
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<(Vec<u8>, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "decrypt")
             .await?;
 
-        // Get key info to retrieve version
+        // Get key info to retrieve latest version metadata
         let key_info = self.get_key(key_name, user).await?;
 
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
         // Retrieve key from storage - try versioned path first, then legacy
-        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
         let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
 
-        if key_entry.is_none() && key_info.version == 1 {
+        if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
             key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, key_info.version),
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
         // Decrypt the stored key data
@@ -1476,7 +1483,7 @@ impl SecretService {
             })
             .await;
 
-        Ok((plaintext, key_info.version))
+        Ok((plaintext, version))
     }
 
     /// Sign data using a key

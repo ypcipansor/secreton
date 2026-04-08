@@ -547,6 +547,8 @@ pub struct DecryptRequest {
     pub key_id: String,
     pub ciphertext: String,
     pub context: Option<HashMap<String, String>>,
+    /// Key version used during encryption. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1271,8 +1273,11 @@ pub async fn encrypt_data(
             _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)),
         })?;
 
-    // Encode to base64
-    let ciphertext_b64 = BASE64_STANDARD.encode(&encrypted_data.ciphertext);
+    // Serialize the full EncryptedData (including nonce, tag, algorithm) so the
+    // client can pass it back to the decrypt endpoint for a successful round-trip.
+    let envelope_json = serde_json::to_vec(&encrypted_data)
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e)))?;
+    let ciphertext_b64 = BASE64_STANDARD.encode(&envelope_json);
 
     let response = EncryptResponse {
         ciphertext: ciphertext_b64,
@@ -1288,24 +1293,20 @@ pub async fn decrypt_data(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
-    // Decode ciphertext from base64
-    let ciphertext = BASE64_STANDARD
+    // Decode base64 ciphertext — this should be a JSON-serialized EncryptedData envelope
+    // produced by the encrypt endpoint.
+    let ciphertext_bytes = BASE64_STANDARD
         .decode(&request.ciphertext)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
 
-    // For now, create a placeholder EncryptedData structure
-    // In a real implementation, the nonce and key_id would be stored/encoded with the ciphertext
-    let encrypted_data = EncryptedData {
-        ciphertext,
-        nonce: vec![0u8; 12],                               // Placeholder nonce
-        tag: None, // Assuming logic handles tag separation or it's included in ciphertext for now
-        algorithm: secreton_crypto::AlgorithmId::Aes256Gcm, // Default algorithm as placeholder
-    };
+    // Deserialize the full EncryptedData envelope (nonce, ciphertext, tag, algorithm)
+    let encrypted_data: EncryptedData = serde_json::from_slice(&ciphertext_bytes)
+        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e)))?;
 
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
         .secreton
-        .decrypt(&request.key_id, &encrypted_data, &user)
+        .decrypt(&request.key_id, &encrypted_data, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
