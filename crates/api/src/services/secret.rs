@@ -1831,7 +1831,7 @@ impl SecretService {
         let signature = base64::engine::general_purpose::STANDARD
             .decode(signature_b64)
             .map_err(|e| {
-                SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e))
+                SecretError::InvalidOperation(format!("Invalid base64 signature: {}", e))
             })?;
 
         // Use the caller-specified version, or fall back to the latest version
