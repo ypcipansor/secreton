@@ -1588,7 +1588,22 @@ impl SecretService {
                     "Key type 'x25519' is for key agreement, not direct encryption.".to_string(),
                 ));
             }
-            _ => secreton_crypto::AlgorithmId::Aes256Gcm,
+            other => {
+                // Legacy metadata may not have a key_type field, defaulting to
+                // "unknown". Fall back to AES-256-GCM for backward compatibility
+                // but warn so callers can fix their metadata.
+                if other != "unknown" {
+                    return Err(SecretError::InvalidOperation(format!(
+                        "Unsupported key type for encryption: {}",
+                        key_info.key_type
+                    )));
+                }
+                warn!(
+                    "Key '{}' has unknown key_type in metadata; defaulting to AES-256-GCM",
+                    key_name
+                );
+                secreton_crypto::AlgorithmId::Aes256Gcm
+            }
         };
         let encrypted_data = self
             .crypto
