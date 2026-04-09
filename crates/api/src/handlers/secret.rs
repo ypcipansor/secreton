@@ -1310,6 +1310,10 @@ pub async fn encrypt_data(
         algorithm: match encrypted_data.algorithm {
             secreton_crypto::AlgorithmId::Aes256Gcm => "AES-GCM".to_string(),
             secreton_crypto::AlgorithmId::ChaCha20Poly1305 => "CHACHA20-POLY1305".to_string(),
+            // The service layer only allows Aes256Gcm and ChaCha20Poly1305 for
+            // encryption, so this branch should never be reached. Use Debug
+            // formatting as a safe fallback rather than silently returning a
+            // wrong name.
             other => format!("{:?}", other),
         },
     };

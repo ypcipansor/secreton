@@ -1408,11 +1408,13 @@ impl SecretService {
         let key_path = format!("keys/{}/{}", user.id, key_id);
         self.check_permission(user, &key_path, "delete").await?;
 
-        // 1. Delete metadata
+        // 1. Verify metadata exists (but don't delete it yet).
+        //    Delete key material BEFORE metadata so that if the process crashes
+        //    mid-way, metadata still references the key and a retry can clean up.
+        //    Deleting metadata first would leave orphaned key material with no
+        //    metadata pointing to it.
         let metadata_entry = self.storage.get_by_path(&key_path).await.map_err(SecretError::Storage)?;
-        if let Some(entry) = metadata_entry {
-            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
-        } else {
+        if metadata_entry.is_none() {
              return Err(SecretError::KeyNotFound { key_id: key_id.to_string() });
         }
 
@@ -1466,6 +1468,11 @@ impl SecretService {
             if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
                 self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
             }
+        }
+
+        // 4. Delete metadata last — all key material is already removed.
+        if let Some(entry) = metadata_entry {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
         }
 
         // Log audit trail
