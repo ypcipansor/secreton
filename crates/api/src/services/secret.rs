@@ -1536,11 +1536,15 @@ impl SecretService {
     }
 
     /// Encrypt data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn encrypt(
         &self,
         key_name: &str,
         plaintext: &[u8],
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<(EncryptedData, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "encrypt")
             .await?;
@@ -1548,17 +1552,20 @@ impl SecretService {
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
         // Retrieve key from storage - try versioned path first, then legacy
-        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
         let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
 
-        if key_entry.is_none() && key_info.version == 1 {
+        if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
             key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, key_info.version),
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
@@ -1630,7 +1637,7 @@ impl SecretService {
             })
             .await;
 
-        Ok((encrypted_data, key_info.version))
+        Ok((encrypted_data, version))
     }
 
     /// Decrypt data using a key
@@ -2262,7 +2269,7 @@ mod tests {
         .await
         .unwrap();
         let (result, key_version) = service
-            .encrypt("key1", "plaintext".as_bytes(), &user)
+            .encrypt("key1", "plaintext".as_bytes(), &user, None)
             .await
             .unwrap();
         assert!(!result.ciphertext.is_empty());

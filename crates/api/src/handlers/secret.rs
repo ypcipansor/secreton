@@ -533,6 +533,8 @@ pub struct EncryptRequest {
     pub plaintext: String,
     pub context: Option<HashMap<String, String>>,
     pub algorithm: Option<String>,
+    /// Key version to encrypt with. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1275,7 +1277,7 @@ pub async fn encrypt_data(
     // Encrypt data via secreton service
     let (encrypted_data, key_version) = state
         .secreton
-        .encrypt(&request.key_id, &plaintext, &user)
+        .encrypt(&request.key_id, &plaintext, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
