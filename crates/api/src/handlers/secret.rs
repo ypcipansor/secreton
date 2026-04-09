@@ -1420,7 +1420,7 @@ pub async fn sign_data(
     let response = SignResponse {
         signature: signature_result.signature,
         key_version: signature_result.key_version, // Already using actual key version
-        algorithm: request.algorithm.unwrap_or_else(|| "ED25519".to_string()),
+        algorithm: request.algorithm.unwrap_or(signature_result.algorithm),
     };
 
     Ok(Json(ApiResponse::success(response)))

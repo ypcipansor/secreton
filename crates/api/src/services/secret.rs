@@ -33,6 +33,7 @@ pub struct PolicyMetadata {
 pub struct SignResult {
     pub signature: String,
     pub key_version: u32,
+    pub algorithm: String,
 }
 
 /// Policy definition
@@ -1770,9 +1771,29 @@ impl SecretService {
             })
             .await;
 
+        // Map the AlgorithmId back to a human-readable algorithm name so the
+        // handler can report the actual algorithm used (instead of a hardcoded
+        // default that may not match the key type).
+        let algorithm_name = match algorithm {
+            secreton_crypto::AlgorithmId::Rsa2048 => "RSA-2048",
+            secreton_crypto::AlgorithmId::Rsa4096 => "RSA-4096",
+            secreton_crypto::AlgorithmId::EcdsaP256 => "ECDSA-P256",
+            secreton_crypto::AlgorithmId::EcdsaP384 => "ECDSA-P384",
+            secreton_crypto::AlgorithmId::Ed25519 => "ED25519",
+            other => {
+                // Fallback for any future algorithm variants
+                return Ok(SignResult {
+                    signature: signature_str,
+                    key_version: key_info.version,
+                    algorithm: format!("{:?}", other),
+                });
+            }
+        };
+
         Ok(SignResult {
             signature: signature_str,
             key_version: key_info.version,
+            algorithm: algorithm_name.to_string(),
         })
     }
 
