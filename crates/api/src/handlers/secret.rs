@@ -578,6 +578,8 @@ pub struct VerifyRequest {
     pub data: String,
     pub signature: String,
     pub algorithm: Option<String>,
+    /// Key version used during signing. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1441,7 +1443,7 @@ pub async fn verify_signature(
     // Verify signature using secreton service
     let (is_valid, key_version) = state
         .secreton
-        .verify_data(&request.key_id, &data, signature_bytes, &user)
+        .verify_data(&request.key_id, &data, signature_bytes, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
