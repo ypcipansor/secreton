@@ -1736,7 +1736,7 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
         "x25519" => (
             "X25519".to_string(),
             256,
-            vec!["encrypt".to_string(), "decrypt".to_string()],
+            vec!["key-agreement".to_string()],
         ),
         "aes256-gcm" => (
             "AES-GCM".to_string(),

@@ -458,6 +458,12 @@ pub fn TransitPage() -> impl IntoView {
                                                                         _ => "ed25519".to_string(),
                                                                     });
                                                                 },
+                                                                "x25519" => {
+                                                                    // x25519 is for key agreement, not direct encrypt/decrypt or sign/verify.
+                                                                    // Default to encrypt tab but no operations will succeed via transit.
+                                                                    set_active_tab.set("encrypt".to_string());
+                                                                    set_selected_algo.set("X25519".to_string());
+                                                                },
                                                                 _ => {
                                                                     set_active_tab.set("encrypt".to_string());
                                                                     set_selected_algo.set(match k_clone.key_type.as_str() {
@@ -520,7 +526,7 @@ pub fn TransitPage() -> impl IntoView {
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("encrypt".to_string());
                                                                         let algo = match k_type_for_encrypt.as_str() {
-                                                                            "chacha20-poly1305" => "CHACHA20-POLY1305",
+                                                                            "chacha20-poly1305" | "xchacha20-poly1305" => "CHACHA20-POLY1305",
                                                                             _ => "AES-GCM",
                                                                         };
                                                                         set_selected_algo.set(algo.to_string());
@@ -536,7 +542,7 @@ pub fn TransitPage() -> impl IntoView {
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("decrypt".to_string());
                                                                         let algo = match k_type_for_decrypt.as_str() {
-                                                                            "chacha20-poly1305" => "CHACHA20-POLY1305",
+                                                                            "chacha20-poly1305" | "xchacha20-poly1305" => "CHACHA20-POLY1305",
                                                                             _ => "AES-GCM",
                                                                         };
                                                                         set_selected_algo.set(algo.to_string());
@@ -659,7 +665,7 @@ pub fn TransitPage() -> impl IntoView {
                                                                 let key_type = selected_key.get().map(|k| k.key_type.clone()).unwrap_or_default();
                                                                 match active_tab.get().as_str() {
                                                                     "encrypt" => match key_type.as_str() {
-                                                                        "chacha20-poly1305" => view! {
+                                                                        "chacha20-poly1305" | "xchacha20-poly1305" => view! {
                                                                             <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
                                                                         }.into_any(),
                                                                         _ => view! {
