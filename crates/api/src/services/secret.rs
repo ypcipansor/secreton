@@ -1187,7 +1187,7 @@ impl SecretService {
             .await;
 
         Ok(KeyInfo {
-            id: key_id.to_string(),
+            id: current_key.id,
             name: current_key.name,
             key_type: current_key.key_type,
             version: new_version,
@@ -1571,7 +1571,12 @@ impl SecretService {
         // Reject asymmetric key types that cannot be used for symmetric encryption.
         let algorithm = match key_info.key_type.as_str() {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" | "xchacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'xchacha20-poly1305' encryption is only supported via the transit engine.".to_string(),
+                ));
+            }
             "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Key type '{}' does not support encryption. Use sign/verify instead.",
