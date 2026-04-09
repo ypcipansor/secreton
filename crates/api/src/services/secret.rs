@@ -877,11 +877,6 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage
-            .store(&metadata_entry)
-            .await
-            .map_err(SecretError::Storage)?;
-
         // Encrypt the key data before storing
         let encrypted_key_data = self
             .crypto
@@ -889,7 +884,8 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
-        // Use versioned path for key data
+        // Store key data BEFORE metadata so that if key data storage fails,
+        // no metadata entry references a nonexistent key version.
         let key_data_path = format!("key_data/{}/{}_v1", user.id, key_name);
         let key_data_entry = secreton_storage::SecretEntry::new(
             key_data_path,
@@ -901,6 +897,12 @@ impl SecretService {
 
         self.storage
             .store(&key_data_entry)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        // Now store metadata — key material is already safely persisted
+        self.storage
+            .store(&metadata_entry)
             .await
             .map_err(SecretError::Storage)?;
 
@@ -1149,11 +1151,6 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage
-            .store(&metadata_entry)
-            .await
-            .map_err(SecretError::Storage)?;
-
         // Encrypt the new key data before storing (must match create_key behavior)
         let encrypted_new_key_data = self
             .crypto
@@ -1161,7 +1158,10 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
-        // Store new key data with version
+        // Store key data BEFORE metadata to reduce the window where metadata
+        // references a version whose key material doesn't exist yet. If the
+        // key data store fails, we haven't touched metadata so the key stays
+        // at its previous version.
         let new_key_data_path = format!("key_data/{}/{}_v{}", user.id, key_id, new_version);
         let key_data_entry = secreton_storage::SecretEntry::new(
             new_key_data_path,
@@ -1173,6 +1173,12 @@ impl SecretService {
 
         self.storage
             .store(&key_data_entry)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        // Now update metadata — key material is already safely stored
+        self.storage
+            .store(&metadata_entry)
             .await
             .map_err(SecretError::Storage)?;
 
@@ -1688,11 +1694,15 @@ impl SecretService {
     }
 
     /// Sign data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn sign_data(
         &self,
         key_name: &str,
         data: &[u8],
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<SignResult, SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "sign")
             .await?;
@@ -1732,17 +1742,20 @@ impl SecretService {
             }
         };
 
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
         // Retrieve key from storage - try versioned path first, then legacy
-        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, key_info.version);
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
         let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
 
-        if key_entry.is_none() && key_info.version == 1 {
+        if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
             key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, key_info.version),
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
@@ -1784,7 +1797,7 @@ impl SecretService {
                 // Fallback for any future algorithm variants
                 return Ok(SignResult {
                     signature: signature_str,
-                    key_version: key_info.version,
+                    key_version: version,
                     algorithm: format!("{:?}", other),
                 });
             }
@@ -1792,7 +1805,7 @@ impl SecretService {
 
         Ok(SignResult {
             signature: signature_str,
-            key_version: key_info.version,
+            key_version: version,
             algorithm: algorithm_name.to_string(),
         })
     }

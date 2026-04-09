@@ -563,6 +563,8 @@ pub struct SignRequest {
     pub data: String,
     pub algorithm: Option<String>,
     pub format: Option<String>,
+    /// Key version used during signing. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -965,6 +967,9 @@ pub async fn create_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
+    // Validate key name to prevent path-traversal and encoding issues
+    crate::handlers::validate_name(&request.name)?;
+
     // Create key via secreton service
     let key_info: secret::KeyInfo = state
         .secreton
@@ -1406,7 +1411,7 @@ pub async fn sign_data(
     // Sign data using secreton service
     let signature_result = state
         .secreton
-        .sign_data(&request.key_id, &data, &user)
+        .sign_data(&request.key_id, &data, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
