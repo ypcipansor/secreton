@@ -814,21 +814,40 @@ impl SecretService {
         }
 
         // Map key type to algorithm.
-        // Some key types (xchacha20-poly1305, ecdsa-secp256k1, x25519) don't
-        // have a dedicated AlgorithmId variant. For these we generate a 32-byte
-        // random key directly, which matches the key size the transit engine
-        // expects.
+        // Some key types (xchacha20-poly1305, ecdsa-secp256k1, x25519) are only
+        // supported via the transit engine, which manages its own in-memory keys.
+        // Reject them here because the secret service's encrypt/decrypt/sign/verify
+        // methods cannot operate on these types, so creating them would produce
+        // unusable keys.
         let algorithm = match key_type {
             "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
             "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
-            "xchacha20-poly1305" => None, // 32-byte random key
+            "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'xchacha20-poly1305' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
             "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
             "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
             "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
-            "ecdsa-secp256k1" => None, // 32-byte random seed
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
-            "x25519" => None, // 32-byte random key
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
@@ -1091,18 +1110,24 @@ impl SecretService {
         // Get current key metadata
         let current_key = self.get_key(key_id, user).await?;
 
-        // Generate new key with same type (must match create_key's type mapping)
+        // Generate new key with same type (must match create_key's type mapping).
+        // Transit-only key types (xchacha20-poly1305, ecdsa-secp256k1, x25519)
+        // should never appear here because create_key rejects them. Guard
+        // against legacy data by returning an error if they are encountered.
         let algorithm = match current_key.key_type.as_str() {
             "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
             "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
-            "xchacha20-poly1305" => None, // 32-byte random key
+            "xchacha20-poly1305" | "ecdsa-secp256k1" | "x25519" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' is only supported via the transit engine and cannot be rotated here.",
+                    current_key.key_type
+                )));
+            }
             "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
             "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
             "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
             "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
-            "ecdsa-secp256k1" => None, // 32-byte random seed
             "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
-            "x25519" => None, // 32-byte random key
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
