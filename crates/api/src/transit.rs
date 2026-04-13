@@ -1,9 +1,9 @@
 use axum::{
     Router,
-    extract::{Extension, Path},
+    extract::{Path, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -16,7 +16,36 @@ use secreton_crypto::transit::{
 };
 
 // Import ApiState from the parent module
-use crate::{ApiResponse, ApiState};
+use crate::ApiResponse;
+use crate::handlers::AppState;
+use secreton_crypto::CryptoError;
+
+/// Map `CryptoError` variants to appropriate HTTP status codes.
+fn crypto_error_to_status(e: &CryptoError) -> StatusCode {
+    match e {
+        CryptoError::KeyNotFound(_) | CryptoError::KeyVersionNotFound(_) => StatusCode::NOT_FOUND,
+        CryptoError::KeyAlreadyExists(_) => StatusCode::CONFLICT,
+        CryptoError::InvalidInput(_)
+        | CryptoError::InvalidUsage(_)
+        | CryptoError::InvalidParameter(_)
+        | CryptoError::InvalidKey(_)
+        | CryptoError::InvalidKeyLength { .. }
+        | CryptoError::InvalidNonceLength
+        | CryptoError::InvalidAlgorithm(_)
+        | CryptoError::InvalidCiphertext(_)
+        | CryptoError::InvalidSignature(_)
+        | CryptoError::ValidationError(_) => StatusCode::BAD_REQUEST,
+        CryptoError::PermissionDenied(_) => StatusCode::FORBIDDEN,
+        CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
+        CryptoError::EncryptionFailed(_)
+        | CryptoError::DecryptionFailed(_)
+        | CryptoError::SigningFailed(_)
+        | CryptoError::VerificationFailed(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -95,38 +124,53 @@ pub struct VerifyResponse {
     pub valid: bool,
 }
 
-pub fn create_transit_router() -> Router<()> {
+pub fn create_transit_router() -> Router<AppState> {
     Router::new()
         .route("/keys", get(list_keys))
-        .route("/keys/{key_name}", post(create_key).get(get_key_info))
+        .route(
+            "/keys/{key_name}",
+            post(create_key).get(get_key_info).delete(delete_key),
+        )
+        .route("/keys/{key_name}/rotate", post(rotate_key))
         .route("/encrypt/{key_name}", post(encrypt_data))
         .route("/decrypt/{key_name}", post(decrypt_data))
         .route("/sign/{key_name}", post(sign_data))
         .route("/verify/{key_name}", post(verify_data))
+        .route("/hash", post(hash_data))
 }
 
 pub async fn list_keys(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
 ) -> Json<ApiResponse<ListKeysResponse>> {
-    let keys = state.transit.engine.list_keys().await;
+    let keys = state.transit.list_keys().await;
     Json(ApiResponse::success(ListKeysResponse { keys }))
 }
 
 pub async fn get_key_info(
     Path(key_name): Path<String>,
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<KeyInfo>>, StatusCode> {
-    match state.transit.engine.get_key_info(&key_name).await {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    match state.transit.get_key_info(&key_name).await {
         Ok(info) => Ok(Json(ApiResponse::success(info))),
-        Err(_) => Err(StatusCode::NOT_FOUND),
+        Err(e) => Err(crypto_error_to_status(&e)),
     }
 }
 
 pub async fn create_key(
     Path(key_name): Path<String>,
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Json(request): Json<CreateKeyRequest>,
 ) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
+    // Validate key name to prevent path-traversal and encoding issues
+    if crate::handlers::validate_name(&key_name).is_err() {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Parse key type from string to KeyType enum
     let key_type = match request.key_type.as_deref().unwrap_or("aes256-gcm") {
         "aes256-gcm" => KeyType::Aes256Gcm,
@@ -152,7 +196,6 @@ pub async fn create_key(
 
     match state
         .transit
-        .engine
         .create_key(key_name.clone(), key_type, Some(options))
         .await
     {
@@ -165,17 +208,72 @@ pub async fn create_key(
         }
         Err(e) => {
             warn!("Failed to create key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn delete_key(
+    Path(key_name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    match state.transit.delete_key(&key_name).await {
+        Ok(_) => {
+            info!("Deleted key: {}", key_name);
+            Ok(Json(ApiResponse::success(CreateKeyResponse {
+                success: true,
+                message: format!("Key '{}' deleted", key_name),
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to delete key {}: {:?}", key_name, e);
+            Err(crypto_error_to_status(&e))
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn rotate_key(
+    Path(key_name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    match state.transit.rotate_key(&key_name).await {
+        Ok(new_version) => {
+            info!("Rotated key: {} to version {}", key_name, new_version);
+            Ok(Json(ApiResponse::success(serde_json::json!({
+                "success": true,
+                "name": key_name,
+                "new_version": new_version,
+            }))))
+        }
+        Err(e) => {
+            warn!("Failed to rotate key {}: {:?}", key_name, e);
+            Err(crypto_error_to_status(&e))
         }
     }
 }
 
 #[axum::debug_handler]
 pub async fn encrypt_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<ApiResponse<EncryptResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 plaintext
@@ -196,7 +294,6 @@ pub async fn encrypt_data(
 
     match state
         .transit
-        .engine
         .encrypt(&key_name, &plaintext_bytes, context.as_deref(), None)
         .await
     {
@@ -206,17 +303,21 @@ pub async fn encrypt_data(
         }
         Err(e) => {
             warn!("Failed to encrypt with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
 
 #[axum::debug_handler]
 pub async fn decrypt_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> Result<Json<ApiResponse<DecryptResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode context if provided
@@ -231,7 +332,6 @@ pub async fn decrypt_data(
 
     match state
         .transit
-        .engine
         .decrypt(&key_name, &request.ciphertext, context.as_deref())
         .await
     {
@@ -243,17 +343,21 @@ pub async fn decrypt_data(
         }
         Err(e) => {
             warn!("Failed to decrypt with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
 
 #[axum::debug_handler]
 pub async fn sign_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<SignRequest>,
 ) -> Result<Json<ApiResponse<SignResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 input
@@ -272,7 +376,7 @@ pub async fn sign_data(
 
     // If algorithm is not specified, try to infer it from key type for the response
     let response_algorithm = if request.algorithm.is_none() {
-        if let Ok(key_info) = state.transit.engine.get_key_info(&key_name).await {
+        if let Ok(key_info) = state.transit.get_key_info(&key_name).await {
             match key_info.key_type {
                 KeyType::Ed25519 => Some("ed25519".to_string()),
                 KeyType::EcdsaP256 => Some("ecdsa-p256".to_string()),
@@ -288,7 +392,6 @@ pub async fn sign_data(
 
     match state
         .transit
-        .engine
         .sign(&key_name, &input_bytes, algorithm, request.key_version)
         .await
     {
@@ -302,17 +405,68 @@ pub async fn sign_data(
         }
         Err(e) => {
             warn!("Failed to sign with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
 
 #[axum::debug_handler]
+pub async fn hash_data(
+    State(state): State<AppState>,
+    Json(request): Json<HashRequest>,
+) -> Result<Json<ApiResponse<HashResponse>>, StatusCode> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    // Decode base64 input
+    let input_bytes = match BASE64.decode(&request.input) {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let algorithm = match request.algorithm.as_deref().unwrap_or("sha256") {
+        "sha256" | "SHA-256" => secreton_crypto::transit::HashAlgorithm::Sha256,
+        "sha384" | "SHA-384" => secreton_crypto::transit::HashAlgorithm::Sha384,
+        "sha512" | "SHA-512" => secreton_crypto::transit::HashAlgorithm::Sha512,
+        "sha3-256" | "SHA3-256" => secreton_crypto::transit::HashAlgorithm::Sha3_256,
+        "sha3-384" | "SHA3-384" => secreton_crypto::transit::HashAlgorithm::Sha3_384,
+        "sha3-512" | "SHA3-512" => secreton_crypto::transit::HashAlgorithm::Sha3_512,
+        "blake3" | "BLAKE3" => secreton_crypto::transit::HashAlgorithm::Blake3,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    match state.transit.hash(&input_bytes, algorithm).await {
+        Ok(hash) => {
+            Ok(Json(ApiResponse::success(HashResponse {
+                hash,
+                algorithm: request.algorithm.unwrap_or_else(|| "sha256".to_string()),
+            })))
+        }
+        Err(e) => Err(crypto_error_to_status(&e)),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HashRequest {
+    pub input: String, // base64 encoded
+    pub algorithm: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HashResponse {
+    pub hash: String,
+    pub algorithm: String,
+}
+
+#[axum::debug_handler]
 pub async fn verify_data(
-    Extension(state): Extension<ApiState>,
+    State(state): State<AppState>,
     Path(key_name): Path<String>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<ApiResponse<VerifyResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     // Decode base64 input
@@ -331,7 +485,6 @@ pub async fn verify_data(
 
     match state
         .transit
-        .engine
         .verify(&key_name, &input_bytes, &request.signature, algorithm)
         .await
     {
@@ -341,7 +494,7 @@ pub async fn verify_data(
         }
         Err(e) => {
             warn!("Failed to verify with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }

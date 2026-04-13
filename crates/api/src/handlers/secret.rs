@@ -6,7 +6,6 @@
 use axum::{
     Router,
     extract::{Path, Query, State},
-    http::HeaderMap,
     response::Json,
     routing::{delete, get, post, put},
 };
@@ -27,6 +26,7 @@ pub fn create_routes() -> Router<AppState> {
     Router::new()
         // Secret operations
         .route("/secret-versions/{*path}", get(list_secret_versions))
+        .route("/secret-rollback/{*path}", post(rollback_secret))
         // Specific path operations (CRUD)
         .route(
             "/secrets/{*path}",
@@ -340,7 +340,7 @@ mod tests {
         let (server, token) = server_with_routes().await;
         let response = server
             .get("/secrets/app/config")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .await;
         response.assert_status_ok();
 
@@ -367,7 +367,7 @@ mod tests {
 
         let response = server
             .post("/secrets/app/admin")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&payload)
             .await;
         response.assert_status_ok();
@@ -392,7 +392,7 @@ mod tests {
 
         let response = server
             .post("/keys")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -415,7 +415,7 @@ mod tests {
 
         let response = server
             .post("/hash")
-            .add_header("Authorization", &format!("Bearer {}", token))
+            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -533,6 +533,8 @@ pub struct EncryptRequest {
     pub plaintext: String,
     pub context: Option<HashMap<String, String>>,
     pub algorithm: Option<String>,
+    /// Key version to encrypt with. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -547,6 +549,8 @@ pub struct DecryptRequest {
     pub key_id: String,
     pub ciphertext: String,
     pub context: Option<HashMap<String, String>>,
+    /// Key version used during encryption. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -561,6 +565,8 @@ pub struct SignRequest {
     pub data: String,
     pub algorithm: Option<String>,
     pub format: Option<String>,
+    /// Key version used during signing. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -576,6 +582,8 @@ pub struct VerifyRequest {
     pub data: String,
     pub signature: String,
     pub algorithm: Option<String>,
+    /// Key version used during signing. If omitted, the latest version is used.
+    pub key_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -663,7 +671,7 @@ pub async fn get_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(90)), // Default 90 days TTL
+        expires_at: None, // Only set when the secret was created with a TTL
     };
 
     // Audit: SecretAccess (handled by service too, but handler logs redundant? removed redundancy)
@@ -695,7 +703,8 @@ pub async fn create_secret(
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to operation: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+            _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
         })?;
 
     let response = SecretResponse {
@@ -852,11 +861,76 @@ pub async fn list_secret_versions(
         .list_secret_versions(&path, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::SecretNotFound { .. } => {
+                crate::ApiError::NotFound("Secret not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to list secret versions: {}", e)),
         })?;
 
     Ok(Json(ApiResponse::success(versions)))
+}
+
+/// Rollback secret to a specific version
+pub async fn rollback_secret(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(path): Path<String>,
+    Query(params): Query<GetSecretParams>,
+) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
+    let version = params.version.ok_or_else(|| {
+        crate::ApiError::BadRequest("Version parameter is required for rollback".to_string())
+    })?;
+
+    let secret_data = state
+        .secreton
+        .rollback_secret(&path, version, &user)
+        .await
+        .map_err(|e| match e {
+            secret::SecretError::SecretNotFound { .. } => {
+                crate::ApiError::NotFound("Secret version not found".to_string())
+            }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            _ => crate::ApiError::Internal(format!("Failed to rollback secret: {}", e)),
+        })?;
+
+    // Detect TOCTOU race: if the secret was deleted between get_secret and put_secret
+    // inside rollback_secret, put_secret will have created a brand-new v1 entry.
+    // Roll back the accidental creation and return NotFound.
+    if secret_data.previous_version.is_none() && secret_data.version == 1 {
+        if let Err(e) = state
+            .secreton
+            .delete_secret_internal(&path, &user, false, false)
+            .await
+        {
+            tracing::warn!(
+                "Failed to rollback accidentally created secret during rollback {}: {}",
+                path,
+                e
+            );
+        }
+        return Err(crate::ApiError::NotFound(
+            "Secret not found (deleted during rollback)".to_string(),
+        ));
+    }
+
+    let response = SecretResponse {
+        path: secret_data.path,
+        data: secret_data.data,
+        metadata: SecretMetadata {
+            description: Some(format!("Secret rolled back to version {}", version)),
+            tags: vec!["managed".to_string(), "rolled-back".to_string()],
+            owner: Some(user.username),
+            classification: Some("internal".to_string()),
+        },
+        version: secret_data.version,
+        created_at: secret_data.created_at,
+        updated_at: secret_data.updated_at,
+        expires_at: None,
+    };
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// List secrets
@@ -900,12 +974,16 @@ pub async fn create_key(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
+    // Validate key name to prevent path-traversal and encoding issues
+    crate::handlers::validate_name(&request.name)?;
+
     // Create key via secreton service
     let key_info: secret::KeyInfo = state
         .secreton
         .create_key(&request.name, &request.key_type, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to create key: {}", e)),
         })?;
@@ -939,25 +1017,9 @@ pub async fn create_key(
 
 pub async fn get_key(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // Get key via secreton service
     let key_info: secret::KeyInfo =
         state
@@ -1001,25 +1063,9 @@ pub async fn get_key(
 
 pub async fn list_keys(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // List keys via secreton service
     let key_infos: Vec<secret::KeyInfo> = state
         .secreton
@@ -1063,27 +1109,10 @@ pub async fn list_keys(
 
 pub async fn rotate_key(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
-    // Extract and validate token
-    let token = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
-        })?;
-
-    // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
-
     // Rotate key via secreton service
-    let _old_key_id = key_id.clone();
     let key_info: secret::KeyInfo =
         state
             .secreton
@@ -1093,6 +1122,7 @@ pub async fn rotate_key(
                 crate::services::secret::SecretError::KeyNotFound { .. } => {
                     crate::ApiError::NotFound(format!("Key not found: {}", key_id))
                 }
+                secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
                 secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
                 _ => crate::ApiError::Internal(format!("Failed to rotate key: {}", e)),
             })?;
@@ -1194,6 +1224,7 @@ pub async fn delete_key(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to delete key: {}", e)),
         })?;
@@ -1217,8 +1248,11 @@ pub async fn list_key_versions(
         .list_key_versions(&key_id, &user)
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to list secrets: {}", e)),
+            _ => crate::ApiError::Internal(format!("Failed to list key versions: {}", e)),
         })?;
 
     // Convert to response format
@@ -1248,20 +1282,45 @@ pub async fn encrypt_data(
     // Encrypt data via secreton service
     let (encrypted_data, key_version) = state
         .secreton
-        .encrypt(&request.key_id, &plaintext, &user)
+        .encrypt(&request.key_id, &plaintext, &user, request.key_version)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)),
         })?;
 
-    // Encode to base64
-    let ciphertext_b64 = BASE64_STANDARD.encode(&encrypted_data.ciphertext);
+    // Serialize the full EncryptedData (including nonce, tag, algorithm) so the
+    // client can pass it back to the decrypt endpoint for a successful round-trip.
+    // Use a compact envelope that base64-encodes the byte fields instead of
+    // relying on serde's default Vec<u8> → JSON number-array serialization,
+    // which is ~3-4× larger on the wire.
+    let compact_envelope = serde_json::json!({
+        "algorithm": encrypted_data.algorithm,
+        "nonce": BASE64_STANDARD.encode(&encrypted_data.nonce),
+        "ciphertext": BASE64_STANDARD.encode(&encrypted_data.ciphertext),
+        "tag": encrypted_data.tag.as_ref().map(|t| BASE64_STANDARD.encode(t)),
+        "key_version": key_version,
+    });
+    let envelope_json = serde_json::to_vec(&compact_envelope)
+        .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e)))?;
+    let ciphertext_b64 = BASE64_STANDARD.encode(&envelope_json);
 
     let response = EncryptResponse {
         ciphertext: ciphertext_b64,
         key_version, // Now using actual key version
-        algorithm: request.algorithm.unwrap_or("AES-GCM".to_string()),
+        algorithm: match encrypted_data.algorithm {
+            secreton_crypto::AlgorithmId::Aes256Gcm => "AES-GCM".to_string(),
+            secreton_crypto::AlgorithmId::ChaCha20Poly1305 => "CHACHA20-POLY1305".to_string(),
+            // The service layer only allows Aes256Gcm and ChaCha20Poly1305 for
+            // encryption, so this branch should never be reached. Use Debug
+            // formatting as a safe fallback rather than silently returning a
+            // wrong name.
+            other => format!("{:?}", other),
+        },
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -1272,26 +1331,69 @@ pub async fn decrypt_data(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
-    // Decode ciphertext from base64
-    let ciphertext = BASE64_STANDARD
+    // Decode base64 ciphertext — this should be a JSON-serialized EncryptedData envelope
+    // produced by the encrypt endpoint.
+    let ciphertext_bytes = BASE64_STANDARD
         .decode(&request.ciphertext)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
 
-    // For now, create a placeholder EncryptedData structure
-    // In a real implementation, the nonce and key_id would be stored/encoded with the ciphertext
-    let encrypted_data = EncryptedData {
-        ciphertext,
-        nonce: vec![0u8; 12],                               // Placeholder nonce
-        tag: None, // Assuming logic handles tag separation or it's included in ciphertext for now
-        algorithm: secreton_crypto::AlgorithmId::Aes256Gcm, // Default algorithm as placeholder
+    // Deserialize the EncryptedData envelope. Try the compact base64-field format
+    // first (produced by the updated encrypt endpoint), then fall back to the raw
+    // serde format (Vec<u8> as number arrays) for backward compatibility.
+    let mut envelope_key_version: Option<u32> = None;
+    let encrypted_data: EncryptedData = {
+        // Try compact format: byte fields are base64-encoded strings
+        #[derive(Deserialize)]
+        struct CompactEnvelope {
+            algorithm: secreton_crypto::AlgorithmId,
+            nonce: String,
+            ciphertext: String,
+            tag: Option<String>,
+            key_version: Option<u32>,
+        }
+        if let Ok(compact) = serde_json::from_slice::<CompactEnvelope>(&ciphertext_bytes) {
+            let nonce = BASE64_STANDARD.decode(&compact.nonce)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 nonce: {}", e)))?;
+            let ct = BASE64_STANDARD.decode(&compact.ciphertext)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
+            let tag = compact.tag
+                .map(|t| BASE64_STANDARD.decode(&t))
+                .transpose()
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 tag: {}", e)))?;
+            // If the envelope contains a key_version and the request didn't
+            // explicitly specify one, use the version from the envelope so
+            // that decryption uses the correct key material even after rotation.
+            if request.key_version.is_none() {
+                envelope_key_version = compact.key_version;
+            }
+            EncryptedData {
+                algorithm: compact.algorithm,
+                nonce,
+                ciphertext: ct,
+                tag,
+            }
+        } else {
+            // Fall back to raw serde format (Vec<u8> as number arrays)
+            serde_json::from_slice(&ciphertext_bytes)
+                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e)))?
+        }
     };
+
+    // Use the key version from the request if explicitly provided, otherwise
+    // fall back to the version embedded in the ciphertext envelope, or None
+    // (which causes the service to use the latest version).
+    let effective_key_version = request.key_version.or(envelope_key_version);
 
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
         .secreton
-        .decrypt(&request.key_id, &encrypted_data, &user)
+        .decrypt(&request.key_id, &encrypted_data, &user, effective_key_version)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)),
         })?;
@@ -1320,17 +1422,21 @@ pub async fn sign_data(
     // Sign data using secreton service
     let signature_result = state
         .secreton
-        .sign_data(&request.key_id, &data, &user)
+        .sign_data(&request.key_id, &data, &user, request.key_version)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to operation: {}", e)),
+            _ => crate::ApiError::Internal(format!("Failed to sign data: {}", e)),
         })?;
 
     let response = SignResponse {
         signature: signature_result.signature,
         key_version: signature_result.key_version, // Already using actual key version
-        algorithm: request.algorithm.unwrap_or("RSA-PSS".to_string()), // Default algorithm
+        algorithm: request.algorithm.unwrap_or(signature_result.algorithm),
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -1341,21 +1447,25 @@ pub async fn verify_signature(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
-    // Decode data and signature from base64
+    // Decode data from base64
     let data = BASE64_STANDARD
         .decode(&request.data)
         .unwrap_or_else(|_| request.data.as_bytes().to_vec());
 
-    let signature = BASE64_STANDARD
-        .decode(&request.signature)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 signature: {}", e)))?;
+    // Pass the base64-encoded signature string directly to verify_data,
+    // which performs its own base64 decoding internally.
+    let signature_bytes = request.signature.as_bytes();
 
     // Verify signature using secreton service
     let (is_valid, key_version) = state
         .secreton
-        .verify_data(&request.key_id, &data, &signature, &user)
+        .verify_data(&request.key_id, &data, signature_bytes, &user, request.key_version)
         .await
         .map_err(|e| match e {
+            secret::SecretError::KeyNotFound { .. } => {
+                crate::ApiError::NotFound("Key not found".to_string())
+            }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to verify signature: {}", e)),
         })?;
@@ -1622,6 +1732,11 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             384,
             vec!["sign".to_string(), "verify".to_string()],
         ),
+        "ecdsa-secp256k1" => (
+            "ECDSA-secp256k1".to_string(),
+            256,
+            vec!["sign".to_string(), "verify".to_string()],
+        ),
         "ed25519" => (
             "ED25519".to_string(),
             256,
@@ -1631,6 +1746,16 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             "CHACHA20-POLY1305".to_string(),
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "xchacha20-poly1305" => (
+            "XCHACHA20-POLY1305".to_string(),
+            256,
+            vec!["encrypt".to_string(), "decrypt".to_string()],
+        ),
+        "x25519" => (
+            "X25519".to_string(),
+            256,
+            vec!["key-agreement".to_string()],
         ),
         "aes256-gcm" => (
             "AES-GCM".to_string(),
@@ -1666,10 +1791,11 @@ async fn get_public_key_for_key(
 ) -> Option<String> {
     // Check if this is an asymmetric key type
     match key_info.key_type.as_str() {
-        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ed25519" => {
-            // Try to retrieve the public key from storage
-            // Public keys are typically stored alongside private keys in secreton
-            let key_path = format!("keys/{}/{}", user.id, key_info.id);
+        "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
+            // Try to retrieve the public key from storage.
+            // The storage path uses the user-friendly key name (key_info.name),
+            // not the internal UUID-based key_id (key_info.id).
+            let key_path = format!("keys/{}/{}", user.id, key_info.name);
 
             match state.storage.get_by_path(&key_path).await {
                 Ok(Some(entry)) => {
@@ -1686,6 +1812,7 @@ async fn get_public_key_for_key(
                         "rsa-4096" => "RSA 4096-bit",
                         "ecdsa-p256" => "ECDSA P-256",
                         "ecdsa-p384" => "ECDSA P-384",
+                        "ecdsa-secp256k1" => "ECDSA secp256k1",
                         "ed25519" => "Ed25519",
                         _ => "Asymmetric",
                     };
@@ -1702,6 +1829,7 @@ async fn get_public_key_for_key(
                         "rsa-4096" => "RSA 4096-bit",
                         "ecdsa-p256" => "ECDSA P-256",
                         "ecdsa-p384" => "ECDSA P-384",
+                        "ecdsa-secp256k1" => "ECDSA secp256k1",
                         "ed25519" => "Ed25519",
                         _ => "Asymmetric",
                     };

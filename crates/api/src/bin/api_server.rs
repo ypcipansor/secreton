@@ -408,6 +408,13 @@ async fn main() -> anyhow::Result<()> {
         performance.clone(),
     );
 
+    // Register Transit Engine service
+    let transit_engine = Arc::new(secreton_crypto::transit::TransitEngine::new());
+    container.register_service::<Arc<secreton_crypto::transit::TransitEngine>>(
+        "transit".to_string(),
+        transit_engine.clone(),
+    );
+
     use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
     let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
     if let Err(e) = telemetry.start_collection().await {
@@ -454,9 +461,13 @@ async fn main() -> anyhow::Result<()> {
         totp_engine_service.clone(),
     );
 
-    // Use default in-memory states for now, matching ApiState::new implementation
+    // Use the shared transit engine for ApiState so it matches the one in the container.
+    // TransitApiState::default() would create a separate, disconnected TransitEngine.
+    let transit_api_state = TransitApiState {
+        engine: transit_engine.clone(),
+    };
     let api_state = ApiState::new(
-        TransitApiState::default(),
+        transit_api_state,
         KVApiState::default(),
         database_state,
         Some(pki_service),

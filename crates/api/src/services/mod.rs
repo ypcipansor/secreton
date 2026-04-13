@@ -63,6 +63,7 @@ pub struct ApiServiceContainer {
     pub database: Arc<database::DatabaseService>,
     pub pki: Arc<pki::PkiPersistentService>,
     pub ssh: Arc<ssh::SshPersistentService>,
+    pub transit: Arc<secreton_crypto::transit::TransitEngine>,
     pub totp_engine: Arc<totp_engine::TotpEngineService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
@@ -244,6 +245,9 @@ impl ApiServiceContainer {
             .with_crypto(crypto.clone()),
         );
 
+        // Initialize Transit Engine
+        let transit = Arc::new(secreton_crypto::transit::TransitEngine::new());
+
         // Initialize Telemetry
         let telemetry = Arc::new(TelemetryCollector::new(TelemetryConfig::default()));
         if let Err(e) = telemetry.start_collection().await {
@@ -265,6 +269,7 @@ impl ApiServiceContainer {
         registry.register_service("database".to_string(), database.clone());
         registry.register_service("pki".to_string(), pki.clone());
         registry.register_service("ssh".to_string(), ssh.clone());
+        registry.register_service("transit".to_string(), transit.clone());
         registry.register_service("totp_engine".to_string(), totp_engine.clone());
         registry.register_service("telemetry".to_string(), telemetry.clone());
         registry.register_service("identity".to_string(), identity.clone());
@@ -284,6 +289,7 @@ impl ApiServiceContainer {
             database,
             pki,
             ssh,
+            transit,
             totp_engine,
             performance,
             mfa,

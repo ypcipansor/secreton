@@ -200,28 +200,18 @@ pub fn SecretsList() -> impl IntoView {
             let current_path = path();
             let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Rollback secret at {} to version {}? This will create a new version with the historical data.", current_path, v)).ok()).unwrap_or(false);
             if !confirm { return; }
-            let fetch_url = format!("/secret/secrets/{}?version={}", current_path, v);
 
-            // 1. Fetch the historical data
-            match api::get::<GetSecretResponse>(&fetch_url).await {
-                Ok(historical) => {
-                    // 2. PUT it as the new latest version
-                    let put_url = format!("/secret/secrets/{}", current_path);
-                    let payload = serde_json::json!({
-                        "data": historical.data
-                    });
+            // Call the specialized rollback endpoint
+            let rollback_url = format!("/secret/secret-rollback/{}?version={}", current_path, v);
 
-                    match api::put::<serde_json::Value, _>(&put_url, payload).await {
-                        Ok(_) => {
-                            set_error_msg.set(None);
-                            set_view_version.set(None);
-                            set_show_history_modal.set(false);
-                            secret_resource.refetch();
-                        }
-                        Err(e) => set_error_msg.set(Some(format!("Rollback failed: {:?}", e))),
-                    }
+            match api::post::<serde_json::Value, _>(&rollback_url, serde_json::json!({})).await {
+                Ok(_) => {
+                    set_error_msg.set(None);
+                    set_view_version.set(None);
+                    set_show_history_modal.set(false);
+                    secret_resource.refetch();
                 }
-                Err(e) => set_error_msg.set(Some(format!("Failed to fetch version for rollback: {:?}", e))),
+                Err(e) => set_error_msg.set(Some(format!("Rollback failed: {:?}", e))),
             }
         });
     };

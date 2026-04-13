@@ -33,6 +33,7 @@ pub struct PolicyMetadata {
 pub struct SignResult {
     pub signature: String,
     pub key_version: u32,
+    pub algorithm: String,
 }
 
 /// Policy definition
@@ -81,7 +82,7 @@ pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
     audit: Arc<AuditLogger>,
-    identity: Arc<dyn IdentityService + Send + Sync>,
+    _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
 }
@@ -100,7 +101,7 @@ impl SecretService {
             storage,
             crypto,
             audit,
-            identity,
+            _identity: identity,
             policy_service,
             performance,
         })
@@ -560,6 +561,46 @@ impl SecretService {
         Ok(())
     }
 
+    /// Rollback secret to a previous version
+    pub async fn rollback_secret(
+        &self,
+        path: &str,
+        version: u32,
+        user: &secreton_auth::User,
+    ) -> Result<SecretData, SecretError> {
+        self.check_permission(user, path, "write").await?;
+
+        // Prevent no-op rollback to the current version, which would waste a
+        // version number and create a redundant history entry.
+        let current = self.get_secret(path, user, None).await?;
+        if current.version == version {
+            return Err(SecretError::InvalidOperation(format!(
+                "Version {} is already the current version — rollback is a no-op",
+                version
+            )));
+        }
+
+        // 1. Fetch the historical version
+        let historical_data = self.get_secret(path, user, Some(version)).await?;
+
+        // 2. Promotion: Put it as the new latest version.
+        // `put_secret` handles archiving the current one and incrementing the version.
+        let rolled_back = self.put_secret(path, historical_data.data, user).await?;
+
+        // Log audit trail for rollback specifically
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::SecretVersionChange {
+                secret_path: path.to_string(),
+                old_version: rolled_back.previous_version.unwrap_or(0),
+                new_version: rolled_back.version,
+                user: user.id.to_string(),
+            })
+            .await;
+
+        Ok(rolled_back)
+    }
+
     /// Create a new policy
     pub async fn create_policy(
         &self,
@@ -757,18 +798,66 @@ impl SecretService {
         key_type: &str,
         user: &secreton_auth::User,
     ) -> Result<KeyInfo, SecretError> {
+        // Reject key names that end with `_v` followed by digits.
+        // The versioned storage scheme uses `key_data/{uid}/{name}_v{N}` paths,
+        // so a key named e.g. "mykey_v1" would collide with key "mykey"'s
+        // version 1 data path.
+        if let Some(pos) = key_name.rfind("_v") {
+            let suffix = &key_name[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key name '{}' must not end with '_v' followed by digits (reserved for versioning)",
+                    key_name
+                )));
+            }
+        }
+
         let key_path = format!("keys/{}/{}", user.id, key_name);
         self.check_permission(user, &key_path, "create").await?;
 
-        // Map key type to algorithm
+        // Check if key already exists to prevent silent overwrites
+        if let Ok(Some(_)) = self.storage.get_by_path(&key_path).await {
+            return Err(SecretError::InvalidOperation(format!(
+                "Key '{}' already exists. Delete it first or use a different name.",
+                key_name
+            )));
+        }
+
+        // Map key type to algorithm.
+        // Some key types (xchacha20-poly1305, ecdsa-secp256k1, x25519) are only
+        // supported via the transit engine, which manages its own in-memory keys.
+        // Reject them here because the secret service's encrypt/decrypt/sign/verify
+        // methods cannot operate on these types, so creating them would produce
+        // unusable keys.
         let algorithm = match key_type {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'xchacha20-poly1305' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is only supported via the transit engine. \
+                     Use POST /api/v1/transit/keys/{name} instead."
+                        .to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
@@ -788,10 +877,11 @@ impl SecretService {
         let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
 
         // Store key metadata as SecretEntry
+        let algorithm_str = format!("{:?}", algorithm);
         let key_metadata = serde_json::json!({
             "key_id": key_id,
             "key_type": key_type,
-            "algorithm": format!("{:?}", algorithm),
+            "algorithm": algorithm_str,
             "created_by": user.id,
             "created_at": chrono::Utc::now().to_rfc3339(),
             "version": 1
@@ -809,11 +899,6 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage
-            .store(&metadata_entry)
-            .await
-            .map_err(SecretError::Storage)?;
-
         // Encrypt the key data before storing
         let encrypted_key_data = self
             .crypto
@@ -821,7 +906,9 @@ impl SecretService {
             .await
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
+        // Store key data BEFORE metadata so that if key data storage fails,
+        // no metadata entry references a nonexistent key version.
+        let key_data_path = format!("key_data/{}/{}_v1", user.id, key_name);
         let key_data_entry = secreton_storage::SecretEntry::new(
             key_data_path,
             encrypted_key_data,
@@ -832,6 +919,12 @@ impl SecretService {
 
         self.storage
             .store(&key_data_entry)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        // Now store metadata — key material is already safely persisted
+        self.storage
+            .store(&metadata_entry)
             .await
             .map_err(SecretError::Storage)?;
 
@@ -880,8 +973,14 @@ impl SecretService {
                 SecretError::Internal(anyhow::anyhow!("Failed to deserialize key metadata: {}", e))
             })?;
 
-        // Extract key information
-        let name = metadata
+        // Extract key information.
+        // `key_id` in the metadata JSON is the internal UUID-based identifier
+        // (e.g. "key_abc123"), while the `key_id` parameter to this function
+        // is the user-friendly name (from the URL path).  Match the field
+        // assignment used by `create_key` and `list_keys`:
+        //   id   = internal key_id from metadata
+        //   name = user-friendly name (the path parameter)
+        let internal_id = metadata
             .get("key_id")
             .and_then(|v| v.as_str())
             .unwrap_or(key_id)
@@ -909,8 +1008,8 @@ impl SecretService {
             .unwrap_or_else(|_| chrono::Utc::now());
 
         Ok(KeyInfo {
-            id: key_id.to_string(),
-            name,
+            id: internal_id,
+            name: key_id.to_string(),
             key_type,
             version,
             status: "active".to_string(),
@@ -1014,10 +1113,19 @@ impl SecretService {
         // Get current key metadata
         let current_key = self.get_key(key_id, user).await?;
 
-        // Generate new key with same type
+        // Generate new key with same type (must match create_key's type mapping).
+        // Transit-only key types (xchacha20-poly1305, ecdsa-secp256k1, x25519)
+        // should never appear here because create_key rejects them. Guard
+        // against legacy data by returning an error if they are encountered.
         let algorithm = match current_key.key_type.as_str() {
             "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
             "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "xchacha20-poly1305" | "ecdsa-secp256k1" | "x25519" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' is only supported via the transit engine and cannot be rotated here.",
+                    current_key.key_type
+                )));
+            }
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
@@ -1041,10 +1149,11 @@ impl SecretService {
         // Update metadata with new version
         let new_version = current_key.version + 1;
         let key_path = format!("keys/{}/{}", user.id, key_id);
+        let algorithm_str = format!("{:?}", algorithm);
         let key_metadata = serde_json::json!({
-            "key_id": key_id,
+            "key_id": current_key.id,
             "key_type": current_key.key_type,
-            "algorithm": format!("{:?}", algorithm),
+            "algorithm": algorithm_str,
             "created_by": user.id,
             "created_at": current_key.created_at.to_rfc3339(),
             "version": new_version,
@@ -1063,16 +1172,21 @@ impl SecretService {
             owner_id,
         );
 
-        self.storage
-            .store(&metadata_entry)
+        // Encrypt the new key data before storing (must match create_key behavior)
+        let encrypted_new_key_data = self
+            .crypto
+            .encrypt_data(&new_key_data)
             .await
-            .map_err(SecretError::Storage)?;
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
-        // Store new key data with version
+        // Store key data BEFORE metadata to reduce the window where metadata
+        // references a version whose key material doesn't exist yet. If the
+        // key data store fails, we haven't touched metadata so the key stays
+        // at its previous version.
         let new_key_data_path = format!("key_data/{}/{}_v{}", user.id, key_id, new_version);
         let key_data_entry = secreton_storage::SecretEntry::new(
             new_key_data_path,
-            new_key_data,
+            encrypted_new_key_data,
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::TopSecret,
             owner_id,
@@ -1080,6 +1194,12 @@ impl SecretService {
 
         self.storage
             .store(&key_data_entry)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        // Now update metadata — key material is already safely stored
+        self.storage
+            .store(&metadata_entry)
             .await
             .map_err(SecretError::Storage)?;
 
@@ -1095,7 +1215,7 @@ impl SecretService {
             .await;
 
         Ok(KeyInfo {
-            id: key_id.to_string(),
+            id: current_key.id,
             name: current_key.name,
             key_type: current_key.key_type,
             version: new_version,
@@ -1215,11 +1335,89 @@ impl SecretService {
         self.check_permission(user, &key_path, "list_versions")
             .await?;
 
-        // Check if key exists
-        self.get_key(key_id, user).await?;
+        // Get current key info to ensure it exists and get base metadata
+        let current_key = self.get_key(key_id, user).await?;
 
-        // Return just the current version for now
-        self.get_key(key_id, user).await.map(|k| vec![k])
+        // Build query params for key versions in key_data
+        let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
+        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
+
+        let entries = self
+            .storage
+            .list(&query)
+            .await
+            .map_err(SecretError::Storage)?;
+
+        let mut versions = Vec::new();
+        for entry in entries {
+            // Extract version from path suffix
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
+                if let Ok(version) = v_str.parse::<u32>() {
+                    // Guard against prefix collision: the entry path
+                    // `key_data/{uid}/{key_id}_v{N}` could also be the legacy
+                    // (non-versioned) data of a *different* key whose name is
+                    // literally `{key_id}_v{N}`.  For example, listing versions
+                    // of key "mykey" with prefix `key_data/{uid}/mykey_v` would
+                    // match `key_data/{uid}/mykey_v1` — but that path may belong
+                    // to a pre-existing key named "mykey_v1" (created before the
+                    // `_v{digits}` name validation was added).  Skip the entry
+                    // when such a colliding key exists.
+                    let potential_key_name = format!("{}_v{}", key_id, version);
+                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                        continue;
+                    }
+
+                    versions.push(KeyInfo {
+                        id: current_key.id.clone(),
+                        name: current_key.name.clone(),
+                        key_type: current_key.key_type.clone(),
+                        version,
+                        status: if version == current_key.version { "active" } else { "historical" }.to_string(),
+                        created_at: entry.created_at,
+                    });
+                }
+            }
+        }
+
+        // Also check for the non-versioned (legacy) entry.
+        //
+        // Guard against path collision: if key_id matches `{other}_v{N}`, the
+        // legacy path `key_data/{uid}/{key_id}` could actually be another key's
+        // versioned data. Only consider it as a legacy entry when no such parent
+        // key exists.
+        let legacy_path = format!("key_data/{}/{}", user.id, key_id);
+        let mut check_legacy = true;
+        if let Some(pos) = key_id.rfind("_v") {
+            let suffix = &key_id[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let parent_key = &key_id[..pos];
+                let parent_meta_path = format!("keys/{}/{}", user.id, parent_key);
+                if let Ok(Some(_)) = self.storage.get_by_path(&parent_meta_path).await {
+                    check_legacy = false;
+                }
+            }
+        }
+        if check_legacy {
+            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+                // Only add if we don't already have a v1 entry from the versioned search
+                if !versions.iter().any(|v| v.version == 1) {
+                    versions.push(KeyInfo {
+                        id: current_key.id.clone(),
+                        name: current_key.name.clone(),
+                        key_type: current_key.key_type.clone(),
+                        version: 1,
+                        status: if current_key.version == 1 { "active" } else { "historical" }.to_string(),
+                        created_at: entry.created_at,
+                    });
+                }
+            }
+        }
+
+        // Sort by version descending
+        versions.sort_by(|a, b| b.version.cmp(&a.version));
+
+        Ok(versions)
     }
 
     /// Delete a key
@@ -1228,10 +1426,130 @@ impl SecretService {
         key_id: &str,
         user: &secreton_auth::User,
     ) -> Result<bool, SecretError> {
-        self.check_permission(user, &format!("keys/{}/{}", user.id, key_id), "delete")
-            .await?;
-        // Placeholder
+        let key_path = format!("keys/{}/{}", user.id, key_id);
+        self.check_permission(user, &key_path, "delete").await?;
+
+        // 1. Verify metadata exists (but don't delete it yet).
+        //    Delete key material BEFORE metadata so that if the process crashes
+        //    mid-way, metadata still references the key and a retry can clean up.
+        //    Deleting metadata first would leave orphaned key material with no
+        //    metadata pointing to it.
+        let metadata_entry = self.storage.get_by_path(&key_path).await.map_err(SecretError::Storage)?;
+        if metadata_entry.is_none() {
+             return Err(SecretError::KeyNotFound { key_id: key_id.to_string() });
+        }
+
+        // 2. Delete all versioned key material
+        let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
+        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
+        let entries = self.storage.list(&query).await.map_err(SecretError::Storage)?;
+
+        for entry in entries {
+            // Only delete entries whose suffix after the prefix is a pure version number
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
+                if let Ok(version) = v_str.parse::<u32>() {
+                    // Guard against prefix collision: `key_data/{uid}/{key_id}_v{N}`
+                    // could also be the legacy data of a different key named
+                    // `{key_id}_v{N}` (created before the `_v{digits}` name
+                    // validation was added). Skip if such a colliding key exists.
+                    let potential_key_name = format!("{}_v{}", key_id, version);
+                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                        continue;
+                    }
+
+                    self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+                }
+            }
+        }
+
+        // 3. Delete legacy non-versioned key material if any.
+        //
+        // Guard against path collision: the versioned scheme stores key data at
+        // `key_data/{uid}/{name}_v{N}`. If the key being deleted is itself named
+        // `{other_key}_v{N}` (e.g. "mykey_v1"), the legacy path
+        // `key_data/{uid}/mykey_v1` is identical to key "mykey"'s version 1 data.
+        // Only delete the legacy entry when the key_id cannot be interpreted as
+        // another key's versioned data path.
+        let legacy_path = format!("key_data/{}/{}", user.id, key_id);
+        let mut safe_to_delete_legacy = true;
+        if let Some(pos) = key_id.rfind("_v") {
+            let suffix = &key_id[pos + 2..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                let parent_key = &key_id[..pos];
+                // Check if a different key's metadata exists that would own this path
+                let parent_meta_path = format!("keys/{}/{}", user.id, parent_key);
+                if let Ok(Some(_)) = self.storage.get_by_path(&parent_meta_path).await {
+                    // Another key exists whose versioned data path collides — skip
+                    safe_to_delete_legacy = false;
+                }
+            }
+        }
+        if safe_to_delete_legacy {
+            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+                self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            }
+        }
+
+        // 4. Delete metadata last — all key material is already removed.
+        if let Some(entry) = metadata_entry {
+            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+        }
+
+        // Log audit trail
+        let _ = self
+            .audit
+            .log_event(SecurityEventType::KeyDeletion {
+                key_id: key_id.to_string(),
+                user: user.id.to_string(),
+            })
+            .await;
+
         Ok(true)
+    }
+
+    /// Decrypt stored key material, with fallback for legacy unencrypted entries.
+    ///
+    /// Before this versioning change, `rotate_key` stored raw (unencrypted) key
+    /// bytes at `key_data/{uid}/{name}_v{N}`. After the fix, all key data is
+    /// encrypted via `crypto.encrypt_data()` (producing a JSON `CryptoPacket`).
+    /// To avoid breaking keys that were rotated before the fix, we try
+    /// `crypto.decrypt()` first and, if it fails (e.g. because the stored bytes
+    /// are not valid JSON), fall back to using the raw bytes directly.
+    ///
+    /// **Important:** If the stored bytes ARE a valid CryptoPacket (i.e. they
+    /// parse as JSON with a `key_id` field), the decryption error is real — for
+    /// example the system key may have been rotated or become unavailable. In
+    /// that case we must NOT fall back to using the raw CryptoPacket JSON bytes
+    /// as key material, because that would produce garbage encryption/signatures
+    /// that can never be reversed.
+    async fn decrypt_key_material(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, SecretError> {
+        match self.crypto.decrypt(encrypted_data).await {
+            Ok(key_data) => Ok(key_data),
+            Err(decrypt_err) => {
+                // Check if the stored data looks like an encrypted CryptoPacket
+                // (JSON with a "key_id" field). If so, the decryption failure is
+                // genuine (e.g. system key unavailable) — propagate the error
+                // instead of silently using the raw JSON bytes as key material.
+                if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(encrypted_data) {
+                    if parsed.get("key_id").is_some() {
+                        return Err(SecretError::Internal(anyhow::anyhow!(
+                            "Failed to decrypt key material (CryptoPacket detected but \
+                             decryption failed — system key may be unavailable): {}",
+                            decrypt_err
+                        )));
+                    }
+                }
+
+                // Legacy fallback: the key material was stored unencrypted
+                // (pre-fix rotate_key). Use the raw bytes directly.
+                warn!(
+                    "Key data could not be decrypted as CryptoPacket; \
+                     treating as legacy unencrypted key material"
+                );
+                Ok(encrypted_data.to_vec())
+            }
+        }
     }
 
     /// Delete a backup
@@ -1246,11 +1564,15 @@ impl SecretService {
     }
 
     /// Encrypt data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn encrypt(
         &self,
         key_name: &str,
         plaintext: &[u8],
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<(EncryptedData, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "encrypt")
             .await?;
@@ -1258,40 +1580,77 @@ impl SecretService {
         // Get key info to retrieve version
         let key_info = self.get_key(key_name, user).await?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
-        // Generate nonce/IV
-        let nonce = secreton_crypto::generate_random_bytes(12)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-
-        // Encrypt data using crypto engine
-        let ciphertext = self
-            .crypto
-            .encrypt(&key_data, plaintext, None)
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-
-        let encrypted_data = EncryptedData {
-            algorithm: secreton_crypto::AlgorithmId::Aes256Gcm,
-            nonce: nonce.clone(),
-            ciphertext: ciphertext.ciphertext,
-            tag: ciphertext.tag,
+        // Encrypt data using crypto engine.
+        // `self.crypto.encrypt` returns an `EncryptedData` that already contains
+        // the internally-generated nonce, ciphertext, and tag. Use it directly
+        // instead of substituting a separately-generated nonce (which would cause
+        // a nonce mismatch on decryption).
+        //
+        // Map the key type to the correct encryption algorithm so that keys
+        // created as chacha20-poly1305 actually encrypt with ChaCha20-Poly1305
+        // instead of always defaulting to AES-256-GCM.
+        // Reject asymmetric key types that cannot be used for symmetric encryption.
+        let algorithm = match key_info.key_type.as_str() {
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
+            "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'xchacha20-poly1305' encryption is only supported via the transit engine.".to_string(),
+                ));
+            }
+            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support encryption. Use sign/verify instead.",
+                    key_info.key_type
+                )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not direct encryption.".to_string(),
+                ));
+            }
+            other => {
+                // Legacy metadata may not have a key_type field, defaulting to
+                // "unknown". Fall back to AES-256-GCM for backward compatibility
+                // but warn so callers can fix their metadata.
+                if other != "unknown" {
+                    return Err(SecretError::InvalidOperation(format!(
+                        "Unsupported key type for encryption: {}",
+                        key_info.key_type
+                    )));
+                }
+                warn!(
+                    "Key '{}' has unknown key_type in metadata; defaulting to AES-256-GCM",
+                    key_name
+                );
+                secreton_crypto::AlgorithmId::Aes256Gcm
+            }
         };
+        let encrypted_data = self
+            .crypto
+            .encrypt_with_algorithm(&key_data, plaintext, algorithm)
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Create key ID for audit
         let key_id = format!("{}/{}", user.id, key_name);
@@ -1306,49 +1665,53 @@ impl SecretService {
             })
             .await;
 
-        Ok((encrypted_data, key_info.version))
+        Ok((encrypted_data, version))
     }
 
     /// Decrypt data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn decrypt(
         &self,
         key_name: &str,
         encrypted_data: &EncryptedData,
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<(Vec<u8>, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "decrypt")
             .await?;
 
-        // Get key info to retrieve version
+        // Get key info to retrieve latest version metadata
         let key_info = self.get_key(key_name, user).await?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
-        // Decrypt the user data using the key
+        // Decrypt the user data using the key.
+        // `decrypt_full` is deprecated and always returns an error.
+        // Use `decrypt_with_key` which accepts the full `EncryptedData` struct.
         let plaintext = self
             .crypto
-            .decrypt_full(
-                &key_data,
-                &encrypted_data.nonce,
-                &encrypted_data.ciphertext,
-                None,
-            )
+            .decrypt_with_key(&key_data, encrypted_data)
             .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Log audit trail
@@ -1362,30 +1725,50 @@ impl SecretService {
             })
             .await;
 
-        Ok((plaintext, key_info.version))
+        Ok((plaintext, version))
     }
 
     /// Sign data using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn sign_data(
         &self,
         key_name: &str,
         data: &[u8],
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<SignResult, SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "sign")
             .await?;
 
         let key_info = self.get_key(key_name, user).await?;
 
-        // Map key type to algorithm
+        // Map key type to algorithm.
+        // Symmetric key types (aes256-gcm, chacha20-poly1305, xchacha20-poly1305)
+        // and key-agreement types (x25519) don't support signing.
         let algorithm = match key_info.key_type.as_str() {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' signing is only supported via the transit engine.".to_string(),
+                ));
+            }
+            "aes256-gcm" | "chacha20-poly1305" | "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support signing. Use encrypt/decrypt instead.",
+                    key_info.key_type
+                )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not signing.".to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type for signing: {}",
@@ -1394,23 +1777,26 @@ impl SecretService {
             }
         };
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Sign data using crypto engine
         let signature = self
@@ -1433,19 +1819,43 @@ impl SecretService {
             })
             .await;
 
+        // Map the AlgorithmId back to a human-readable algorithm name so the
+        // handler can report the actual algorithm used (instead of a hardcoded
+        // default that may not match the key type).
+        let algorithm_name = match algorithm {
+            secreton_crypto::AlgorithmId::Rsa2048 => "RSA-2048",
+            secreton_crypto::AlgorithmId::Rsa4096 => "RSA-4096",
+            secreton_crypto::AlgorithmId::EcdsaP256 => "ECDSA-P256",
+            secreton_crypto::AlgorithmId::EcdsaP384 => "ECDSA-P384",
+            secreton_crypto::AlgorithmId::Ed25519 => "ED25519",
+            other => {
+                // Fallback for any future algorithm variants
+                return Ok(SignResult {
+                    signature: signature_str,
+                    key_version: version,
+                    algorithm: format!("{:?}", other),
+                });
+            }
+        };
+
         Ok(SignResult {
             signature: signature_str,
-            key_version: key_info.version,
+            key_version: version,
+            algorithm: algorithm_name.to_string(),
         })
     }
 
     /// Verify signature using a key
+    ///
+    /// If `key_version` is `Some(v)`, the key material at version `v` is used.
+    /// Otherwise the latest version from key metadata is used.
     pub async fn verify_data(
         &self,
         key_name: &str,
         data: &[u8],
         signature_b64: &[u8],
         user: &secreton_auth::User,
+        key_version: Option<u32>,
     ) -> Result<(bool, u32), SecretError> {
         self.check_permission(user, &format!("keys/{}/{}", user.id, key_name), "verify")
             .await?;
@@ -1453,15 +1863,30 @@ impl SecretService {
         // Get key info to retrieve version and algorithm
         let key_info = self.get_key(key_name, user).await?;
 
-        // Map key type to algorithm
+        // Map key type to algorithm.
+        // Symmetric key types and key-agreement types don't support verification.
         let algorithm = match key_info.key_type.as_str() {
-            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
-            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
             "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
             "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
             "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
+            "ecdsa-secp256k1" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'ecdsa-secp256k1' verification is only supported via the transit engine.".to_string(),
+                ));
+            }
+            "aes256-gcm" | "chacha20-poly1305" | "xchacha20-poly1305" => {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Key type '{}' does not support verification. Use encrypt/decrypt instead.",
+                    key_info.key_type
+                )));
+            }
+            "x25519" => {
+                return Err(SecretError::InvalidOperation(
+                    "Key type 'x25519' is for key agreement, not verification.".to_string(),
+                ));
+            }
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type for verification: {}",
@@ -1475,26 +1900,29 @@ impl SecretService {
         let signature = base64::engine::general_purpose::STANDARD
             .decode(signature_b64)
             .map_err(|e| {
-                SecretError::Internal(anyhow::anyhow!("Invalid base64 signature: {}", e))
+                SecretError::InvalidOperation(format!("Invalid base64 signature: {}", e))
             })?;
 
-        // Retrieve key from storage
-        let key_data_path = format!("key_data/{}/{}", user.id, key_name);
-        let key_entry = self
-            .storage
-            .get_by_path(&key_data_path)
-            .await
-            .map_err(SecretError::Storage)?
-            .ok_or_else(|| SecretError::KeyNotFound {
-                key_id: key_name.to_string(),
+        // Use the caller-specified version, or fall back to the latest version
+        let version = key_version.unwrap_or(key_info.version);
+
+        // Retrieve key from storage - try versioned path first, then legacy
+        let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
+        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+
+        if key_entry.is_none() && version == 1 {
+            let legacy_path = format!("key_data/{}/{}", user.id, key_name);
+            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+        }
+
+        let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
+                key_id: format!("{} (v{})", key_name, version),
             })?;
 
-        // Decrypt the stored key data
+        // Decrypt the stored key data (with legacy fallback for unencrypted entries)
         let key_data = self
-            .crypto
-            .decrypt(&key_entry.encrypted_data)
-            .await
-            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Failed to decrypt key: {}", e)))?;
+            .decrypt_key_material(&key_entry.encrypted_data)
+            .await?;
 
         // Verify signature
         let is_valid = self
@@ -1514,7 +1942,7 @@ impl SecretService {
             })
             .await;
 
-        Ok((is_valid, key_info.version))
+        Ok((is_valid, version))
     }
 
     /// Compute hash of data
@@ -1869,7 +2297,7 @@ mod tests {
         .await
         .unwrap();
         let (result, key_version) = service
-            .encrypt("key1", "plaintext".as_bytes(), &user)
+            .encrypt("key1", "plaintext".as_bytes(), &user, None)
             .await
             .unwrap();
         assert!(!result.ciphertext.is_empty());

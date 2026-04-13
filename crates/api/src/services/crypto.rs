@@ -222,7 +222,7 @@ impl CryptoService {
         self.root_key_store.read().await.is_some()
     }
 
-    /// Encrypt using a specific key (low-level)
+    /// Encrypt using a specific key (low-level, defaults to AES-256-GCM)
     pub fn encrypt(
         &self,
         key: &[u8],
@@ -231,6 +231,18 @@ impl CryptoService {
     ) -> Result<EncryptedData> {
         self.crypto_engine
             .encrypt(AlgorithmId::Aes256Gcm, plaintext, key)
+            .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))
+    }
+
+    /// Encrypt using a specific key and algorithm
+    pub fn encrypt_with_algorithm(
+        &self,
+        key: &[u8],
+        plaintext: &[u8],
+        algorithm: AlgorithmId,
+    ) -> Result<EncryptedData> {
+        self.crypto_engine
+            .encrypt(algorithm, plaintext, key)
             .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))
     }
 
