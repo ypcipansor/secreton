@@ -39,6 +39,10 @@ fn crypto_error_to_status(e: &CryptoError) -> StatusCode {
         CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
             StatusCode::TOO_MANY_REQUESTS
         }
+        CryptoError::EncryptionFailed(_)
+        | CryptoError::DecryptionFailed(_)
+        | CryptoError::SigningFailed(_)
+        | CryptoError::VerificationFailed(_) => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
