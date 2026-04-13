@@ -703,6 +703,7 @@ pub async fn create_secret(
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
         })?;
 
@@ -860,6 +861,9 @@ pub async fn list_secret_versions(
         .list_secret_versions(&path, &user)
         .await
         .map_err(|e| match e {
+            secret::SecretError::SecretNotFound { .. } => {
+                crate::ApiError::NotFound("Secret not found".to_string())
+            }
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to list secret versions: {}", e)),
         })?;
@@ -886,6 +890,7 @@ pub async fn rollback_secret(
             secret::SecretError::SecretNotFound { .. } => {
                 crate::ApiError::NotFound("Secret version not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to rollback secret: {}", e)),
         })?;
@@ -1108,7 +1113,6 @@ pub async fn rotate_key(
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // Rotate key via secreton service
-    let _old_key_id = key_id.clone();
     let key_info: secret::KeyInfo =
         state
             .secreton
@@ -1220,6 +1224,7 @@ pub async fn delete_key(
             secret::SecretError::KeyNotFound { .. } => {
                 crate::ApiError::NotFound("Key not found".to_string())
             }
+            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
             _ => crate::ApiError::Internal(format!("Failed to delete key: {}", e)),
         })?;

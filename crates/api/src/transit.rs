@@ -18,6 +18,30 @@ use secreton_crypto::transit::{
 // Import ApiState from the parent module
 use crate::ApiResponse;
 use crate::handlers::AppState;
+use secreton_crypto::CryptoError;
+
+/// Map `CryptoError` variants to appropriate HTTP status codes.
+fn crypto_error_to_status(e: &CryptoError) -> StatusCode {
+    match e {
+        CryptoError::KeyNotFound(_) | CryptoError::KeyVersionNotFound(_) => StatusCode::NOT_FOUND,
+        CryptoError::KeyAlreadyExists(_) => StatusCode::CONFLICT,
+        CryptoError::InvalidInput(_)
+        | CryptoError::InvalidUsage(_)
+        | CryptoError::InvalidParameter(_)
+        | CryptoError::InvalidKey(_)
+        | CryptoError::InvalidKeyLength { .. }
+        | CryptoError::InvalidNonceLength
+        | CryptoError::InvalidAlgorithm(_)
+        | CryptoError::InvalidCiphertext(_)
+        | CryptoError::InvalidSignature(_)
+        | CryptoError::ValidationError(_) => StatusCode::BAD_REQUEST,
+        CryptoError::PermissionDenied(_) => StatusCode::FORBIDDEN,
+        CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
 
 #[derive(Clone)]
 pub struct TransitApiState {
@@ -124,7 +148,7 @@ pub async fn get_key_info(
 
     match state.transit.get_key_info(&key_name).await {
         Ok(info) => Ok(Json(ApiResponse::success(info))),
-        Err(_) => Err(StatusCode::NOT_FOUND),
+        Err(e) => Err(crypto_error_to_status(&e)),
     }
 }
 
@@ -176,7 +200,7 @@ pub async fn create_key(
         }
         Err(e) => {
             warn!("Failed to create key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
@@ -220,7 +244,7 @@ pub async fn encrypt_data(
         }
         Err(e) => {
             warn!("Failed to encrypt with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
@@ -260,7 +284,7 @@ pub async fn decrypt_data(
         }
         Err(e) => {
             warn!("Failed to decrypt with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
@@ -322,7 +346,7 @@ pub async fn sign_data(
         }
         Err(e) => {
             warn!("Failed to sign with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
@@ -358,7 +382,7 @@ pub async fn hash_data(
                 algorithm: request.algorithm.unwrap_or_else(|| "sha256".to_string()),
             })))
         }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => Err(crypto_error_to_status(&e)),
     }
 }
 
@@ -411,7 +435,7 @@ pub async fn verify_data(
         }
         Err(e) => {
             warn!("Failed to verify with key {}: {:?}", key_name, e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(crypto_error_to_status(&e))
         }
     }
 }
