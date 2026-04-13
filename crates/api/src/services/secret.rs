@@ -570,6 +570,16 @@ impl SecretService {
     ) -> Result<SecretData, SecretError> {
         self.check_permission(user, path, "write").await?;
 
+        // Prevent no-op rollback to the current version, which would waste a
+        // version number and create a redundant history entry.
+        let current = self.get_secret(path, user, None).await?;
+        if current.version == version {
+            return Err(SecretError::InvalidOperation(format!(
+                "Version {} is already the current version — rollback is a no-op",
+                version
+            )));
+        }
+
         // 1. Fetch the historical version
         let historical_data = self.get_secret(path, user, Some(version)).await?;
 
