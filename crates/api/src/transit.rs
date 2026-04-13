@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Json,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -127,7 +127,11 @@ pub struct VerifyResponse {
 pub fn create_transit_router() -> Router<AppState> {
     Router::new()
         .route("/keys", get(list_keys))
-        .route("/keys/{key_name}", post(create_key).get(get_key_info))
+        .route(
+            "/keys/{key_name}",
+            post(create_key).get(get_key_info).delete(delete_key),
+        )
+        .route("/keys/{key_name}/rotate", post(rotate_key))
         .route("/encrypt/{key_name}", post(encrypt_data))
         .route("/decrypt/{key_name}", post(decrypt_data))
         .route("/sign/{key_name}", post(sign_data))
@@ -204,6 +208,57 @@ pub async fn create_key(
         }
         Err(e) => {
             warn!("Failed to create key {}: {:?}", key_name, e);
+            Err(crypto_error_to_status(&e))
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn delete_key(
+    Path(key_name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<CreateKeyResponse>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    match state.transit.delete_key(&key_name).await {
+        Ok(_) => {
+            info!("Deleted key: {}", key_name);
+            Ok(Json(ApiResponse::success(CreateKeyResponse {
+                success: true,
+                message: format!("Key '{}' deleted", key_name),
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to delete key {}: {:?}", key_name, e);
+            Err(crypto_error_to_status(&e))
+        }
+    }
+}
+
+#[axum::debug_handler]
+pub async fn rotate_key(
+    Path(key_name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    if crate::handlers::validate_name(&key_name).is_err() {
+        warn!("Invalid key name: {}", key_name);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    match state.transit.rotate_key(&key_name).await {
+        Ok(new_version) => {
+            info!("Rotated key: {} to version {}", key_name, new_version);
+            Ok(Json(ApiResponse::success(serde_json::json!({
+                "success": true,
+                "name": key_name,
+                "new_version": new_version,
+            }))))
+        }
+        Err(e) => {
+            warn!("Failed to rotate key {}: {:?}", key_name, e);
             Err(crypto_error_to_status(&e))
         }
     }
