@@ -820,8 +820,8 @@ impl SecretService {
         // methods cannot operate on these types, so creating them would produce
         // unusable keys.
         let algorithm = match key_type {
-            "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
-            "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "xchacha20-poly1305" => {
                 return Err(SecretError::InvalidOperation(
                     "Key type 'xchacha20-poly1305' is only supported via the transit engine. \
@@ -829,10 +829,10 @@ impl SecretService {
                         .to_string(),
                 ));
             }
-            "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
-            "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
-            "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
-            "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
             "ecdsa-secp256k1" => {
                 return Err(SecretError::InvalidOperation(
                     "Key type 'ecdsa-secp256k1' is only supported via the transit engine. \
@@ -840,7 +840,7 @@ impl SecretService {
                         .to_string(),
                 ));
             }
-            "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
             "x25519" => {
                 return Err(SecretError::InvalidOperation(
                     "Key type 'x25519' is only supported via the transit engine. \
@@ -857,12 +857,8 @@ impl SecretService {
         };
 
         // Generate key using crypto service
-        let key_data = match algorithm {
-            Some(algo) => secreton_crypto::generate_key(algo)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
-            None => secreton_crypto::generate_random_bytes(32)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
-        };
+        let key_data = secreton_crypto::generate_key(algorithm)
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Generate unique key ID
         let key_id = format!("key_{}", Uuid::new_v4().simple());
@@ -871,10 +867,7 @@ impl SecretService {
         let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
 
         // Store key metadata as SecretEntry
-        let algorithm_str = match &algorithm {
-            Some(algo) => format!("{:?}", algo),
-            None => key_type.to_string(),
-        };
+        let algorithm_str = format!("{:?}", algorithm);
         let key_metadata = serde_json::json!({
             "key_id": key_id,
             "key_type": key_type,
@@ -1115,19 +1108,19 @@ impl SecretService {
         // should never appear here because create_key rejects them. Guard
         // against legacy data by returning an error if they are encountered.
         let algorithm = match current_key.key_type.as_str() {
-            "aes256-gcm" => Some(secreton_crypto::AlgorithmId::Aes256Gcm),
-            "chacha20-poly1305" => Some(secreton_crypto::AlgorithmId::ChaCha20Poly1305),
+            "aes256-gcm" => secreton_crypto::AlgorithmId::Aes256Gcm,
+            "chacha20-poly1305" => secreton_crypto::AlgorithmId::ChaCha20Poly1305,
             "xchacha20-poly1305" | "ecdsa-secp256k1" | "x25519" => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Key type '{}' is only supported via the transit engine and cannot be rotated here.",
                     current_key.key_type
                 )));
             }
-            "rsa-2048" => Some(secreton_crypto::AlgorithmId::Rsa2048),
-            "rsa-4096" => Some(secreton_crypto::AlgorithmId::Rsa4096),
-            "ecdsa-p256" => Some(secreton_crypto::AlgorithmId::EcdsaP256),
-            "ecdsa-p384" => Some(secreton_crypto::AlgorithmId::EcdsaP384),
-            "ed25519" => Some(secreton_crypto::AlgorithmId::Ed25519),
+            "rsa-2048" => secreton_crypto::AlgorithmId::Rsa2048,
+            "rsa-4096" => secreton_crypto::AlgorithmId::Rsa4096,
+            "ecdsa-p256" => secreton_crypto::AlgorithmId::EcdsaP256,
+            "ecdsa-p384" => secreton_crypto::AlgorithmId::EcdsaP384,
+            "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
             _ => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Unsupported key type: {}",
@@ -1137,12 +1130,8 @@ impl SecretService {
         };
 
         // Generate new key data
-        let new_key_data = match algorithm {
-            Some(algo) => secreton_crypto::generate_key(algo)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
-            None => secreton_crypto::generate_random_bytes(32)
-                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?,
-        };
+        let new_key_data = secreton_crypto::generate_key(algorithm)
+            .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
 
         // Parse user_id as UUID
         let owner_id = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
@@ -1150,10 +1139,7 @@ impl SecretService {
         // Update metadata with new version
         let new_version = current_key.version + 1;
         let key_path = format!("keys/{}/{}", user.id, key_id);
-        let algorithm_str = match &algorithm {
-            Some(algo) => format!("{:?}", algo),
-            None => current_key.key_type.clone(),
-        };
+        let algorithm_str = format!("{:?}", algorithm);
         let key_metadata = serde_json::json!({
             "key_id": current_key.id,
             "key_type": current_key.key_type,
