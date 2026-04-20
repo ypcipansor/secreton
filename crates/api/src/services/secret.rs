@@ -420,7 +420,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, _existing_owner, previous_version) =
+        let (version, _existing_owner, previous_version, existing_metadata, existing_tags) =
             if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
                 // Check ownership first
                 if existing.owner_id != owner_id {
@@ -429,6 +429,10 @@ impl SecretService {
                         path
                     )));
                 }
+
+                // Capture existing metadata and tags before archiving
+                let prev_metadata = existing.metadata.clone();
+                let prev_tags = existing.tags.clone();
 
                 // Archive the existing version
                 let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
@@ -446,9 +450,11 @@ impl SecretService {
                     existing.version + 1,
                     Some(existing.owner_id),
                     Some(existing.version),
+                    Some(prev_metadata),
+                    Some(prev_tags),
                 )
             } else {
-                (1, None, None)
+                (1, None, None, None, None)
             };
 
         // Create SecretEntry
@@ -461,7 +467,19 @@ impl SecretService {
         );
         entry.version = version;
 
-        // Apply metadata if provided
+        // Carry forward existing metadata as defaults, then let caller override
+        if let Some(prev_meta) = &existing_metadata {
+            for (k, v) in prev_meta {
+                entry.metadata.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(prev_tags) = &existing_tags {
+            for tag in prev_tags {
+                entry = entry.add_tag(tag.clone());
+            }
+        }
+
+        // Apply caller-provided metadata on top (overrides existing values)
         if let Some(meta) = &metadata {
             if let Some(desc) = &meta.description {
                 entry.metadata.insert("description".to_string(), desc.clone());
@@ -472,9 +490,8 @@ impl SecretService {
             if let Some(class) = &meta.classification {
                 entry.metadata.insert("classification".to_string(), class.clone());
             }
-            for tag in &meta.tags {
-                entry = entry.add_tag(tag.clone());
-            }
+            // Replace tags entirely when caller provides metadata
+            entry.tags = meta.tags.clone();
         }
 
         // Store encrypted data
@@ -504,10 +521,18 @@ impl SecretService {
             })
             .await;
 
+        // Reconstruct metadata from the actual stored entry to ensure accuracy
+        let stored_metadata = SecretMetadata {
+            description: entry.metadata.get("description").cloned(),
+            tags: entry.tags.clone(),
+            owner: entry.metadata.get("owner").cloned(),
+            classification: entry.metadata.get("classification").cloned(),
+        };
+
         Ok(SecretData {
             path: path.to_string(),
             data,
-            metadata: metadata.unwrap_or_default(),
+            metadata: stored_metadata,
             version: entry.version,
             previous_version,
             created_at: entry.created_at,

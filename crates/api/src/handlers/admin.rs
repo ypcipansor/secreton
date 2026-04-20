@@ -789,10 +789,6 @@ pub async fn get_system_status(
         check_auth_health(&state),
     );
 
-    // Re-map health statuses to what frontend expects if needed, or keep descriptive.
-    // Frontend uses HealthResponse in dashboard.rs but here we use SystemStatus.
-    // Dashboard.rs expects "active" or "healthy".
-
     let overall_status = if database_status == "healthy"
         && cache_status == "healthy"
         && crypto_status == "healthy"
@@ -800,10 +796,13 @@ pub async fn get_system_status(
         && auth_status == "healthy"
     {
         "healthy"
-    } else if database_status == "timeout" || storage_status == "timeout" {
-        "degraded"
-    } else {
+    } else if database_status != "healthy"
+        || storage_status != "healthy"
+        || crypto_status != "healthy"
+    {
         "unhealthy"
+    } else {
+        "degraded"
     };
 
     // Use telemetry for actual system uptime (consistent with get_system_metrics)
