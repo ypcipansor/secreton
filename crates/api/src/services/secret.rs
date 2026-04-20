@@ -479,16 +479,26 @@ impl SecretService {
             }
         }
 
-        // Apply caller-provided metadata on top (overrides existing values)
+        // Apply caller-provided metadata on top (full replacement semantics).
+        // When metadata is Some, it represents the complete desired metadata
+        // state: Some fields set the value, None fields clear it. This ensures
+        // rollback correctly restores historical metadata without leaking
+        // values from the current version.
         if let Some(meta) = &metadata {
             if let Some(desc) = &meta.description {
                 entry.metadata.insert("description".to_string(), desc.clone());
+            } else {
+                entry.metadata.remove("description");
             }
             if let Some(owner) = &meta.owner {
                 entry.metadata.insert("owner".to_string(), owner.clone());
+            } else {
+                entry.metadata.remove("owner");
             }
             if let Some(class) = &meta.classification {
                 entry.metadata.insert("classification".to_string(), class.clone());
+            } else {
+                entry.metadata.remove("classification");
             }
             // Replace tags entirely when caller provides metadata
             entry.tags = meta.tags.clone();
