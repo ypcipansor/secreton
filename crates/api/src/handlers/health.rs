@@ -67,10 +67,13 @@ pub async fn health_check(
         _ => "unhealthy",
     };
 
+    // Use telemetry for actual system uptime
+    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+
     let health = HealthCheckResponse {
         status: database_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: get_uptime_seconds(),
+        uptime,
         dependencies: HealthCheckDependencies {
             database: database_status.to_string(),
             cache: "healthy".to_string(),  // No dedicated cache service

@@ -86,11 +86,16 @@ mod tests {
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        )
+
+        let container = crate::services::ApiServiceContainer::new(&config)
+            .await
+            .expect("Failed to create services");
+
+        // Initialize crypto for tests that require encryption (like role creation)
+        let root_key = vec![0u8; 32];
+        let _ = container.crypto.set_root_key(root_key).await;
+
+        Arc::new(container)
     }
 
     /// Create a `TestServer` from the given services.
@@ -784,6 +789,10 @@ pub async fn get_system_status(
         check_auth_health(&state),
     );
 
+    // Re-map health statuses to what frontend expects if needed, or keep descriptive.
+    // Frontend uses HealthResponse in dashboard.rs but here we use SystemStatus.
+    // Dashboard.rs expects "active" or "healthy".
+
     let overall_status = if database_status == "healthy"
         && cache_status == "healthy"
         && crypto_status == "healthy"
@@ -791,13 +800,10 @@ pub async fn get_system_status(
         && auth_status == "healthy"
     {
         "healthy"
-    } else if database_status != "healthy"
-        || storage_status != "healthy"
-        || crypto_status != "healthy"
-    {
-        "unhealthy"
-    } else {
+    } else if database_status == "timeout" || storage_status == "timeout" {
         "degraded"
+    } else {
+        "unhealthy"
     };
 
     // Use telemetry for actual system uptime (consistent with get_system_metrics)

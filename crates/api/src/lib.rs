@@ -617,7 +617,7 @@ async fn handle_secret_put(
 ) -> Result<impl Reply, Rejection> {
     let path_str = path.as_str();
     let secret = secreton
-        .put_secret(path_str, payload.data, &user)
+        .put_secret(path_str, payload.data, None, &user)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(warp::reply::json(&ApiResponse::success(secret)))

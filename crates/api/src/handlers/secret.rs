@@ -443,20 +443,14 @@ pub struct ListQuery {
     pub filter: Option<String>,
 }
 
+use crate::services::secret::SecretMetadata;
+
 /// Secret request/response models
 #[derive(Debug, Deserialize)]
 pub struct CreateSecretRequest {
     pub data: HashMap<String, String>,
     pub metadata: Option<SecretMetadata>,
     pub ttl: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct SecretMetadata {
-    pub description: Option<String>,
-    pub tags: Vec<String>,
-    pub owner: Option<String>,
-    pub classification: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -662,12 +656,7 @@ pub async fn get_secret(
     let response = SecretResponse {
         path: secret_data.path.clone(),
         data: secret_data.data,
-        metadata: SecretMetadata {
-            description: Some(format!("Secret at path: {}", secret_data.path)),
-            tags: vec!["managed".to_string()],
-            owner: Some(user.username.clone()),
-            classification: Some("internal".to_string()),
-        },
+        metadata: secret_data.metadata,
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
@@ -699,7 +688,7 @@ pub async fn create_secret(
     // Create secret via secreton service
     let secret_data: secret::SecretData = state
         .secreton
-        .put_secret(&path, request.data, &user)
+        .put_secret(&path, request.data, request.metadata, &user)
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -710,12 +699,7 @@ pub async fn create_secret(
     let response = SecretResponse {
         path: secret_data.path,
         data: secret_data.data,
-        metadata: request.metadata.unwrap_or_else(|| SecretMetadata {
-            description: None,
-            tags: vec![],
-            owner: Some(user.username.clone()),
-            classification: None,
-        }),
+        metadata: secret_data.metadata,
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
@@ -756,7 +740,7 @@ pub async fn update_secret(
     // Update secret via secreton service
     let secret_data: secret::SecretData = state
         .secreton
-        .put_secret(&path, request.data, &user)
+        .put_secret(&path, request.data, request.metadata, &user)
         .await
         .map_err(|e| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -794,12 +778,7 @@ pub async fn update_secret(
     let response = SecretResponse {
         path: secret_data.path,
         data: secret_data.data,
-        metadata: request.metadata.unwrap_or_else(|| SecretMetadata {
-            description: None,
-            tags: vec![],
-            owner: Some(user.username.clone()),
-            classification: None,
-        }),
+        metadata: secret_data.metadata,
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
@@ -918,12 +897,7 @@ pub async fn rollback_secret(
     let response = SecretResponse {
         path: secret_data.path,
         data: secret_data.data,
-        metadata: SecretMetadata {
-            description: Some(format!("Secret rolled back to version {}", version)),
-            tags: vec!["managed".to_string(), "rolled-back".to_string()],
-            owner: Some(user.username),
-            classification: Some("internal".to_string()),
-        },
+        metadata: secret_data.metadata,
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
@@ -953,12 +927,7 @@ pub async fn list_secrets(
         .into_iter()
         .map(|secret_data| SecretListItem {
             path: secret_data.path.clone(),
-            metadata: SecretMetadata {
-                description: Some(format!("Secret at path: {}", secret_data.path)),
-                tags: vec!["managed".to_string()],
-                owner: Some(user.username.clone()),
-                classification: Some("internal".to_string()),
-            },
+            metadata: secret_data.metadata,
             version: secret_data.version,
             created_at: secret_data.created_at,
             updated_at: secret_data.updated_at,
