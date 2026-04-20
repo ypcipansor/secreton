@@ -32,6 +32,7 @@ pub struct PolicyMetadata {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SecretMetadata {
     pub description: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub owner: Option<String>,
     pub classification: Option<String>,
