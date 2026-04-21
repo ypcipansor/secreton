@@ -212,6 +212,16 @@ impl TelemetryCollector {
         self.metrics.read().await.clone()
     }
 
+    /// Get system uptime in seconds without acquiring the metrics RwLock.
+    ///
+    /// This is useful for lightweight probes (e.g. liveness checks) that must
+    /// remain dependency-free.  Unlike `get_metrics().system.uptime_seconds`,
+    /// this always returns an accurate value even before the background
+    /// collection task has completed its first tick.
+    pub fn uptime_seconds(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
     /// Start StatsD metrics collection
     async fn start_statsd_collection(&self) -> Result<(), AppError> {
         // Simplified StatsD implementation

@@ -67,8 +67,8 @@ pub async fn health_check(
         _ => "unhealthy",
     };
 
-    // Use telemetry for actual system uptime
-    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+    // Use the lock-free uptime helper for actual system uptime
+    let uptime = state.telemetry.uptime_seconds();
 
     let health = HealthCheckResponse {
         status: database_status.to_string(),
@@ -127,7 +127,7 @@ pub async fn detailed_health_check(
         "degraded"
     };
 
-    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+    let uptime = state.telemetry.uptime_seconds();
 
     let health = DetailedHealthResponse {
         status: overall_status.to_string(),
@@ -171,8 +171,10 @@ pub async fn readiness_check(State(state): State<AppState>) -> ApiResult<Json<Re
 
 /// Liveness check - determines if the service is alive and should not be restarted
 pub async fn liveness_check(State(state): State<AppState>) -> ApiResult<Json<LivenessResponse>> {
-    // Simple liveness check - if we can respond, we're alive
-    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+    // Simple liveness check - if we can respond, we're alive.
+    // Use the lock-free uptime_seconds() to avoid depending on the
+    // telemetry RwLock, keeping this probe truly dependency-free.
+    let uptime = state.telemetry.uptime_seconds();
     let liveness = LivenessResponse {
         alive: true,
         uptime,

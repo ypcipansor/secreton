@@ -805,8 +805,8 @@ pub async fn get_system_status(
         "degraded"
     };
 
-    // Use telemetry for actual system uptime (consistent with get_system_metrics)
-    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+    // Use the lock-free uptime helper for actual system uptime
+    let uptime = state.telemetry.uptime_seconds();
 
     let status = SystemStatus {
         status: overall_status.to_string(),
