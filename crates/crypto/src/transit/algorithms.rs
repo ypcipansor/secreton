@@ -19,18 +19,25 @@ pub use sha3::{Sha3_256, Sha3_384, Sha3_512};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HashAlgorithm {
     /// SHA-256
+    #[serde(alias = "sha256", alias = "SHA-256")]
     Sha256,
     /// SHA-384  
+    #[serde(alias = "sha384", alias = "SHA-384")]
     Sha384,
     /// SHA-512
+    #[serde(alias = "sha512", alias = "SHA-512")]
     Sha512,
     /// SHA3-256
+    #[serde(alias = "sha3-256", alias = "SHA3-256")]
     Sha3_256,
     /// SHA3-384
+    #[serde(alias = "sha3-384", alias = "SHA3-384")]
     Sha3_384,
     /// SHA3-512
+    #[serde(alias = "sha3-512", alias = "SHA3-512")]
     Sha3_512,
     /// BLAKE3
+    #[serde(alias = "blake3", alias = "BLAKE3")]
     Blake3,
 }
 
@@ -82,10 +89,13 @@ impl fmt::Display for KdfAlgorithm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureAlgorithm {
     /// Ed25519 with SHA-512 (recommended)
+    #[serde(alias = "ed25519")]
     Ed25519,
     /// ECDSA with P-256 and SHA-256
+    #[serde(alias = "ecdsa-p256")]
     EcdsaP256,
     /// ECDSA with secp256k1 and SHA-256
+    #[serde(alias = "ecdsa-secp256k1")]
     EcdsaSecp256k1,
 }
 
