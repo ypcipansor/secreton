@@ -17,6 +17,7 @@ use crate::handlers::{AppState, validate_name};
 use crate::{ApiResponse, ApiResult};
 use secreton_crypto::CryptoError;
 use secreton_crypto::transit::{HashAlgorithm, KeyOptions, KeyType, SignatureAlgorithm};
+use tracing::{info, warn};
 
 /// Create transit engine routes
 pub fn create_routes() -> Router<AppState> {
@@ -41,8 +42,11 @@ pub fn create_routes() -> Router<AppState> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateKeyRequest {
     pub key_type: Option<KeyType>,
-    #[serde(flatten)]
-    pub options: Option<KeyOptions>,
+    /// Whether key can be exported
+    #[serde(default)]
+    pub exportable: Option<bool>,
+    /// Key usage constraints (if omitted, defaults are inferred from key type)
+    pub usage: Option<Vec<secreton_crypto::transit::KeyUsage>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -177,26 +181,31 @@ pub async fn create_key(
 ) -> ApiResult<Json<ApiResponse<()>>> {
     validate_name(&name)?;
     let key_type = request.key_type.unwrap_or(KeyType::Aes256Gcm);
-    let mut options = request.options.unwrap_or_default();
 
-    // If the caller did not provide explicit usage, apply sensible defaults
-    // based on the key type. The default KeyOptions has [Encrypt, Decrypt],
-    // which is wrong for signing-only key types and would make them unusable.
-    let default_usage = KeyOptions::default().usage;
-    if options.usage == default_usage {
-        options.usage = match &key_type {
+    // Build KeyOptions from the explicit optional fields.
+    // When usage is omitted, infer sensible defaults from the key type.
+    let usage = match request.usage {
+        Some(u) => u,
+        None => match &key_type {
             KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
                 vec![
                     secreton_crypto::transit::KeyUsage::Sign,
                     secreton_crypto::transit::KeyUsage::Verify,
                 ]
             }
-            _ => default_usage,
-        };
-    }
+            _ => KeyOptions::default().usage,
+        },
+    };
 
-    state.transit.create_key(name, key_type, Some(options)).await
-        .map_err(map_crypto_err)?;
+    let options = KeyOptions {
+        exportable: request.exportable.unwrap_or(false),
+        usage,
+        ..KeyOptions::default()
+    };
+
+    state.transit.create_key(name.clone(), key_type, Some(options)).await
+        .map_err(|e| { warn!("Failed to create key {}: {:?}", name, e); map_crypto_err(e) })?;
+    info!("Created transit key: {}", name);
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -207,7 +216,8 @@ pub async fn rotate_key(
 ) -> ApiResult<Json<ApiResponse<u32>>> {
     validate_name(&name)?;
     let new_version = state.transit.rotate_key(&name).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to rotate key {}: {:?}", name, e); map_crypto_err(e) })?;
+    info!("Rotated transit key: {} to version {}", name, new_version);
     Ok(Json(ApiResponse::success(new_version)))
 }
 
@@ -218,7 +228,8 @@ pub async fn delete_key(
 ) -> ApiResult<Json<ApiResponse<()>>> {
     validate_name(&name)?;
     state.transit.delete_key(&name).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to delete key {}: {:?}", name, e); map_crypto_err(e) })?;
+    info!("Deleted transit key: {}", name);
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -237,7 +248,7 @@ pub async fn encrypt(
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
 
     let ciphertext = state.transit.encrypt(&name, &plaintext, context.as_deref(), request.key_version).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to encrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
     Ok(Json(ApiResponse::success(EncryptResponse { ciphertext })))
 }
@@ -254,7 +265,7 @@ pub async fn decrypt(
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
 
     let plaintext = state.transit.decrypt(&name, &request.ciphertext, context.as_deref()).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to decrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
     Ok(Json(ApiResponse::success(DecryptResponse {
         plaintext: BASE64_STANDARD.encode(plaintext)
@@ -272,7 +283,7 @@ pub async fn sign(
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
     let signature = state.transit.sign(&name, &input, request.algorithm, request.key_version).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to sign with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
     Ok(Json(ApiResponse::success(SignResponse { signature })))
 }
@@ -288,7 +299,7 @@ pub async fn verify(
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
     let valid = state.transit.verify(&name, &input, &request.signature, request.algorithm).await
-        .map_err(map_crypto_err)?;
+        .map_err(|e| { warn!("Failed to verify with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
     Ok(Json(ApiResponse::success(VerifyResponse { valid })))
 }
@@ -329,7 +340,9 @@ mod tests {
     use std::sync::Arc;
 
     async fn server_with_routes() -> (TestServer, String) {
-        // Set root key for crypto service auto-unseal
+        // Set root key for crypto service auto-unseal.
+        // SAFETY: This test is run in a single-threaded context and no other
+        // thread reads this env var concurrently during setup.
         unsafe {
             std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
         }
@@ -389,7 +402,8 @@ mod tests {
         // 1. Create Key
         let create_req = CreateKeyRequest {
             key_type: Some(KeyType::Aes256Gcm),
-            options: None,
+            exportable: None,
+            usage: None,
         };
         let response = server
             .post(&format!("/keys/{}", key_name))

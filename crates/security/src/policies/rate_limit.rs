@@ -208,7 +208,7 @@ impl RateLimiter {
             Ok(true)
         } else {
             Err(SecretonError::RateLimitExceeded {
-                message: format!("Rate limit exceeded for key: {}", _key),
+                message: "Too many requests, please try again later".to_string(),
             })
         }
     }
@@ -258,7 +258,7 @@ impl RateLimiter {
                         && !window.check()
                     {
                         return Err(SecretonError::RateLimitExceeded {
-                            message: format!("Rate limit exceeded for key: {}", _key),
+                            message: "Too many requests, please try again later".to_string(),
                         });
                     }
                 }
@@ -270,7 +270,7 @@ impl RateLimiter {
             Ok(true)
         } else {
             Err(SecretonError::RateLimitExceeded {
-                message: format!("Rate limit exceeded for key: {}", _key),
+                message: "Too many requests, please try again later".to_string(),
             })
         }
     }
