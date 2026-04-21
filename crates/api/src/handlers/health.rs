@@ -67,10 +67,13 @@ pub async fn health_check(
         _ => "unhealthy",
     };
 
+    // Use the lock-free uptime helper for actual system uptime
+    let uptime = state.telemetry.uptime_seconds();
+
     let health = HealthCheckResponse {
         status: database_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: get_uptime_seconds(),
+        uptime,
         dependencies: HealthCheckDependencies {
             database: database_status.to_string(),
             cache: "healthy".to_string(),  // No dedicated cache service
@@ -124,10 +127,12 @@ pub async fn detailed_health_check(
         "degraded"
     };
 
+    let uptime = state.telemetry.uptime_seconds();
+
     let health = DetailedHealthResponse {
         status: overall_status.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: get_uptime_seconds(),
+        uptime,
         timestamp: chrono::Utc::now(),
         checks,
     };
@@ -165,11 +170,14 @@ pub async fn readiness_check(State(state): State<AppState>) -> ApiResult<Json<Re
 }
 
 /// Liveness check - determines if the service is alive and should not be restarted
-pub async fn liveness_check(State(_state): State<AppState>) -> ApiResult<Json<LivenessResponse>> {
-    // Simple liveness check - if we can respond, we're alive
+pub async fn liveness_check(State(state): State<AppState>) -> ApiResult<Json<LivenessResponse>> {
+    // Simple liveness check - if we can respond, we're alive.
+    // Use the lock-free uptime_seconds() to avoid acquiring the
+    // telemetry RwLock, keeping this probe lightweight.
+    let uptime = state.telemetry.uptime_seconds();
     let liveness = LivenessResponse {
         alive: true,
-        uptime: get_uptime_seconds(),
+        uptime,
         timestamp: chrono::Utc::now(),
     };
 
@@ -341,15 +349,6 @@ async fn check_crypto_readiness(_state: &AppState) -> HealthCheck {
     let mut check = check_crypto_health(_state).await;
     check.status = "ready".to_string();
     check
-}
-
-/// Get system uptime in seconds
-fn get_uptime_seconds() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[cfg(test)]

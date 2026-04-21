@@ -212,6 +212,16 @@ impl TelemetryCollector {
         self.metrics.read().await.clone()
     }
 
+    /// Get system uptime in seconds without acquiring the metrics RwLock.
+    ///
+    /// This is useful for lightweight probes (e.g. liveness checks) that must
+    /// remain dependency-free.  Unlike `get_metrics().system.uptime_seconds`,
+    /// this always returns an accurate value even before the background
+    /// collection task has completed its first tick.
+    pub fn uptime_seconds(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
     /// Start StatsD metrics collection
     async fn start_statsd_collection(&self) -> Result<(), AppError> {
         // Simplified StatsD implementation
@@ -424,19 +434,18 @@ async fn update_prometheus_metrics(_metrics: &SystemMetrics, _registry: &prometh
 }
 
 /// Collect current system metrics
+///
+/// NOTE: This function cannot compute real uptime because it has no access to
+/// the `TelemetryCollector::start_time` field. Callers that need accurate
+/// uptime should use `TelemetryCollector::uptime_seconds()` instead.
 #[allow(dead_code)]
 async fn collect_system_metrics() -> SystemResourceMetrics {
     // Simplified system metrics collection
     // In a real implementation, this would use system monitoring libraries
 
-    let uptime_seconds = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
     SystemResourceMetrics {
         active_connections: 0, // Would be collected from connection pool
-        uptime_seconds,
+        uptime_seconds: 0,    // Cannot compute here; use TelemetryCollector::uptime_seconds()
         load_average_1m: 0.0, // Would be collected from system
         load_average_5m: 0.0,
         load_average_15m: 0.0,

@@ -28,6 +28,16 @@ pub struct PolicyMetadata {
     pub tags: std::collections::HashMap<String, String>,
 }
 
+/// Secret metadata
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct SecretMetadata {
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub owner: Option<String>,
+    pub classification: Option<String>,
+}
+
 /// Signing result
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignResult {
@@ -280,9 +290,17 @@ impl SecretService {
                                     )
                                     .await;
 
+                                let metadata = SecretMetadata {
+                                    description: encrypted_entry.metadata.get("description").cloned(),
+                                    tags: encrypted_entry.tags.clone(),
+                                    owner: encrypted_entry.metadata.get("owner").cloned(),
+                                    classification: encrypted_entry.metadata.get("classification").cloned(),
+                                };
+
                                 return Ok(SecretData {
                                     path: path.to_string(),
                                     data: secret_map,
+                                    metadata,
                                     version: encrypted_entry.version, // Use actual version from storage
                                     previous_version: None,
                                     created_at: encrypted_entry.created_at,
@@ -341,9 +359,17 @@ impl SecretService {
             })
             .await;
 
+        let metadata = SecretMetadata {
+            description: encrypted_entry.metadata.get("description").cloned(),
+            tags: encrypted_entry.tags.clone(),
+            owner: encrypted_entry.metadata.get("owner").cloned(),
+            classification: encrypted_entry.metadata.get("classification").cloned(),
+        };
+
         Ok(SecretData {
             path: path.to_string(),
             data: secret_map,
+            metadata,
             version: encrypted_entry.version,
             previous_version: None,
             created_at: encrypted_entry.created_at,
@@ -356,6 +382,7 @@ impl SecretService {
         &self,
         path: &str,
         data: HashMap<String, String>,
+        metadata: Option<SecretMetadata>,
         user: &secreton_auth::User,
     ) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
@@ -394,7 +421,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, _existing_owner, previous_version) =
+        let (version, _existing_owner, previous_version, existing_metadata, existing_tags, existing_created_at) =
             if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
                 // Check ownership first
                 if existing.owner_id != owner_id {
@@ -403,6 +430,11 @@ impl SecretService {
                         path
                     )));
                 }
+
+                // Capture existing metadata, tags, and created_at before archiving
+                let prev_metadata = existing.metadata.clone();
+                let prev_tags = existing.tags.clone();
+                let prev_created_at = existing.created_at;
 
                 // Archive the existing version
                 let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
@@ -420,9 +452,12 @@ impl SecretService {
                     existing.version + 1,
                     Some(existing.owner_id),
                     Some(existing.version),
+                    Some(prev_metadata),
+                    Some(prev_tags),
+                    Some(prev_created_at),
                 )
             } else {
-                (1, None, None)
+                (1, None, None, None, None, None)
             };
 
         // Create SecretEntry
@@ -434,6 +469,54 @@ impl SecretService {
             owner_id,
         );
         entry.version = version;
+
+        // Preserve original creation timestamp across updates so that
+        // `created_at` reflects when the secret was first written, not the
+        // time of the latest version.
+        if let Some(ts) = existing_created_at {
+            entry.created_at = ts;
+        }
+
+        // When the caller provides metadata (Some), it represents the complete
+        // desired metadata state (full replacement semantics): Some fields set
+        // the value, None fields clear it.  This ensures rollback correctly
+        // restores historical metadata without leaking values from the current
+        // version.
+        //
+        // When metadata is None, carry forward existing metadata/tags so that
+        // updates through APIs that don't support metadata (gRPC, warp) don't
+        // silently erase previously stored values.
+        if let Some(meta) = &metadata {
+            if let Some(desc) = &meta.description {
+                entry.metadata.insert("description".to_string(), desc.clone());
+            } else {
+                entry.metadata.remove("description");
+            }
+            if let Some(owner) = &meta.owner {
+                entry.metadata.insert("owner".to_string(), owner.clone());
+            } else {
+                entry.metadata.remove("owner");
+            }
+            if let Some(class) = &meta.classification {
+                entry.metadata.insert("classification".to_string(), class.clone());
+            } else {
+                entry.metadata.remove("classification");
+            }
+            // Replace tags entirely when caller provides metadata
+            entry.tags = meta.tags.clone();
+        } else {
+            // Carry forward existing metadata as defaults
+            if let Some(prev_meta) = &existing_metadata {
+                for (k, v) in prev_meta {
+                    entry.metadata.insert(k.clone(), v.clone());
+                }
+            }
+            if let Some(prev_tags) = &existing_tags {
+                for tag in prev_tags {
+                    entry = entry.add_tag(tag.clone());
+                }
+            }
+        }
 
         // Store encrypted data
         self.storage
@@ -462,9 +545,18 @@ impl SecretService {
             })
             .await;
 
+        // Reconstruct metadata from the actual stored entry to ensure accuracy
+        let stored_metadata = SecretMetadata {
+            description: entry.metadata.get("description").cloned(),
+            tags: entry.tags.clone(),
+            owner: entry.metadata.get("owner").cloned(),
+            classification: entry.metadata.get("classification").cloned(),
+        };
+
         Ok(SecretData {
             path: path.to_string(),
             data,
+            metadata: stored_metadata,
             version: entry.version,
             previous_version,
             created_at: entry.created_at,
@@ -585,7 +677,7 @@ impl SecretService {
 
         // 2. Promotion: Put it as the new latest version.
         // `put_secret` handles archiving the current one and incrementing the version.
-        let rolled_back = self.put_secret(path, historical_data.data, user).await?;
+        let rolled_back = self.put_secret(path, historical_data.data, Some(historical_data.metadata), user).await?;
 
         // Log audit trail for rollback specifically
         let _ = self
@@ -767,9 +859,17 @@ impl SecretService {
                         // Parse the decrypted data as JSON
                         match serde_json::from_slice::<HashMap<String, String>>(&decrypted_data) {
                             Ok(secret_map) => {
+                                let metadata = SecretMetadata {
+                                    description: entry.metadata.get("description").cloned(),
+                                    tags: entry.tags.clone(),
+                                    owner: entry.metadata.get("owner").cloned(),
+                                    classification: entry.metadata.get("classification").cloned(),
+                                };
+
                                 accessible_secrets.push(SecretData {
                                     path: entry.path.clone(),
                                     data: secret_map,
+                                    metadata,
                                     version: entry.version,
                                     previous_version: None,
                                     created_at: entry.created_at,
@@ -1988,6 +2088,7 @@ impl SecretService {
 pub struct SecretData {
     pub path: String,
     pub data: HashMap<String, String>,
+    pub metadata: SecretMetadata,
     pub version: u32,
     pub previous_version: Option<u32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -2225,7 +2326,7 @@ mod tests {
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
         let user = mock_user();
-        let secret = service.put_secret("app/admin", data, &user).await.unwrap();
+        let secret = service.put_secret("app/admin", data, None, &user).await.unwrap();
         assert_eq!(secret.path, "app/admin");
         assert!(secret.data.contains_key("username"));
     }
@@ -2474,13 +2575,13 @@ mod tests {
         // 1. Create Secret (v1)
         let mut data1 = HashMap::new();
         data1.insert("k".to_string(), "v1".to_string());
-        let s1 = service.put_secret("app/ver", data1, &user).await.unwrap();
+        let s1 = service.put_secret("app/ver", data1, None, &user).await.unwrap();
         assert_eq!(s1.version, 1);
 
         // 2. Update Secret (v2)
         let mut data2 = HashMap::new();
         data2.insert("k".to_string(), "v2".to_string());
-        let s2 = service.put_secret("app/ver", data2, &user).await.unwrap();
+        let s2 = service.put_secret("app/ver", data2, None, &user).await.unwrap();
         assert_eq!(s2.version, 2);
 
         // 3. Get Current (v2)
@@ -2532,7 +2633,7 @@ mod tests {
         // 1. Create Secret (v1)
         let mut data = HashMap::new();
         data.insert("k".to_string(), "v1".to_string());
-        service.put_secret("app/race", data, &user).await.unwrap();
+        service.put_secret("app/race", data, None, &user).await.unwrap();
 
         // 2. Pollute cache with "future" version (v2)
         // We need to construct the cache payload: [v2_bytes] + [json_data]

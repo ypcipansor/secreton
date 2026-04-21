@@ -86,11 +86,16 @@ mod tests {
         config.auth.jwt.secret = Some("test_secret".to_string());
         config.auth.jwt.issuer = "secreton".to_string();
         config.auth.jwt.audience = "secreton-api".to_string();
-        Arc::new(
-            crate::services::ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        )
+
+        let container = crate::services::ApiServiceContainer::new(&config)
+            .await
+            .expect("Failed to create services");
+
+        // Initialize crypto for tests that require encryption (like role creation)
+        let root_key = vec![0u8; 32];
+        let _ = container.crypto.set_root_key(root_key).await;
+
+        Arc::new(container)
     }
 
     /// Create a `TestServer` from the given services.
@@ -737,7 +742,9 @@ pub async fn get_system_metrics(
         packets_received: 0,
     };
 
-    let uptime = m.system.uptime_seconds;
+    // Use the lock-free uptime helper for actual system uptime (consistent
+    // with get_system_status, health_check, and liveness_check).
+    let uptime = state.telemetry.uptime_seconds();
 
     // Count total policies from storage
     let total_policies: u64 = state
@@ -800,8 +807,8 @@ pub async fn get_system_status(
         "degraded"
     };
 
-    // Use telemetry for actual system uptime (consistent with get_system_metrics)
-    let uptime = state.telemetry.get_metrics().await.system.uptime_seconds;
+    // Use the lock-free uptime helper for actual system uptime
+    let uptime = state.telemetry.uptime_seconds();
 
     let status = SystemStatus {
         status: overall_status.to_string(),

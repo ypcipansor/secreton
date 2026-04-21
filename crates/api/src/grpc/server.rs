@@ -83,7 +83,7 @@ impl SecretService for GrpcSecretService {
 
         match self
             .core_service
-            .put_secret(&req.path, req.data, &user)
+            .put_secret(&req.path, req.data, None, &user)
             .await
         {
             Ok(secret) => Ok(Response::new(PutSecretResponse {
