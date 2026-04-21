@@ -477,23 +477,15 @@ impl SecretService {
             entry.created_at = ts;
         }
 
-        // Carry forward existing metadata as defaults, then let caller override
-        if let Some(prev_meta) = &existing_metadata {
-            for (k, v) in prev_meta {
-                entry.metadata.insert(k.clone(), v.clone());
-            }
-        }
-        if let Some(prev_tags) = &existing_tags {
-            for tag in prev_tags {
-                entry = entry.add_tag(tag.clone());
-            }
-        }
-
-        // Apply caller-provided metadata on top (full replacement semantics).
-        // When metadata is Some, it represents the complete desired metadata
-        // state: Some fields set the value, None fields clear it. This ensures
-        // rollback correctly restores historical metadata without leaking
-        // values from the current version.
+        // When the caller provides metadata (Some), it represents the complete
+        // desired metadata state (full replacement semantics): Some fields set
+        // the value, None fields clear it.  This ensures rollback correctly
+        // restores historical metadata without leaking values from the current
+        // version.
+        //
+        // When metadata is None, carry forward existing metadata/tags so that
+        // updates through APIs that don't support metadata (gRPC, warp) don't
+        // silently erase previously stored values.
         if let Some(meta) = &metadata {
             if let Some(desc) = &meta.description {
                 entry.metadata.insert("description".to_string(), desc.clone());
@@ -512,6 +504,18 @@ impl SecretService {
             }
             // Replace tags entirely when caller provides metadata
             entry.tags = meta.tags.clone();
+        } else {
+            // Carry forward existing metadata as defaults
+            if let Some(prev_meta) = &existing_metadata {
+                for (k, v) in prev_meta {
+                    entry.metadata.insert(k.clone(), v.clone());
+                }
+            }
+            if let Some(prev_tags) = &existing_tags {
+                for tag in prev_tags {
+                    entry = entry.add_tag(tag.clone());
+                }
+            }
         }
 
         // Store encrypted data

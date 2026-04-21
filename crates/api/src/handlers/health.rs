@@ -172,8 +172,8 @@ pub async fn readiness_check(State(state): State<AppState>) -> ApiResult<Json<Re
 /// Liveness check - determines if the service is alive and should not be restarted
 pub async fn liveness_check(State(state): State<AppState>) -> ApiResult<Json<LivenessResponse>> {
     // Simple liveness check - if we can respond, we're alive.
-    // Use the lock-free uptime_seconds() to avoid depending on the
-    // telemetry RwLock, keeping this probe truly dependency-free.
+    // Use the lock-free uptime_seconds() to avoid acquiring the
+    // telemetry RwLock, keeping this probe lightweight.
     let uptime = state.telemetry.uptime_seconds();
     let liveness = LivenessResponse {
         alive: true,
