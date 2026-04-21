@@ -13,7 +13,9 @@ use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::extractors::AuthenticatedUser;
 use crate::handlers::{AppState, validate_name};
+use crate::services::audit::SecurityEventType;
 use crate::{ApiResponse, ApiResult};
 use secreton_crypto::CryptoError;
 use secreton_crypto::transit::{HashAlgorithm, KeyOptions, KeyType, SignatureAlgorithm};
@@ -155,6 +157,7 @@ fn map_crypto_err(e: CryptoError) -> crate::ApiError {
 /// List all transit keys
 pub async fn list_keys(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<HashMap<String, Vec<String>>>>> {
     let keys = state.transit.list_keys().await;
     let mut response = HashMap::new();
@@ -165,6 +168,7 @@ pub async fn list_keys(
 /// Get transit key information
 pub async fn get_key(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<secreton_crypto::transit::KeyInfo>>> {
     validate_name(&name)?;
@@ -176,9 +180,17 @@ pub async fn get_key(
 /// Create a new transit key
 pub async fn create_key(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
+    // Only admin/root users may create transit keys
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to create transit keys".to_string(),
+        ));
+    }
+
     validate_name(&name)?;
     let key_type = request.key_type.unwrap_or(KeyType::Aes256Gcm);
 
@@ -203,45 +215,86 @@ pub async fn create_key(
         ..KeyOptions::default()
     };
 
-    state.transit.create_key(name.clone(), key_type, Some(options)).await
+    state.transit.create_key(name.clone(), key_type.clone(), Some(options)).await
         .map_err(|e| { warn!("Failed to create key {}: {:?}", name, e); map_crypto_err(e) })?;
     info!("Created transit key: {}", name);
+
+    state.audit.log_event(SecurityEventType::KeyGeneration {
+        key_type: format!("{:?}", key_type),
+        key_id: name,
+        algorithm: format!("{:?}", key_type),
+        user: user.username,
+    }).await;
+
     Ok(Json(ApiResponse::success(())))
 }
 
 /// Rotate a transit key
 pub async fn rotate_key(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<u32>>> {
+    // Only admin/root users may rotate transit keys
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to rotate transit keys".to_string(),
+        ));
+    }
+
     validate_name(&name)?;
     let new_version = state.transit.rotate_key(&name).await
         .map_err(|e| { warn!("Failed to rotate key {}: {:?}", name, e); map_crypto_err(e) })?;
     info!("Rotated transit key: {} to version {}", name, new_version);
+
+    state.audit.log_event(SecurityEventType::KeyRotation {
+        old_key_id: name.clone(),
+        new_key_id: name,
+        algorithm: format!("v{}", new_version),
+        user: user.username,
+    }).await;
+
     Ok(Json(ApiResponse::success(new_version)))
 }
 
 /// Delete a transit key
 pub async fn delete_key(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
+    // Only admin/root users may delete transit keys
+    if !user.is_admin() {
+        return Err(crate::ApiError::Authorization(
+            "Admin privileges required to delete transit keys".to_string(),
+        ));
+    }
+
     validate_name(&name)?;
     state.transit.delete_key(&name).await
         .map_err(|e| { warn!("Failed to delete key {}: {:?}", name, e); map_crypto_err(e) })?;
     info!("Deleted transit key: {}", name);
+
+    state.audit.log_event(SecurityEventType::KeyDeletion {
+        key_id: name,
+        user: user.username,
+    }).await;
+
     Ok(Json(ApiResponse::success(())))
 }
 
 /// Encrypt data
 pub async fn encrypt(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
     validate_name(&name)?;
     let plaintext = BASE64_STANDARD.decode(&request.plaintext)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 plaintext: {}", e)))?;
+
+    let data_size = plaintext.len() as u64;
 
     let context = request.context.map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
@@ -250,12 +303,19 @@ pub async fn encrypt(
     let ciphertext = state.transit.encrypt(&name, &plaintext, context.as_deref(), request.key_version).await
         .map_err(|e| { warn!("Failed to encrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
+    state.audit.log_event(SecurityEventType::EncryptionOperation {
+        key_id: name,
+        user: user.username,
+        data_size,
+    }).await;
+
     Ok(Json(ApiResponse::success(EncryptResponse { ciphertext })))
 }
 
 /// Decrypt data
 pub async fn decrypt(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
@@ -267,6 +327,12 @@ pub async fn decrypt(
     let plaintext = state.transit.decrypt(&name, &request.ciphertext, context.as_deref()).await
         .map_err(|e| { warn!("Failed to decrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
 
+    state.audit.log_event(SecurityEventType::DecryptionOperation {
+        key_id: name,
+        user: user.username,
+        data_size: request.ciphertext.len() as u64,
+    }).await;
+
     Ok(Json(ApiResponse::success(DecryptResponse {
         plaintext: BASE64_STANDARD.encode(plaintext)
     })))
@@ -275,6 +341,7 @@ pub async fn decrypt(
 /// Sign data
 pub async fn sign(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
@@ -282,8 +349,16 @@ pub async fn sign(
     let input = BASE64_STANDARD.decode(&request.input)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
+    let data_size = input.len() as u64;
+
     let signature = state.transit.sign(&name, &input, request.algorithm, request.key_version).await
         .map_err(|e| { warn!("Failed to sign with key {}: {:?}", name, e); map_crypto_err(e) })?;
+
+    state.audit.log_event(SecurityEventType::SigningOperation {
+        key_id: name,
+        user: user.username,
+        data_size,
+    }).await;
 
     Ok(Json(ApiResponse::success(SignResponse { signature })))
 }
@@ -291,6 +366,7 @@ pub async fn sign(
 /// Verify signature
 pub async fn verify(
     State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
@@ -298,8 +374,17 @@ pub async fn verify(
     let input = BASE64_STANDARD.decode(&request.input)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
+    let data_size = input.len() as u64;
+
     let valid = state.transit.verify(&name, &input, &request.signature, request.algorithm).await
         .map_err(|e| { warn!("Failed to verify with key {}: {:?}", name, e); map_crypto_err(e) })?;
+
+    state.audit.log_event(SecurityEventType::VerificationOperation {
+        key_id: name,
+        user: user.username,
+        data_size,
+        valid,
+    }).await;
 
     Ok(Json(ApiResponse::success(VerifyResponse { valid })))
 }
@@ -307,6 +392,7 @@ pub async fn verify(
 /// Hash data
 pub async fn hash(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
     let input = BASE64_STANDARD.decode(&request.input)
@@ -321,6 +407,7 @@ pub async fn hash(
 /// Generate random bytes
 pub async fn random(
     State(state): State<AppState>,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<RandomRequest>,
 ) -> ApiResult<Json<ApiResponse<RandomResponse>>> {
     let data = state.transit.random(request.bytes).await
