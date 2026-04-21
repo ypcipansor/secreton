@@ -136,6 +136,9 @@ fn map_crypto_err(e: CryptoError) -> crate::ApiError {
         | CryptoError::SigningFailed(_)
         | CryptoError::VerificationFailed(_) => crate::ApiError::BadRequest(e.to_string()),
         CryptoError::PermissionDenied(_) => crate::ApiError::Authorization(e.to_string()),
+        CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
+            crate::ApiError::RateLimited(e.to_string())
+        }
         _ => crate::ApiError::Internal(e.to_string()),
     }
 }

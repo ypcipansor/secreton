@@ -62,6 +62,7 @@ pub enum KeyType {
 
 /// Key derivation options
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct KeyOptions {
     /// Whether key can be exported (default: false)
     pub exportable: bool,

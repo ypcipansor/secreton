@@ -1107,6 +1107,11 @@ impl ApiError {
     pub fn Conflict(message: String) -> Self {
         Self(SecretonError::Conflict { message })
     }
+
+    #[allow(non_snake_case)]
+    pub fn RateLimited(_message: String) -> Self {
+        Self(SecretonError::RateLimitExceeded)
+    }
 }
 
 impl axum::response::IntoResponse for ApiError {
@@ -1162,6 +1167,10 @@ impl axum::response::IntoResponse for ApiError {
             SecretonError::PasswordExpired { username } => (
                 axum::http::StatusCode::FORBIDDEN,
                 format!("Password expired: {}", username),
+            ),
+            SecretonError::RateLimitExceeded => (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "Rate limit exceeded".to_string(),
             ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
