@@ -1354,7 +1354,11 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         )
         .nest(
             "/api/v1/totp",
-            crate::handlers::totp_engine::create_routes().with_state(app_state),
+            crate::handlers::totp_engine::create_routes().with_state(app_state.clone()),
+        )
+        .nest(
+            "/api/v1/transit",
+            crate::handlers::transit::create_routes().with_state(app_state),
         )
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(
