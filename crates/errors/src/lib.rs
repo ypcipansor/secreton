@@ -186,8 +186,8 @@ pub enum SecretonError {
     Decryption { message: String },
 
     // Rate Limiting & Quotas
-    #[error("Rate limit exceeded")]
-    RateLimitExceeded,
+    #[error("Rate limit exceeded: {message}")]
+    RateLimitExceeded { message: String },
 
     #[error("Quota exceeded: {resource} limit {limit}, used {used}")]
     QuotaExceeded {
@@ -412,7 +412,7 @@ impl SecretonError {
             SecretonError::Decryption { .. } => StatusCode::INTERNAL_SERVER_ERROR,
 
             // Limits
-            SecretonError::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
+            SecretonError::RateLimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
             SecretonError::QuotaExceeded { .. } => StatusCode::INSUFFICIENT_STORAGE,
 
             // Configuration
@@ -478,7 +478,7 @@ impl SecretonError {
     pub fn is_warning(&self) -> bool {
         matches!(
             self,
-            SecretonError::RateLimitExceeded
+            SecretonError::RateLimitExceeded { .. }
                 | SecretonError::Timeout { .. }
                 | SecretonError::Network { .. }
         )
@@ -492,7 +492,7 @@ impl SecretonError {
                 | SecretonError::AlreadyExists { .. }
                 | SecretonError::Validation { .. }
                 | SecretonError::InvalidInput { .. }
-                | SecretonError::RateLimitExceeded
+                | SecretonError::RateLimitExceeded { .. }
         )
     }
 
@@ -557,7 +557,7 @@ impl SecretonError {
             | SecretonError::Encryption { .. }
             | SecretonError::Decryption { .. } => "cryptography",
 
-            SecretonError::RateLimitExceeded | SecretonError::QuotaExceeded { .. } => "limits",
+            SecretonError::RateLimitExceeded { .. } | SecretonError::QuotaExceeded { .. } => "limits",
 
             SecretonError::Configuration { .. } => "configuration",
 

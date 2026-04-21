@@ -1107,6 +1107,11 @@ impl ApiError {
     pub fn Conflict(message: String) -> Self {
         Self(SecretonError::Conflict { message })
     }
+
+    #[allow(non_snake_case)]
+    pub fn RateLimited(message: String) -> Self {
+        Self(SecretonError::RateLimitExceeded { message })
+    }
 }
 
 impl axum::response::IntoResponse for ApiError {
@@ -1162,6 +1167,10 @@ impl axum::response::IntoResponse for ApiError {
             SecretonError::PasswordExpired { username } => (
                 axum::http::StatusCode::FORBIDDEN,
                 format!("Password expired: {}", username),
+            ),
+            SecretonError::RateLimitExceeded { ref message } => (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                format!("Rate limit exceeded: {}", message),
             ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1242,7 +1251,6 @@ pub mod kv;
 pub mod pki;
 pub mod ssh;
 pub mod totp;
-pub mod transit;
 
 // Re-export types needed by tests
 pub use database::DatabaseApiState;
@@ -1251,13 +1259,11 @@ pub use pki::PkiApiState;
 pub use secreton_performance::OptimizationLevel;
 pub use ssh::SshApiState;
 pub use totp::TotpApiState;
-pub use transit::TransitApiState;
 
 /// Main API state combining all engine states
 #[derive(Clone)]
 pub struct ApiState {
     pub kv: KVApiState,
-    pub transit: TransitApiState,
     pub database: DatabaseApiState,
     pub pki: PkiApiState,
     pub ssh: SshApiState,
@@ -1270,7 +1276,6 @@ pub struct ApiState {
 
 impl ApiState {
     pub async fn new(
-        transit_state: TransitApiState,
         kv_state: KVApiState,
         database_state: DatabaseApiState,
         pki_service: Option<std::sync::Arc<crate::services::pki::PkiPersistentService>>,
@@ -1282,7 +1287,6 @@ impl ApiState {
     ) -> Result<Self, SecretonError> {
         Ok(Self {
             kv: kv_state,
-            transit: transit_state,
             database: database_state,
             pki: PkiApiState {
                 service: pki_service,
@@ -1346,10 +1350,6 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
             crate::handlers::secret::create_routes().with_state(app_state.clone()),
         ) // Add secret routes
         .nest(
-            "/api/v1/transit",
-            transit::create_transit_router().with_state(app_state.clone()),
-        )
-        .nest(
             "/api/v1/database",
             crate::handlers::database::create_routes().with_state(app_state.clone()),
         )
@@ -1363,7 +1363,11 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         )
         .nest(
             "/api/v1/totp",
-            crate::handlers::totp_engine::create_routes().with_state(app_state),
+            crate::handlers::totp_engine::create_routes().with_state(app_state.clone()),
+        )
+        .nest(
+            "/api/v1/transit",
+            crate::handlers::transit::create_routes().with_state(app_state),
         )
         // Apply authentication middleware to all routes
         .route_layer(middleware::from_fn_with_state(

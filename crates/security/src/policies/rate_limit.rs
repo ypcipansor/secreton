@@ -207,7 +207,9 @@ impl RateLimiter {
         if allowed {
             Ok(true)
         } else {
-            Err(SecretonError::RateLimitExceeded)
+            Err(SecretonError::RateLimitExceeded {
+                message: "Too many requests, please try again later".to_string(),
+            })
         }
     }
 
@@ -255,7 +257,9 @@ impl RateLimiter {
                     if let LimiterState::SlidingWindow(window) = state
                         && !window.check()
                     {
-                        return Err(SecretonError::RateLimitExceeded);
+                        return Err(SecretonError::RateLimitExceeded {
+                            message: "Too many requests, please try again later".to_string(),
+                        });
                     }
                 }
                 true
@@ -265,7 +269,9 @@ impl RateLimiter {
         if allowed {
             Ok(true)
         } else {
-            Err(SecretonError::RateLimitExceeded)
+            Err(SecretonError::RateLimitExceeded {
+                message: "Too many requests, please try again later".to_string(),
+            })
         }
     }
 

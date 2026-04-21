@@ -13,6 +13,7 @@ pub mod secret;
 pub mod ssh;
 pub mod sys;
 pub mod totp_engine;
+pub mod transit;
 #[cfg(test)]
 pub mod ssh_tests;
 
@@ -136,6 +137,7 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
         .nest("/pki", pki::create_routes())
         .nest("/ssh", ssh::create_routes())
         .nest("/totp", totp_engine::create_routes())
+        .nest("/transit", transit::create_routes())
         .route("/health", get(health::health_check))
         .route("/version", get(get_version))
         .route("/metrics", get(get_metrics));

@@ -43,18 +43,25 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum KeyType {
     /// AES-256-GCM symmetric encryption
+    #[serde(alias = "aes256-gcm")]
     Aes256Gcm,
     /// ChaCha20-Poly1305 symmetric encryption
+    #[serde(alias = "chacha20-poly1305")]
     ChaCha20Poly1305,
     /// XChaCha20-Poly1305 symmetric encryption (extended nonce)
+    #[serde(alias = "xchacha20-poly1305")]
     XChaCha20Poly1305,
     /// Ed25519 key for signing
+    #[serde(alias = "ed25519")]
     Ed25519,
     /// ECDSA key using P-256 curve
+    #[serde(alias = "ecdsa-p256")]
     EcdsaP256,
     /// ECDSA key using secp256k1 curve
+    #[serde(alias = "ecdsa-secp256k1")]
     EcdsaSecp256k1,
     /// X25519 key for key exchange
+    #[serde(alias = "x25519")]
     X25519,
     /// RSA key for signing/encryption
     Rsa(u32),
@@ -62,6 +69,7 @@ pub enum KeyType {
 
 /// Key derivation options
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct KeyOptions {
     /// Whether key can be exported (default: false)
     pub exportable: bool,
