@@ -95,7 +95,12 @@ pub struct VerifyResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HashRequest {
     pub input: String, // Base64 encoded
+    #[serde(default = "default_hash_algorithm")]
     pub algorithm: HashAlgorithm,
+}
+
+fn default_hash_algorithm() -> HashAlgorithm {
+    HashAlgorithm::Sha256
 }
 
 #[derive(Debug, Serialize, Deserialize)]
