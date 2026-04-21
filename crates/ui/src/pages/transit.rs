@@ -5,88 +5,103 @@ use crate::components::{Button, Input, Card};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::collections::HashMap;
 
-// API Structures matching backend crates/api/src/handlers/secret.rs
+// API Structures matching backend transit engine
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct KeyResponse {
-    pub id: String,
-    pub name: String,
-    pub key_type: String,
-    pub algorithm: String,
-    pub size: u32,
-    pub usage: Vec<String>,
-    pub metadata: KeyMetadata,
-    pub version: u32,
-    pub created_at: String, // Backend uses DateTime, serialized to string
-    pub status: String,
-    pub public_key: Option<String>,
+pub enum KeyType {
+    Aes256Gcm,
+    ChaCha20Poly1305,
+    XChaCha20Poly1305,
+    Ed25519,
+    EcdsaP256,
+    EcdsaSecp256k1,
+    X25519,
+    #[serde(rename = "Rsa")]
+    Rsa(u32),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
-pub struct KeyMetadata {
-    pub description: Option<String>,
-    pub tags: Vec<String>,
-    pub owner: Option<String>,
-    pub purpose: Option<String>,
+impl KeyType {
+    pub fn to_string_display(&self) -> String {
+        match self {
+            KeyType::Aes256Gcm => "AES-256-GCM".to_string(),
+            KeyType::ChaCha20Poly1305 => "ChaCha20-Poly1305".to_string(),
+            KeyType::XChaCha20Poly1305 => "XChaCha20-Poly1305".to_string(),
+            KeyType::Ed25519 => "Ed25519".to_string(),
+            KeyType::EcdsaP256 => "ECDSA-P256".to_string(),
+            KeyType::EcdsaSecp256k1 => "ECDSA-secp256k1".to_string(),
+            KeyType::X25519 => "X25519".to_string(),
+            KeyType::Rsa(size) => format!("RSA-{}", size),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum KeyUsage {
+    Encrypt,
+    Decrypt,
+    Sign,
+    Verify,
+    Derive,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct KeyInfo {
+    pub name: String,
+    pub key_type: KeyType,
+    pub latest_version: u32,
+    pub min_decryption_version: u32,
+    pub created_at: String,
+    pub last_rotated_at: Option<String>,
+    pub versions: Vec<u32>,
+    pub usage: Vec<KeyUsage>,
+    pub exportable: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateKeyRequest {
-    pub name: String,
-    pub key_type: String,
-    pub algorithm: String,
-    pub size: Option<u32>,
-    pub usage: Vec<String>,
-    pub metadata: Option<KeyMetadata>,
+    pub key_type: Option<KeyType>,
+    pub exportable: bool,
+    pub usage: Vec<KeyUsage>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EncryptRequest {
-    pub key_id: String,
     pub plaintext: String,       // base64 encoded
-    pub context: Option<HashMap<String, String>>,
-    pub algorithm: Option<String>,
+    pub context: Option<String>, // base64 encoded
+    pub key_version: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncryptResponse {
     pub ciphertext: String,
-    pub key_version: u32,
-    pub algorithm: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DecryptRequest {
-    pub key_id: String,
     pub ciphertext: String,
-    pub context: Option<HashMap<String, String>>,
+    pub context: Option<String>, // base64 encoded
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DecryptResponse {
     pub plaintext: String, // base64 encoded
-    pub key_version: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignRequest {
-    pub key_id: String,
-    pub data: String, // base64 encoded
+    pub input: String, // base64 encoded
     pub algorithm: Option<String>,
-    pub format: Option<String>,
+    pub key_version: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SignResponse {
     pub signature: String,
-    pub key_version: u32,
-    pub algorithm: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VerifyRequest {
-    pub key_id: String,
-    pub data: String, // base64 encoded
+    pub input: String, // base64 encoded
     pub signature: String,
     pub algorithm: Option<String>,
 }
@@ -94,19 +109,18 @@ pub struct VerifyRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VerifyResponse {
     pub valid: bool,
-    pub key_version: u32,
 }
 
 #[component]
 pub fn TransitPage() -> impl IntoView {
     // State
-    let (keys, set_keys) = signal(Vec::<KeyResponse>::new());
-    let (selected_key, set_selected_key) = signal(Option::<KeyResponse>::None);
+    let (keys, set_keys) = signal(Vec::<KeyInfo>::new());
+    let (selected_key, set_selected_key) = signal(Option::<KeyInfo>::None);
     let (active_tab, set_active_tab) = signal("encrypt".to_string());
 
     // Create Key Form
     let (new_key_name, set_new_key_name) = signal(String::new());
-    let (new_key_type, set_new_key_type) = signal("aes256-gcm".to_string());
+    let (new_key_type, set_new_key_type) = signal("Aes256Gcm".to_string());
     let (create_status, set_create_status) = signal(Option::<String>::None);
 
     // Operation Forms
@@ -115,80 +129,27 @@ pub fn TransitPage() -> impl IntoView {
     let (output_result, set_output_result) = signal(String::new());
     let (verify_result, set_verify_result) = signal(Option::<bool>::None);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
-    let (selected_algo, set_selected_algo) = signal("AES-GCM".to_string());
+    let (selected_algo, set_selected_algo) = signal("Aes256Gcm".to_string());
 
     // Fetch Keys
     let fetch_keys = Action::new_local(move |_: &()| {
         async move {
-            // Using /api/v1/transit path for list keys if we want to align with Transit API
-            // Actually, backend has /api/v1/transit/keys. Let's use that.
             #[derive(Deserialize)]
             struct TransitListResponse {
                 keys: Vec<String>,
             }
             match api::get::<TransitListResponse>("/transit/keys").await {
                 Ok(res) => {
-                    // Fetch key info for each key to get the actual key_type
-                    #[derive(Deserialize)]
-                    struct TransitKeyInfo {
-                        name: String,
-                        key_type: String,
-                        latest_version: Option<u32>,
-                        #[serde(default)]
-                        usage: Vec<String>,
-                    }
-                    // Helper to map transit KeyType enum serialization to UI key_type strings
-                    fn map_key_type(raw: &str) -> String {
-                        match raw {
-                            "Aes256Gcm" => "aes256-gcm".to_string(),
-                            "ChaCha20Poly1305" => "chacha20-poly1305".to_string(),
-                            "XChaCha20Poly1305" => "xchacha20-poly1305".to_string(),
-                            "Ed25519" => "ed25519".to_string(),
-                            "EcdsaP256" => "ecdsa-p256".to_string(),
-                            "EcdsaSecp256k1" => "ecdsa-secp256k1".to_string(),
-                            "X25519" => "x25519".to_string(),
-                            other => other.to_lowercase(),
-                        }
-                    }
-                    let mut k_responses = Vec::new();
+                    let mut k_infos = Vec::new();
                     for name in res.keys {
-                        // Fetch detailed key info from transit API
-                        match api::get::<TransitKeyInfo>(&format!("/transit/keys/{}", name)).await {
-                            Ok(info) => {
-                                let kt = map_key_type(&info.key_type);
-                                k_responses.push(KeyResponse {
-                                    id: info.name.clone(),
-                                    name: info.name,
-                                    key_type: kt,
-                                    algorithm: "unknown".to_string(),
-                                    size: 0,
-                                    usage: info.usage,
-                                    metadata: KeyMetadata::default(),
-                                    version: info.latest_version.unwrap_or(1),
-                                    created_at: "".to_string(),
-                                    status: "active".to_string(),
-                                    public_key: None,
-                                });
-                            }
-                            Err(_) => {
-                                // Fallback: create placeholder if info fetch fails
-                                k_responses.push(KeyResponse {
-                                    id: name.clone(),
-                                    name: name.clone(),
-                                    key_type: "aes256-gcm".to_string(),
-                                    algorithm: "unknown".to_string(),
-                                    size: 0,
-                                    usage: vec![],
-                                    metadata: KeyMetadata::default(),
-                                    version: 1,
-                                    created_at: "".to_string(),
-                                    status: "active".to_string(),
-                                    public_key: None,
-                                });
+                        match api::get::<KeyInfo>(&format!("/transit/keys/{}", name)).await {
+                            Ok(info) => k_infos.push(info),
+                            Err(e) => {
+                                web_sys::console::error_2(&format!("Failed to fetch key info for {}:", name).into(), &format!("{:?}", e).into());
                             }
                         }
                     }
-                    set_keys.set(k_responses);
+                    set_keys.set(k_infos);
                 },
                 Err(e) => set_error_msg.set(Some(format!("Failed to fetch keys: {:?}", e))),
             }
@@ -203,19 +164,34 @@ pub fn TransitPage() -> impl IntoView {
     // Create Key Action
     let create_key_action = Action::new_local(move |_: &()| {
         let name = new_key_name.get();
-        let k_type = new_key_type.get();
+        let k_type_str = new_key_type.get();
         async move {
             if name.is_empty() {
                 set_create_status.set(Some("Key name required".to_string()));
                 return;
             }
-            #[derive(Serialize)]
-            struct TransitCreateRequest {
-                key_type: Option<String>,
-            }
-            let req = TransitCreateRequest {
-                key_type: Some(k_type),
+
+            let k_type = match k_type_str.as_str() {
+                "Aes256Gcm" => KeyType::Aes256Gcm,
+                "ChaCha20Poly1305" => KeyType::ChaCha20Poly1305,
+                "XChaCha20Poly1305" => KeyType::XChaCha20Poly1305,
+                "Ed25519" => KeyType::Ed25519,
+                "EcdsaP256" => KeyType::EcdsaP256,
+                "EcdsaSecp256k1" => KeyType::EcdsaSecp256k1,
+                "X25519" => KeyType::X25519,
+                _ => KeyType::Aes256Gcm,
             };
+
+            let req = CreateKeyRequest {
+                key_type: Some(k_type.clone()),
+                exportable: false,
+                usage: match k_type {
+                    KeyType::Aes256Gcm | KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 => vec![KeyUsage::Encrypt, KeyUsage::Decrypt],
+                    KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => vec![KeyUsage::Sign, KeyUsage::Verify],
+                    _ => vec![KeyUsage::Encrypt, KeyUsage::Decrypt],
+                },
+            };
+
             match api::post::<serde_json::Value, _>(&format!("/transit/keys/{}", name), req).await {
                 Ok(_) => {
                     set_create_status.set(Some("Key created successfully".to_string()));
@@ -234,20 +210,12 @@ pub fn TransitPage() -> impl IntoView {
         async move {
             if let Some(k) = key {
                 let b64_text = BASE64.encode(text.as_bytes());
-                #[derive(Serialize)]
-                struct TransitEncryptRequest {
-                    plaintext: String,
-                    context: Option<String>,
-                }
-                let req = TransitEncryptRequest {
+                let req = EncryptRequest {
                     plaintext: b64_text,
                     context: None,
+                    key_version: None,
                 };
-                #[derive(Deserialize)]
-                struct TransitEncryptResponse {
-                    ciphertext: String,
-                }
-                match api::post::<TransitEncryptResponse, _>(&format!("/transit/encrypt/{}", k.name), req).await {
+                match api::post::<EncryptResponse, _>(&format!("/transit/encrypt/{}", k.name), req).await {
                     Ok(res) => {
                         set_output_result.set(res.ciphertext);
                         set_error_msg.set(None);
@@ -267,20 +235,11 @@ pub fn TransitPage() -> impl IntoView {
         let ciphertext = input_text.get();
         async move {
             if let Some(k) = key {
-                #[derive(Serialize)]
-                struct TransitDecryptRequest {
-                    ciphertext: String,
-                    context: Option<String>,
-                }
-                let req = TransitDecryptRequest {
+                let req = DecryptRequest {
                     ciphertext,
                     context: None,
                 };
-                #[derive(Deserialize)]
-                struct TransitDecryptResponse {
-                    plaintext: String,
-                }
-                match api::post::<TransitDecryptResponse, _>(&format!("/transit/decrypt/{}", k.name), req).await {
+                match api::post::<DecryptResponse, _>(&format!("/transit/decrypt/{}", k.name), req).await {
                     Ok(res) => {
                         match BASE64.decode(&res.plaintext) {
                             Ok(bytes) => {
@@ -311,22 +270,12 @@ pub fn TransitPage() -> impl IntoView {
         async move {
             if let Some(k) = key {
                 let b64_input = BASE64.encode(text.as_bytes());
-                #[derive(Serialize)]
-                struct TransitSignRequest {
-                    input: String,
-                    algorithm: Option<String>,
-                    key_version: Option<u32>,
-                }
-                let req = TransitSignRequest {
+                let req = SignRequest {
                     input: b64_input,
-                    algorithm: Some(algo.to_lowercase()),
+                    algorithm: Some(algo),
                     key_version: None,
                 };
-                #[derive(Deserialize)]
-                struct TransitSignResponse {
-                    signature: String,
-                }
-                match api::post::<TransitSignResponse, _>(&format!("/transit/sign/{}", k.name), req).await {
+                match api::post::<SignResponse, _>(&format!("/transit/sign/{}", k.name), req).await {
                     Ok(res) => {
                         set_output_result.set(res.signature);
                         set_error_msg.set(None);
@@ -352,22 +301,12 @@ pub fn TransitPage() -> impl IntoView {
                 let sig_trimmed = sig.trim();
 
                 let b64_input = BASE64.encode(text_trimmed.as_bytes());
-                #[derive(Serialize)]
-                struct TransitVerifyRequest {
-                    input: String,
-                    signature: String,
-                    algorithm: Option<String>,
-                }
-                let req = TransitVerifyRequest {
+                let req = VerifyRequest {
                     input: b64_input,
                     signature: sig_trimmed.to_string(),
-                    algorithm: Some(algo.to_lowercase())
+                    algorithm: Some(algo)
                 };
-                #[derive(Deserialize)]
-                struct TransitVerifyResponse {
-                    valid: bool,
-                }
-                match api::post::<TransitVerifyResponse, _>(&format!("/transit/verify/{}", k.name), req).await {
+                match api::post::<VerifyResponse, _>(&format!("/transit/verify/{}", k.name), req).await {
                     Ok(res) => {
                         set_verify_result.set(Some(res.valid));
                         set_error_msg.set(None);
@@ -408,13 +347,13 @@ pub fn TransitPage() -> impl IntoView {
                                 on:change=move |ev| set_new_key_type.set(event_target_value(&ev))
                                 prop:value=new_key_type
                             >
-                                <option value="aes256-gcm">"AES-256-GCM"</option>
-                                <option value="chacha20-poly1305">"ChaCha20-Poly1305"</option>
-                                <option value="xchacha20-poly1305">"XChaCha20-Poly1305"</option>
-                                <option value="ed25519">"Ed25519"</option>
-                                <option value="ecdsa-p256">"ECDSA-P256"</option>
-                                <option value="ecdsa-secp256k1">"ECDSA-secp256k1"</option>
-                                <option value="x25519">"X25519"</option>
+                                <option value="Aes256Gcm">"AES-256-GCM"</option>
+                                <option value="ChaCha20Poly1305">"ChaCha20-Poly1305"</option>
+                                <option value="XChaCha20Poly1305">"XChaCha20-Poly1305"</option>
+                                <option value="Ed25519">"Ed25519"</option>
+                                <option value="EcdsaP256">"ECDSA-P256"</option>
+                                <option value="EcdsaSecp256k1">"ECDSA-secp256k1"</option>
+                                <option value="X25519">"X25519"</option>
                             </select>
                         </div>
                         <Button on_click=Box::new(move |_| { create_key_action.dispatch(()); })>"Create"</Button>
@@ -438,7 +377,7 @@ pub fn TransitPage() -> impl IntoView {
                                         <ul class="space-y-2">
                                             {k_list.into_iter().map(|k| {
                                                 let k_clone = k.clone();
-                                                let is_sel = selected_key.get().as_ref().map(|sk| sk.id == k_clone.id).unwrap_or(false);
+                                                let is_sel = selected_key.get().as_ref().map(|sk| sk.name == k_clone.name).unwrap_or(false);
                                                 view! {
                                                     <li
                                                         class=format!(
@@ -448,27 +387,25 @@ pub fn TransitPage() -> impl IntoView {
                                                         on:click=move |_| {
                                                             set_selected_key.set(Some(k_clone.clone()));
                                                             // Auto-switch tab based on capability
-                                                            match k_clone.key_type.as_str() {
-                                                                "ed25519" | "ecdsa-p256" | "ecdsa-secp256k1" => {
+                                                            match k_clone.key_type {
+                                                                KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
                                                                     set_active_tab.set("sign".to_string());
-                                                                    set_selected_algo.set(match k_clone.key_type.as_str() {
-                                                                        "ecdsa-p256" => "ecdsa-p256".to_string(),
-                                                                        "ecdsa-secp256k1" => "ecdsa-secp256k1".to_string(),
-                                                                        "ed25519" => "ed25519".to_string(),
-                                                                        _ => "ed25519".to_string(),
+                                                                    set_selected_algo.set(match k_clone.key_type {
+                                                                        KeyType::EcdsaP256 => "EcdsaP256".to_string(),
+                                                                        KeyType::EcdsaSecp256k1 => "EcdsaSecp256k1".to_string(),
+                                                                        KeyType::Ed25519 => "Ed25519".to_string(),
+                                                                        _ => "Ed25519".to_string(),
                                                                     });
                                                                 },
-                                                                "x25519" => {
-                                                                    // x25519 is for key agreement, not direct encrypt/decrypt or sign/verify.
-                                                                    // Default to encrypt tab but no operations will succeed via transit.
+                                                                KeyType::X25519 => {
                                                                     set_active_tab.set("encrypt".to_string());
                                                                     set_selected_algo.set("X25519".to_string());
                                                                 },
                                                                 _ => {
                                                                     set_active_tab.set("encrypt".to_string());
-                                                                    set_selected_algo.set(match k_clone.key_type.as_str() {
-                                                                        "chacha20-poly1305" | "xchacha20-poly1305" => "CHACHA20-POLY1305".to_string(),
-                                                                        _ => "AES-GCM".to_string(),
+                                                                    set_selected_algo.set(match k_clone.key_type {
+                                                                        KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 => "ChaCha20Poly1305".to_string(),
+                                                                        _ => "Aes256Gcm".to_string(),
                                                                     });
                                                                 }
                                                             }
@@ -481,9 +418,9 @@ pub fn TransitPage() -> impl IntoView {
                                                     >
                                                         <div class="flex justify-between items-center">
                                                             <span class="font-medium">{k.name}</span>
-                                                            <span class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 uppercase">{k.key_type}</span>
+                                                            <span class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 uppercase">{k.key_type.to_string_display()}</span>
                                                         </div>
-                                                        <div class="text-[10px] text-gray-400 mt-1 truncate">{k.id}</div>
+                                                        <div class="text-[10px] text-gray-400 mt-1 truncate">"Version: " {k.latest_version}</div>
                                                     </li>
                                                 }
                                             }).collect::<Vec<_>>()}
@@ -518,16 +455,16 @@ pub fn TransitPage() -> impl IntoView {
                                                 let k_type_for_decrypt = k_type.clone();
                                                 view! {
                                                     <div class="flex space-x-2 bg-gray-100 p-1 rounded-lg">
-                                                        {match k_type.as_str() {
-                                                            "ed25519" | "ecdsa-p256" | "ecdsa-secp256k1" => view! {}.into_any(),
+                                                        {match k_type {
+                                                            KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => view! {}.into_any(),
                                                             _ => view! {
                                                                 <button
                                                                     class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "encrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("encrypt".to_string());
-                                                                        let algo = match k_type_for_encrypt.as_str() {
-                                                                            "chacha20-poly1305" | "xchacha20-poly1305" => "CHACHA20-POLY1305",
-                                                                            _ => "AES-GCM",
+                                                                        let algo = match k_type_for_encrypt {
+                                                                            KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 => "ChaCha20Poly1305",
+                                                                            _ => "Aes256Gcm",
                                                                         };
                                                                         set_selected_algo.set(algo.to_string());
                                                                         set_output_result.set(String::new());
@@ -541,9 +478,9 @@ pub fn TransitPage() -> impl IntoView {
                                                                     class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "decrypt" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                     on:click=move |_| {
                                                                         set_active_tab.set("decrypt".to_string());
-                                                                        let algo = match k_type_for_decrypt.as_str() {
-                                                                            "chacha20-poly1305" | "xchacha20-poly1305" => "CHACHA20-POLY1305",
-                                                                            _ => "AES-GCM",
+                                                                        let algo = match k_type_for_decrypt {
+                                                                            KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 => "ChaCha20Poly1305",
+                                                                            _ => "Aes256Gcm",
                                                                         };
                                                                         set_selected_algo.set(algo.to_string());
                                                                         set_output_result.set(String::new());
@@ -556,18 +493,18 @@ pub fn TransitPage() -> impl IntoView {
                                                             }.into_any()
                                                         }}
 
-                                                        {match k_type_for_sign.as_str() {
-                                                            "ed25519" | "ecdsa-p256" | "ecdsa-secp256k1" => {
+                                                        {match k_type_for_sign {
+                                                            KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
                                                                 view! {
                                                                     <button
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "sign" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("sign".to_string());
-                                                                            let algo = match k_type_for_sign.as_str() {
-                                                                                "ecdsa-p256" => "ecdsa-p256",
-                                                                                "ecdsa-secp256k1" => "ecdsa-secp256k1",
-                                                                                "ed25519" => "ed25519",
-                                                                                _ => "ed25519",
+                                                                            let algo = match k_type_for_sign {
+                                                                                KeyType::EcdsaP256 => "EcdsaP256",
+                                                                                KeyType::EcdsaSecp256k1 => "EcdsaSecp256k1",
+                                                                                KeyType::Ed25519 => "Ed25519",
+                                                                                _ => "Ed25519",
                                                                             };
                                                                             set_selected_algo.set(algo.to_string());
                                                                             set_output_result.set(String::new());
@@ -581,11 +518,11 @@ pub fn TransitPage() -> impl IntoView {
                                                                         class=format!("px-4 py-1.5 rounded-md text-sm font-medium transition-colors {}", if active_tab.get() == "verify" { "bg-white shadow text-gray-900" } else { "text-gray-500 hover:text-gray-700" })
                                                                         on:click=move |_| {
                                                                             set_active_tab.set("verify".to_string());
-                                                                            let algo = match k_type_for_verify.as_str() {
-                                                                                "ecdsa-p256" => "ecdsa-p256",
-                                                                                "ecdsa-secp256k1" => "ecdsa-secp256k1",
-                                                                                "ed25519" => "ed25519",
-                                                                                _ => "ed25519",
+                                                                            let algo = match k_type_for_verify {
+                                                                                KeyType::EcdsaP256 => "EcdsaP256",
+                                                                                KeyType::EcdsaSecp256k1 => "EcdsaSecp256k1",
+                                                                                KeyType::Ed25519 => "Ed25519",
+                                                                                _ => "Ed25519",
                                                                             };
                                                                             set_selected_algo.set(algo.to_string());
                                                                             set_output_result.set(String::new());
@@ -612,7 +549,7 @@ pub fn TransitPage() -> impl IntoView {
                                                 <label class="block text-sm font-medium text-gray-700 mb-1">
                                                     {move || match active_tab.get().as_str() {
                                                         "encrypt" => "Plaintext",
-                                                        "decrypt" => "Ciphertext (Base64)",
+                                                        "decrypt" => "Ciphertext",
                                                         "sign" => "Data to Sign",
                                                         "verify" => "Original Data",
                                                         _ => "Input"
@@ -624,7 +561,7 @@ pub fn TransitPage() -> impl IntoView {
                                                     on:input=move |ev| set_input_text.set(event_target_value(&ev))
                                                     placeholder=move || match active_tab.get().as_str() {
                                                         "encrypt" => "Enter text to encrypt...",
-                                                        "decrypt" => "Enter base64 ciphertext...",
+                                                        "decrypt" => "Enter ciphertext...",
                                                         "sign" => "Enter data to sign...",
                                                         "verify" => "Enter original data...",
                                                         _ => ""
@@ -636,12 +573,12 @@ pub fn TransitPage() -> impl IntoView {
                                             {move || if active_tab.get() == "verify" {
                                                 view! {
                                                     <div>
-                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Signature (Base64)"</label>
+                                                        <label class="block text-sm font-medium text-gray-700 mb-1">"Signature"</label>
                                                         <textarea
                                                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 h-24 font-mono text-sm"
                                                             prop:value=signature_input
                                                             on:input=move |ev| set_signature_input.set(event_target_value(&ev))
-                                                            placeholder="Enter base64 signature..."
+                                                            placeholder="Enter signature..."
                                                         ></textarea>
                                                     </div>
                                                 }.into_any()
@@ -662,33 +599,37 @@ pub fn TransitPage() -> impl IntoView {
                                                             prop:value=selected_algo
                                                         >
                                                             {move || {
-                                                                let key_type = selected_key.get().map(|k| k.key_type.clone()).unwrap_or_default();
-                                                                match active_tab.get().as_str() {
-                                                                    "encrypt" => match key_type.as_str() {
-                                                                        "chacha20-poly1305" | "xchacha20-poly1305" => view! {
-                                                                            <option value="CHACHA20-POLY1305">"CHACHA20-POLY1305"</option>
-                                                                        }.into_any(),
-                                                                        _ => view! {
-                                                                            <option value="AES-GCM">"AES-GCM"</option>
-                                                                        }.into_any(),
-                                                                    },
-                                                                    "sign" | "verify" => match key_type.as_str() {
-                                                                        "ecdsa-p256" => view! {
-                                                                            <option value="ecdsa-p256">"ECDSA-P256"</option>
-                                                                        }.into_any(),
-                                                                        "ecdsa-secp256k1" => view! {
-                                                                            <option value="ecdsa-secp256k1">"ECDSA-secp256k1"</option>
-                                                                        }.into_any(),
-                                                                        "ed25519" => view! {
-                                                                            <option value="ed25519">"Ed25519"</option>
-                                                                        }.into_any(),
-                                                                        _ => view! {
-                                                                            <option value="ed25519">"Ed25519"</option>
-                                                                            <option value="ecdsa-p256">"ECDSA-P256"</option>
-                                                                            <option value="ecdsa-secp256k1">"ECDSA-secp256k1"</option>
-                                                                        }.into_any(),
-                                                                    },
-                                                                    _ => view! {}.into_any()
+                                                                let key_info = selected_key.get();
+                                                                if let Some(info) = key_info {
+                                                                    match active_tab.get().as_str() {
+                                                                        "encrypt" => match info.key_type {
+                                                                            KeyType::ChaCha20Poly1305 | KeyType::XChaCha20Poly1305 => view! {
+                                                                                <option value="ChaCha20Poly1305">"CHACHA20-POLY1305"</option>
+                                                                            }.into_any(),
+                                                                            _ => view! {
+                                                                                <option value="Aes256Gcm">"AES-GCM"</option>
+                                                                            }.into_any(),
+                                                                        },
+                                                                        "sign" | "verify" => match info.key_type {
+                                                                            KeyType::EcdsaP256 => view! {
+                                                                                <option value="EcdsaP256">"ECDSA-P256"</option>
+                                                                            }.into_any(),
+                                                                            KeyType::EcdsaSecp256k1 => view! {
+                                                                                <option value="EcdsaSecp256k1">"ECDSA-secp256k1"</option>
+                                                                            }.into_any(),
+                                                                            KeyType::Ed25519 => view! {
+                                                                                <option value="Ed25519">"Ed25519"</option>
+                                                                            }.into_any(),
+                                                                            _ => view! {
+                                                                                <option value="Ed25519">"Ed25519"</option>
+                                                                                <option value="EcdsaP256">"ECDSA-P256"</option>
+                                                                                <option value="EcdsaSecp256k1">"ECDSA-secp256k1"</option>
+                                                                            }.into_any(),
+                                                                        },
+                                                                        _ => view! {}.into_any()
+                                                                    }
+                                                                } else {
+                                                                    view! {}.into_any()
                                                                 }
                                                             }}
                                                         </select>
@@ -730,7 +671,7 @@ pub fn TransitPage() -> impl IntoView {
                                                 if !res.is_empty() && active_tab.get() != "verify" {
                                                     view! {
                                                         <div class="space-y-1">
-                                                            <label class="block text-sm font-medium text-gray-700">"Result (Base64)"</label>
+                                                            <label class="block text-sm font-medium text-gray-700">"Result"</label>
                                                             <div class="relative">
                                                                 <pre class="bg-gray-800 text-gray-100 p-4 rounded-md overflow-x-auto text-sm font-mono break-all whitespace-pre-wrap">
                                                                     {res}

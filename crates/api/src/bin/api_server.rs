@@ -348,7 +348,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize Axum components for new engines
     use secreton_api::services::pki::PkiPersistentService;
-    use secreton_api::{ApiState, KVApiState, TransitApiState};
+    use secreton_api::{ApiState, KVApiState};
     use secreton_performance::OptimizationLevel;
 
     // Initialize PKI Persistent Service
@@ -461,13 +461,7 @@ async fn main() -> anyhow::Result<()> {
         totp_engine_service.clone(),
     );
 
-    // Use the shared transit engine for ApiState so it matches the one in the container.
-    // TransitApiState::default() would create a separate, disconnected TransitEngine.
-    let transit_api_state = TransitApiState {
-        engine: transit_engine.clone(),
-    };
     let api_state = ApiState::new(
-        transit_api_state,
         KVApiState::default(),
         database_state,
         Some(pki_service),

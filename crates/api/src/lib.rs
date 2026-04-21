@@ -1242,7 +1242,6 @@ pub mod kv;
 pub mod pki;
 pub mod ssh;
 pub mod totp;
-pub mod transit;
 
 // Re-export types needed by tests
 pub use database::DatabaseApiState;
@@ -1251,13 +1250,11 @@ pub use pki::PkiApiState;
 pub use secreton_performance::OptimizationLevel;
 pub use ssh::SshApiState;
 pub use totp::TotpApiState;
-pub use transit::TransitApiState;
 
 /// Main API state combining all engine states
 #[derive(Clone)]
 pub struct ApiState {
     pub kv: KVApiState,
-    pub transit: TransitApiState,
     pub database: DatabaseApiState,
     pub pki: PkiApiState,
     pub ssh: SshApiState,
@@ -1270,7 +1267,6 @@ pub struct ApiState {
 
 impl ApiState {
     pub async fn new(
-        transit_state: TransitApiState,
         kv_state: KVApiState,
         database_state: DatabaseApiState,
         pki_service: Option<std::sync::Arc<crate::services::pki::PkiPersistentService>>,
@@ -1282,7 +1278,6 @@ impl ApiState {
     ) -> Result<Self, SecretonError> {
         Ok(Self {
             kv: kv_state,
-            transit: transit_state,
             database: database_state,
             pki: PkiApiState {
                 service: pki_service,
@@ -1345,10 +1340,6 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
             "/api/v1/secret",
             crate::handlers::secret::create_routes().with_state(app_state.clone()),
         ) // Add secret routes
-        .nest(
-            "/api/v1/transit",
-            transit::create_transit_router().with_state(app_state.clone()),
-        )
         .nest(
             "/api/v1/database",
             crate::handlers::database::create_routes().with_state(app_state.clone()),
