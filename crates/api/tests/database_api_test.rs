@@ -7,7 +7,6 @@ use secreton_api::database::{
 };
 use secreton_api::kv::KVApiState;
 use secreton_api::pki::PkiApiState;
-use secreton_api::transit::TransitApiState;
 use secreton_performance::OptimizationLevel;
 use secreton_secrets::{DatabaseConfig, DatabaseEngine};
 use std::sync::Arc;
@@ -141,9 +140,20 @@ async fn test_database_api_endpoints() {
     );
     container.register_service("totp_engine".to_string(), totp_engine_svc);
 
+    // Register transit, ssh, and telemetry services required by create_api_router
+    let transit = Arc::new(secreton_crypto::transit::TransitEngine::new());
+    container.register_service("transit".to_string(), transit);
+    let ssh_svc = Arc::new(
+        secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone()),
+    );
+    container.register_service("ssh".to_string(), ssh_svc);
+    let telemetry = Arc::new(secreton_core::telemetry::TelemetryCollector::new(
+        secreton_core::telemetry::TelemetryConfig::default(),
+    ));
+    container.register_service("telemetry".to_string(), telemetry);
+
     let state = ApiState {
         kv: KVApiState::default(),
-        transit: TransitApiState::default(),
         database: database_state,
         pki: PkiApiState::default(),
         ssh: SshApiState::default(),

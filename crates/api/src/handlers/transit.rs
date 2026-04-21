@@ -172,7 +172,25 @@ pub async fn create_key(
 ) -> ApiResult<Json<ApiResponse<()>>> {
     validate_name(&name)?;
     let key_type = request.key_type.unwrap_or(KeyType::Aes256Gcm);
-    state.transit.create_key(name, key_type, request.options).await
+    let mut options = request.options.unwrap_or_default();
+
+    // If the caller did not provide explicit usage, apply sensible defaults
+    // based on the key type. The default KeyOptions has [Encrypt, Decrypt],
+    // which is wrong for signing-only key types and would make them unusable.
+    let default_usage = KeyOptions::default().usage;
+    if options.usage == default_usage {
+        options.usage = match &key_type {
+            KeyType::Ed25519 | KeyType::EcdsaP256 | KeyType::EcdsaSecp256k1 => {
+                vec![
+                    secreton_crypto::transit::KeyUsage::Sign,
+                    secreton_crypto::transit::KeyUsage::Verify,
+                ]
+            }
+            _ => default_usage,
+        };
+    }
+
+    state.transit.create_key(name, key_type, Some(options)).await
         .map_err(map_crypto_err)?;
     Ok(Json(ApiResponse::success(())))
 }
