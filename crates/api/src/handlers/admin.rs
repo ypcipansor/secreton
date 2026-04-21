@@ -742,7 +742,9 @@ pub async fn get_system_metrics(
         packets_received: 0,
     };
 
-    let uptime = m.system.uptime_seconds;
+    // Use the lock-free uptime helper for actual system uptime (consistent
+    // with get_system_status, health_check, and liveness_check).
+    let uptime = state.telemetry.uptime_seconds();
 
     // Count total policies from storage
     let total_policies: u64 = state
