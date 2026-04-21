@@ -421,7 +421,7 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, _existing_owner, previous_version, existing_metadata, existing_tags) =
+        let (version, _existing_owner, previous_version, existing_metadata, existing_tags, existing_created_at) =
             if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
                 // Check ownership first
                 if existing.owner_id != owner_id {
@@ -431,9 +431,10 @@ impl SecretService {
                     )));
                 }
 
-                // Capture existing metadata and tags before archiving
+                // Capture existing metadata, tags, and created_at before archiving
                 let prev_metadata = existing.metadata.clone();
                 let prev_tags = existing.tags.clone();
+                let prev_created_at = existing.created_at;
 
                 // Archive the existing version
                 let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
@@ -453,9 +454,10 @@ impl SecretService {
                     Some(existing.version),
                     Some(prev_metadata),
                     Some(prev_tags),
+                    Some(prev_created_at),
                 )
             } else {
-                (1, None, None, None, None)
+                (1, None, None, None, None, None)
             };
 
         // Create SecretEntry
@@ -467,6 +469,13 @@ impl SecretService {
             owner_id,
         );
         entry.version = version;
+
+        // Preserve original creation timestamp across updates so that
+        // `created_at` reflects when the secret was first written, not the
+        // time of the latest version.
+        if let Some(ts) = existing_created_at {
+            entry.created_at = ts;
+        }
 
         // Carry forward existing metadata as defaults, then let caller override
         if let Some(prev_meta) = &existing_metadata {
