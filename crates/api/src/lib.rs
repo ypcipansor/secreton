@@ -1172,9 +1172,12 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 format!("Rate limit exceeded: {}", message),
             ),
-            SecretonError::MfaNotConfigured { ref user } => (
+            SecretonError::MfaNotConfigured { .. } => (
                 axum::http::StatusCode::BAD_REQUEST,
-                format!("MFA not configured for user '{}'; please enroll in MFA before logging in", user),
+                // Do not include the username — the error only fires after
+                // successful password verification, so echoing the username
+                // would confirm valid credentials and enable enumeration.
+                "MFA not configured; please enroll in MFA before logging in".to_string(),
             ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,

@@ -907,6 +907,47 @@ impl AdminService {
         })
     }
 
+    /// Retrieve raw policy content previously stored by `update_policy_content`.
+    ///
+    /// Returns `Ok(Some(content))` when the policy exists, `Ok(None)` when it
+    /// does not, and `Err` on storage/crypto failures.
+    pub async fn get_policy_content(&self, name: &str) -> Result<Option<String>, AdminError> {
+        let path = format!("sys/policies/content/{}", name);
+
+        let entry = match self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+        {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
+        // Prefer decrypting `encrypted_data` when crypto is available and the
+        // blob is non-empty (i.e. the entry was stored with encryption).
+        if let Some(crypto) = &self.crypto {
+            if !entry.encrypted_data.is_empty() {
+                let decrypted = crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Failed to decrypt policy content: {}",
+                        e
+                    ))
+                })?;
+                let content = String::from_utf8(decrypted).map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Policy content is not valid UTF-8: {}",
+                        e
+                    ))
+                })?;
+                return Ok(Some(content));
+            }
+        }
+
+        // Fallback: read from metadata (unencrypted path).
+        Ok(entry.metadata.get("content").cloned())
+    }
+
     /// Update a policy definition
     pub async fn update_policy_content(&self, name: &str, content: &str) -> Result<(), AdminError> {
         // Persist raw policy content to storage.

@@ -1512,33 +1512,44 @@ pub async fn get_policy(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
-) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
-    // Get policy via secreton service
-    let policy = state
-        .secreton
-        .get_policy(&name, &user)
-        .await
-        .map_err(|e| match e {
-            secret::SecretError::PolicyNotFound { .. } => {
-                crate::ApiError::NotFound("Policy not found".to_string())
+) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // Try structured policy first
+    match state.secreton.get_policy(&name, &user).await {
+        Ok(policy) => {
+            let response = PolicyResponse {
+                name: policy.name,
+                rules: policy.rules,
+                metadata: PolicyMetadata {
+                    description: policy.metadata.description,
+                    tags: policy.metadata.tags.keys().cloned().collect(),
+                    owner: policy.metadata.owner,
+                },
+                created_at: policy.created_at,
+                updated_at: policy.updated_at,
+            };
+            let value = serde_json::to_value(response)
+                .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy: {}", e)))?;
+            Ok(Json(ApiResponse::success(value)))
+        }
+        Err(secret::SecretError::PolicyNotFound { .. }) => {
+            // Fall back to raw policy content (admin-only)
+            if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
+                return Err(crate::ApiError::NotFound("Policy not found".to_string()));
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e)),
-        })?;
-
-    let response = PolicyResponse {
-        name: policy.name,
-        rules: policy.rules,
-        metadata: PolicyMetadata {
-            description: policy.metadata.description,
-            tags: policy.metadata.tags.keys().cloned().collect(),
-            owner: policy.metadata.owner,
-        },
-        created_at: policy.created_at,
-        updated_at: policy.updated_at,
-    };
-
-    Ok(Json(ApiResponse::success(response)))
+            match state.admin.get_policy_content(&name).await {
+                Ok(Some(content)) => {
+                    Ok(Json(ApiResponse::success(serde_json::json!({
+                        "name": name,
+                        "content": content,
+                    }))))
+                }
+                Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
+                Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy content: {}", e))),
+            }
+        }
+        Err(secret::SecretError::PermissionDenied(msg)) => Err(crate::ApiError::Authorization(msg)),
+        Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e))),
+    }
 }
 
 pub async fn create_policy(
@@ -1657,7 +1668,7 @@ pub async fn update_policy(
         state.admin.update_policy_content(&name, content).await.map_err(|e| {
             crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
         })?;
-        Ok(Json(ApiResponse::success(serde_json::json!({"status": "updated"}))))
+        Ok(Json(ApiResponse::success(serde_json::json!({"status": "updated", "name": name}))))
     } else {
         Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
     }
