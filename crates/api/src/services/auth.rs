@@ -533,11 +533,16 @@ impl AuthenticationService {
             }
         }
 
-        // Create login request
+        // Create login request.
+        // Do NOT pass mfa_code to auth_service.login() — MFA is validated
+        // explicitly below via `enforce_mfa()`.  Passing it here could cause
+        // double-validation issues if the underlying auth service ever starts
+        // consuming TOTP codes (which are single-use).  This mirrors the same
+        // pattern used in `authenticate()`.
         let request = LoginRequest {
             username: req.username.clone(),
             password: req.password.clone(),
-            mfa_code: req.mfa_code.clone(),
+            mfa_code: None,
             remember_me: Some(false),
         };
 
