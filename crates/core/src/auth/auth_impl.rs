@@ -202,6 +202,10 @@ impl AuthService {
         // because refresh tokens don't carry those claims.
         let (roles, policies, email) = if let Some(storage) = &self.storage {
             if let Ok(Some(details)) = storage.get_user_details(&claims.username).await {
+                // `UserInfo` from the storage trait does not carry policies,
+                // so we fall back to ["default"] for the storage-backed path.
+                // The in-memory path below uses `record.policies` which does
+                // have the real values.
                 (details.roles, vec!["default".to_string()], details.email)
             } else {
                 return Err(SecretonError::Authentication {

@@ -406,7 +406,21 @@ impl AuthenticationService {
 
         if let Some(mfa) = &self.mfa_service {
             let user_uuid = Uuid::parse_str(user_id).unwrap_or_default();
-            let mfa_configured = mfa.is_mfa_required(user_uuid).await.unwrap_or(false);
+            let mfa_configured = match mfa.is_mfa_required(user_uuid).await {
+                Ok(configured) => configured,
+                Err(e) => {
+                    // Fail-safe: treat MFA service errors as "MFA is required"
+                    // rather than silently bypassing.  A transient MFA service
+                    // failure should not allow a privileged user through without
+                    // MFA when they have already configured it.
+                    tracing::warn!(
+                        "MFA service error for user '{}': {}; \
+                         treating as MFA-required (fail-safe)",
+                        username, e
+                    );
+                    true
+                }
+            };
 
             if mfa_configured {
                 let code = mfa_code.ok_or_else(|| {
@@ -646,7 +660,18 @@ impl AuthenticationService {
             // lockout mechanism also covers MFA brute-force attempts.
             // Without this, an attacker who knows the password could try
             // unlimited MFA codes without ever triggering account lockout.
-            if matches!(mfa_err, AuthError::InvalidMfaCode | AuthError::MfaRequired | AuthError::MfaNotConfigured(_)) {
+            //
+            // Only count `InvalidMfaCode` — an actual wrong code — toward
+            // lockout.  `MfaRequired` (first step of a two-step login) and
+            // `MfaNotConfigured` (user hasn't enrolled yet) are NOT attack
+            // indicators and should not accumulate lockout attempts:
+            //   - MfaRequired fires on every first-step login attempt in a
+            //     two-step flow; counting it would lock out legitimate users
+            //     after a few page refreshes.
+            //   - MfaNotConfigured fires every time a user who hasn't
+            //     enrolled tries to log in; counting it would permanently
+            //     lock them out before they can ever enroll.
+            if matches!(mfa_err, AuthError::InvalidMfaCode) {
                 user.failed_login_attempts += 1;
 
                 if !user.is_privileged() && user.failed_login_attempts >= 5 {
@@ -1378,6 +1403,13 @@ impl AuthenticationService {
         &self,
         credentials: crate::services::auth::LoginRequest,
     ) -> Result<secreton_core::AuthResult, AuthError> {
+        // Root user cannot login via password — mirrors the check in `login()`
+        // so that the root account is consistently blocked from password-based
+        // authentication regardless of which code path is used.
+        if credentials.username == "root" {
+            return Err(AuthError::InvalidCredentials);
+        }
+
         // Load user from storage ONCE at the start so that lockout checks,
         // failed-attempt increments, policy loading, and counter resets all
         // operate on the same snapshot.  This eliminates the TOCTOU window
@@ -1543,11 +1575,9 @@ impl AuthenticationService {
         )
         .await
         {
-            // Increment failed_login_attempts on MFA failure so that the
-            // lockout mechanism also covers MFA brute-force attempts.
-            // Without this, an attacker who knows the password could try
-            // unlimited MFA codes without ever triggering account lockout.
-            if matches!(mfa_err, AuthError::InvalidMfaCode | AuthError::MfaRequired | AuthError::MfaNotConfigured(_)) {
+            // Only count `InvalidMfaCode` toward lockout — see the
+            // matching comment in `login()` for the full rationale.
+            if matches!(mfa_err, AuthError::InvalidMfaCode) {
                 if let Some((mut u, entry)) = stored_user_entry {
                     u.failed_login_attempts += 1;
 
