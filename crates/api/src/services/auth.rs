@@ -51,6 +51,12 @@ pub struct Claims {
     pub email: Option<String>,
     /// Roles
     pub roles: Vec<String>,
+    /// Associated policies
+    #[serde(default)]
+    pub policies: Vec<String>,
+    /// MFA required flag
+    #[serde(default)]
+    pub mfa_required: bool,
     /// Issued at
     pub iat: usize,
     /// Expiration time
@@ -1398,6 +1404,8 @@ impl AuthenticationService {
             username: user.username.clone(),
             email: user.email.clone(),
             roles: user.roles.clone(),
+            policies: user.policies.clone(),
+            mfa_required: user.mfa_enabled,
             iat: now.timestamp() as usize,
             exp: exp.timestamp() as usize,
             jti: uuid::Uuid::new_v4().to_string(),

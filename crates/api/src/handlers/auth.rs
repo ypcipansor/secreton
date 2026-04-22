@@ -170,6 +170,8 @@ mod tests {
             username: "testuser".to_string(),
             email: Some("test@example.com".to_string()),
             roles: vec![],
+            policies: vec!["default".to_string()],
+            mfa_required: false,
             iat: chrono::Utc::now().timestamp() as usize,
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             jti: "unique".to_string(),
