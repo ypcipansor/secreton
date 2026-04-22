@@ -117,13 +117,24 @@ impl AuthService {
                 Ok(true) => {
                      // Fetch actual user details including roles from DB
                      if let Ok(Some(details)) = storage.get_user_details(username).await {
+                         // `UserInfo` from the storage trait does not carry policies.
+                         // Try to read them from the in-memory store first (which has
+                         // the real values); fall back to ["default"] only when the
+                         // user is not in the in-memory cache.  This mirrors the
+                         // pattern used in `refresh_token()`.
+                         let user_policies = {
+                             let user_store = self.user_store.read().await;
+                             user_store.get(username)
+                                 .map(|r| r.policies.clone())
+                                 .unwrap_or_else(|| vec!["default".to_string()])
+                         };
                          Some(UserRecord {
                             id: details.id.unwrap_or_else(|| username.to_string()),
                             username: details.username,
                             email: details.email,
                             password_hash: "".to_string(), // Not needed
                             roles: details.roles,
-                            policies: vec!["default".to_string()], // Policies might need to be fetched too if stored separately
+                            policies: user_policies,
                             created_at: chrono::Utc::now(), // Ideally fetched from details if available in UserInfo
                             last_login: Some(chrono::Utc::now()),
                          })
