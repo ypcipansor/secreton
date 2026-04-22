@@ -174,16 +174,48 @@ impl AuthenticationService {
         let mut session_timeout = self.config.jwt.expiration;
         let mut mfa_enabled = self.config.mfa.enabled;
 
-        if let Ok(Some(entry)) = self.storage.get_by_path(config_path).await {
-            if let Some(config_data) = entry.metadata.get("config_data") {
-                if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_data) {
-                    if let Some(timeout) = config.get("session_timeout").and_then(|v| v.as_u64()) {
-                        session_timeout = timeout;
-                    }
-                    if let Some(mfa) = config.get("enable_mfa").and_then(|v| v.as_bool()) {
-                        mfa_enabled = mfa;
+        match self.storage.get_by_path(config_path).await {
+            Ok(Some(entry)) => {
+                if let Some(config_data) = entry.metadata.get("config_data") {
+                    match serde_json::from_str::<serde_json::Value>(config_data) {
+                        Ok(config) => {
+                            if let Some(timeout) = config.get("session_timeout").and_then(|v| v.as_u64()) {
+                                // Apply the same validation range (60-86400 seconds)
+                                // that the admin service enforces during updates.
+                                if timeout >= 60 && timeout <= 86400 {
+                                    session_timeout = timeout;
+                                } else {
+                                    tracing::warn!(
+                                        "Dynamic session_timeout {} is outside valid range \
+                                         (60-86400); using static default {}",
+                                        timeout,
+                                        self.config.jwt.expiration,
+                                    );
+                                }
+                            }
+                            if let Some(mfa) = config.get("enable_mfa").and_then(|v| v.as_bool()) {
+                                mfa_enabled = mfa;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to parse system/config config_data as JSON: {}; \
+                                 using static defaults",
+                                e,
+                            );
+                        }
                     }
                 }
+            }
+            Ok(None) => {
+                // No dynamic config stored yet — use static defaults (not an error)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read system/config from storage: {}; \
+                     using static defaults",
+                    e,
+                );
             }
         }
 
@@ -205,25 +237,43 @@ impl AuthenticationService {
             allowed_special_chars: None,
         };
 
-        if let Ok(Some(entry)) = self.storage.get_by_path(config_path).await {
-            if let Some(config_data) = entry.metadata.get("config_data") {
-                if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_data) {
-                    if let Some(v) = config.get("password_policy_min_length").and_then(|v| v.as_u64()) {
-                        policy.min_length = v as usize;
-                    }
-                    if let Some(v) = config.get("password_policy_require_uppercase").and_then(|v| v.as_bool()) {
-                        policy.require_uppercase = v;
-                    }
-                    if let Some(v) = config.get("password_policy_require_lowercase").and_then(|v| v.as_bool()) {
-                        policy.require_lowercase = v;
-                    }
-                    if let Some(v) = config.get("password_policy_require_numbers").and_then(|v| v.as_bool()) {
-                        policy.require_numbers = v;
-                    }
-                    if let Some(v) = config.get("password_policy_require_special").and_then(|v| v.as_bool()) {
-                        policy.require_special = v;
+        match self.storage.get_by_path(config_path).await {
+            Ok(Some(entry)) => {
+                if let Some(config_data) = entry.metadata.get("config_data") {
+                    match serde_json::from_str::<serde_json::Value>(config_data) {
+                        Ok(config) => {
+                            if let Some(v) = config.get("password_policy_min_length").and_then(|v| v.as_u64()) {
+                                policy.min_length = v as usize;
+                            }
+                            if let Some(v) = config.get("password_policy_require_uppercase").and_then(|v| v.as_bool()) {
+                                policy.require_uppercase = v;
+                            }
+                            if let Some(v) = config.get("password_policy_require_lowercase").and_then(|v| v.as_bool()) {
+                                policy.require_lowercase = v;
+                            }
+                            if let Some(v) = config.get("password_policy_require_numbers").and_then(|v| v.as_bool()) {
+                                policy.require_numbers = v;
+                            }
+                            if let Some(v) = config.get("password_policy_require_special").and_then(|v| v.as_bool()) {
+                                policy.require_special = v;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to parse system/config config_data for password policy: {}; \
+                                 using defaults",
+                                e,
+                            );
+                        }
                     }
                 }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read system/config for password policy: {}; using defaults",
+                    e,
+                );
             }
         }
 
@@ -748,22 +798,32 @@ impl AuthenticationService {
 
         // Load user from storage to get current roles/policies instead of
         // using empty slices which would strip all authorization claims.
+        // A storage or decryption failure here is treated as an error rather
+        // than silently downgrading the token to empty roles — a transient
+        // storage hiccup should not strip a user's authorization.
         let user_path = format!("{}{}", USER_STORAGE_PREFIX, claims.username);
-        let (user_roles, user_policies, user_email) = if let Ok(Some(entry)) =
-            self.storage.get_by_path(&user_path).await
-        {
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                if let Ok(user) = serde_json::from_slice::<User>(&decrypted) {
-                    (user.roles, user.policies, user.email)
-                } else {
-                    (vec![], vec!["default".to_string()], None)
-                }
-            } else {
-                (vec![], vec!["default".to_string()], None)
-            }
-        } else {
-            (vec![], vec!["default".to_string()], None)
-        };
+        let user_entry = self
+            .storage
+            .get_by_path(&user_path)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Failed to load user '{}' during token refresh: {}", claims.username, e);
+                AuthError::Storage(e)
+            })?
+            .ok_or_else(|| {
+                tracing::warn!("User '{}' not found in storage during token refresh", claims.username);
+                AuthError::UserNotFound
+            })?;
+        let decrypted = self.crypto.decrypt(&user_entry.encrypted_data).await.map_err(|e| {
+            tracing::warn!("Failed to decrypt user '{}' during token refresh: {}", claims.username, e);
+            AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
+        })?;
+        let stored_user: User = serde_json::from_slice(&decrypted).map_err(|e| {
+            tracing::warn!("Failed to deserialize user '{}' during token refresh: {}", claims.username, e);
+            AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
+        })?;
+        let (user_roles, user_policies, user_email) =
+            (stored_user.roles, stored_user.policies, stored_user.email);
 
         let token_pair = self
             .token_service
