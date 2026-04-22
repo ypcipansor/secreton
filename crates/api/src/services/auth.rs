@@ -1300,9 +1300,9 @@ impl AuthenticationService {
         credentials: crate::services::auth::LoginRequest,
     ) -> Result<secreton_core::AuthResult, AuthError> {
         let request = secreton_auth::LoginRequest {
-            username: credentials.username,
+            username: credentials.username.clone(),
             password: credentials.password,
-            mfa_code: credentials.mfa_code,
+            mfa_code: credentials.mfa_code.clone(),
             remember_me: credentials.remember_me,
         };
 
@@ -1352,8 +1352,103 @@ impl AuthenticationService {
         // Generate session ID
         let session_id = Uuid::new_v4().to_string();
 
-        // Get effective config for session timeout
-        let (session_timeout_secs, _) = self.get_effective_config().await;
+        // Get effective config for session timeout and MFA enforcement
+        let (session_timeout_secs, global_mfa_enabled) = self.get_effective_config().await;
+
+        // Enforce MFA for privileged users (admin/root) or if globally enabled.
+        // This mirrors the enforcement in `login()` so that the `authenticate`
+        // code path cannot be used to bypass global MFA.
+        let is_privileged = user_roles.contains(&"admin".to_string())
+            || user_roles.contains(&"root".to_string());
+        if is_privileged || global_mfa_enabled {
+            if let Some(mfa) = &self.mfa_service {
+                let user_uuid = Uuid::parse_str(
+                    user_info.id.as_deref().unwrap_or_default(),
+                )
+                .unwrap_or_default();
+
+                let mfa_configured = mfa.is_mfa_required(user_uuid).await.unwrap_or(false);
+
+                if mfa_configured {
+                    // If configured, strictly enforce code
+                    let code = credentials.mfa_code.ok_or_else(|| {
+                        AuthError::MfaRequired
+                    })?;
+
+                    use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
+
+                    let validation_request = MfaValidationRequest {
+                        entity_id: user_uuid,
+                        method: MfaMethod::Totp,
+                        code: Some(code),
+                        hardware_request: None,
+                        push_notification_id: None,
+                        push_response: None,
+                        webauthn_response: None,
+                    };
+
+                    if !mfa.validate(validation_request).await.unwrap_or(false) {
+                        if let Some(audit) = &self.audit {
+                            let _ = audit
+                                .log_event(
+                                    crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                        user: credentials.username.clone(),
+                                        method: "totp".to_string(),
+                                        reason: "Invalid MFA code".to_string(),
+                                    },
+                                )
+                                .await;
+                        }
+                        return Err(AuthError::InvalidMfaCode);
+                    }
+                } else if is_privileged {
+                    // TOFU (Trust On First Use) — only for privileged users
+                    // during initial bootstrap.
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationSuccess {
+                                    user: credentials.username.clone(),
+                                    method: "password_no_mfa_setup".to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                } else {
+                    // Global MFA is enabled and the user has not configured
+                    // MFA yet.  Deny login so they are forced to set up MFA
+                    // through the enrollment flow before gaining access.
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: credentials.username.clone(),
+                                    method: "global_mfa".to_string(),
+                                    reason: "MFA not configured but globally required".to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                    return Err(AuthError::Internal(anyhow::anyhow!(
+                        "MFA not configured for user '{}'; please enroll in MFA before logging in",
+                        credentials.username
+                    )));
+                }
+            } else if is_privileged {
+                return Err(AuthError::Internal(anyhow::anyhow!(
+                    "MFA service not configured but required for privileged access"
+                )));
+            } else {
+                // Global MFA is enabled but the MFA service is not registered.
+                // Non-privileged users should not be locked out due to a server
+                // misconfiguration — log a warning and allow them through.
+                tracing::warn!(
+                    "Global MFA enabled but MFA service not configured; \
+                     allowing non-privileged user '{}' without MFA",
+                    credentials.username
+                );
+            }
+        }
 
         // Store session
         let now = chrono::Utc::now();
