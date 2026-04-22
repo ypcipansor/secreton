@@ -558,10 +558,10 @@ impl AuthenticationService {
                         }
                         .into());
                     }
-                } else {
-                    // If NOT configured, allow login so user can set it up
-                    // This is "Trust On First Use" for admin creation
-                    // Ideally, we might restrict the token scope here, but for now we rely on immediate setup
+                } else if is_privileged {
+                    // TOFU (Trust On First Use) — only for privileged users
+                    // during initial bootstrap.  They are allowed through so
+                    // they can set up MFA immediately after first login.
                     if let Some(audit) = &self.audit {
                         let _ = audit
                             .log_event(
@@ -572,6 +572,25 @@ impl AuthenticationService {
                             )
                             .await;
                     }
+                } else {
+                    // Global MFA is enabled and the user has not configured
+                    // MFA yet.  Deny login so they are forced to set up MFA
+                    // through the enrollment flow before gaining access.
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: req.username.clone(),
+                                    method: "global_mfa".to_string(),
+                                    reason: "MFA not configured but globally required".to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                    return Err(secreton_errors::SecretonError::MfaNotConfigured {
+                        user: req.username.clone(),
+                    }
+                    .into());
                 }
             } else if is_privileged {
                 // If MFA service is not configured but user is admin/root, this is a configuration error or security risk
