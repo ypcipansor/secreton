@@ -1172,6 +1172,10 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 format!("Rate limit exceeded: {}", message),
             ),
+            SecretonError::MfaNotConfigured { ref user } => (
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("MFA not configured for user '{}'; please enroll in MFA before logging in", user),
+            ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Unknown error".to_string(),
