@@ -1462,13 +1462,31 @@ impl AuthenticationService {
                         );
                         AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
                     })?;
-                    let u: User = serde_json::from_slice(&decrypted).map_err(|e| {
+                    let mut u: User = serde_json::from_slice(&decrypted).map_err(|e| {
                         tracing::warn!(
                             "Failed to deserialize user '{}' during authenticate: {}",
                             user_info.username, e
                         );
                         AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
                     })?;
+
+                    // Reset failed login attempts on success — mirrors the
+                    // logic in `login()` so that the counter does not
+                    // accumulate across successful logins, which would cause
+                    // premature lockout on the next failure.
+                    if u.failed_login_attempts > 0 || u.locked_until.is_some() {
+                        u.failed_login_attempts = 0;
+                        u.locked_until = None;
+
+                        if let Ok(user_data) = serde_json::to_vec(&u) {
+                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                                let mut updated_entry = entry;
+                                updated_entry.encrypted_data = encrypted;
+                                let _ = self.storage.store(&updated_entry).await;
+                            }
+                        }
+                    }
+
                     u.policies
                 }
                 Ok(None) => vec!["default".to_string()],
