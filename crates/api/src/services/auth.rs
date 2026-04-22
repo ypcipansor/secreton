@@ -610,13 +610,19 @@ impl AuthenticationService {
                 }
             } else {
                 // Global MFA is enabled but the MFA service is not registered.
-                // Non-privileged users should not be locked out due to a server
-                // misconfiguration — log a warning and allow them through.
-                tracing::warn!(
+                // Fail-safe: deny login rather than silently bypassing the
+                // admin's explicit MFA enforcement.
+                tracing::error!(
                     "Global MFA enabled but MFA service not configured; \
-                     allowing non-privileged user '{}' without MFA",
+                     denying login for user '{}'",
                     user.username
                 );
+                return Err(secreton_errors::SecretonError::Configuration {
+                    message: "MFA service not configured but global MFA is enabled; \
+                              please contact your administrator"
+                        .to_string(),
+                }
+                .into());
             }
         }
 
@@ -1442,13 +1448,17 @@ impl AuthenticationService {
                 )));
             } else {
                 // Global MFA is enabled but the MFA service is not registered.
-                // Non-privileged users should not be locked out due to a server
-                // misconfiguration — log a warning and allow them through.
-                tracing::warn!(
+                // Fail-safe: deny login rather than silently bypassing the
+                // admin's explicit MFA enforcement.
+                tracing::error!(
                     "Global MFA enabled but MFA service not configured; \
-                     allowing non-privileged user '{}' without MFA",
+                     denying login for user '{}'",
                     credentials.username
                 );
+                return Err(AuthError::Internal(anyhow::anyhow!(
+                    "MFA service not configured but global MFA is enabled; \
+                     please contact your administrator"
+                )));
             }
         }
 
@@ -1505,13 +1515,19 @@ impl AuthenticationService {
             .await
             .map_err(AuthError::Storage)?;
 
+        let mut result_metadata = std::collections::HashMap::new();
+        result_metadata.insert(
+            "expires_in".to_string(),
+            token_pair.expires_in.to_string(),
+        );
+
         Ok(secreton_core::AuthResult {
             success: true,
             token: Some(token_pair.access_token),
             refresh_token: Some(token_pair.refresh_token),
             user_info: result.user_info,
             policies,
-            metadata: std::collections::HashMap::new(),
+            metadata: result_metadata,
             mfa_required: result.mfa_required,
         })
     }

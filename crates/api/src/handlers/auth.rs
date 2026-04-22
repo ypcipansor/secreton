@@ -723,11 +723,19 @@ pub async fn login(
                 crate::ApiError::Authentication("User info not available".to_string())
             })?;
 
+            // Read dynamic expires_in from AuthResult metadata (set by
+            // authenticate()), falling back to 3600 for backward compat.
+            let expires_in: i64 = auth_token
+                .metadata
+                .get("expires_in")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(3600);
+
             let response = LoginResponse {
                 access_token: Some(access_token.clone()),
                 refresh_token: auth_token.refresh_token.clone(),
                 token_type: "Bearer".to_string(),
-                expires_in: 3600, // 1 hour default
+                expires_in,
                 user: UserInfo {
                     id: user_info.id.clone(),
                     username: user_info.username.clone(),
