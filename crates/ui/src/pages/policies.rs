@@ -84,7 +84,8 @@ pub fn PoliciesList() -> impl IntoView {
     };
 
     let handle_delete = move |name: String| {
-         if !web_sys::window().unwrap().confirm_with_message(&format!("Delete role {}?", name)).unwrap_or(false) {
+         let Some(window) = web_sys::window() else { return };
+         if !window.confirm_with_message(&format!("Delete role {}?", name)).unwrap_or(false) {
             return;
         }
         spawn_local(async move {
@@ -95,7 +96,8 @@ pub fn PoliciesList() -> impl IntoView {
     };
 
     let handle_delete_policy = move |name: String| {
-        if !web_sys::window().unwrap().confirm_with_message(&format!("Delete policy {}?", name)).unwrap_or(false) {
+        let Some(window) = web_sys::window() else { return };
+        if !window.confirm_with_message(&format!("Delete policy {}?", name)).unwrap_or(false) {
            return;
        }
        spawn_local(async move {

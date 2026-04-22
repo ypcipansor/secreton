@@ -953,7 +953,7 @@ impl AdminService {
             path,
             encrypted_data,
             encryption_metadata,
-            secreton_storage::SecurityLevel::Internal,
+            secreton_storage::SecurityLevel::Secret,
             uuid::Uuid::nil(), // system-owned
         );
         entry.id = entry_id;
