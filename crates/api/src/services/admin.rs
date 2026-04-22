@@ -925,7 +925,14 @@ impl AdminService {
 
         // Preserve the existing entry's id so that storage backends that index
         // by UUID perform an upsert rather than creating orphan rows.
-        let existing = self.storage.get_by_path(&path).await.ok().flatten();
+        // Propagate storage errors instead of silently treating them as
+        // "entry not found" — a transient failure could otherwise cause a
+        // duplicate `store()` instead of `update()`, creating orphan rows.
+        let existing = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?;
         let entry_id = existing.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
         let created_at = existing.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
         let version = existing.as_ref().map(|e| e.version + 1).unwrap_or(1);
@@ -934,11 +941,16 @@ impl AdminService {
             let enc = crypto.encrypt_data(content.as_bytes()).await.map_err(|e| {
                 AdminError::Internal(anyhow::anyhow!("Failed to encrypt policy content: {}", e))
             })?;
+            // The encrypted blob is a self-contained CryptoPacket (JSON with
+            // embedded key_id, IV, and auth_tag).  `CryptoService::decrypt`
+            // reads all parameters from that blob, so the EncryptionMetadata
+            // on the SecretEntry is informational.  We mark it clearly so
+            // readers know the real parameters live inside `encrypted_data`.
             (
                 enc,
                 secreton_storage::EncryptionMetadata {
-                    algorithm: "encrypted".to_string(),
-                    key_id: "active".to_string(),
+                    algorithm: "aes-256-gcm-cryptopacket".to_string(),
+                    key_id: "embedded".to_string(),
                     iv: Vec::new(),
                     auth_tag: None,
                     aad: None,
