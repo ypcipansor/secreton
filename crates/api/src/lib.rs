@@ -1174,11 +1174,12 @@ impl axum::response::IntoResponse for ApiError {
             ),
             SecretonError::MfaNotConfigured { .. } => (
                 axum::http::StatusCode::UNAUTHORIZED,
-                // Return 401 (same as invalid credentials) to prevent
-                // credential enumeration.  MfaNotConfigured only fires after
-                // successful password verification, so a distinct status code
-                // would confirm valid credentials.
-                "MFA not configured; please enroll in MFA before logging in".to_string(),
+                // Return 401 with a generic message identical to invalid
+                // credentials to prevent credential enumeration.
+                // MfaNotConfigured only fires after successful password
+                // verification, so a distinct message would confirm valid
+                // credentials.
+                "Authentication failed".to_string(),
             ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
