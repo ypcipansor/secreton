@@ -1451,7 +1451,11 @@ impl AuthenticationService {
         // a transient storage outage does not silently downgrade a user's
         // policies.  This is consistent with `refresh_token()` which also
         // propagates storage errors.
-        let policies = {
+        //
+        // NOTE: The failed_login_attempts counter is reset AFTER MFA
+        // enforcement (below) so that failed MFA attempts still count toward
+        // the lockout threshold.  This matches the order used in `login()`.
+        let (policies, stored_user_entry) = {
             let user_path = format!("{}{}", USER_STORAGE_PREFIX, user_info.username);
             match self.storage.get_by_path(&user_path).await {
                 Ok(Some(entry)) => {
@@ -1462,7 +1466,7 @@ impl AuthenticationService {
                         );
                         AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
                     })?;
-                    let mut u: User = serde_json::from_slice(&decrypted).map_err(|e| {
+                    let u: User = serde_json::from_slice(&decrypted).map_err(|e| {
                         tracing::warn!(
                             "Failed to deserialize user '{}' during authenticate: {}",
                             user_info.username, e
@@ -1470,26 +1474,9 @@ impl AuthenticationService {
                         AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
                     })?;
 
-                    // Reset failed login attempts on success — mirrors the
-                    // logic in `login()` so that the counter does not
-                    // accumulate across successful logins, which would cause
-                    // premature lockout on the next failure.
-                    if u.failed_login_attempts > 0 || u.locked_until.is_some() {
-                        u.failed_login_attempts = 0;
-                        u.locked_until = None;
-
-                        if let Ok(user_data) = serde_json::to_vec(&u) {
-                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                                let mut updated_entry = entry;
-                                updated_entry.encrypted_data = encrypted;
-                                let _ = self.storage.store(&updated_entry).await;
-                            }
-                        }
-                    }
-
-                    u.policies
+                    (u.policies.clone(), Some((u, entry)))
                 }
-                Ok(None) => vec!["default".to_string()],
+                Ok(None) => (vec!["default".to_string()], None),
                 Err(e) => {
                     tracing::warn!(
                         "Failed to load user '{}' from storage during authenticate: {}",
@@ -1509,6 +1496,10 @@ impl AuthenticationService {
         // Enforce MFA for privileged users (admin/root) or if globally enabled.
         // Uses the shared `enforce_mfa()` helper so that `login()` and
         // `authenticate()` have identical enforcement logic.
+        //
+        // This MUST happen BEFORE resetting failed_login_attempts so that
+        // failed MFA attempts still count toward the lockout threshold,
+        // preventing unlimited MFA brute-force.
         let is_privileged = user_roles.contains(&"admin".to_string())
             || user_roles.contains(&"root".to_string());
         self.enforce_mfa(
@@ -1519,6 +1510,26 @@ impl AuthenticationService {
             credentials.mfa_code,
         )
         .await?;
+
+        // Reset failed login attempts on success — mirrors the logic in
+        // `login()` so that the counter does not accumulate across
+        // successful logins, which would cause premature lockout on the
+        // next failure.  This runs AFTER MFA enforcement so that a failed
+        // MFA code does not reset the counter.
+        if let Some((mut u, entry)) = stored_user_entry {
+            if u.failed_login_attempts > 0 || u.locked_until.is_some() {
+                u.failed_login_attempts = 0;
+                u.locked_until = None;
+
+                if let Ok(user_data) = serde_json::to_vec(&u) {
+                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                        let mut updated_entry = entry;
+                        updated_entry.encrypted_data = encrypted;
+                        let _ = self.storage.store(&updated_entry).await;
+                    }
+                }
+            }
+        }
 
         // Store session
         let now = chrono::Utc::now();

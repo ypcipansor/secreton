@@ -783,13 +783,16 @@ pub async fn login(
                     Err(crate::ApiError::Authentication("MFA required".to_string()))
                 }
                 AuthError::Internal(ref inner) => {
-                    Err(crate::ApiError::Internal(inner.to_string()))
+                    tracing::error!("Internal error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
                 }
                 AuthError::Storage(ref inner) => {
-                    Err(crate::ApiError::Internal(format!("Storage error: {}", inner)))
+                    tracing::error!("Storage error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
                 }
                 AuthError::Crypto(ref inner) => {
-                    Err(crate::ApiError::Internal(format!("Crypto error: {}", inner)))
+                    tracing::error!("Crypto error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
                 }
                 _ => Err(crate::ApiError::Authentication(e.to_string())),
             }
