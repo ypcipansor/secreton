@@ -746,14 +746,33 @@ impl AuthenticationService {
         ))
         .unwrap_or(chrono::Duration::hours(1));
 
+        // Load user from storage to get current roles/policies instead of
+        // using empty slices which would strip all authorization claims.
+        let user_path = format!("{}{}", USER_STORAGE_PREFIX, claims.username);
+        let (user_roles, user_policies, user_email) = if let Ok(Some(entry)) =
+            self.storage.get_by_path(&user_path).await
+        {
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                if let Ok(user) = serde_json::from_slice::<User>(&decrypted) {
+                    (user.roles, user.policies, user.email)
+                } else {
+                    (vec![], vec!["default".to_string()], None)
+                }
+            } else {
+                (vec![], vec!["default".to_string()], None)
+            }
+        } else {
+            (vec![], vec!["default".to_string()], None)
+        };
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
                 &claims.sub,
                 &claims.username,
-                None,  // Email not stored in refresh token
-                &[],   // Roles not stored in refresh token (should be fetched from user data)
-                &[],   // Policies not stored in refresh token (should be fetched from user data)
+                user_email.as_deref(),
+                &user_roles,
+                &user_policies,
                 false, // MFA status should be checked separately
                 Some(session_id.clone()),
                 Some(session_duration),
@@ -791,26 +810,21 @@ impl AuthenticationService {
             .await
             .map_err(AuthError::Storage)?;
 
-        // For refresh, we need to get user info again
-        // This is simplified - in production you'd cache or store user info
-        let claims = self
-            .token_service
-            .validate_access_token(&token_pair.access_token)
-            .map_err(|_| AuthError::InvalidToken)?;
-
+        // Build the User from the data we already loaded from storage
+        // (or from the token claims as a fallback).
         let user = User {
-            id: claims.claims.sub.clone(),
-            username: claims.claims.username.clone(),
-            email: claims.claims.email.clone(),
+            id: claims.sub.clone(),
+            username: claims.username.clone(),
+            email: user_email,
             display_name: None,
             disabled: false,
             password_hash: "".to_string(),
             full_name: None,
             is_active: true,
             is_superuser: false,
-            roles: claims.claims.roles.clone(),
+            roles: user_roles,
             permissions: vec![],
-            policies: vec!["default".to_string()],
+            policies: user_policies,
             enabled: true,
             mfa_enabled: false,
             mfa_secret: None,

@@ -422,8 +422,15 @@ impl DatabaseEngine {
     }
 
     /// Revoke MongoDB credentials
-    async fn revoke_mongodb_credentials(&self, _username: &str) -> Result<(), DatabaseError> {
-        // Placeholder for MongoDB revocation
+    async fn revoke_mongodb_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // MongoDB revocation is not yet implemented. Log a warning so
+        // operators know the credential remains active on the target
+        // database and must be removed manually.
+        tracing::warn!(
+            "MongoDB credential revocation not implemented; \
+             user '{}' may still be active on the target database",
+            username
+        );
         Ok(())
     }
 
@@ -449,8 +456,15 @@ impl DatabaseEngine {
     }
 
     /// Revoke Redis credentials
-    async fn revoke_redis_credentials(&self, _username: &str) -> Result<(), DatabaseError> {
-        // Placeholder for Redis revocation
+    async fn revoke_redis_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Redis revocation is not yet implemented. Log a warning so
+        // operators know the credential remains active on the target
+        // database and must be removed manually.
+        tracing::warn!(
+            "Redis credential revocation not implemented; \
+             user '{}' may still be active on the target database",
+            username
+        );
         Ok(())
     }
 

@@ -911,14 +911,20 @@ impl AdminService {
     pub async fn update_policy_content(&self, name: &str, content: &str) -> Result<(), AdminError> {
         // Persist raw policy content to storage.
         // This is primarily for the UI to manage policy files.
+        //
+        // NOTE: Policy content is stored in metadata (plaintext) rather than
+        // in encrypted_data.  This is consistent with the pattern used by
+        // `update_config` for system configuration.  Policy definitions are
+        // access-control rules (not user secrets), so we use SecurityLevel::Internal
+        // to reflect that they are system data rather than user secrets.
         let path = format!("sys/policies/{}", name);
 
         let mut entry = secreton_storage::SecretEntry::new(
             path,
             Vec::new(), // Raw content is in metadata for easy retrieval by UI
             secreton_storage::EncryptionMetadata::default(),
-            secreton_storage::SecurityLevel::Secret,
-            uuid::Uuid::nil(),
+            secreton_storage::SecurityLevel::Internal,
+            uuid::Uuid::new_v4(),
         );
         entry.metadata.insert("content".to_string(), content.to_string());
         entry.metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
