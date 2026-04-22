@@ -913,17 +913,15 @@ impl AdminService {
         // This is primarily for the UI to manage policy files.
         let path = format!("sys/policies/{}", name);
 
-        let mut metadata = HashMap::new();
-        metadata.insert("content".to_string(), content.to_string());
-        metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
-
-        let entry = secreton_storage::SecretEntry::new(
+        let mut entry = secreton_storage::SecretEntry::new(
             path,
             Vec::new(), // Raw content is in metadata for easy retrieval by UI
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::Secret,
             uuid::Uuid::nil(),
         );
+        entry.metadata.insert("content".to_string(), content.to_string());
+        entry.metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
 
         self.storage.store(&entry).await.map_err(AdminError::Storage)?;
         Ok(())

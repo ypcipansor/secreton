@@ -1635,7 +1635,7 @@ pub async fn update_policy(
                 _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
             })?;
 
-        Ok(Json(ApiResponse::success(serde_json::to_value(PolicyResponse {
+        let response_value = serde_json::to_value(PolicyResponse {
             name: policy.name,
             rules: policy.rules,
             metadata: PolicyMetadata {
@@ -1645,7 +1645,9 @@ pub async fn update_policy(
             },
             created_at: policy.created_at,
             updated_at: policy.updated_at,
-        }).unwrap())))
+        }).map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy response: {}", e)))?;
+
+        Ok(Json(ApiResponse::success(response_value)))
     } else if let Some(content) = request.get("content").and_then(|v| v.as_str()) {
         // Only admin/root may update raw policy content
         if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {

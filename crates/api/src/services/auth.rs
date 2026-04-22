@@ -523,7 +523,7 @@ impl AuthenticationService {
                             .await;
                     }
                 }
-            } else {
+            } else if is_privileged {
                 // If MFA service is not configured but user is admin/root, this is a configuration error or security risk
                 // For now, warn but allow if strict mode isn't enforced, OR fail safe.
                 // Given the prompt "admin wajib selain password harus masukan otp", we should Fail Safe.
@@ -535,6 +535,15 @@ impl AuthenticationService {
                     }
                     .into());
                 }
+            } else {
+                // Global MFA is enabled but the MFA service is not registered.
+                // Non-privileged users should not be locked out due to a server
+                // misconfiguration — log a warning and allow them through.
+                tracing::warn!(
+                    "Global MFA enabled but MFA service not configured; \
+                     allowing non-privileged user '{}' without MFA",
+                    user.username
+                );
             }
         }
 
