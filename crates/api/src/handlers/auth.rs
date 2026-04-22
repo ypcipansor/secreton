@@ -774,10 +774,12 @@ pub async fn login(
             // Map specific auth errors to appropriate HTTP status codes.
             match e {
                 AuthError::MfaNotConfigured(_) => {
-                    // Do not include the username in the response — doing so
-                    // would confirm that the credentials are valid, enabling
-                    // credential enumeration.
-                    Err(crate::ApiError::BadRequest(
+                    // Return 401 (same as invalid credentials) to prevent
+                    // credential enumeration.  MfaNotConfigured only fires
+                    // after successful password verification, so returning a
+                    // distinct status code (e.g. 400) would confirm that the
+                    // credentials are valid.
+                    Err(crate::ApiError::Authentication(
                         "MFA not configured; please enroll in MFA before logging in".to_string(),
                     ))
                 }

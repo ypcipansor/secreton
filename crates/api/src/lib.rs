@@ -1173,10 +1173,11 @@ impl axum::response::IntoResponse for ApiError {
                 format!("Rate limit exceeded: {}", message),
             ),
             SecretonError::MfaNotConfigured { .. } => (
-                axum::http::StatusCode::BAD_REQUEST,
-                // Do not include the username — the error only fires after
-                // successful password verification, so echoing the username
-                // would confirm valid credentials and enable enumeration.
+                axum::http::StatusCode::UNAUTHORIZED,
+                // Return 401 (same as invalid credentials) to prevent
+                // credential enumeration.  MfaNotConfigured only fires after
+                // successful password verification, so a distinct status code
+                // would confirm valid credentials.
                 "MFA not configured; please enroll in MFA before logging in".to_string(),
             ),
             _ => (

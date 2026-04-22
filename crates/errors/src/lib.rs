@@ -363,7 +363,7 @@ impl SecretonError {
             SecretonError::MfaCredentialError { .. } => StatusCode::BAD_REQUEST,
             SecretonError::MfaAuthError { .. } => StatusCode::UNAUTHORIZED,
             SecretonError::MfaAlreadyConfigured { .. } => StatusCode::CONFLICT,
-            SecretonError::MfaNotConfigured { .. } => StatusCode::BAD_REQUEST,
+            SecretonError::MfaNotConfigured { .. } => StatusCode::UNAUTHORIZED,
             SecretonError::MfaCodeReused => StatusCode::BAD_REQUEST,
             SecretonError::RecoveryCodeUsed => StatusCode::BAD_REQUEST,
             SecretonError::RecoveryCodeNotFound => StatusCode::NOT_FOUND,
