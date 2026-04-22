@@ -1537,7 +1537,11 @@ pub async fn get_policy(
             Ok(Json(ApiResponse::success(value)))
         }
         Err(secret::SecretError::PolicyNotFound { .. }) => {
-            // Fall back to raw policy content (admin-only)
+            // Fall back to raw policy content (admin-only).
+            // The RBAC permission check for "sys/policies/{name}" was already
+            // performed by `state.secreton.get_policy()` above — if the user
+            // lacked read access, that call would have returned
+            // `PermissionDenied` (handled below), not `PolicyNotFound`.
             if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
                 return Err(crate::ApiError::NotFound("Policy not found".to_string()));
             }
@@ -1673,10 +1677,37 @@ pub async fn update_policy(
         }).map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy response: {}", e)))?;
 
         Ok(Json(ApiResponse::success(response_value)))
-    } else if let Some(content) = request.get("content").and_then(|v| v.as_str()) {
+    } else if request.get("content").is_some_and(|v| !v.is_null()) {
+        // Validate that 'content' is a string — non-string values (e.g.
+        // numbers, booleans, objects) are not valid policy content.
+        let content = request
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                crate::ApiError::BadRequest(
+                    "Invalid request: 'content' must be a string".to_string(),
+                )
+            })?;
+
         // Only admin/root may update raw policy content
         if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
             return Err(crate::ApiError::Authorization("Admin privileges required".to_string()));
+        }
+
+        // Enforce RBAC policy checks for the policy path, not just role
+        // membership.  This ensures that an admin whose access has been
+        // restricted via fine-grained RBAC policies cannot bypass those
+        // restrictions through the raw content update path.
+        //
+        // We attempt a read via the RBAC-checked service method.  If it
+        // returns `PermissionDenied`, propagate it.  `PolicyNotFound` is
+        // expected (the structured policy may not exist) and is fine.
+        match state.secreton.get_policy(&name, &user).await {
+            Err(secret::SecretError::PermissionDenied(msg)) => {
+                return Err(crate::ApiError::Authorization(msg));
+            }
+            // PolicyNotFound or Ok — RBAC check passed, proceed
+            _ => {}
         }
 
         state.admin.update_policy_content(&name, content).await.map_err(|e| {

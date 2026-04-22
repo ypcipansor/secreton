@@ -1580,6 +1580,15 @@ impl AuthenticationService {
         // NOTE: The failed_login_attempts counter is reset AFTER MFA
         // enforcement (below) so that failed MFA attempts still count toward
         // the lockout threshold.  This matches the order used in `login()`.
+        //
+        // Capture the stored user's ID before moving pre_auth_user into
+        // stored_user_entry.  This is used for MFA enforcement below so
+        // that we always pass a real user ID to `enforce_mfa()` instead of
+        // relying on `user_info.id` which may be `None` for external auth
+        // methods.  A nil UUID would cause `is_mfa_required` to return
+        // `false`, triggering the TOFU path and bypassing MFA for
+        // privileged users.
+        let stored_user_id: Option<String> = pre_auth_user.as_ref().map(|u| u.id.clone());
         let (policies, stored_user_entry) = match (pre_auth_user, pre_auth_entry) {
             (Some(u), Some(entry)) => (u.policies.clone(), Some((u, entry))),
             _ => (vec!["default".to_string()], None),
@@ -1600,9 +1609,31 @@ impl AuthenticationService {
         // preventing unlimited MFA brute-force.
         let is_privileged = user_roles.contains(&"admin".to_string())
             || user_roles.contains(&"root".to_string());
+
+        // Prefer the user ID loaded from storage (which is always a valid
+        // UUID) over `user_info.id` (which may be `None` for external auth
+        // providers).  An empty/nil UUID would cause `enforce_mfa` to query
+        // the MFA service for the nil UUID, get `mfa_configured = false`,
+        // and take the TOFU path — silently bypassing MFA for privileged
+        // users.
+        let effective_user_id = stored_user_id
+            .as_deref()
+            .or(user_info.id.as_deref())
+            .unwrap_or_default();
+
+        if effective_user_id.is_empty() && is_privileged {
+            // A privileged user with no resolvable user ID is a serious
+            // configuration error — deny login rather than risk an MFA
+            // bypass via the nil-UUID TOFU path.
+            return Err(AuthError::Internal(anyhow::anyhow!(
+                "Cannot enforce MFA: no valid user ID available for privileged user '{}'",
+                credentials.username
+            )));
+        }
+
         if let Err(mfa_err) = self.enforce_mfa(
             &credentials.username,
-            user_info.id.as_deref().unwrap_or_default(),
+            effective_user_id,
             is_privileged,
             global_mfa_enabled,
             credentials.mfa_code,
