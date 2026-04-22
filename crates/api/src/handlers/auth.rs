@@ -773,11 +773,10 @@ pub async fn login(
 
             // Map specific auth errors to appropriate HTTP status codes.
             match e {
-                AuthError::MfaNotConfigured(ref user) => {
-                    Err(crate::ApiError::BadRequest(format!(
-                        "MFA not configured for user '{}'; please enroll in MFA before logging in",
-                        user
-                    )))
+                AuthError::MfaNotConfigured(_) => {
+                    Err(crate::ApiError::BadRequest(
+                        "MFA not configured; please enroll in MFA before logging in".to_string(),
+                    ))
                 }
                 AuthError::MfaRequired => {
                     Err(crate::ApiError::Authentication("MFA required".to_string()))

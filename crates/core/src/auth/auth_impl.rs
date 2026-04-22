@@ -204,14 +204,18 @@ impl AuthService {
             if let Ok(Some(details)) = storage.get_user_details(&claims.username).await {
                 (details.roles, vec!["default".to_string()], details.email)
             } else {
-                (vec![], vec!["default".to_string()], None)
+                return Err(SecretonError::Authentication {
+                    message: format!("User '{}' not found during token refresh", claims.username),
+                });
             }
         } else {
             let user_store = self.user_store.read().await;
             if let Some(record) = user_store.get(&claims.username) {
                 (record.roles.clone(), record.policies.clone(), record.email.clone())
             } else {
-                (vec![], vec!["default".to_string()], None)
+                return Err(SecretonError::Authentication {
+                    message: format!("User '{}' not found during token refresh", claims.username),
+                });
             }
         };
 

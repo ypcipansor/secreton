@@ -1378,33 +1378,62 @@ impl AuthenticationService {
         &self,
         credentials: crate::services::auth::LoginRequest,
     ) -> Result<secreton_core::AuthResult, AuthError> {
+        // Load user from storage ONCE at the start so that lockout checks,
+        // failed-attempt increments, policy loading, and counter resets all
+        // operate on the same snapshot.  This eliminates the TOCTOU window
+        // that existed when the user was re-read up to 3 times, and avoids
+        // the extra storage + decryption overhead.
+        let user_path = format!("{}{}", USER_STORAGE_PREFIX, credentials.username);
+        let (mut pre_auth_user, mut pre_auth_entry) = match self.storage.get_by_path(&user_path).await {
+            Ok(Some(entry)) => {
+                let decrypted = self.crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
+                    tracing::warn!(
+                        "Failed to decrypt user '{}' during authenticate: {}",
+                        credentials.username, e
+                    );
+                    AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
+                })?;
+                let u: User = serde_json::from_slice(&decrypted).map_err(|e| {
+                    tracing::warn!(
+                        "Failed to deserialize user '{}' during authenticate: {}",
+                        credentials.username, e
+                    );
+                    AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
+                })?;
+                (Some(u), Some(entry))
+            }
+            Ok(None) => (None, None),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to load user '{}' from storage during authenticate: {}",
+                    credentials.username, e
+                );
+                return Err(AuthError::Storage(e));
+            }
+        };
+
         // Check lockout status before attempting login — mirrors the check in
         // `login()` so that locked accounts cannot authenticate through this
         // code path.
-        let user_path = format!("{}{}", USER_STORAGE_PREFIX, credentials.username);
-        if let Ok(Some(entry)) = self.storage.get_by_path(&user_path).await {
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                if let Ok(u) = serde_json::from_slice::<User>(&decrypted) {
-                    if let Some(locked_until) = u.locked_until {
-                        if locked_until > chrono::Utc::now() {
-                            if let Some(audit) = &self.audit {
-                                let _ = audit
-                                    .log_event(
-                                        crate::services::audit::SecurityEventType::AuthenticationFailure {
-                                            user: credentials.username.clone(),
-                                            method: "userpass".to_string(),
-                                            reason: "Account locked".to_string(),
-                                        },
-                                    )
-                                    .await;
-                            }
-                            return Err(AuthError::InvalidCredentials);
-                        }
+        if let Some(ref u) = pre_auth_user {
+            if let Some(locked_until) = u.locked_until {
+                if locked_until > chrono::Utc::now() {
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: credentials.username.clone(),
+                                    method: "userpass".to_string(),
+                                    reason: "Account locked".to_string(),
+                                },
+                            )
+                            .await;
                     }
-                    if u.disabled || !u.enabled || !u.is_active {
-                        return Err(AuthError::InvalidCredentials);
-                    }
+                    return Err(AuthError::InvalidCredentials);
                 }
+            }
+            if u.disabled || !u.enabled || !u.is_active {
+                return Err(AuthError::InvalidCredentials);
             }
         }
 
@@ -1429,37 +1458,34 @@ impl AuthenticationService {
             // Increment failed_login_attempts and persist — mirrors the logic
             // in `login()` so that the lockout check at the top of this method
             // actually triggers after repeated failures.
-            if let Ok(Some(entry)) = self.storage.get_by_path(&user_path).await {
-                if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                    if let Ok(mut u) = serde_json::from_slice::<User>(&decrypted) {
-                        u.failed_login_attempts += 1;
+            if let Some(ref mut u) = pre_auth_user {
+                u.failed_login_attempts += 1;
 
-                        // Max attempts check (e.g. 5), but exempt privileged
-                        // users from auto-lockout (DoS protection).
-                        if !u.is_privileged() && u.failed_login_attempts >= 5 {
-                            u.locked_until =
-                                Some(chrono::Utc::now() + chrono::Duration::minutes(15));
-                            if let Some(audit) = &self.audit {
-                                let _ = audit
-                                    .log_event(
-                                        crate::services::audit::SecurityEventType::AuthenticationFailure {
-                                            user: credentials.username.clone(),
-                                            method: "userpass".to_string(),
-                                            reason: "Account locked due to too many failed attempts"
-                                                .to_string(),
-                                        },
-                                    )
-                                    .await;
-                            }
-                        }
+                // Max attempts check (e.g. 5), but exempt privileged
+                // users from auto-lockout (DoS protection).
+                if !u.is_privileged() && u.failed_login_attempts >= 5 {
+                    u.locked_until =
+                        Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: credentials.username.clone(),
+                                    method: "userpass".to_string(),
+                                    reason: "Account locked due to too many failed attempts"
+                                        .to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                }
 
-                        // Encrypt and update user in storage
-                        if let Ok(user_data) = serde_json::to_vec(&u) {
-                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                                let mut updated_entry = entry;
-                                updated_entry.encrypted_data = encrypted;
-                                let _ = self.storage.store(&updated_entry).await;
-                            }
+                // Encrypt and update user in storage
+                if let Ok(user_data) = serde_json::to_vec(&u) {
+                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                        if let Some(mut entry) = pre_auth_entry.take() {
+                            entry.encrypted_data = encrypted;
+                            let _ = self.storage.store(&entry).await;
                         }
                     }
                 }
@@ -1480,48 +1506,17 @@ impl AuthenticationService {
 
         let user_roles = &user_info.roles;
 
-        // Load the user's actual policies from storage instead of using a
-        // hardcoded placeholder.  Fall back to ["default"] only when the user
-        // is not yet persisted (e.g. first login via external auth).
-        //
-        // Storage/crypto/parse *errors* are propagated (fail-closed) so that
-        // a transient storage outage does not silently downgrade a user's
-        // policies.  This is consistent with `refresh_token()` which also
-        // propagates storage errors.
+        // Use the user loaded at the start of the method for policies and
+        // the MFA / counter-reset logic below.  Fall back to ["default"]
+        // only when the user is not yet persisted (e.g. first login via
+        // external auth).
         //
         // NOTE: The failed_login_attempts counter is reset AFTER MFA
         // enforcement (below) so that failed MFA attempts still count toward
         // the lockout threshold.  This matches the order used in `login()`.
-        let (policies, stored_user_entry) = {
-            let user_path = format!("{}{}", USER_STORAGE_PREFIX, user_info.username);
-            match self.storage.get_by_path(&user_path).await {
-                Ok(Some(entry)) => {
-                    let decrypted = self.crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
-                        tracing::warn!(
-                            "Failed to decrypt user '{}' during authenticate: {}",
-                            user_info.username, e
-                        );
-                        AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
-                    })?;
-                    let u: User = serde_json::from_slice(&decrypted).map_err(|e| {
-                        tracing::warn!(
-                            "Failed to deserialize user '{}' during authenticate: {}",
-                            user_info.username, e
-                        );
-                        AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
-                    })?;
-
-                    (u.policies.clone(), Some((u, entry)))
-                }
-                Ok(None) => (vec!["default".to_string()], None),
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to load user '{}' from storage during authenticate: {}",
-                        user_info.username, e
-                    );
-                    return Err(AuthError::Storage(e));
-                }
-            }
+        let (policies, stored_user_entry) = match (pre_auth_user, pre_auth_entry) {
+            (Some(u), Some(entry)) => (u.policies.clone(), Some((u, entry))),
+            _ => (vec!["default".to_string()], None),
         };
 
         // Generate session ID
