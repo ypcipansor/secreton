@@ -804,7 +804,25 @@ pub async fn login(
                     tracing::error!("Crypto error during login for '{}': {}", request.username, inner);
                     Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
                 }
-                _ => Err(crate::ApiError::Authentication(e.to_string())),
+                // InvalidMfaCode only fires after successful password
+                // verification, so returning "Invalid MFA code" would
+                // confirm that the credentials are valid.  Use a generic
+                // message consistent with MfaNotConfigured handling above.
+                AuthError::InvalidMfaCode => {
+                    Err(crate::ApiError::Authentication(
+                        "Authentication failed".to_string(),
+                    ))
+                }
+                // UserNotFound / UserAlreadyExists — return a generic
+                // message to prevent user enumeration.
+                AuthError::UserNotFound | AuthError::UserAlreadyExists => {
+                    Err(crate::ApiError::Authentication(
+                        "Authentication failed".to_string(),
+                    ))
+                }
+                _ => Err(crate::ApiError::Authentication(
+                    "Authentication failed".to_string(),
+                )),
             }
         }
     }
