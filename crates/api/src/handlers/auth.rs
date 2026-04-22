@@ -168,7 +168,7 @@ mod tests {
         let claims = Claims {
             sub: "123e4567-e89b-12d3-a456-426614174000".to_string(), // valid uuid
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: Some("test@example.com".to_string()),
             roles: vec![],
             iat: chrono::Utc::now().timestamp() as usize,
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -784,7 +784,13 @@ pub async fn login(
                     ))
                 }
                 AuthError::MfaRequired => {
-                    Err(crate::ApiError::Authentication("MFA required".to_string()))
+                    // NOTE: "MFA required" implicitly confirms valid credentials
+                    // (it only fires after successful password verification).
+                    // This is an inherent limitation of two-step MFA flows — the
+                    // client needs to know when to prompt for a code.  We use a
+                    // dedicated SecretonError variant so the HTTP layer returns
+                    // the correct 401 status with the MFA-specific message.
+                    Err(crate::ApiError(secreton_errors::SecretonError::MfaRequired))
                 }
                 AuthError::Internal(ref inner) => {
                     tracing::error!("Internal error during login for '{}': {}", request.username, inner);

@@ -601,6 +601,11 @@ pub struct HashResponse {
 /// Policy models
 #[derive(Debug, Deserialize)]
 pub struct CreatePolicyRequest {
+    /// Policy name.  For the `create_policy` endpoint this is required and
+    /// must match the URL path parameter.  For the `update_policy` endpoint
+    /// the name comes from the URL path, so this field is optional (ignored
+    /// when present).
+    #[serde(default)]
     pub name: String,
     pub rules: Vec<String>,
     pub metadata: Option<PolicyMetadata>,

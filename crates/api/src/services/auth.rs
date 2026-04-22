@@ -36,6 +36,11 @@ pub struct ApiLoginRequest {
 }
 
 /// JWT Claims structure
+///
+/// NOTE: The `email` field is `Option<String>` to match the canonical
+/// `secreton_auth::jwt::Claims` struct.  Tokens created with
+/// `email: None` serialize as `"email": null`; using a bare `String`
+/// here would cause deserialization to fail for those tokens.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     /// Subject (user ID)
@@ -43,7 +48,7 @@ pub struct Claims {
     /// Username
     pub username: String,
     /// Email
-    pub email: String,
+    pub email: Option<String>,
     /// Roles
     pub roles: Vec<String>,
     /// Issued at
@@ -1391,7 +1396,7 @@ impl AuthenticationService {
         let claims = Claims {
             sub: user.id.clone(),
             username: user.username.clone(),
-            email: user.email.clone().unwrap_or_default(),
+            email: user.email.clone(),
             roles: user.roles.clone(),
             iat: now.timestamp() as usize,
             exp: exp.timestamp() as usize,
