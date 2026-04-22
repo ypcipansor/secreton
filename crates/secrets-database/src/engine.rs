@@ -221,7 +221,8 @@ impl DatabaseEngine {
         // In PostgreSQL, we drop the user.
         // We use DROP USER IF EXISTS to avoid errors if already gone.
         // Also need to handle active connections if necessary, but simple drop usually works if no dependencies.
-        let revoke_sql = format!("DROP USER IF EXISTS \"{}\"", username);
+        let safe_username = username.replace('"', "\"\"");
+        let revoke_sql = format!("DROP USER IF EXISTS \"{}\"", safe_username);
 
         let params: &[&(dyn ToSql + Sync)] = &[];
         client
@@ -322,7 +323,8 @@ impl DatabaseEngine {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
         })?;
 
-        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
+        let safe_username = username.replace('\'', "''");
+        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", safe_username);
 
         use mysql_async::prelude::Queryable;
         conn.query_drop(revoke_sql).await.map_err(|e| {

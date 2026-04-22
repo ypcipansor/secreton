@@ -589,10 +589,16 @@ impl AuthenticationService {
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
-        // Create token pair with session binding
+        // Create token pair with session binding, using the dynamic timeout so
+        // that the JWT `exp` claim stays in sync with the session `expires_at`.
+        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
+            session_timeout_secs,
+        ))
+        .unwrap_or(chrono::Duration::hours(1));
+
         let token_pair = self
             .token_service
-            .create_token_pair(
+            .create_token_pair_with_duration(
                 &user.id,
                 &user.username,
                 user.email.as_deref(), // Convert Option<&String> to Option<&str>
@@ -600,6 +606,7 @@ impl AuthenticationService {
                 &user.policies, // Use user.policies which we just created
                 false,          // MFA status from auth result
                 Some(session_id.clone()),
+                Some(session_duration),
             )
             .map_err(|e| secreton_errors::SecretonError::Authentication {
                 message: e.to_string(),
@@ -734,9 +741,23 @@ impl AuthenticationService {
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
+        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
+            session_timeout_secs,
+        ))
+        .unwrap_or(chrono::Duration::hours(1));
+
         let token_pair = self
             .token_service
-            .refresh_access_token(refresh_token, Some(session_id.clone()))
+            .create_token_pair_with_duration(
+                &claims.sub,
+                &claims.username,
+                None,  // Email not stored in refresh token
+                &[],   // Roles not stored in refresh token (should be fetched from user data)
+                &[],   // Policies not stored in refresh token (should be fetched from user data)
+                false, // MFA status should be checked separately
+                Some(session_id.clone()),
+                Some(session_duration),
+            )
             .map_err(|_| AuthError::InvalidToken)?;
 
         // Store session
@@ -1064,9 +1085,14 @@ impl AuthenticationService {
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
+        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
+            session_timeout_secs,
+        ))
+        .unwrap_or(chrono::Duration::hours(1));
+
         let token = self
             .token_service
-            .create_access_token(
+            .create_access_token_with_duration(
                 &user.id,
                 &user.username,
                 user.email.as_deref(),
@@ -1074,6 +1100,7 @@ impl AuthenticationService {
                 &user.policies,
                 false, // MFA not required for simple token generation
                 Some(session_id.clone()),
+                Some(session_duration),
             )
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Token generation failed: {}", e)))?;
 
@@ -1188,10 +1215,19 @@ impl AuthenticationService {
         // Get effective config for session timeout
         let (session_timeout_secs, _) = self.get_effective_config().await;
 
-        // Generate tokens with session binding
+        // Store session
+        let now = chrono::Utc::now();
+        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
+            session_timeout_secs,
+        ))
+        .unwrap_or(chrono::Duration::hours(1));
+        let expires_at = now + session_duration;
+
+        // Generate tokens with session binding, using the dynamic timeout so
+        // that the JWT `exp` claim stays in sync with the session `expires_at`.
         let token_pair = self
             .token_service
-            .create_token_pair(
+            .create_token_pair_with_duration(
                 user_info.id.as_deref().unwrap_or_default(),
                 &user_info.username,
                 user_info.email.as_deref(),
@@ -1199,16 +1235,9 @@ impl AuthenticationService {
                 &policies,
                 result.mfa_required,
                 Some(session_id.clone()),
+                Some(session_duration),
             )
             .map_err(|_| AuthError::Internal(anyhow::anyhow!("Token generation failed")))?;
-
-        // Store session
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(
-                session_timeout_secs,
-            ))
-            .unwrap_or(chrono::Duration::hours(1));
 
         let session = Session {
             id: session_id.clone(),
