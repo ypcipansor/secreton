@@ -771,8 +771,7 @@ pub async fn login(
                 })
                 .await;
 
-            // Map MfaNotConfigured to HTTP 400 (consistent with the login()
-            // code path which returns SecretonError::MfaNotConfigured).
+            // Map specific auth errors to appropriate HTTP status codes.
             match e {
                 AuthError::MfaNotConfigured(ref user) => {
                     Err(crate::ApiError::BadRequest(format!(
@@ -782,6 +781,9 @@ pub async fn login(
                 }
                 AuthError::MfaRequired => {
                     Err(crate::ApiError::Authentication("MFA required".to_string()))
+                }
+                AuthError::Internal(ref inner) => {
+                    Err(crate::ApiError::Internal(inner.to_string()))
                 }
                 _ => Err(crate::ApiError::Authentication(e.to_string())),
             }
