@@ -82,6 +82,9 @@ pub enum AuthError {
     #[error("Invalid MFA code")]
     InvalidMfaCode,
 
+    #[error("MFA not configured for user '{0}'; please enroll in MFA before logging in")]
+    MfaNotConfigured(String),
+
     #[error("Permission denied")]
     PermissionDenied,
 
@@ -1429,10 +1432,9 @@ impl AuthenticationService {
                             )
                             .await;
                     }
-                    return Err(AuthError::Internal(anyhow::anyhow!(
-                        "MFA not configured for user '{}'; please enroll in MFA before logging in",
-                        credentials.username
-                    )));
+                    return Err(AuthError::MfaNotConfigured(
+                        credentials.username.clone(),
+                    ));
                 }
             } else if is_privileged {
                 return Err(AuthError::Internal(anyhow::anyhow!(

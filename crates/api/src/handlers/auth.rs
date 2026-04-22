@@ -763,7 +763,20 @@ pub async fn login(
                 })
                 .await;
 
-            Err(crate::ApiError::Authentication(e.to_string()))
+            // Map MfaNotConfigured to HTTP 400 (consistent with the login()
+            // code path which returns SecretonError::MfaNotConfigured).
+            match e {
+                AuthError::MfaNotConfigured(ref user) => {
+                    Err(crate::ApiError::BadRequest(format!(
+                        "MFA not configured for user '{}'; please enroll in MFA before logging in",
+                        user
+                    )))
+                }
+                AuthError::MfaRequired => {
+                    Err(crate::ApiError::Authentication("MFA required".to_string()))
+                }
+                _ => Err(crate::ApiError::Authentication(e.to_string())),
+            }
         }
     }
 }
