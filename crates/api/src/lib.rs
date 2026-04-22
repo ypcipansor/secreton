@@ -1168,7 +1168,7 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::FORBIDDEN,
                 format!("Password expired: {}", username),
             ),
-            SecretonError::RateLimitExceeded { message } => (
+            SecretonError::RateLimitExceeded { ref message } => (
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 format!("Rate limit exceeded: {}", message),
             ),

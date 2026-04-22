@@ -243,7 +243,8 @@ impl AuthenticationService {
                     match serde_json::from_str::<serde_json::Value>(config_data) {
                         Ok(config) => {
                             if let Some(v) = config.get("password_policy_min_length").and_then(|v| v.as_u64()) {
-                                policy.min_length = v as usize;
+                                // Clamp to usize::MAX to avoid silent truncation on 32-bit platforms.
+                                policy.min_length = usize::try_from(v).unwrap_or(usize::MAX);
                             }
                             if let Some(v) = config.get("password_policy_require_uppercase").and_then(|v| v.as_bool()) {
                                 policy.require_uppercase = v;
@@ -746,7 +747,11 @@ impl AuthenticationService {
             return Err(AuthError::InvalidToken);
         }
 
-        // Convert claims to User (simplified)
+        // Convert claims to User — use the roles AND policies embedded in the
+        // JWT so that authorization checks after token validation see the same
+        // claims the token was issued with.  Previously `policies` was hardcoded
+        // to `["default"]`, which stripped any non-default policies the user had
+        // at login time.
         Ok(User {
             id: claims.claims.sub,
             username: claims.claims.username.clone(),
@@ -757,7 +762,7 @@ impl AuthenticationService {
             is_superuser: false,
             roles: claims.claims.roles.clone(),
             permissions: vec![],
-            policies: vec!["default".to_string()],
+            policies: claims.claims.policies.clone(),
             enabled: true,
             disabled: false,
             display_name: None,
@@ -1322,7 +1327,27 @@ impl AuthenticationService {
             .ok_or(AuthError::Internal(anyhow::anyhow!("No user info")))?;
 
         let user_roles = &user_info.roles;
-        let policies = vec!["default".to_string()]; // Placeholder policies
+
+        // Try to load the user's actual policies from storage instead of
+        // using a hardcoded placeholder.  Fall back to ["default"] if the
+        // user is not yet persisted (e.g. first login via external auth).
+        let policies = {
+            let user_path = format!("{}{}", USER_STORAGE_PREFIX, user_info.username);
+            match self.storage.get_by_path(&user_path).await {
+                Ok(Some(entry)) => {
+                    match self.crypto.decrypt(&entry.encrypted_data).await {
+                        Ok(decrypted) => {
+                            match serde_json::from_slice::<User>(&decrypted) {
+                                Ok(u) => u.policies,
+                                Err(_) => vec!["default".to_string()],
+                            }
+                        }
+                        Err(_) => vec!["default".to_string()],
+                    }
+                }
+                _ => vec!["default".to_string()],
+            }
+        };
 
         // Generate session ID
         let session_id = Uuid::new_v4().to_string();

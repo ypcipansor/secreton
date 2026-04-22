@@ -222,6 +222,10 @@ impl DatabaseEngine {
         // before dropping the user. Without this, DROP USER fails with
         // "role cannot be dropped because some objects depend on it" when the
         // role SQL used during credential generation contained GRANT statements.
+        //
+        // All three statements are wrapped in a transaction so that a failure
+        // in any step rolls back the previous ones, preventing a partially
+        // cleaned-up state (e.g. objects reassigned but user not dropped).
         let safe_username = username.replace('"', "\"\"");
         let reassign_sql = format!("REASSIGN OWNED BY \"{}\" TO CURRENT_USER", safe_username);
         let drop_owned_sql = format!("DROP OWNED BY \"{}\"", safe_username);
@@ -230,19 +234,43 @@ impl DatabaseEngine {
         let params: &[&(dyn ToSql + Sync)] = &[];
 
         client
-            .execute(&reassign_sql, params)
+            .execute("BEGIN", params)
             .await
-            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
-        client
-            .execute(&drop_owned_sql, params)
-            .await
-            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
-        client
-            .execute(&drop_user_sql, params)
-            .await
-            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
-        Ok(())
+        let result = async {
+            client
+                .execute(&reassign_sql, params)
+                .await
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
+            client
+                .execute(&drop_owned_sql, params)
+                .await
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+            client
+                .execute(&drop_user_sql, params)
+                .await
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
+            Ok::<(), DatabaseError>(())
+        }
+        .await;
+
+        match result {
+            Ok(()) => {
+                client
+                    .execute("COMMIT", params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
+                Ok(())
+            }
+            Err(e) => {
+                // Best-effort rollback — if this fails the connection will be
+                // returned to the pool in an aborted transaction state, which
+                // deadpool-postgres handles via its recycling method.
+                let _ = client.execute("ROLLBACK", params).await;
+                Err(e)
+            }
+        }
     }
 
     /// Generate PostgreSQL credentials
@@ -335,7 +363,7 @@ impl DatabaseEngine {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
         })?;
 
-        let safe_username = username.replace('\'', "''");
+        let safe_username = username.replace('\\', "\\\\").replace('\'', "''");
         let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", safe_username);
 
         use mysql_async::prelude::Queryable;

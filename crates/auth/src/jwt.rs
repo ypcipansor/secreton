@@ -390,7 +390,17 @@ impl JwtTokenService {
         Ok(token_data.claims)
     }
 
-    /// Refresh access token using refresh token
+    /// Refresh access token using refresh token.
+    ///
+    /// **Deprecated**: This method creates tokens with empty roles and policies
+    /// because refresh tokens do not carry those claims.  Callers should load
+    /// the user from storage and call `create_token_pair_with_duration` with
+    /// the current roles/policies instead.  See `AuthenticationService::refresh_token`
+    /// for the correct pattern.
+    #[deprecated(
+        since = "2.1.0",
+        note = "produces tokens with empty roles/policies; use create_token_pair_with_duration after loading user from storage"
+    )]
     pub fn refresh_access_token(
         &self,
         refresh_token: &str,
