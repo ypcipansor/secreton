@@ -633,7 +633,7 @@ impl AuthenticationService {
         // Delegates to the shared `enforce_mfa()` helper so that `login()` and
         // `authenticate()` use identical enforcement logic.
         let is_privileged = user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string());
-        self.enforce_mfa(
+        if let Err(mfa_err) = self.enforce_mfa(
             &req.username,
             &user.id,
             is_privileged,
@@ -641,23 +641,60 @@ impl AuthenticationService {
             req.mfa_code.clone(),
         )
         .await
-        .map_err(|e| match e {
-            AuthError::MfaRequired => secreton_errors::SecretonError::MfaRequired,
-            AuthError::MfaNotConfigured(ref user) => {
-                secreton_errors::SecretonError::MfaNotConfigured {
-                    user: user.clone(),
+        {
+            // Increment failed_login_attempts on MFA failure so that the
+            // lockout mechanism also covers MFA brute-force attempts.
+            // Without this, an attacker who knows the password could try
+            // unlimited MFA codes without ever triggering account lockout.
+            if matches!(mfa_err, AuthError::InvalidMfaCode | AuthError::MfaRequired | AuthError::MfaNotConfigured(_)) {
+                user.failed_login_attempts += 1;
+
+                if !user.is_privileged() && user.failed_login_attempts >= 5 {
+                    user.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                    user: req.username.clone(),
+                                    method: "mfa".to_string(),
+                                    reason: "Account locked due to too many failed attempts"
+                                        .to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                }
+
+                // Persist the updated counter
+                if let Ok(user_data) = serde_json::to_vec(&user) {
+                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                        if let Some(mut entry) = user_entry {
+                            entry.encrypted_data = encrypted;
+                            let _ = self.storage.store(&entry).await;
+                        }
+                    }
                 }
             }
-            AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
-                message: "Invalid MFA code".to_string(),
-            },
-            AuthError::Internal(ref inner) => secreton_errors::SecretonError::Configuration {
-                message: inner.to_string(),
-            },
-            other => secreton_errors::SecretonError::Authentication {
-                message: other.to_string(),
-            },
-        })?;
+
+            return Err(match mfa_err {
+                AuthError::MfaRequired => secreton_errors::SecretonError::MfaRequired,
+                AuthError::MfaNotConfigured(ref user) => {
+                    secreton_errors::SecretonError::MfaNotConfigured {
+                        user: user.clone(),
+                    }
+                }
+                AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
+                    message: "Invalid MFA code".to_string(),
+                },
+                AuthError::Internal(ref inner) => secreton_errors::SecretonError::Configuration {
+                    message: inner.to_string(),
+                },
+                other => secreton_errors::SecretonError::Authentication {
+                    message: other.to_string(),
+                },
+            }
+            .into());
+        }
 
         // Reset failed login attempts on success
         // Also ensure user is persisted if it didn't exist (new user)
@@ -1502,14 +1539,53 @@ impl AuthenticationService {
         // preventing unlimited MFA brute-force.
         let is_privileged = user_roles.contains(&"admin".to_string())
             || user_roles.contains(&"root".to_string());
-        self.enforce_mfa(
+        if let Err(mfa_err) = self.enforce_mfa(
             &credentials.username,
             user_info.id.as_deref().unwrap_or_default(),
             is_privileged,
             global_mfa_enabled,
             credentials.mfa_code,
         )
-        .await?;
+        .await
+        {
+            // Increment failed_login_attempts on MFA failure so that the
+            // lockout mechanism also covers MFA brute-force attempts.
+            // Without this, an attacker who knows the password could try
+            // unlimited MFA codes without ever triggering account lockout.
+            if matches!(mfa_err, AuthError::InvalidMfaCode | AuthError::MfaRequired | AuthError::MfaNotConfigured(_)) {
+                if let Some((mut u, entry)) = stored_user_entry {
+                    u.failed_login_attempts += 1;
+
+                    if !u.is_privileged() && u.failed_login_attempts >= 5 {
+                        u.locked_until =
+                            Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                        if let Some(audit) = &self.audit {
+                            let _ = audit
+                                .log_event(
+                                    crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                        user: credentials.username.clone(),
+                                        method: "mfa".to_string(),
+                                        reason: "Account locked due to too many failed attempts"
+                                            .to_string(),
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+
+                    // Persist the updated counter
+                    if let Ok(user_data) = serde_json::to_vec(&u) {
+                        if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                            let mut updated_entry = entry;
+                            updated_entry.encrypted_data = encrypted;
+                            let _ = self.storage.store(&updated_entry).await;
+                        }
+                    }
+                }
+            }
+
+            return Err(mfa_err);
+        }
 
         // Reset failed login attempts on success — mirrors the logic in
         // `login()` so that the counter does not accumulate across
