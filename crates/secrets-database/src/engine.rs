@@ -423,15 +423,15 @@ impl DatabaseEngine {
 
     /// Revoke MongoDB credentials
     async fn revoke_mongodb_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // MongoDB revocation is not yet implemented. Return an error so
-        // the caller does NOT delete the lease tracking record — the
-        // operator can then manually remove the credential and retry.
+        // MongoDB revocation is not yet implemented. Return a dedicated
+        // error so the caller can distinguish "not implemented" from a
+        // real failure and decide whether to delete the lease record.
         tracing::warn!(
             "MongoDB credential revocation not implemented; \
              user '{}' may still be active on the target database",
             username
         );
-        Err(DatabaseError::QueryFailed(format!(
+        Err(DatabaseError::RevocationNotImplemented(format!(
             "MongoDB credential revocation not implemented; \
              user '{}' must be removed manually",
             username
@@ -461,15 +461,15 @@ impl DatabaseEngine {
 
     /// Revoke Redis credentials
     async fn revoke_redis_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // Redis revocation is not yet implemented. Return an error so
-        // the caller does NOT delete the lease tracking record — the
-        // operator can then manually remove the credential and retry.
+        // Redis revocation is not yet implemented. Return a dedicated
+        // error so the caller can distinguish "not implemented" from a
+        // real failure and decide whether to delete the lease record.
         tracing::warn!(
             "Redis credential revocation not implemented; \
              user '{}' may still be active on the target database",
             username
         );
-        Err(DatabaseError::QueryFailed(format!(
+        Err(DatabaseError::RevocationNotImplemented(format!(
             "Redis credential revocation not implemented; \
              user '{}' must be removed manually",
             username
