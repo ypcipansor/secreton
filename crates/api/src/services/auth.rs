@@ -518,9 +518,25 @@ impl AuthenticationService {
             .into());
         }
 
-        // Check lockout status before attempting login
+        // Check lockout status before attempting login.
+        // Propagate storage errors so that a transient failure does not
+        // silently skip the lockout check (which would allow a locked-out
+        // user to authenticate).  This mirrors the fail-closed approach
+        // used in `authenticate()`.
         let user_path = format!("{}{}", USER_STORAGE_PREFIX, req.username);
-        let user_entry = self.storage.get_by_path(&user_path).await.ok().flatten();
+        let user_entry = match self.storage.get_by_path(&user_path).await {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to load user '{}' from storage during login: {}",
+                    req.username, e
+                );
+                return Err(secreton_errors::SecretonError::Internal {
+                    message: "An internal error occurred during authentication".to_string(),
+                }
+                .into());
+            }
+        };
         let mut stored_user: Option<User> = None;
 
         if let Some(ref entry) = user_entry {
@@ -542,6 +558,14 @@ impl AuthenticationService {
                             }
                             .into());
                         }
+                    }
+
+                    // Also check disabled/inactive status — mirrors authenticate()
+                    if u.disabled || !u.enabled || !u.is_active {
+                        return Err(secreton_errors::SecretonError::Authentication {
+                            message: "Invalid credentials".to_string(),
+                        }
+                        .into());
                     }
                 }
             }
@@ -1212,12 +1236,9 @@ impl AuthenticationService {
 
         let mut sessions = Vec::new();
         for entry in entries {
+            // Session data is currently stored as plaintext JSON in
+            // encrypted_data (no actual encryption for sessions yet).
             if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
-                if session.user_id == user_id {
-                    sessions.push(session);
-                }
-            } else if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
-                // Fallback? encrypted_data is actually plaintext in current impl since no crypto used for sessions yet
                 if session.user_id == user_id {
                     sessions.push(session);
                 }

@@ -202,11 +202,17 @@ impl AuthService {
         // because refresh tokens don't carry those claims.
         let (roles, policies, email) = if let Some(storage) = &self.storage {
             if let Ok(Some(details)) = storage.get_user_details(&claims.username).await {
-                // `UserInfo` from the storage trait does not carry policies,
-                // so we fall back to ["default"] for the storage-backed path.
-                // The in-memory path below uses `record.policies` which does
-                // have the real values.
-                (details.roles, vec!["default".to_string()], details.email)
+                // `UserInfo` from the storage trait does not carry policies.
+                // Try to read them from the in-memory store first (which has
+                // the real values); fall back to ["default"] only when the
+                // user is not in the in-memory cache.
+                let user_policies = {
+                    let user_store = self.user_store.read().await;
+                    user_store.get(&claims.username)
+                        .map(|r| r.policies.clone())
+                        .unwrap_or_else(|| vec!["default".to_string()])
+                };
+                (details.roles, user_policies, details.email)
             } else {
                 return Err(SecretonError::Authentication {
                     message: format!("User '{}' not found during token refresh", claims.username),

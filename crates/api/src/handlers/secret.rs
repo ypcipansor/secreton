@@ -1615,6 +1615,15 @@ pub async fn update_policy(
     // 2. Raw content update for UI/system-config (if 'content' is present)
 
     if request.get("rules").is_some_and(|v| !v.is_null()) {
+        // If both 'rules' and 'content' are present, 'rules' takes precedence.
+        // Log a warning so operators can spot unintentional data loss.
+        if request.get("content").is_some_and(|v| !v.is_null()) {
+            tracing::warn!(
+                "update_policy '{}': request contains both 'rules' and 'content'; \
+                 only 'rules' will be processed (raw content is ignored)",
+                name
+            );
+        }
         let req: CreatePolicyRequest = serde_json::from_value(request)
             .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
 
