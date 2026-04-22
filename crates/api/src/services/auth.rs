@@ -1384,6 +1384,45 @@ impl AuthenticationService {
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Auth failed: {}", e)))?;
 
         if !result.success {
+            // Increment failed_login_attempts and persist — mirrors the logic
+            // in `login()` so that the lockout check at the top of this method
+            // actually triggers after repeated failures.
+            if let Ok(Some(entry)) = self.storage.get_by_path(&user_path).await {
+                if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                    if let Ok(mut u) = serde_json::from_slice::<User>(&decrypted) {
+                        u.failed_login_attempts += 1;
+
+                        // Max attempts check (e.g. 5), but exempt privileged
+                        // users from auto-lockout (DoS protection).
+                        if !u.is_privileged() && u.failed_login_attempts >= 5 {
+                            u.locked_until =
+                                Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                            if let Some(audit) = &self.audit {
+                                let _ = audit
+                                    .log_event(
+                                        crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                            user: credentials.username.clone(),
+                                            method: "userpass".to_string(),
+                                            reason: "Account locked due to too many failed attempts"
+                                                .to_string(),
+                                        },
+                                    )
+                                    .await;
+                            }
+                        }
+
+                        // Encrypt and update user in storage
+                        if let Ok(user_data) = serde_json::to_vec(&u) {
+                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                                let mut updated_entry = entry;
+                                updated_entry.encrypted_data = encrypted;
+                                let _ = self.storage.store(&updated_entry).await;
+                            }
+                        }
+                    }
+                }
+            }
+
             return Err(AuthError::InvalidCredentials);
         }
 
