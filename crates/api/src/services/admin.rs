@@ -912,24 +912,66 @@ impl AdminService {
         // Persist raw policy content to storage.
         // This is primarily for the UI to manage policy files.
         //
-        // NOTE: Policy content is stored in metadata (plaintext) rather than
-        // in encrypted_data.  This is consistent with the pattern used by
-        // `update_config` for system configuration.  Policy definitions are
-        // access-control rules (not user secrets), so we use SecurityLevel::Internal
-        // to reflect that they are system data rather than user secrets.
-        let path = format!("sys/policies/{}", name);
+        // Use a separate path namespace (`sys/policies/content/`) so that raw
+        // content entries never collide with the structured policies stored by
+        // `SecretService::_upsert_policy` at `sys/policies/{name}`.
+        //
+        // When a CryptoService is available the content is encrypted into
+        // `encrypted_data` so that policy definitions (which may reveal the
+        // security posture) are not stored as plaintext.  When crypto is not
+        // configured we fall back to storing in metadata, consistent with
+        // `update_config`.
+        let path = format!("sys/policies/content/{}", name);
+
+        // Preserve the existing entry's id so that storage backends that index
+        // by UUID perform an upsert rather than creating orphan rows.
+        let existing = self.storage.get_by_path(&path).await.ok().flatten();
+        let entry_id = existing.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let version = existing.as_ref().map(|e| e.version + 1).unwrap_or(1);
+
+        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
+            let enc = crypto.encrypt_data(content.as_bytes()).await.map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!("Failed to encrypt policy content: {}", e))
+            })?;
+            (
+                enc,
+                secreton_storage::EncryptionMetadata {
+                    algorithm: "encrypted".to_string(),
+                    key_id: "active".to_string(),
+                    iv: Vec::new(),
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
+        } else {
+            (Vec::new(), secreton_storage::EncryptionMetadata::default())
+        };
 
         let mut entry = secreton_storage::SecretEntry::new(
             path,
-            Vec::new(), // Raw content is in metadata for easy retrieval by UI
-            secreton_storage::EncryptionMetadata::default(),
+            encrypted_data,
+            encryption_metadata,
             secreton_storage::SecurityLevel::Internal,
-            uuid::Uuid::new_v4(),
+            uuid::Uuid::nil(), // system-owned
         );
-        entry.metadata.insert("content".to_string(), content.to_string());
+        entry.id = entry_id;
+        entry.created_at = created_at;
+        entry.version = version;
         entry.metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
 
-        self.storage.store(&entry).await.map_err(AdminError::Storage)?;
+        // When crypto is not available, store the raw content in metadata as a
+        // fallback so the UI can still retrieve it.
+        if self.crypto.is_none() {
+            entry.metadata.insert("content".to_string(), content.to_string());
+        }
+
+        if existing.is_some() {
+            self.storage.update(&entry).await.map_err(AdminError::Storage)?;
+        } else {
+            self.storage.store(&entry).await.map_err(AdminError::Storage)?;
+        }
         Ok(())
     }
 

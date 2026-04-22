@@ -423,15 +423,19 @@ impl DatabaseEngine {
 
     /// Revoke MongoDB credentials
     async fn revoke_mongodb_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // MongoDB revocation is not yet implemented. Log a warning so
-        // operators know the credential remains active on the target
-        // database and must be removed manually.
+        // MongoDB revocation is not yet implemented. Return an error so
+        // the caller does NOT delete the lease tracking record — the
+        // operator can then manually remove the credential and retry.
         tracing::warn!(
             "MongoDB credential revocation not implemented; \
              user '{}' may still be active on the target database",
             username
         );
-        Ok(())
+        Err(DatabaseError::QueryFailed(format!(
+            "MongoDB credential revocation not implemented; \
+             user '{}' must be removed manually",
+            username
+        )))
     }
 
     /// Generate MongoDB credentials
@@ -457,15 +461,19 @@ impl DatabaseEngine {
 
     /// Revoke Redis credentials
     async fn revoke_redis_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // Redis revocation is not yet implemented. Log a warning so
-        // operators know the credential remains active on the target
-        // database and must be removed manually.
+        // Redis revocation is not yet implemented. Return an error so
+        // the caller does NOT delete the lease tracking record — the
+        // operator can then manually remove the credential and retry.
         tracing::warn!(
             "Redis credential revocation not implemented; \
              user '{}' may still be active on the target database",
             username
         );
-        Ok(())
+        Err(DatabaseError::QueryFailed(format!(
+            "Redis credential revocation not implemented; \
+             user '{}' must be removed manually",
+            username
+        )))
     }
 
     /// Generate Redis credentials
