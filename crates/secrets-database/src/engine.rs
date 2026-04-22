@@ -218,15 +218,27 @@ impl DatabaseEngine {
             DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {}", e))
         })?;
 
-        // In PostgreSQL, we drop the user.
-        // We use DROP USER IF EXISTS to avoid errors if already gone.
-        // Also need to handle active connections if necessary, but simple drop usually works if no dependencies.
+        // In PostgreSQL, we must reassign owned objects and revoke all privileges
+        // before dropping the user. Without this, DROP USER fails with
+        // "role cannot be dropped because some objects depend on it" when the
+        // role SQL used during credential generation contained GRANT statements.
         let safe_username = username.replace('"', "\"\"");
-        let revoke_sql = format!("DROP USER IF EXISTS \"{}\"", safe_username);
+        let reassign_sql = format!("REASSIGN OWNED BY \"{}\" TO CURRENT_USER", safe_username);
+        let drop_owned_sql = format!("DROP OWNED BY \"{}\"", safe_username);
+        let drop_user_sql = format!("DROP USER IF EXISTS \"{}\"", safe_username);
 
         let params: &[&(dyn ToSql + Sync)] = &[];
+
         client
-            .execute(&revoke_sql, params)
+            .execute(&reassign_sql, params)
+            .await
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
+        client
+            .execute(&drop_owned_sql, params)
+            .await
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+        client
+            .execute(&drop_user_sql, params)
             .await
             .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
 

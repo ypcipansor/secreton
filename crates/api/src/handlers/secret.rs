@@ -1603,7 +1603,7 @@ pub async fn update_policy(
     // 1. Structured policy update (if 'rules' is present)
     // 2. Raw content update for UI/system-config (if 'content' is present)
 
-    if request.get("rules").is_some() {
+    if request.get("rules").is_some_and(|v| !v.is_null()) {
         let req: CreatePolicyRequest = serde_json::from_value(request)
             .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
 
