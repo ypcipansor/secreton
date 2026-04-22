@@ -189,9 +189,44 @@ impl AuthService {
 
     /// Refresh an access token using a refresh token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, SecretonError> {
+        // Validate the refresh token to extract the user's identity.
+        let claims = self
+            .token_service
+            .validate_refresh_token(refresh_token)
+            .map_err(|e| SecretonError::Authentication {
+                message: format!("Token refresh failed: {}", e),
+            })?;
+
+        // Load the user's current roles, policies, and email.  The deprecated
+        // `refresh_access_token` produced tokens with empty roles/policies
+        // because refresh tokens don't carry those claims.
+        let (roles, policies, email) = if let Some(storage) = &self.storage {
+            if let Ok(Some(details)) = storage.get_user_details(&claims.username).await {
+                (details.roles, vec!["default".to_string()], details.email)
+            } else {
+                (vec![], vec!["default".to_string()], None)
+            }
+        } else {
+            let user_store = self.user_store.read().await;
+            if let Some(record) = user_store.get(&claims.username) {
+                (record.roles.clone(), record.policies.clone(), record.email.clone())
+            } else {
+                (vec![], vec!["default".to_string()], None)
+            }
+        };
+
         let token_pair = self
             .token_service
-            .refresh_access_token(refresh_token, None)
+            .create_token_pair_with_duration(
+                &claims.sub,
+                &claims.username,
+                email.as_deref(),
+                &roles,
+                &policies,
+                false,
+                None,
+                None,
+            )
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token refresh failed: {}", e),
             })?;

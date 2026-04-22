@@ -1308,10 +1308,44 @@ impl AuthenticationService {
         &self,
         credentials: crate::services::auth::LoginRequest,
     ) -> Result<secreton_core::AuthResult, AuthError> {
+        // Check lockout status before attempting login — mirrors the check in
+        // `login()` so that locked accounts cannot authenticate through this
+        // code path.
+        let user_path = format!("{}{}", USER_STORAGE_PREFIX, credentials.username);
+        if let Ok(Some(entry)) = self.storage.get_by_path(&user_path).await {
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
+                if let Ok(u) = serde_json::from_slice::<User>(&decrypted) {
+                    if let Some(locked_until) = u.locked_until {
+                        if locked_until > chrono::Utc::now() {
+                            if let Some(audit) = &self.audit {
+                                let _ = audit
+                                    .log_event(
+                                        crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                            user: credentials.username.clone(),
+                                            method: "userpass".to_string(),
+                                            reason: "Account locked".to_string(),
+                                        },
+                                    )
+                                    .await;
+                            }
+                            return Err(AuthError::InvalidCredentials);
+                        }
+                    }
+                    if u.disabled || !u.enabled || !u.is_active {
+                        return Err(AuthError::InvalidCredentials);
+                    }
+                }
+            }
+        }
+
+        // Do NOT pass mfa_code to auth_service.login() — MFA is validated
+        // explicitly below.  Passing it here could cause double-validation
+        // issues if the underlying auth service ever starts consuming TOTP
+        // codes (which are single-use).
         let request = secreton_auth::LoginRequest {
             username: credentials.username.clone(),
             password: credentials.password,
-            mfa_code: credentials.mfa_code.clone(),
+            mfa_code: None,
             remember_me: credentials.remember_me,
         };
 
@@ -1340,6 +1374,8 @@ impl AuthenticationService {
         // Try to load the user's actual policies from storage instead of
         // using a hardcoded placeholder.  Fall back to ["default"] if the
         // user is not yet persisted (e.g. first login via external auth).
+        // Log warnings on storage/crypto/parse failures so operators can
+        // diagnose silent policy downgrades.
         let policies = {
             let user_path = format!("{}{}", USER_STORAGE_PREFIX, user_info.username);
             match self.storage.get_by_path(&user_path).await {
@@ -1348,13 +1384,35 @@ impl AuthenticationService {
                         Ok(decrypted) => {
                             match serde_json::from_slice::<User>(&decrypted) {
                                 Ok(u) => u.policies,
-                                Err(_) => vec!["default".to_string()],
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to deserialize user '{}' during authenticate; \
+                                         falling back to default policies: {}",
+                                        user_info.username, e
+                                    );
+                                    vec!["default".to_string()]
+                                }
                             }
                         }
-                        Err(_) => vec!["default".to_string()],
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to decrypt user '{}' during authenticate; \
+                                 falling back to default policies: {}",
+                                user_info.username, e
+                            );
+                            vec!["default".to_string()]
+                        }
                     }
                 }
-                _ => vec!["default".to_string()],
+                Ok(None) => vec!["default".to_string()],
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load user '{}' from storage during authenticate; \
+                         falling back to default policies: {}",
+                        user_info.username, e
+                    );
+                    vec!["default".to_string()]
+                }
             }
         };
 
