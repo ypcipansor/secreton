@@ -1597,55 +1597,68 @@ pub async fn update_policy(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
-    Json(request): Json<CreatePolicyRequest>,
-) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
-    // Convert metadata
-    let metadata = if let Some(meta) = &request.metadata {
-        crate::services::secret::PolicyMetadata {
-            description: meta.description.clone(),
-            tags: meta
-                .tags
-                .iter()
-                .map(|t| (t.clone(), "true".to_string()))
-                .collect(),
-            owner: meta.owner.clone(),
-            created_by: user.username.clone(),
-        }
-    } else {
-        crate::services::secret::PolicyMetadata {
-            description: None,
-            tags: std::collections::HashMap::new(),
-            owner: Some(user.username.clone()),
-            created_by: user.username.clone(),
-        }
-    };
+    Json(request): Json<serde_json::Value>,
+) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // Support two modes:
+    // 1. Structured policy update (if 'rules' is present)
+    // 2. Raw content update for UI/system-config (if 'content' is present)
 
-    // Update policy via secreton service
-    let policy = state
-        .secreton
-        .update_policy(&name, request.rules.clone(), metadata, &user)
-        .await
-        .map_err(|e| match e {
-            secret::SecretError::PolicyNotFound { .. } => {
-                crate::ApiError::NotFound("Policy not found".to_string())
+    if request.get("rules").is_some() {
+        let req: CreatePolicyRequest = serde_json::from_value(request)
+            .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
+
+        let metadata = if let Some(meta) = &req.metadata {
+            crate::services::secret::PolicyMetadata {
+                description: meta.description.clone(),
+                tags: meta.tags.iter().map(|t| (t.clone(), "true".to_string())).collect(),
+                owner: meta.owner.clone(),
+                created_by: user.username.clone(),
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
+        } else {
+            crate::services::secret::PolicyMetadata {
+                description: None,
+                tags: std::collections::HashMap::new(),
+                owner: Some(user.username.clone()),
+                created_by: user.username.clone(),
+            }
+        };
+
+        let policy = state
+            .secreton
+            .update_policy(&name, req.rules, metadata, &user)
+            .await
+            .map_err(|e| match e {
+                secret::SecretError::PolicyNotFound { .. } => {
+                    crate::ApiError::NotFound("Policy not found".to_string())
+                }
+                secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+                _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
+            })?;
+
+        Ok(Json(ApiResponse::success(serde_json::to_value(PolicyResponse {
+            name: policy.name,
+            rules: policy.rules,
+            metadata: PolicyMetadata {
+                description: policy.metadata.description,
+                tags: policy.metadata.tags.keys().cloned().collect(),
+                owner: policy.metadata.owner,
+            },
+            created_at: policy.created_at,
+            updated_at: policy.updated_at,
+        }).unwrap())))
+    } else if let Some(content) = request.get("content").and_then(|v| v.as_str()) {
+        // Only admin/root may update raw policy content
+        if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
+            return Err(crate::ApiError::Authorization("Admin privileges required".to_string()));
+        }
+
+        state.admin.update_policy_content(&name, content).await.map_err(|e| {
+            crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
         })?;
-
-    let response = PolicyResponse {
-        name: policy.name,
-        rules: policy.rules,
-        metadata: PolicyMetadata {
-            description: policy.metadata.description,
-            tags: policy.metadata.tags.keys().cloned().collect(),
-            owner: policy.metadata.owner,
-        },
-        created_at: policy.created_at,
-        updated_at: policy.updated_at,
-    };
-
-    Ok(Json(ApiResponse::success(response)))
+        Ok(Json(ApiResponse::success(serde_json::json!({"status": "updated"}))))
+    } else {
+        Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
+    }
 }
 
 pub async fn delete_policy(

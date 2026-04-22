@@ -168,6 +168,68 @@ pub struct AuthenticationService {
 }
 
 impl AuthenticationService {
+    /// Get current security config from storage, merging with defaults
+    async fn get_effective_config(&self) -> (u64, bool) {
+        let config_path = "system/config";
+        let mut session_timeout = self.config.jwt.expiration;
+        let mut mfa_enabled = self.config.mfa.enabled;
+
+        if let Ok(Some(entry)) = self.storage.get_by_path(config_path).await {
+            if let Some(config_data) = entry.metadata.get("config_data") {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_data) {
+                    if let Some(timeout) = config.get("session_timeout").and_then(|v| v.as_u64()) {
+                        session_timeout = timeout;
+                    }
+                    if let Some(mfa) = config.get("enable_mfa").and_then(|v| v.as_bool()) {
+                        mfa_enabled = mfa;
+                    }
+                }
+            }
+        }
+
+        (session_timeout, mfa_enabled)
+    }
+
+    /// Get current password policy from storage, merging with defaults
+    pub async fn get_password_policy(&self) -> secreton_common::password::PasswordPolicy {
+        let config_path = "system/config";
+
+        // Defaults
+        let mut policy = secreton_common::password::PasswordPolicy {
+            min_length: 8,
+            max_length: None,
+            require_uppercase: true,
+            require_lowercase: true,
+            require_numbers: true,
+            require_special: false,
+            allowed_special_chars: None,
+        };
+
+        if let Ok(Some(entry)) = self.storage.get_by_path(config_path).await {
+            if let Some(config_data) = entry.metadata.get("config_data") {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_data) {
+                    if let Some(v) = config.get("password_policy_min_length").and_then(|v| v.as_u64()) {
+                        policy.min_length = v as usize;
+                    }
+                    if let Some(v) = config.get("password_policy_require_uppercase").and_then(|v| v.as_bool()) {
+                        policy.require_uppercase = v;
+                    }
+                    if let Some(v) = config.get("password_policy_require_lowercase").and_then(|v| v.as_bool()) {
+                        policy.require_lowercase = v;
+                    }
+                    if let Some(v) = config.get("password_policy_require_numbers").and_then(|v| v.as_bool()) {
+                        policy.require_numbers = v;
+                    }
+                    if let Some(v) = config.get("password_policy_require_special").and_then(|v| v.as_bool()) {
+                        policy.require_special = v;
+                    }
+                }
+            }
+        }
+
+        policy
+    }
+
     /// Create new authentication service
     pub async fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -273,6 +335,9 @@ impl AuthenticationService {
 
     /// Authenticate user with username and password
     pub async fn login(&self, req: ApiLoginRequest) -> ApiResult<ApiLoginResponse> {
+        // Get effective config for session timeout and MFA enforcement
+        let (session_timeout_secs, global_mfa_enabled) = self.get_effective_config().await;
+
         // Root user cannot login via password (authentication is handled via unseal/SSS token)
         if req.username == "root" {
             return Err(secreton_errors::SecretonError::Authentication {
@@ -401,8 +466,9 @@ impl AuthenticationService {
             }
         };
 
-        // Enforce MFA for privileged users (admin/root)
-        if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
+        // Enforce MFA for privileged users (admin/root) or if globally enabled
+        let is_privileged = user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string());
+        if is_privileged || global_mfa_enabled {
             if let Some(mfa) = &self.mfa_service {
                 let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
@@ -510,7 +576,7 @@ impl AuthenticationService {
         let now = chrono::Utc::now();
         let expires_at = now
             + chrono::Duration::from_std(std::time::Duration::from_secs(
-                self.config.jwt.expiration,
+                session_timeout_secs,
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
@@ -647,12 +713,15 @@ impl AuthenticationService {
             .validate_refresh_token(refresh_token)
             .map_err(|_| AuthError::InvalidToken)?;
 
+        // Get effective config for session timeout
+        let (session_timeout_secs, _) = self.get_effective_config().await;
+
         // Generate session ID
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
         let expires_at = now
             + chrono::Duration::from_std(std::time::Duration::from_secs(
-                self.config.jwt.expiration,
+                session_timeout_secs,
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
@@ -975,11 +1044,14 @@ impl AuthenticationService {
 
     /// Generate access token for user
     pub async fn generate_token(&self, user: &User) -> Result<String, AuthError> {
+        // Get effective config for session timeout
+        let (session_timeout_secs, _) = self.get_effective_config().await;
+
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
         let expires_at = now
             + chrono::Duration::from_std(std::time::Duration::from_secs(
-                self.config.jwt.expiration,
+                session_timeout_secs,
             ))
             .unwrap_or(chrono::Duration::hours(1));
 
@@ -1104,6 +1176,9 @@ impl AuthenticationService {
         // Generate session ID
         let session_id = Uuid::new_v4().to_string();
 
+        // Get effective config for session timeout
+        let (session_timeout_secs, _) = self.get_effective_config().await;
+
         // Generate tokens with session binding
         let token_pair = self
             .token_service
@@ -1122,7 +1197,7 @@ impl AuthenticationService {
         let now = chrono::Utc::now();
         let expires_at = now
             + chrono::Duration::from_std(std::time::Duration::from_secs(
-                self.config.jwt.expiration,
+                session_timeout_secs,
             ))
             .unwrap_or(chrono::Duration::hours(1));
 

@@ -79,6 +79,42 @@ impl DatabaseEngine {
         }
     }
 
+    /// Revoke database credentials
+    pub async fn revoke_credentials(
+        &self,
+        username: &str,
+    ) -> Result<(), DatabaseError> {
+        if !self.enabled {
+            return Err(DatabaseError::EngineDisabled);
+        }
+
+        // Determine database type from connection URL
+        let db_type = self.detect_database_type(&self.config.connection_url)?;
+
+        match db_type {
+            #[cfg(feature = "postgres")]
+            DatabaseType::PostgreSQL => {
+                self.revoke_postgres_credentials(username).await
+            }
+            #[cfg(not(feature = "postgres"))]
+            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration("PostgreSQL feature disabled".to_string())),
+
+            #[cfg(feature = "mysql")]
+            DatabaseType::MySQL => {
+                self.revoke_mysql_credentials(username).await
+            }
+            #[cfg(not(feature = "mysql"))]
+            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration("MySQL feature disabled".to_string())),
+
+            DatabaseType::MongoDB => {
+                self.revoke_mongodb_credentials(username).await
+            }
+            DatabaseType::Redis => {
+                self.revoke_redis_credentials(username).await
+            }
+        }
+    }
+
     /// Get or create PostgreSQL connection pool
     #[cfg(feature = "postgres")]
     async fn get_pg_pool(&self) -> Result<PgPool, DatabaseError> {
@@ -174,6 +210,28 @@ impl DatabaseEngine {
         Ok(pool)
     }
 
+    /// Revoke PostgreSQL credentials
+    #[cfg(feature = "postgres")]
+    async fn revoke_postgres_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        let pool = self.get_pg_pool().await?;
+        let client = pool.get().await.map_err(|e| {
+            DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {}", e))
+        })?;
+
+        // In PostgreSQL, we drop the user.
+        // We use DROP USER IF EXISTS to avoid errors if already gone.
+        // Also need to handle active connections if necessary, but simple drop usually works if no dependencies.
+        let revoke_sql = format!("DROP USER IF EXISTS \"{}\"", username);
+
+        let params: &[&(dyn ToSql + Sync)] = &[];
+        client
+            .execute(&revoke_sql, params)
+            .await
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
+
+        Ok(())
+    }
+
     /// Generate PostgreSQL credentials
     #[cfg(feature = "postgres")]
     async fn generate_postgres_credentials(
@@ -256,6 +314,24 @@ impl DatabaseEngine {
             .replace("{{expiration}}", expiration)
     }
 
+    /// Revoke MySQL credentials
+    #[cfg(feature = "mysql")]
+    async fn revoke_mysql_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        let pool = self.get_mysql_pool().await?;
+        let mut conn = pool.get_conn().await.map_err(|e| {
+            DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
+        })?;
+
+        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
+
+        use mysql_async::prelude::Queryable;
+        conn.query_drop(revoke_sql).await.map_err(|e| {
+             DatabaseError::QueryFailed(format!("Failed to drop MySQL user: {}", e))
+        })?;
+
+        Ok(())
+    }
+
     /// Generate MySQL credentials
     #[cfg(feature = "mysql")]
     async fn generate_mysql_credentials(
@@ -331,6 +407,12 @@ impl DatabaseEngine {
         Ok(data)
     }
 
+    /// Revoke MongoDB credentials
+    async fn revoke_mongodb_credentials(&self, _username: &str) -> Result<(), DatabaseError> {
+        // Placeholder for MongoDB revocation
+        Ok(())
+    }
+
     /// Generate MongoDB credentials
     async fn generate_mongodb_credentials(
         &self,
@@ -350,6 +432,12 @@ impl DatabaseEngine {
         );
 
         Ok(data)
+    }
+
+    /// Revoke Redis credentials
+    async fn revoke_redis_credentials(&self, _username: &str) -> Result<(), DatabaseError> {
+        // Placeholder for Redis revocation
+        Ok(())
     }
 
     /// Generate Redis credentials

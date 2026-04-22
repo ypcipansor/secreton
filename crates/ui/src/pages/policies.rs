@@ -22,12 +22,34 @@ struct CreateRoleRequest {
     permissions: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct PolicyResponse {
+    name: String,
+    rules: Vec<String>,
+    metadata: PolicyMetadata,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct PolicyMetadata {
+    description: Option<String>,
+    tags: Vec<String>,
+    owner: Option<String>,
+}
+
 #[component]
 pub fn PoliciesList() -> impl IntoView {
-    // Fetch roles
+    // Fetch roles and policies
     let roles_resource = LocalResource::new(
         move || async move {
             api::get::<Vec<RoleResponse>>("/admin/roles").await
+        },
+    );
+
+    let policies_resource = LocalResource::new(
+        move || async move {
+            api::get::<Vec<PolicyResponse>>("/secret/policies").await
         },
     );
 
@@ -72,8 +94,19 @@ pub fn PoliciesList() -> impl IntoView {
         });
     };
 
+    let handle_delete_policy = move |name: String| {
+        if !web_sys::window().unwrap().confirm_with_message(&format!("Delete policy {}?", name)).unwrap_or(false) {
+           return;
+       }
+       spawn_local(async move {
+           let url = format!("/secret/policies/{}", name);
+           let _ = api::delete::<serde_json::Value>(&url).await;
+           policies_resource.refetch();
+       });
+   };
+
     view! {
-        <div class="space-y-6">
+        <div class="space-y-12">
             <header class="flex justify-between items-center">
                 <div>
                     <h1 class="text-3xl font-bold text-gray-900">"Policies & Roles"</h1>
@@ -87,9 +120,14 @@ pub fn PoliciesList() -> impl IntoView {
                 </Button>
             </header>
 
-            <Suspense fallback=|| view! { <div class="text-center p-8">"Loading roles..."</div> }>
-                {move || {
-                    roles_resource.get().map(|res| {
+            <section class="space-y-6">
+                <header>
+                    <h2 class="text-xl font-bold text-gray-800">"Roles"</h2>
+                </header>
+
+                <Suspense fallback=|| view! { <div class="text-center p-8">"Loading roles..."</div> }>
+                    {move || {
+                        roles_resource.get().map(|res| {
                         match res {
                             Ok(roles) => {
                                 let roles = roles.clone();
@@ -151,10 +189,84 @@ pub fn PoliciesList() -> impl IntoView {
                                     <span class="text-xs text-gray-500">"Make sure you are an admin."</span>
                                 </div>
                             }.into_any()
-                        }
-                    })
-                }}
-            </Suspense>
+                            }
+                        })
+                    }}
+                </Suspense>
+            </section>
+
+            <section class="space-y-6">
+                <header class="flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-gray-800">"Security Policies"</h2>
+                </header>
+
+                <Suspense fallback=|| view! { <div class="text-center p-8">"Loading policies..."</div> }>
+                    {move || {
+                        policies_resource.get().map(|res| {
+                            match res {
+                                Ok(policies) => {
+                                    let policies = policies.clone();
+                                    if policies.is_empty() {
+                                        view! {
+                                            <Card>
+                                                <div class="text-center py-8 text-gray-500">
+                                                    "No policies defined."
+                                                </div>
+                                            </Card>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                                                {policies.into_iter().map(|policy| {
+                                                    let p_name = policy.name.clone();
+                                                    let p_del = policy.name.clone();
+                                                    let p_desc = policy.metadata.description.clone().unwrap_or_default();
+
+                                                    view! {
+                                                        <Card
+                                                            title=p_name.clone()
+                                                            subtitle=p_desc
+                                                            actions=view! {
+                                                                 <button
+                                                                    class="text-red-600 hover:text-red-800 text-sm font-medium"
+                                                                    on:click=move |_| handle_delete_policy(p_del.clone())
+                                                                >
+                                                                    "Delete"
+                                                                </button>
+                                                            }.into_any()
+                                                        >
+                                                            <div class="mt-2">
+                                                                <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">"Rules"</h4>
+                                                                <div class="space-y-1">
+                                                                    {policy.rules.iter().take(3).map(|rule| view! {
+                                                                        <div class="text-xs font-mono bg-gray-50 p-1 rounded truncate">
+                                                                            {rule.clone()}
+                                                                        </div>
+                                                                    }).collect_view()}
+                                                                    {if policy.rules.len() > 3 {
+                                                                        view! { <div class="text-[10px] text-gray-400">"plus " {policy.rules.len() - 3} " more..."</div> }.into_any()
+                                                                    } else {
+                                                                        view! {}.into_any()
+                                                                    }}
+                                                                </div>
+                                                            </div>
+                                                        </Card>
+                                                    }
+                                                }).collect_view()}
+                                            </div>
+                                        }.into_any()
+                                    }
+                                },
+                                Err(e) => view! {
+                                    <div class="p-4 bg-red-50 text-red-700 rounded border border-red-200">
+                                        "Error loading policies: " {e.to_string()}
+                                    </div>
+                                }.into_any()
+                            }
+                        })
+                    }}
+                </Suspense>
+            </section>
 
             <Modal
                 show=show_modal
