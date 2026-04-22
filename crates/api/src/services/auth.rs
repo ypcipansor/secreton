@@ -841,6 +841,28 @@ impl AuthenticationService {
             tracing::warn!("Failed to deserialize user '{}' during token refresh: {}", claims.username, e);
             AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
         })?;
+
+        // Reject token refresh for disabled or locked accounts.
+        // Without this check a user whose account was disabled/locked after
+        // login could keep refreshing tokens indefinitely.
+        if stored_user.disabled || !stored_user.enabled || !stored_user.is_active {
+            tracing::warn!(
+                "Token refresh denied for user '{}': account is disabled/inactive",
+                claims.username
+            );
+            return Err(AuthError::InvalidCredentials);
+        }
+        if let Some(locked_until) = stored_user.locked_until {
+            if locked_until > chrono::Utc::now() {
+                tracing::warn!(
+                    "Token refresh denied for user '{}': account is locked until {}",
+                    claims.username,
+                    locked_until
+                );
+                return Err(AuthError::InvalidCredentials);
+            }
+        }
+
         let (user_roles, user_policies, user_email) =
             (stored_user.roles, stored_user.policies, stored_user.email);
 
