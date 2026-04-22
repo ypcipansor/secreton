@@ -860,11 +860,44 @@ pub async fn refresh_token(
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Validate refresh token and get new tokens
-    let auth_token = state
-        .auth
-        .refresh_token(&request.refresh_token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+    let auth_token = match state.auth.refresh_token(&request.refresh_token).await {
+        Ok(token) => token,
+        Err(e) => {
+            // Map specific auth errors to appropriate HTTP responses,
+            // sanitizing internal details to prevent information leakage.
+            // This mirrors the error handling in the login handler.
+            return Err(match e {
+                AuthError::Storage(ref inner) => {
+                    tracing::error!("Storage error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                AuthError::Internal(ref inner) => {
+                    tracing::error!("Internal error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                AuthError::Crypto(ref inner) => {
+                    tracing::error!("Crypto error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                // InvalidCredentials covers disabled/locked accounts and
+                // UserNotFound — return a generic auth failure message to
+                // avoid confirming whether the account exists or its status.
+                AuthError::InvalidCredentials | AuthError::UserNotFound => {
+                    crate::ApiError::Authentication("Token refresh failed".to_string())
+                }
+                AuthError::InvalidToken | AuthError::TokenExpired => {
+                    crate::ApiError::Authentication(e.to_string())
+                }
+                _ => crate::ApiError::Authentication("Token refresh failed".to_string()),
+            });
+        }
+    };
 
     // Fetch user info using the new token
     let user = state
