@@ -785,6 +785,12 @@ pub async fn login(
                 AuthError::Internal(ref inner) => {
                     Err(crate::ApiError::Internal(inner.to_string()))
                 }
+                AuthError::Storage(ref inner) => {
+                    Err(crate::ApiError::Internal(format!("Storage error: {}", inner)))
+                }
+                AuthError::Crypto(ref inner) => {
+                    Err(crate::ApiError::Internal(format!("Crypto error: {}", inner)))
+                }
                 _ => Err(crate::ApiError::Authentication(e.to_string())),
             }
         }
