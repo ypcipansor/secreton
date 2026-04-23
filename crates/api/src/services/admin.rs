@@ -973,8 +973,17 @@ impl AdminService {
         Ok(entry.metadata.get("content").map(|c| (c.clone(), created_at, updated_at)))
     }
 
-    /// Update a policy definition
-    pub async fn update_policy_content(&self, name: &str, content: &str) -> Result<(), AdminError> {
+    /// Update a policy definition.
+    ///
+    /// Returns `(created_at, updated_at)` for the stored entry so callers can
+    /// construct a response without a separate read-back (which would race
+    /// with any concurrent `update_policy_content` call and could surface the
+    /// other writer's timestamps to this caller).
+    pub async fn update_policy_content(
+        &self,
+        name: &str,
+        content: &str,
+    ) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), AdminError> {
         // Persist raw policy content to storage.
         // This is primarily for the UI to manage policy files.
         //
@@ -1044,7 +1053,8 @@ impl AdminService {
         entry.id = entry_id;
         entry.created_at = created_at;
         entry.version = version;
-        entry.metadata.insert("updated_at".to_string(), chrono::Utc::now().to_rfc3339());
+        let updated_at = chrono::Utc::now();
+        entry.metadata.insert("updated_at".to_string(), updated_at.to_rfc3339());
 
         // When crypto is not available, store the raw content in metadata as a
         // fallback so the UI can still retrieve it.
@@ -1057,7 +1067,7 @@ impl AdminService {
         } else {
             self.storage.store(&entry).await.map_err(AdminError::Storage)?;
         }
-        Ok(())
+        Ok((created_at, updated_at))
     }
 
     /// Delete raw policy content previously stored by `update_policy_content`.

@@ -95,6 +95,18 @@ pub struct SecretService {
     _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
+
+    /// Serializes concurrent structured policy upserts.
+    ///
+    /// `_upsert_policy` performs a read-modify-write over `sys/policies/{name}`.
+    /// Two concurrent `create_policy`/`update_policy` requests for the same
+    /// policy name could both observe `existing_entry = None` and both call
+    /// `storage.store()`, which on backends without a unique constraint on
+    /// `path` would create duplicate rows.  Holding this lock across the
+    /// whole RMW sequence closes the TOCTOU window.  Structured-policy
+    /// upserts are admin-only and rare, so a single global mutex is fine —
+    /// mirrors `AdminService::policy_content_write_lock`.
+    policy_write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SecretService {
@@ -114,6 +126,7 @@ impl SecretService {
             _identity: identity,
             policy_service,
             performance,
+            policy_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -1377,6 +1390,13 @@ impl SecretService {
         rules: Vec<String>,
         metadata: PolicyMetadata,
     ) -> Result<Policy, SecretError> {
+        // Serialize the read-modify-write sequence so that two concurrent
+        // upserts cannot both observe `existing_entry = None` and both call
+        // `storage.store()`.  See `policy_write_lock` field doc for the full
+        // rationale.  The guard is held across the entire RMW sequence below
+        // and released when it drops at function end.
+        let _write_guard = self.policy_write_lock.lock().await;
+
         // Read the existing entry FIRST so that `created_at` can be preserved
         // in both the serialized `Policy` JSON and on the outer `SecretEntry`.
         // Previously the `Policy` struct was constructed with

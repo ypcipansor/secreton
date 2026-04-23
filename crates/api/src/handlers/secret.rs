@@ -629,13 +629,27 @@ pub struct PolicyMetadata {
     pub owner: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PolicyResponse {
     pub name: String,
     pub rules: Vec<String>,
     pub metadata: PolicyMetadata,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Response discriminator: `"structured"` (rules-based) or `"raw"`
+    /// (opaque content).  Added to preserve backward compatibility for
+    /// strongly-typed clients while supporting dual-mode policies.
+    #[serde(rename = "type", default = "default_policy_type")]
+    pub policy_type: String,
+    /// Raw policy content — only populated when `policy_type == "raw"`.
+    /// `None` (and omitted from JSON) for structured policies, so existing
+    /// clients that deserialize structured responses keep working unchanged.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub content: Option<String>,
+}
+
+fn default_policy_type() -> String {
+    "structured".to_string()
 }
 
 /// Get secret by path
@@ -1507,6 +1521,8 @@ pub async fn list_policies(
             },
             created_at: policy.created_at,
             updated_at: policy.updated_at,
+            policy_type: "structured".to_string(),
+            content: None,
         })
         .collect();
 
@@ -1553,6 +1569,8 @@ pub async fn list_policies(
                         },
                         created_at,
                         updated_at,
+                        policy_type: "raw".to_string(),
+                        content: None,
                     });
                 }
             }
@@ -1571,7 +1589,7 @@ pub async fn get_policy(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
-) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
     // Validate policy name to prevent path-traversal attacks.
     // The name comes from a URL path parameter and is used to construct
     // storage paths like `sys/policies/content/{name}`.
@@ -1585,9 +1603,10 @@ pub async fn get_policy(
     let policy_result = state.secreton.get_policy(&name, &user).await;
 
     // Fast path: structured policy found — return it directly.
-    // Include a "type" discriminator so clients can reliably distinguish
-    // structured responses from raw-content responses, preserving backward
-    // compatibility for strongly-typed API consumers.
+    // The `policy_type` discriminator field on `PolicyResponse` lets clients
+    // reliably distinguish structured responses from raw-content responses
+    // while preserving a single strongly-typed response shape for SDK
+    // consumers.
     if let Ok(policy) = policy_result {
         let response = PolicyResponse {
             name: policy.name,
@@ -1599,14 +1618,10 @@ pub async fn get_policy(
             },
             created_at: policy.created_at,
             updated_at: policy.updated_at,
+            policy_type: "structured".to_string(),
+            content: None,
         };
-        let mut value = serde_json::to_value(response)
-            .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy: {}", e)))?;
-        // Add type discriminator at the top level
-        if let Some(obj) = value.as_object_mut() {
-            obj.insert("type".to_string(), serde_json::Value::String("structured".to_string()));
-        }
-        return Ok(Json(ApiResponse::success(value)));
+        return Ok(Json(ApiResponse::success(response)));
     }
 
     // Propagate definitive errors that are NOT "policy not found".
@@ -1651,19 +1666,26 @@ pub async fn get_policy(
 
     match state.admin.get_policy_content(&name).await {
         Ok(Some((content, created_at, updated_at))) => {
-            // Include the same top-level fields as the structured
-            // PolicyResponse so that strongly-typed clients can parse
-            // either variant.  The `type` discriminator lets clients
-            // distinguish raw-content responses from structured ones.
-            Ok(Json(ApiResponse::success(serde_json::json!({
-                "type": "raw",
-                "name": name,
-                "rules": [],
-                "metadata": { "description": null, "tags": [], "owner": null },
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "content": content,
-            }))))
+            // Return the same `PolicyResponse` shape as structured policies,
+            // with `policy_type = "raw"` and the raw `content` populated.
+            // Existing clients that deserialize `PolicyResponse` continue to
+            // work (all previously-required fields are present); clients that
+            // need to handle the raw variant can inspect `policy_type` and
+            // read `content`.
+            let response = PolicyResponse {
+                name: name.clone(),
+                rules: Vec::new(),
+                metadata: PolicyMetadata {
+                    description: None,
+                    tags: Vec::new(),
+                    owner: None,
+                },
+                created_at,
+                updated_at,
+                policy_type: "raw".to_string(),
+                content: Some(content),
+            };
+            Ok(Json(ApiResponse::success(response)))
         }
         Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
         Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy content: {}", e))),
@@ -1720,6 +1742,8 @@ pub async fn create_policy(
         },
         created_at: policy.created_at,
         updated_at: policy.updated_at,
+        policy_type: "structured".to_string(),
+        content: None,
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -1730,7 +1754,7 @@ pub async fn update_policy(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<serde_json::Value>,
-) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
     // Validate policy name to prevent path-traversal attacks.
     crate::handlers::validate_name(&name)?;
 
@@ -1847,7 +1871,7 @@ pub async fn update_policy(
                 _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
             })?;
 
-        let mut response_value = serde_json::to_value(PolicyResponse {
+        let response = PolicyResponse {
             name: policy.name,
             rules: policy.rules,
             metadata: PolicyMetadata {
@@ -1857,13 +1881,11 @@ pub async fn update_policy(
             },
             created_at: policy.created_at,
             updated_at: policy.updated_at,
-        }).map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy response: {}", e)))?;
-        // Add type discriminator for consistency with get_policy
-        if let Some(obj) = response_value.as_object_mut() {
-            obj.insert("type".to_string(), serde_json::Value::String("structured".to_string()));
-        }
+            policy_type: "structured".to_string(),
+            content: None,
+        };
 
-        Ok(Json(ApiResponse::success(response_value)))
+        Ok(Json(ApiResponse::success(response)))
     } else if request.get("content").is_some_and(|v| !v.is_null()) {
         // Validate that 'content' is a string — non-string values (e.g.
         // numbers, booleans, objects) are not valid policy content.
@@ -1894,37 +1916,32 @@ pub async fn update_policy(
             )));
         }
 
-        state.admin.update_policy_content(&name, content).await.map_err(|e| {
-            crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
-        })?;
-        // Read back the stored entry so that the response reflects the real
-        // `created_at` (preserved from the original entry) and `updated_at`
-        // (set by `update_policy_content`).  Previously this used
-        // `chrono::Utc::now()` for both, which was incorrect for updates of
-        // existing policies — the client would see a `created_at` that
-        // differs from what `get_policy` returns.
-        let (created_at, updated_at) = match state.admin.get_policy_content(&name).await {
-            Ok(Some((_content, ca, ua))) => (ca, ua),
-            _ => {
-                // Fallback: if the read-back fails (unlikely since we just
-                // wrote), use now for both — same as the old behavior.
-                let now = chrono::Utc::now();
-                (now, now)
-            }
+        // `update_policy_content` returns the authoritative
+        // `(created_at, updated_at)` for the write it just performed, so we
+        // don't need to read back the entry — which would race with a
+        // concurrent update and could surface the other writer's timestamps.
+        let (created_at, updated_at) =
+            state.admin.update_policy_content(&name, content).await.map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
+            })?;
+        // Return the same `PolicyResponse` shape as structured policies so
+        // strongly-typed clients can parse either variant.  `policy_type =
+        // "raw"` and the raw `content` is echoed back so callers can verify
+        // the stored value without an additional GET round-trip.
+        let response = PolicyResponse {
+            name: name.clone(),
+            rules: Vec::new(),
+            metadata: PolicyMetadata {
+                description: None,
+                tags: Vec::new(),
+                owner: None,
+            },
+            created_at,
+            updated_at,
+            policy_type: "raw".to_string(),
+            content: Some(content.to_string()),
         };
-        // Return a response shape that includes the same top-level fields as
-        // the structured PolicyResponse (name, rules, metadata, created_at,
-        // updated_at) so that strongly-typed clients can parse either variant.
-        // The `type` discriminator lets clients distinguish the two modes.
-        Ok(Json(ApiResponse::success(serde_json::json!({
-            "type": "raw",
-            "name": name,
-            "rules": [],
-            "metadata": { "description": null, "tags": [], "owner": null },
-            "created_at": created_at,
-            "updated_at": updated_at,
-            "status": "updated"
-        }))))
+        Ok(Json(ApiResponse::success(response)))
     } else {
         Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
     }
