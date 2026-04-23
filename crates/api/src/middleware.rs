@@ -685,6 +685,26 @@ pub mod auth {
                 .await
                 .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
+            // Enforce TOFU MFA enrollment: if the token was issued with
+            // `mfa_required: true` (TOFU — privileged user who has not
+            // yet configured MFA), only allow access to MFA enrollment
+            // endpoints and logout.  All other operations are blocked
+            // until the user completes MFA setup.
+            let mfa_pending = user
+                .metadata
+                .get("mfa_pending")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+
+            if mfa_pending {
+                let is_mfa_endpoint = path.contains("/mfa/")
+                    || path.ends_with("/mfa")
+                    || path.ends_with("/logout");
+                if !is_mfa_endpoint {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+            }
+
             // Create request context or simplified user info to store in extensions
             // The handlers expect AuthenticatedUser extractor which likely looks for User in extensions
             req.extensions_mut().insert(user);

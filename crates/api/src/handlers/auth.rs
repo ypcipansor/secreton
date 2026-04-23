@@ -941,6 +941,14 @@ pub async fn refresh_token(
         .await
         .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
 
+    // Propagate the mfa_pending flag from the validated token so that
+    // clients know whether the user still needs to complete MFA enrollment.
+    let mfa_required = user
+        .metadata
+        .get("mfa_pending")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     let response = LoginResponse {
         access_token: Some(auth_token.access_token.clone()),
         refresh_token: Some(auth_token.refresh_token.clone()),
@@ -956,7 +964,7 @@ pub async fn refresh_token(
             metadata: user.metadata,
             last_login: user.last_login,
         },
-        mfa_required: false,
+        mfa_required,
     };
 
     // Audit: token refresh

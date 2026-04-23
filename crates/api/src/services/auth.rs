@@ -1006,23 +1006,33 @@ impl AuthenticationService {
             return Err(AuthError::InvalidToken);
         }
 
-        // Enforce TOFU MFA enrollment: if the token was issued with
-        // `mfa_required: true` (TOFU — privileged user who has not yet
-        // configured MFA), reject the token so the user is forced to
-        // complete MFA enrollment before performing any operations.
+        // Track TOFU MFA enrollment status on the returned User via
+        // metadata so that callers (middleware, handlers) can enforce
+        // restricted scope for privileged users who have not yet
+        // completed MFA enrollment.
         //
-        // Without this check a privileged user could operate indefinitely
-        // without MFA by simply never completing enrollment, since the
-        // TOFU path in `enforce_mfa()` allows the initial login through.
-        if claims.claims.mfa_required {
-            return Err(AuthError::PermissionDenied);
-        }
+        // We do NOT reject TOFU tokens here because doing so creates a
+        // deadlock: the user needs an authenticated session to reach the
+        // `/mfa/setup` endpoint, but `validate_token` is called by both
+        // the global `auth_middleware` and the `AuthenticatedUser`
+        // extractor.  Blanket rejection would lock the user out of every
+        // endpoint — including the one they need to complete enrollment.
+        //
+        // Instead, the `mfa_pending` metadata flag is set so that
+        // authorization layers can selectively deny access to sensitive
+        // operations while still allowing MFA enrollment endpoints.
+        let mfa_pending = claims.claims.mfa_required;
 
         // Convert claims to User — use the roles AND policies embedded in the
         // JWT so that authorization checks after token validation see the same
         // claims the token was issued with.  Previously `policies` was hardcoded
         // to `["default"]`, which stripped any non-default policies the user had
         // at login time.
+        let mut metadata = HashMap::new();
+        if mfa_pending {
+            metadata.insert("mfa_pending".to_string(), "true".to_string());
+        }
+
         Ok(User {
             id: claims.claims.sub,
             username: claims.claims.username.clone(),
@@ -1042,7 +1052,7 @@ impl AuthenticationService {
             last_login: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            metadata: HashMap::new(),
+            metadata,
             failed_login_attempts: 0,
             locked_until: None,
         })
@@ -1139,6 +1149,30 @@ impl AuthenticationService {
             }
         }
 
+        let is_privileged = stored_user.roles.contains(&"admin".to_string())
+            || stored_user.roles.contains(&"root".to_string());
+
+        // Check whether the user still needs MFA enrollment.  If the user
+        // is privileged and has not yet configured MFA, the refreshed token
+        // must carry `mfa_required: true` so that the auth_middleware
+        // continues to restrict scope.  Without this, a TOFU user could
+        // call the refresh endpoint (which does not go through
+        // validate_token) to obtain a new access token with
+        // `mfa_required: false`, completely bypassing MFA enforcement.
+        let token_mfa_required = if is_privileged {
+            if let Some(mfa) = &self.mfa_service {
+                let user_uuid = Uuid::parse_str(&stored_user.id).unwrap_or_default();
+                let mfa_configured = mfa.is_mfa_required(user_uuid).await.unwrap_or(false);
+                !mfa_configured // mfa_required = true when NOT configured
+            } else {
+                // MFA service not available — fail-safe: mark as required
+                // so the user cannot operate without MFA.
+                true
+            }
+        } else {
+            false
+        };
+
         let (user_roles, user_policies, user_email) =
             (stored_user.roles, stored_user.policies, stored_user.email);
 
@@ -1150,7 +1184,7 @@ impl AuthenticationService {
                 user_email.as_deref(),
                 &user_roles,
                 &user_policies,
-                false, // MFA status should be checked separately
+                token_mfa_required,
                 Some(session_id.clone()),
                 Some(session_duration),
             )

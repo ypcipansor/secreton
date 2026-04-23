@@ -1419,6 +1419,27 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => match state.auth.validate_token(token).await {
             Ok(user) => {
+                // Enforce TOFU MFA enrollment: if the token was issued with
+                // `mfa_required: true` (TOFU — privileged user who has not
+                // yet configured MFA), only allow access to MFA enrollment
+                // endpoints.  All other operations are blocked until the
+                // user completes MFA setup.
+                let mfa_pending = user
+                    .metadata
+                    .get("mfa_pending")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+
+                if mfa_pending {
+                    let path = req.uri().path();
+                    let is_mfa_endpoint = path.contains("/mfa/")
+                        || path.ends_with("/mfa")
+                        || path.ends_with("/logout");
+                    if !is_mfa_endpoint {
+                        return Err(axum::http::StatusCode::FORBIDDEN);
+                    }
+                }
+
                 let mut req = req;
                 req.extensions_mut().insert(user);
                 Ok(next.run(req).await)

@@ -1523,79 +1523,103 @@ pub async fn get_policy(
     // storage paths like `sys/policies/content/{name}`.
     crate::handlers::validate_name(&name)?;
 
-    // Try structured policy first
+    // Attempt to load the structured policy.  `get_policy` calls
+    // `check_permission` internally, so a successful result (or a
+    // `PolicyNotFound` error) proves the RBAC check passed.
+    //
+    // IMPORTANT: We capture the result and match it in two phases so
+    // that the raw-content fallback path does NOT depend on the
+    // internal ordering of permission-vs-existence checks inside
+    // `get_policy`.  If `get_policy` ever changes to check existence
+    // before permissions, `PolicyNotFound` would no longer imply RBAC
+    // passed.  To guard against this, the raw-content path performs
+    // its own explicit RBAC verification below.
+    let policy_result = state.secreton.get_policy(&name, &user).await;
+
+    // Fast path: structured policy found — return it directly.
+    if let Ok(policy) = policy_result {
+        let response = PolicyResponse {
+            name: policy.name,
+            rules: policy.rules,
+            metadata: PolicyMetadata {
+                description: policy.metadata.description,
+                tags: policy.metadata.tags.keys().cloned().collect(),
+                owner: policy.metadata.owner,
+            },
+            created_at: policy.created_at,
+            updated_at: policy.updated_at,
+        };
+        let value = serde_json::to_value(response)
+            .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy: {}", e)))?;
+        return Ok(Json(ApiResponse::success(value)));
+    }
+
+    // Propagate definitive errors that are NOT "policy not found".
+    // PermissionDenied, Internal, Storage, Crypto — all must be
+    // returned immediately.
+    let policy_err = policy_result.unwrap_err();
+    if !matches!(policy_err, secret::SecretError::PolicyNotFound { .. }) {
+        return Err(match policy_err {
+            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+            e => crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e)),
+        });
+    }
+
+    // Structured policy not found — fall back to raw policy content.
+    //
+    // Only admin/root users may access raw policy content.
+    // Non-admin users get a generic 404 to avoid revealing
+    // whether a raw-content policy exists at this path.
+    if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
+        return Err(crate::ApiError::NotFound("Policy not found".to_string()));
+    }
+
+    // Perform an explicit, independent RBAC check for the raw-content
+    // fallback path.  We do NOT rely on the `PolicyNotFound` from the
+    // first `get_policy` call implying RBAC passed, because that
+    // assumption depends on the internal ordering of
+    // `SecretService::get_policy` (permissions before existence) which
+    // could change in a future refactor.
+    //
+    // `get_policy` is called again solely for its RBAC side-effect.
+    // We expect `PolicyNotFound` (the structured policy doesn't exist —
+    // that's why we're here).  `PermissionDenied` and any other error
+    // must be propagated fail-closed.
     match state.secreton.get_policy(&name, &user).await {
-        Ok(policy) => {
-            let response = PolicyResponse {
-                name: policy.name,
-                rules: policy.rules,
-                metadata: PolicyMetadata {
-                    description: policy.metadata.description,
-                    tags: policy.metadata.tags.keys().cloned().collect(),
-                    owner: policy.metadata.owner,
-                },
-                created_at: policy.created_at,
-                updated_at: policy.updated_at,
-            };
-            let value = serde_json::to_value(response)
-                .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy: {}", e)))?;
-            Ok(Json(ApiResponse::success(value)))
+        Err(secret::SecretError::PermissionDenied(msg)) => {
+            return Err(crate::ApiError::Authorization(msg));
         }
         Err(secret::SecretError::PolicyNotFound { .. }) => {
-            // Fall back to raw policy content (admin-only).
-            //
-            // Only admin/root users may access raw policy content.
-            // Non-admin users get a generic 404 to avoid revealing
-            // whether a raw-content policy exists at this path.
-            if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
-                return Err(crate::ApiError::NotFound("Policy not found".to_string()));
-            }
-
-            // Explicitly verify RBAC permissions for the raw-content
-            // fallback path instead of relying on the assumption that
-            // `state.secreton.get_policy()` always checks permissions
-            // before existence.  If that ordering ever changes,
-            // `PolicyNotFound` would no longer imply RBAC passed,
-            // and the raw-content path would silently bypass RBAC.
-            //
-            // We re-check via `get_policy` which calls
-            // `check_permission` first.  `PolicyNotFound` is expected
-            // (the structured policy doesn't exist — that's why we're
-            // here).  `PermissionDenied` must be propagated.  Any
-            // other error (storage, crypto) is propagated fail-closed.
-            match state.secreton.get_policy(&name, &user).await {
-                Err(secret::SecretError::PermissionDenied(msg)) => {
-                    return Err(crate::ApiError::Authorization(msg));
-                }
-                Err(secret::SecretError::PolicyNotFound { .. }) => {
-                    // Expected — proceed to raw-content lookup below.
-                }
-                Ok(_) => {
-                    // Structured policy appeared between the two calls
-                    // (race).  This is fine — RBAC passed.
-                }
-                Err(e) => {
-                    return Err(crate::ApiError::Internal(format!(
-                        "Failed to verify policy permissions: {}", e
-                    )));
-                }
-            }
-            match state.admin.get_policy_content(&name).await {
-                Ok(Some(content)) => {
-                    // Include a "type" discriminator so clients can distinguish
-                    // raw-content responses from structured PolicyResponse objects.
-                    Ok(Json(ApiResponse::success(serde_json::json!({
-                        "type": "raw",
-                        "name": name,
-                        "content": content,
-                    }))))
-                }
-                Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
-                Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy content: {}", e))),
-            }
+            // Expected — RBAC check inside get_policy passed (or was
+            // skipped due to ordering).  The role-based admin/root
+            // gate above provides a safety net.
         }
-        Err(secret::SecretError::PermissionDenied(msg)) => Err(crate::ApiError::Authorization(msg)),
-        Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e))),
+        Ok(_) => {
+            // Structured policy appeared between the two calls (race).
+            // RBAC passed — proceed.
+        }
+        Err(e) => {
+            // Storage timeout, deserialization failure, etc. — propagate
+            // fail-closed rather than allowing the update to proceed
+            // without verified permissions.
+            return Err(crate::ApiError::Internal(format!(
+                "Failed to verify policy permissions: {}", e
+            )));
+        }
+    }
+
+    match state.admin.get_policy_content(&name).await {
+        Ok(Some(content)) => {
+            // Include a "type" discriminator so clients can distinguish
+            // raw-content responses from structured PolicyResponse objects.
+            Ok(Json(ApiResponse::success(serde_json::json!({
+                "type": "raw",
+                "name": name,
+                "content": content,
+            }))))
+        }
+        Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
+        Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy content: {}", e))),
     }
 }
 
