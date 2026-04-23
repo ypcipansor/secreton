@@ -1766,6 +1766,30 @@ pub async fn update_policy(
                 name
             );
         }
+
+        // Before performing the structured update, remove any stale raw-content
+        // entry at `sys/policies/content/{name}` so that the two namespaces do
+        // not drift out of sync.  Without this cleanup, a policy that previously
+        // received a raw-content update followed by a structured update would
+        // leave an orphaned raw entry in storage — which would resurface in
+        // `list_policies` / `get_policy` fallback reads and could be misread
+        // after the structured policy is later deleted.
+        //
+        // Only admin/root users may touch raw content; for non-admin users this
+        // block is a no-op, which is safe because only admins can have created
+        // raw content in the first place.
+        if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
+            if let Err(e) = state.admin.delete_policy_content(&name).await {
+                // Don't fail the structured update on raw-content cleanup
+                // failures — log and continue.  The structured policy is the
+                // authoritative representation after this update.
+                tracing::warn!(
+                    "update_policy '{}': failed to delete stale raw content during \
+                     structured update: {}",
+                    name, e
+                );
+            }
+        }
         let req: CreatePolicyRequest = serde_json::from_value(request)
             .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
 
