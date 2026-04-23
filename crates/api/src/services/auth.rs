@@ -1437,6 +1437,16 @@ impl AuthenticationService {
 
         // Build the User from the data we already loaded from storage
         // (or from the token claims as a fallback).
+        //
+        // Propagate the `mfa_pending` metadata flag when the refreshed token
+        // carries `mfa_required: true`, matching the contract documented on
+        // `validate_token`.  This lets the refresh handler (and any other
+        // caller that consumes `AuthToken.user` directly) read the TOFU flag
+        // without having to re-validate the just-issued access token.
+        let mut metadata = HashMap::new();
+        if token_mfa_required {
+            metadata.insert("mfa_pending".to_string(), "true".to_string());
+        }
         let user = User {
             id: claims.sub.clone(),
             username: claims.username.clone(),
@@ -1456,7 +1466,7 @@ impl AuthenticationService {
             last_login: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            metadata: HashMap::new(),
+            metadata,
             failed_login_attempts: 0,
             locked_until: None,
         };

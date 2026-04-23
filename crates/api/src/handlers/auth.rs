@@ -944,14 +944,15 @@ pub async fn refresh_token(
         }
     };
 
-    // Fetch user info using the new token
-    let user = state
-        .auth
-        .validate_token(&auth_token.access_token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+    // Use the User embedded in the refreshed AuthToken directly instead of
+    // re-validating the just-issued access token.  `refresh_token()` populates
+    // `auth_token.user` with the current roles/policies loaded from storage
+    // and sets `metadata["mfa_pending"] = "true"` when the refreshed token
+    // carries `mfa_required: true`, so we can read the TOFU flag without
+    // another JWT decode + session lookup round-trip.
+    let user = &auth_token.user;
 
-    // Propagate the mfa_pending flag from the validated token so that
+    // Propagate the mfa_pending flag from the refreshed token so that
     // clients know whether the user still needs to complete MFA enrollment.
     let mfa_required = user
         .metadata
@@ -962,16 +963,16 @@ pub async fn refresh_token(
     let response = LoginResponse {
         access_token: Some(auth_token.access_token.clone()),
         refresh_token: Some(auth_token.refresh_token.clone()),
-        token_type: auth_token.token_type,
+        token_type: auth_token.token_type.clone(),
         expires_in: auth_token.expires_in as i64,
         user: UserInfo {
             id: Some(user.id.to_string()),
             username: user.username.clone(),
             email: user.email.clone(),
-            display_name: user.display_name,
-            roles: user.roles,
+            display_name: user.display_name.clone(),
+            roles: user.roles.clone(),
             permissions: vec![],
-            metadata: user.metadata,
+            metadata: user.metadata.clone(),
             last_login: user.last_login,
         },
         mfa_required,

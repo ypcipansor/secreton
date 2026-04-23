@@ -1410,12 +1410,21 @@ impl SecretService {
         entry.created_at = created_at;
         entry.version = version;
 
-        self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+        // Use `update()` for existing entries and `store()` for new ones.
+        // Storage backends with a unique constraint on `path` (e.g. PostgreSQL)
+        // would otherwise reject `store()` on an existing entry, and backends
+        // that treat `store()` as INSERT could silently create duplicate rows.
+        // This mirrors the pattern in `AdminService::update_policy_content`.
+        if existing_entry.is_some() {
+            self.storage.update(&entry).await.map_err(SecretError::Storage)?;
+        } else {
+            self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+        }
 
         Ok(policy)
     }
 
-    pub async fn list_policies(&self, _filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
+    pub async fn list_policies(&self, filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/policies/".to_string()),
             limit: None,
@@ -1445,7 +1454,18 @@ impl SecretService {
             match self.crypto.decrypt(&entry.encrypted_data).await {
                 Ok(decrypted) => {
                     match serde_json::from_slice::<Policy>(&decrypted) {
-                        Ok(policy) => policies.push(policy),
+                        Ok(policy) => {
+                            // Apply substring filter on the policy name,
+                            // mirroring the semantics used in the handler's
+                            // merge of raw-content policies so that both
+                            // sources filter consistently.
+                            if let Some(f) = filter {
+                                if !policy.name.contains(f) {
+                                    continue;
+                                }
+                            }
+                            policies.push(policy);
+                        }
                         Err(e) => tracing::warn!("Failed to deserialize policy at {}: {}", entry.path, e),
                     }
                 }
