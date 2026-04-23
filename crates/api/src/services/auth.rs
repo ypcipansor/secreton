@@ -1418,41 +1418,21 @@ impl AuthenticationService {
     }
 
     /// Generate refresh token for user
+    ///
+    /// Uses the token service's `create_refresh_token` method to produce a
+    /// `RefreshTokenClaims`-based token signed with `jwt_refresh_secret`.
+    /// This ensures the token can be validated by `validate_refresh_token`
+    /// (which expects `RefreshTokenClaims` and uses `jwt_refresh_secret`).
+    ///
+    /// Previously this method used the API-local `Claims` struct and signed
+    /// with `jwt_secret`, creating a structural and key mismatch that would
+    /// cause `refresh_token()` → `validate_refresh_token()` to fail.
     pub async fn generate_refresh_token(&self, user: &User) -> Result<String, AuthError> {
-        // Generate a longer-lived refresh token
-        let now = chrono::Utc::now();
-        let exp = now + chrono::Duration::days(7);
-
-        let claims = Claims {
-            sub: user.id.clone(),
-            username: user.username.clone(),
-            email: user.email.clone(),
-            roles: user.roles.clone(),
-            policies: user.policies.clone(),
-            mfa_required: user.mfa_enabled,
-            iat: now.timestamp() as usize,
-            exp: exp.timestamp() as usize,
-            jti: uuid::Uuid::new_v4().to_string(),
-            iss: self.config.jwt.issuer.clone(),
-            aud: self.config.jwt.audience.clone(),
-        };
-
-        let jwt_secret = self.config.jwt.secret.as_ref().ok_or_else(|| {
-            AuthError::Internal(anyhow::anyhow!(
-                "JWT secret must be configured for refresh token generation"
-            ))
-        })?;
-
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
-        )
-        .map_err(|e| {
-            AuthError::Internal(anyhow::anyhow!("Refresh token generation failed: {}", e))
-        })?;
-
-        Ok(token)
+        self.token_service
+            .create_refresh_token(&user.id, &user.username)
+            .map_err(|e| {
+                AuthError::Internal(anyhow::anyhow!("Refresh token generation failed: {}", e))
+            })
     }
 
     /// Authenticate user
