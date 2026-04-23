@@ -909,9 +909,12 @@ impl AdminService {
 
     /// Retrieve raw policy content previously stored by `update_policy_content`.
     ///
-    /// Returns `Ok(Some(content))` when the policy exists, `Ok(None)` when it
-    /// does not, and `Err` on storage/crypto failures.
-    pub async fn get_policy_content(&self, name: &str) -> Result<Option<String>, AdminError> {
+    /// Returns `Ok(Some((content, created_at, updated_at)))` when the policy
+    /// exists, `Ok(None)` when it does not, and `Err` on storage/crypto failures.
+    pub async fn get_policy_content(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>, AdminError> {
         let path = format!("sys/policies/content/{}", name);
 
         let entry = match self
@@ -923,6 +926,16 @@ impl AdminService {
             Some(e) => e,
             None => return Ok(None),
         };
+
+        let created_at = entry.created_at;
+        // Use the metadata `updated_at` if available (set by update_policy_content),
+        // otherwise fall back to the entry's `updated_at` field.
+        let updated_at = entry
+            .metadata
+            .get("updated_at")
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or(entry.updated_at);
 
         // Prefer decrypting `encrypted_data` when crypto is available and the
         // blob is non-empty (i.e. the entry was stored with encryption).
@@ -940,12 +953,12 @@ impl AdminService {
                         e
                     ))
                 })?;
-                return Ok(Some(content));
+                return Ok(Some((content, created_at, updated_at)));
             }
         }
 
         // Fallback: read from metadata (unencrypted path).
-        Ok(entry.metadata.get("content").cloned())
+        Ok(entry.metadata.get("content").map(|c| (c.clone(), created_at, updated_at)))
     }
 
     /// Update a policy definition

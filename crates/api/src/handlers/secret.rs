@@ -1596,19 +1596,18 @@ pub async fn get_policy(
     }
 
     match state.admin.get_policy_content(&name).await {
-        Ok(Some(content)) => {
+        Ok(Some((content, created_at, updated_at))) => {
             // Include the same top-level fields as the structured
             // PolicyResponse so that strongly-typed clients can parse
             // either variant.  The `type` discriminator lets clients
             // distinguish raw-content responses from structured ones.
-            let now = chrono::Utc::now();
             Ok(Json(ApiResponse::success(serde_json::json!({
                 "type": "raw",
                 "name": name,
                 "rules": [],
                 "metadata": { "description": null, "tags": [], "owner": null },
-                "created_at": now,
-                "updated_at": now,
+                "created_at": created_at,
+                "updated_at": updated_at,
                 "content": content,
             }))))
         }

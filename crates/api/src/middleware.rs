@@ -660,7 +660,9 @@ pub fn enforce_mfa_pending(
         // Use exact prefix matching for MFA endpoints to prevent bypass via
         // user-controlled path segments (e.g. a secret named "mfa" would
         // match `path.contains("/mfa/")`).
-        let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/")
+        let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/setup")
+            || path.starts_with("/api/v1/auth/mfa/verify")
+            || path.starts_with("/api/v1/auth/mfa/status")
             || path == "/api/v1/auth/mfa"
             || path.starts_with("/api/v1/auth/logout");
         if !is_mfa_endpoint {
@@ -760,13 +762,16 @@ pub mod seal {
         ) -> Result<Response, Response> {
             let path = req.uri().path().to_string();
 
-            // Paths allowed when sealed
-            if path.contains("/sys/init")
-                || path.contains("/sys/unseal")
-                || path.contains("/sys/seal-status")
-                || path.contains("/sys/health")
-                || path.ends_with("/health")
-            // Global health
+            // Paths allowed when sealed — use exact prefix matching to prevent
+            // bypass via user-controlled path segments (e.g. a secret named
+            // "sys/init" would match `path.contains("/sys/init")`).
+            // This mirrors the tightened matching in `AuthMiddleware::authenticate`.
+            if path == "/api/v1/sys/init"
+                || path == "/api/v1/sys/unseal"
+                || path == "/api/v1/sys/seal-status"
+                || path == "/api/v1/sys/health"
+                || path == "/health"
+                || path == "/api/v1/health"
             {
                 return Ok(next.run(req).await);
             }

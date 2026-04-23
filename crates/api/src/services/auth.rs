@@ -1513,7 +1513,7 @@ impl AuthenticationService {
                     // log it and skip the entry rather than silently producing
                     // a garbage Session.
                     if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
-                        tracing::debug!(
+                        tracing::warn!(
                             "Session '{}': decryption failed, using legacy plaintext fallback",
                             entry.path
                         );
@@ -1562,7 +1562,7 @@ impl AuthenticationService {
                     // NOT valid JSON either, this is genuine data corruption —
                     // deny the request rather than risking a failed ownership check.
                     if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
-                        tracing::debug!(
+                        tracing::warn!(
                             "Session '{}': decryption failed, using legacy plaintext fallback",
                             session_id
                         );
