@@ -763,12 +763,21 @@ pub async fn login(
             Ok(Json(ApiResponse::success(response)))
         }
         Err(e) => {
-            // Audit: log authentication failures, but skip MfaRequired since
-            // it is a normal first step in a two-step MFA flow (not a real
-            // failure).  Logging it as AuthenticationFailure would inflate
-            // failure counts in security dashboards and confuse incident
-            // response.
-            if !matches!(e, AuthError::MfaRequired) {
+            // Audit: log authentication failures, but skip errors that are
+            // already audited inside `enforce_mfa()` to avoid duplicate
+            // entries in security dashboards:
+            //   - MfaRequired: normal first step in a two-step MFA flow
+            //     (not a real failure).
+            //   - InvalidMfaCode: already logged by enforce_mfa() at the
+            //     "totp" method level.
+            //   - MfaNotConfigured: already logged by enforce_mfa() at the
+            //     "global_mfa" method level.
+            if !matches!(
+                e,
+                AuthError::MfaRequired
+                    | AuthError::InvalidMfaCode
+                    | AuthError::MfaNotConfigured(_)
+            ) {
                 let _ = state
                     .audit
                     .log_event(SecurityEventType::AuthenticationFailure {

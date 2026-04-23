@@ -151,6 +151,16 @@ pub struct ApiLoginResponse {
     pub token: AuthToken,
 }
 
+/// Cached effective configuration (session timeout + global MFA flag).
+///
+/// Avoids a storage round-trip on every authentication call by caching
+/// the result of `get_effective_config()` with a short TTL.
+struct CachedEffectiveConfig {
+    session_timeout: u64,
+    mfa_enabled: bool,
+    fetched_at: std::time::Instant,
+}
+
 /// Authentication service facade
 pub struct AuthenticationService {
     /// Unified authentication service
@@ -179,11 +189,55 @@ pub struct AuthenticationService {
 
     /// MFA service
     mfa_service: Option<Arc<secreton_auth::mfa::CombinedMfaService>>,
+
+    /// Cached effective config to avoid per-request storage reads.
+    /// Protected by an RwLock so concurrent auth calls can share the
+    /// cached value; only one caller refreshes when the TTL expires.
+    effective_config_cache: Arc<tokio::sync::RwLock<Option<CachedEffectiveConfig>>>,
 }
 
+/// TTL for the effective-config cache.  30 seconds is short enough that
+/// admin config changes propagate quickly, but long enough to avoid a
+/// storage round-trip on every authentication call in high-throughput
+/// deployments.
+const EFFECTIVE_CONFIG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl AuthenticationService {
-    /// Get current security config from storage, merging with defaults
+    /// Get current security config from storage, merging with defaults.
+    ///
+    /// Results are cached for [`EFFECTIVE_CONFIG_CACHE_TTL`] to avoid a
+    /// storage round-trip on every call to `login()`, `authenticate()`,
+    /// `refresh_token()`, and `generate_token()`.
     async fn get_effective_config(&self) -> (u64, bool) {
+        // Fast path: return cached value if still fresh.
+        {
+            let cache = self.effective_config_cache.read().await;
+            if let Some(ref cached) = *cache {
+                if cached.fetched_at.elapsed() < EFFECTIVE_CONFIG_CACHE_TTL {
+                    return (cached.session_timeout, cached.mfa_enabled);
+                }
+            }
+        }
+
+        // Slow path: read from storage and update the cache.
+        let (session_timeout, mfa_enabled) = self.fetch_effective_config_from_storage().await;
+
+        {
+            let mut cache = self.effective_config_cache.write().await;
+            *cache = Some(CachedEffectiveConfig {
+                session_timeout,
+                mfa_enabled,
+                fetched_at: std::time::Instant::now(),
+            });
+        }
+
+        (session_timeout, mfa_enabled)
+    }
+
+    /// Read `system/config` from storage and merge with static defaults.
+    ///
+    /// This is the uncached inner implementation of [`get_effective_config`].
+    async fn fetch_effective_config_from_storage(&self) -> (u64, bool) {
         let config_path = "system/config";
         let mut session_timeout = self.config.jwt.expiration;
         let mut mfa_enabled = self.config.mfa.enabled;
@@ -385,6 +439,7 @@ impl AuthenticationService {
             audit: None,
             mfa_service: None,
             crypto,
+            effective_config_cache: Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
 

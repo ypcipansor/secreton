@@ -1220,6 +1220,17 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
                 code = warp::http::StatusCode::BAD_REQUEST;
                 message = "Invalid request format";
             }
+            SecretonError::MfaRequired => {
+                code = warp::http::StatusCode::UNAUTHORIZED;
+                message = "MFA required";
+            }
+            SecretonError::MfaNotConfigured { .. } => {
+                // Return 401 with a generic message identical to invalid
+                // credentials to prevent credential enumeration — mirrors
+                // the axum IntoResponse implementation.
+                code = warp::http::StatusCode::UNAUTHORIZED;
+                message = "Authentication failed";
+            }
             SecretonError::Internal { message: ref msg } => {
                 warn!("Internal error: {}", msg);
                 code = warp::http::StatusCode::INTERNAL_SERVER_ERROR;
