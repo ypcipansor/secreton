@@ -649,13 +649,20 @@ pub mod auth {
             next: Next,
         ) -> Result<Response, StatusCode> {
             let path = req.uri().path().to_string();
-            // Exempt public paths: root, health, version, auth endpoints (login, oauth, etc.)
+            // Exempt public paths: root, health, version, and specific
+            // unauthenticated auth endpoints (login, refresh, verify, oauth).
+            // Protected auth endpoints (logout, mfa/*, sessions, users) are
+            // NOT exempted so they go through token validation and
+            // MFA-pending enforcement below.
             // Exempt sys initialization endpoints
             if path == "/" 
                 || path.ends_with("/health") 
                 || path.ends_with("/version") 
-                || path.contains("/auth/")
                 || path.ends_with("/login")  // Handler unit test uses /login directly
+                || path.ends_with("/auth/login")
+                || path.ends_with("/auth/refresh")
+                || path.ends_with("/auth/verify")
+                || path.contains("/auth/oauth/")
                 || path.ends_with("/oauth")
                 || path.contains("/sys/init")
                 || path.contains("/sys/unseal")

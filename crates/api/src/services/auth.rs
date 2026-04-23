@@ -1078,11 +1078,60 @@ impl AuthenticationService {
 
     /// Refresh access token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthToken, AuthError> {
+        // Check if the refresh token has been revoked (single-use enforcement).
+        // This must happen BEFORE validation so that a previously-used refresh
+        // token is rejected even if its JWT signature and expiry are still valid.
+        if self.is_token_revoked(refresh_token).await {
+            return Err(AuthError::InvalidToken);
+        }
+
         // Validate first to get user info for session creation
         let claims = self
             .token_service
             .validate_refresh_token(refresh_token)
             .map_err(|_| AuthError::InvalidToken)?;
+
+        // Revoke the old refresh token so it cannot be reused.
+        // This implements single-use refresh token rotation: each refresh
+        // token can only be exchanged once.  Without this, a captured
+        // refresh token could be replayed indefinitely to generate new
+        // sessions without invalidating previous ones.
+        //
+        // We also attempt to find and revoke the old session that was
+        // associated with this refresh token, so that the old access token
+        // is invalidated as well.
+        {
+            // Revoke the refresh token itself (add to blacklist with a
+            // generous expiry — refresh tokens are long-lived).
+            let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
+            self.revoke_token(refresh_token.to_string(), refresh_expiry).await;
+
+            // Best-effort: find and delete the old session whose refresh_token
+            // matches the one being exchanged.  This is a scan over the
+            // session prefix — acceptable because refresh is infrequent.
+            let params = secreton_storage::QueryParams {
+                path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
+                include_expired: false,
+                ..Default::default()
+            };
+            if let Ok(entries) = self.storage.list(&params).await {
+                for entry in entries {
+                    let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
+                        Ok(decrypted) => decrypted,
+                        Err(_) => entry.encrypted_data.clone(), // legacy plaintext fallback
+                    };
+                    if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
+                        if session.refresh_token.as_deref() == Some(refresh_token) {
+                            // Revoke the old access token
+                            self.revoke_token(session.token.clone(), session.expires_at).await;
+                            // Delete the old session record
+                            let _ = self.storage.delete_by_path(&entry.path).await;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         // Get effective config for session timeout
         let (session_timeout_secs, _) = self.get_effective_config().await;
@@ -1873,7 +1922,14 @@ impl AuthenticationService {
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
         // Set mfa_required on the token when TOFU was used (privileged user
         // authenticated without MFA), mirroring the logic in `login()`.
-        let token_mfa_required = (is_privileged && !mfa_verified) || result.mfa_required;
+        // Use the same formula as `login()` — `is_privileged && !mfa_verified`.
+        // Previously this also OR'd in `result.mfa_required` from the underlying
+        // auth service, but `login()` did not, creating an inconsistency.  Since
+        // we pass `mfa_code: None` to `auth_service.login()` and handle MFA
+        // entirely via `enforce_mfa()`, `result.mfa_required` is not meaningful
+        // here and would only cause divergent behavior if the auth service
+        // evolves to set it independently.
+        let token_mfa_required = is_privileged && !mfa_verified;
 
         let token_pair = self
             .token_service

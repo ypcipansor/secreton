@@ -707,6 +707,22 @@ impl SecretService {
         self._upsert_policy(name, rules, metadata).await
     }
 
+    /// Check whether the user has the given permission on a policy path.
+    ///
+    /// This is a thin wrapper around `check_permission` exposed publicly so
+    /// that handlers can perform an explicit RBAC check without loading the
+    /// full policy object.  It is intentionally cheap (in-memory RBAC
+    /// evaluation, no storage I/O).
+    pub async fn check_policy_permission(
+        &self,
+        name: &str,
+        user: &secreton_auth::User,
+        action: &str,
+    ) -> Result<(), SecretError> {
+        self.check_permission(user, &format!("sys/policies/{}", name), action)
+            .await
+    }
+
     /// Get policy by name
     pub async fn get_policy(
         &self,

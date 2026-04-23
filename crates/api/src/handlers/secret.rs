@@ -1575,20 +1575,40 @@ pub async fn get_policy(
         return Err(crate::ApiError::NotFound("Policy not found".to_string()));
     }
 
-    // The first `get_policy` call above already performed the RBAC check
+    // The first `get_policy` call above performed the RBAC check
     // (SecretService::get_policy calls check_permission BEFORE checking
     // existence, so PolicyNotFound implies RBAC passed).  The admin/root
-    // role gate above provides an additional safety net.  No need to call
-    // `get_policy` again — doing so would add latency and introduce a
-    // TOCTOU race without meaningful security benefit.
+    // role gate above provides an additional safety net.
+    //
+    // DEFENSIVE: If the `get_policy` implementation ever changes to check
+    // existence before permissions (returning PolicyNotFound without
+    // evaluating RBAC), the fallback path would bypass fine-grained RBAC.
+    // To guard against this, explicitly verify read permission on the
+    // policy path.  This is a cheap in-memory RBAC evaluation.
+    if let Err(e) = state.secreton.check_policy_permission(&name, &user, "read").await {
+        if let secret::SecretError::PermissionDenied(msg) = e {
+            return Err(crate::ApiError::Authorization(msg));
+        }
+        // Other errors (e.g. storage) — fail closed
+        return Err(crate::ApiError::Internal(format!(
+            "Failed to verify policy permissions: {}", e
+        )));
+    }
 
     match state.admin.get_policy_content(&name).await {
         Ok(Some(content)) => {
-            // Include a "type" discriminator so clients can distinguish
-            // raw-content responses from structured PolicyResponse objects.
+            // Include the same top-level fields as the structured
+            // PolicyResponse so that strongly-typed clients can parse
+            // either variant.  The `type` discriminator lets clients
+            // distinguish raw-content responses from structured ones.
+            let now = chrono::Utc::now();
             Ok(Json(ApiResponse::success(serde_json::json!({
                 "type": "raw",
                 "name": name,
+                "rules": [],
+                "metadata": { "description": null, "tags": [], "owner": null },
+                "created_at": now,
+                "updated_at": now,
                 "content": content,
             }))))
         }
@@ -1744,28 +1764,32 @@ pub async fn update_policy(
         // membership.  This ensures that an admin whose access has been
         // restricted via fine-grained RBAC policies cannot bypass those
         // restrictions through the raw content update path.
-        //
-        // SecretService::get_policy calls check_permission("read") BEFORE
-        // checking existence, so PermissionDenied is definitive.
-        // PolicyNotFound is expected (the structured policy may not exist).
-        // Other errors (storage timeout, etc.) are propagated fail-closed.
-        match state.secreton.get_policy(&name, &user).await {
-            Err(secret::SecretError::PermissionDenied(msg)) => {
+        if let Err(e) = state.secreton.check_policy_permission(&name, &user, "update").await {
+            if let secret::SecretError::PermissionDenied(msg) = e {
                 return Err(crate::ApiError::Authorization(msg));
             }
-            Err(secret::SecretError::PolicyNotFound { .. }) => {}
-            Ok(_) => {}
-            Err(e) => {
-                return Err(crate::ApiError::Internal(format!(
-                    "Failed to verify policy permissions: {}", e
-                )));
-            }
+            return Err(crate::ApiError::Internal(format!(
+                "Failed to verify policy permissions: {}", e
+            )));
         }
 
         state.admin.update_policy_content(&name, content).await.map_err(|e| {
             crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
         })?;
-        Ok(Json(ApiResponse::success(serde_json::json!({"type": "raw", "status": "updated", "name": name}))))
+        // Return a response shape that includes the same top-level fields as
+        // the structured PolicyResponse (name, rules, metadata, created_at,
+        // updated_at) so that strongly-typed clients can parse either variant.
+        // The `type` discriminator lets clients distinguish the two modes.
+        let now = chrono::Utc::now();
+        Ok(Json(ApiResponse::success(serde_json::json!({
+            "type": "raw",
+            "name": name,
+            "rules": [],
+            "metadata": { "description": null, "tags": [], "owner": null },
+            "created_at": now,
+            "updated_at": now,
+            "status": "updated"
+        }))))
     } else {
         Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
     }
