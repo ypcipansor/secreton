@@ -1377,10 +1377,26 @@ impl SecretService {
         rules: Vec<String>,
         metadata: PolicyMetadata,
     ) -> Result<Policy, SecretError> {
+        // Read the existing entry FIRST so that `created_at` can be preserved
+        // in both the serialized `Policy` JSON and on the outer `SecretEntry`.
+        // Previously the `Policy` struct was constructed with
+        // `created_at: chrono::Utc::now()` on every upsert, so subsequent
+        // `get_policy` reads (which deserialize this JSON — see
+        // `Self::get_policy`) would report the wrong creation timestamp after
+        // every update.  This also brings the structured-policy path in line
+        // with the raw-content path added in this PR
+        // (`AdminService::update_policy_content`), which correctly preserves
+        // `created_at` from the existing entry.
+        let policy_path = format!("sys/policies/{}", name);
+        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
+        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
+
         let policy = Policy {
             name: name.to_string(),
             rules,
-            created_at: chrono::Utc::now(),
+            created_at,
             updated_at: chrono::Utc::now(),
             metadata,
         };
@@ -1392,12 +1408,6 @@ impl SecretService {
         let encrypted_data = self.crypto.encrypt_data(&data).await.map_err(|e| {
             SecretError::Internal(anyhow::anyhow!("Failed to encrypt policy: {}", e))
         })?;
-
-        let policy_path = format!("sys/policies/{}", name);
-        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
-        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
-        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
-        let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
 
         let mut entry = secreton_storage::SecretEntry::new(
             policy_path,
