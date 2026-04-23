@@ -727,6 +727,52 @@ mod tests {
             );
         }
     }
+
+    /// Regression test: cross-check the `MFA_PENDING_ALLOWED_PATHS` constant
+    /// against the actual routes defined by `handlers::auth::create_routes()`.
+    ///
+    /// `handlers::auth::create_routes()` defines auth routes **without** the
+    /// `/api/v1/auth` prefix (e.g. `/mfa/setup`), and the router mounts them
+    /// under that prefix in `create_router()`.  The allowlist hardcodes the
+    /// fully-prefixed paths because that is what the middleware sees at
+    /// request time.  If either side is modified without the other — e.g.
+    /// the handler route is renamed to `/mfa/enroll` but the allowlist still
+    /// lists `/api/v1/auth/mfa/setup` — a TOFU user will be blocked from
+    /// enrolling and become permanently locked out.
+    ///
+    /// This test codifies the mapping so that such a drift fails fast at
+    /// test time rather than silently in production.  The expected paths
+    /// below must be kept in sync with
+    /// `crates/api/src/handlers/auth.rs::create_routes()` — each entry here
+    /// corresponds to a handler route that a TOFU user must be able to
+    /// reach to complete enrollment (plus logout).
+    #[test]
+    fn mfa_pending_allowlist_matches_handler_routes() {
+        // Routes defined by `handlers::auth::create_routes()`, as they will
+        // appear after the `/api/v1/auth` prefix is applied by
+        // `create_router()`.  Only the subset that a TOFU user needs access
+        // to is listed — other routes (e.g. `/login`, `/refresh`) are
+        // exempted from auth entirely and never hit `enforce_mfa_pending`.
+        let expected: &[&str] = &[
+            "/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/complete",
+            "/api/v1/auth/mfa/verify",
+            "/api/v1/auth/logout",
+        ];
+
+        // Order-insensitive set comparison so refactors that reorder the
+        // constant don't break this test.
+        let actual: std::collections::HashSet<&str> =
+            MFA_PENDING_ALLOWED_PATHS.iter().copied().collect();
+        let expected_set: std::collections::HashSet<&str> = expected.iter().copied().collect();
+
+        assert_eq!(
+            actual, expected_set,
+            "MFA_PENDING_ALLOWED_PATHS has drifted from the handler routes \
+             in handlers::auth::create_routes(). If you added or removed an \
+             MFA-enrollment route, update both the constant and this test."
+        );
+    }
 }
 
 /// Paths that remain accessible when a user is in the TOFU MFA-pending state.

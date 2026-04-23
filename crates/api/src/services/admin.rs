@@ -165,6 +165,17 @@ pub struct AdminService {
     performance: Arc<SecretPerformanceOptimizer>,
     audit: Arc<crate::services::audit::AuditLogger>,
     crypto: Option<Arc<CryptoService>>,
+    /// Serializes concurrent raw policy-content writes.
+    ///
+    /// `update_policy_content` performs a read-modify-write over
+    /// `sys/policies/content/{name}`.  Two concurrent admin requests for the
+    /// same policy name could both observe `existing = None` and both call
+    /// `storage.store()`, which on backends without a unique constraint on
+    /// `path` would create duplicate entries.  Acquiring this lock across
+    /// the whole RMW sequence closes the TOCTOU window.  Raw-content
+    /// updates are admin-only and rare, so a single global mutex is fine —
+    /// a per-path sharded map would only matter if this became a hot path.
+    policy_content_write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AdminService {
@@ -181,6 +192,7 @@ impl AdminService {
             performance,
             audit,
             crypto: None,
+            policy_content_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -976,6 +988,13 @@ impl AdminService {
         // configured we fall back to storing in metadata, consistent with
         // `update_config`.
         let path = format!("sys/policies/content/{}", name);
+
+        // Serialize the read-modify-write sequence so that two concurrent
+        // writes cannot both observe `existing = None` and both call
+        // `storage.store()`.  See `policy_content_write_lock` field doc
+        // for the full rationale.  The guard is held across the entire
+        // RMW sequence below and released when it drops at function end.
+        let _write_guard = self.policy_content_write_lock.lock().await;
 
         // Preserve the existing entry's id so that storage backends that index
         // by UUID perform an upsert rather than creating orphan rows.

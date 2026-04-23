@@ -767,11 +767,21 @@ pub async fn login(
             // already audited inside `enforce_mfa()` to avoid duplicate
             // entries in security dashboards:
             //   - MfaRequired: normal first step in a two-step MFA flow
-            //     (not a real failure).
-            //   - InvalidMfaCode: already logged by enforce_mfa() at the
-            //     "totp" method level.
-            //   - MfaNotConfigured: already logged by enforce_mfa() at the
-            //     "global_mfa" method level.
+            //     (not a real failure; no audit is emitted by enforce_mfa
+            //     either, matching the design — MFA-required prompts are
+            //     not security events).
+            //   - InvalidMfaCode: already logged by `enforce_mfa()` as
+            //     `AuthenticationFailure { method: "totp", reason:
+            //     "Invalid MFA code" }` at crates/api/src/services/auth.rs.
+            //     Skipping the duplicate keeps a single canonical entry so
+            //     brute-force MFA attempts remain accurately counted in
+            //     security dashboards.
+            //   - MfaNotConfigured: `enforce_mfa()` does NOT currently emit
+            //     this variant (TOFU users take a different code path), so
+            //     this arm is a defensive no-op.  It is retained so that if
+            //     `enforce_mfa()` is ever changed to return
+            //     `MfaNotConfigured`, the login handler will not duplicate
+            //     the audit entry.
             if !matches!(
                 e,
                 AuthError::MfaRequired

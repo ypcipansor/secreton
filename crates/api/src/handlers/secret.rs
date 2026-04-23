@@ -1767,7 +1767,15 @@ pub async fn update_policy(
             );
         }
 
-        // Before performing the structured update, remove any stale raw-content
+        // Parse and validate the request body BEFORE making any destructive
+        // changes to storage.  If deserialization fails we return 400 without
+        // having touched existing raw content — otherwise a malformed request
+        // (e.g. `{"rules": [123]}`) would wipe the raw-content entry and then
+        // leave the caller with a 400 and no recoverable state.
+        let req: CreatePolicyRequest = serde_json::from_value(request)
+            .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
+
+        // Now that the request is known-valid, remove any stale raw-content
         // entry at `sys/policies/content/{name}` so that the two namespaces do
         // not drift out of sync.  Without this cleanup, a policy that previously
         // received a raw-content update followed by a structured update would
@@ -1790,8 +1798,6 @@ pub async fn update_policy(
                 );
             }
         }
-        let req: CreatePolicyRequest = serde_json::from_value(request)
-            .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
 
         let metadata = if let Some(meta) = &req.metadata {
             crate::services::secret::PolicyMetadata {
