@@ -662,7 +662,6 @@ pub fn enforce_mfa_pending(
         // match `path.contains("/mfa/")`).
         let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/setup")
             || path.starts_with("/api/v1/auth/mfa/verify")
-            || path.starts_with("/api/v1/auth/mfa/disable")
             || path.starts_with("/api/v1/auth/logout");
         if !is_mfa_endpoint {
             return Err(axum::http::StatusCode::FORBIDDEN);
