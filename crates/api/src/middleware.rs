@@ -694,6 +694,8 @@ pub mod auth {
                 || path == "/health"
                 || path == "/version"
                 || path == "/login"  // Handler unit test uses /login directly
+                || path == "/api/v1/health"
+                || path == "/api/v1/version"
                 || path == "/api/v1/sys/health"
                 || path == "/api/v1/auth/login"
                 || path == "/api/v1/auth/refresh"

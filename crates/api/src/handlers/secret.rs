@@ -1807,7 +1807,7 @@ pub async fn delete_policy(
     // Track whether the structured policy existed so we can decide whether
     // to return 404 when neither the structured nor raw content entry exists.
     let structured_deleted = match state.secreton.delete_policy(&name, &user).await {
-        Ok(()) => true,
+        Ok(_) => true,
         Err(secret::SecretError::PolicyNotFound { .. }) => false,
         Err(secret::SecretError::PermissionDenied(msg)) => {
             return Err(crate::ApiError::Authorization(msg));
