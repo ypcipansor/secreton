@@ -1051,6 +1051,36 @@ impl AdminService {
         self.storage.delete_by_path(&path).await.map_err(AdminError::Storage)
     }
 
+    /// List the names of raw-content-only policies stored under
+    /// `sys/policies/content/`.
+    ///
+    /// Structured policies are listed separately via `SecretService::list_policies`
+    /// (which scans `sys/policies/`).  Because `update_policy_content` stores
+    /// entries under a disjoint prefix (`sys/policies/content/`), callers that
+    /// want to surface *all* policies — including those created purely via the
+    /// raw-content path — must combine the two results.  This method returns
+    /// just the names so the caller can deduplicate against the structured list.
+    pub async fn list_policy_content_names(&self) -> Result<Vec<String>, AdminError> {
+        const PREFIX: &str = "sys/policies/content/";
+        let query_params = QueryParams {
+            path_prefix: Some(PREFIX.to_string()),
+            limit: None,
+            offset: Some(0),
+            ..Default::default()
+        };
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        Ok(entries
+            .into_iter()
+            .filter_map(|e| e.path.strip_prefix(PREFIX).map(|s| s.to_string()))
+            .filter(|name| !name.is_empty())
+            .collect())
+    }
+
     /// Check password security
     async fn check_password_security(&self) -> Result<Vec<SecurityFinding>, AdminError> {
         let mut findings = Vec::new();

@@ -1484,7 +1484,7 @@ pub async fn hash_data(
 /// Policy operations
 pub async fn list_policies(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<PolicyResponse>>>> {
     // List policies via secreton service
@@ -1495,7 +1495,7 @@ pub async fn list_policies(
         .map_err(|e| crate::ApiError::Internal(format!("Failed to list policies: {}", e)))?;
 
     // Convert to response format
-    let policy_responses: Vec<PolicyResponse> = policies
+    let mut policy_responses: Vec<PolicyResponse> = policies
         .into_iter()
         .map(|policy| PolicyResponse {
             name: policy.name,
@@ -1509,6 +1509,70 @@ pub async fn list_policies(
             updated_at: policy.updated_at,
         })
         .collect();
+
+    // Also surface policies created via the raw-content path
+    // (`update_policy` with `{"content": "..."}`, stored under
+    // `sys/policies/content/`) so they are visible and manageable in the UI.
+    //
+    // Only admin/root users see raw-content-only policies — mirrors the role
+    // gates in `get_policy`, `update_policy`, and `delete_policy`.  Non-admin
+    // users only see structured policies, preserving the existing information
+    // boundary.
+    //
+    // Names already present in the structured list are not re-added: when a
+    // policy exists in both namespaces the structured definition is the
+    // authoritative representation for listing purposes.  Clients can still
+    // fetch the raw form via `GET /policies/{name}` when applicable.
+    if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
+        match state.admin.list_policy_content_names().await {
+            Ok(raw_names) => {
+                let existing: std::collections::HashSet<String> =
+                    policy_responses.iter().map(|p| p.name.clone()).collect();
+                for name in raw_names {
+                    if existing.contains(&name) {
+                        continue;
+                    }
+                    // Apply the same `filter` semantics used by
+                    // `SecretService::list_policies` (substring match on name).
+                    if let Some(f) = query.filter.as_deref() {
+                        if !name.contains(f) {
+                            continue;
+                        }
+                    }
+                    // Read back timestamps so the listing reflects the real
+                    // created_at / updated_at of the stored entry rather than
+                    // fabricated values.
+                    let (created_at, updated_at) = match state
+                        .admin
+                        .get_policy_content(&name)
+                        .await
+                    {
+                        Ok(Some((_content, ca, ua))) => (ca, ua),
+                        _ => {
+                            let now = chrono::Utc::now();
+                            (now, now)
+                        }
+                    };
+                    policy_responses.push(PolicyResponse {
+                        name,
+                        rules: Vec::new(),
+                        metadata: PolicyMetadata {
+                            description: None,
+                            tags: Vec::new(),
+                            owner: None,
+                        },
+                        created_at,
+                        updated_at,
+                    });
+                }
+            }
+            Err(e) => {
+                // Don't fail the whole listing on raw-content enumeration
+                // failures — structured policies are still useful on their own.
+                tracing::warn!("Failed to enumerate raw policy content: {}", e);
+            }
+        }
+    }
 
     Ok(Json(ApiResponse::success(policy_responses)))
 }
