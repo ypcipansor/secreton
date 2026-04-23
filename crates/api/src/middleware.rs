@@ -729,6 +729,23 @@ mod tests {
     }
 }
 
+/// Paths that remain accessible when a user is in the TOFU MFA-pending state.
+///
+/// These are the **full** HTTP paths as seen by the auth middleware — i.e.
+/// they include the `/api/v1` router prefix that `create_router` adds on top
+/// of `handlers::auth::create_routes()` (which itself defines them without a
+/// prefix, e.g. `/mfa/setup`).
+///
+/// Kept as a named constant so a regression test can cross-check the allowlist
+/// against the real `create_routes()` definitions and catch silent drift when
+/// either side is modified.
+pub const MFA_PENDING_ALLOWED_PATHS: &[&str] = &[
+    "/api/v1/auth/mfa/setup",
+    "/api/v1/auth/mfa/setup/complete",
+    "/api/v1/auth/mfa/verify",
+    "/api/v1/auth/logout",
+];
+
 /// Check whether the authenticated user has a pending MFA enrollment (TOFU)
 /// and, if so, whether the requested path is allowed.
 ///
@@ -738,7 +755,7 @@ mod tests {
 /// This is the **single source of truth** for the MFA-pending allowlist so
 /// that `AuthMiddleware::authenticate` (used by `create_router`) and
 /// `auth_middleware` (used by `create_api_router`) stay in sync.  Any change
-/// to the allowlist must be made here only.
+/// to the allowlist must be made in [`MFA_PENDING_ALLOWED_PATHS`] only.
 pub fn enforce_mfa_pending(
     user: &secreton_auth::User,
     path: &str,
@@ -754,22 +771,12 @@ pub fn enforce_mfa_pending(
         // user-controlled path segments (e.g. a secret named "mfa" would
         // match `path.contains("/mfa/")`).
         //
-        // Allowed during TOFU (MFA enrollment pending):
-        //   - /api/v1/auth/mfa/setup          — start MFA enrollment
-        //   - /api/v1/auth/mfa/setup/complete  — finish MFA enrollment
-        //   - /api/v1/auth/mfa/verify          — verify an MFA code
-        //   - /api/v1/auth/logout              — allow the user to log out
-        //
         // NOT allowed during TOFU:
         //   - /api/v1/auth/mfa/disable — a TOFU user has not enrolled yet,
         //     so there is nothing to disable.  Allowing it would let a
         //     privileged user call disable (which is a no-op or error) and
         //     remain in the TOFU state indefinitely.
-        let is_mfa_endpoint = path == "/api/v1/auth/mfa/setup"
-            || path == "/api/v1/auth/mfa/setup/complete"
-            || path == "/api/v1/auth/mfa/verify"
-            || path == "/api/v1/auth/logout";
-        if !is_mfa_endpoint {
+        if !MFA_PENDING_ALLOWED_PATHS.iter().any(|p| path == *p) {
             return Err(axum::http::StatusCode::FORBIDDEN);
         }
     }

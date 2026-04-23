@@ -1524,11 +1524,15 @@ pub async fn list_policies(
     // authoritative representation for listing purposes.  Clients can still
     // fetch the raw form via `GET /policies/{name}` when applicable.
     if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
-        match state.admin.list_policy_content_names().await {
-            Ok(raw_names) => {
+        // Use `list_policy_content_metadata` to obtain the timestamps from the
+        // storage listing directly, avoiding an N+1 pattern of one extra
+        // `get_policy_content` (storage read + crypto decrypt) per raw-content
+        // policy.  The full content is not needed for a listing response.
+        match state.admin.list_policy_content_metadata().await {
+            Ok(raw_entries) => {
                 let existing: std::collections::HashSet<String> =
                     policy_responses.iter().map(|p| p.name.clone()).collect();
-                for name in raw_names {
+                for (name, created_at, updated_at) in raw_entries {
                     if existing.contains(&name) {
                         continue;
                     }
@@ -1539,20 +1543,6 @@ pub async fn list_policies(
                             continue;
                         }
                     }
-                    // Read back timestamps so the listing reflects the real
-                    // created_at / updated_at of the stored entry rather than
-                    // fabricated values.
-                    let (created_at, updated_at) = match state
-                        .admin
-                        .get_policy_content(&name)
-                        .await
-                    {
-                        Ok(Some((_content, ca, ua))) => (ca, ua),
-                        _ => {
-                            let now = chrono::Utc::now();
-                            (now, now)
-                        }
-                    };
                     policy_responses.push(PolicyResponse {
                         name,
                         rules: Vec::new(),
@@ -1749,9 +1739,27 @@ pub async fn update_policy(
     // 2. Raw content update for UI/system-config (if 'content' is present)
 
     if request.get("rules").is_some_and(|v| !v.is_null()) {
+        // Reject an empty `rules` array accompanied by a non-null `content`:
+        // this is almost certainly a client mistake — sending an empty
+        // structured update would silently wipe rules AND drop the raw
+        // content the caller also supplied.  Fail fast instead of losing
+        // data.
+        let rules_is_empty_array = request
+            .get("rules")
+            .and_then(|v| v.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(false);
+        let content_present = request.get("content").is_some_and(|v| !v.is_null());
+        if rules_is_empty_array && content_present {
+            return Err(crate::ApiError::BadRequest(
+                "Invalid request: 'rules' is empty and 'content' is also provided; \
+                 send either 'rules' with at least one rule or 'content' alone"
+                    .to_string(),
+            ));
+        }
         // If both 'rules' and 'content' are present, 'rules' takes precedence.
         // Log a warning so operators can spot unintentional data loss.
-        if request.get("content").is_some_and(|v| !v.is_null()) {
+        if content_present {
             tracing::warn!(
                 "update_policy '{}': request contains both 'rules' and 'content'; \
                  only 'rules' will be processed (raw content is ignored)",

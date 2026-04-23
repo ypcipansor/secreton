@@ -1061,6 +1061,32 @@ impl AdminService {
     /// raw-content path — must combine the two results.  This method returns
     /// just the names so the caller can deduplicate against the structured list.
     pub async fn list_policy_content_names(&self) -> Result<Vec<String>, AdminError> {
+        Ok(self
+            .list_policy_content_metadata()
+            .await?
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect())
+    }
+
+    /// List raw-content-only policies with their timestamps.
+    ///
+    /// Returns `(name, created_at, updated_at)` tuples read directly from the
+    /// storage listing — no additional `get_by_path` calls or decryption.
+    /// This exists to avoid an N+1 read/decrypt pattern when a caller needs
+    /// timestamps for every raw-content policy (e.g. `list_policies` in the
+    /// secret handler).  The `updated_at` metadata override written by
+    /// `update_policy_content` is honoured, matching `get_policy_content`.
+    pub async fn list_policy_content_metadata(
+        &self,
+    ) -> Result<
+        Vec<(
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+        )>,
+        AdminError,
+    > {
         const PREFIX: &str = "sys/policies/content/";
         let query_params = QueryParams {
             path_prefix: Some(PREFIX.to_string()),
@@ -1076,8 +1102,22 @@ impl AdminService {
 
         Ok(entries
             .into_iter()
-            .filter_map(|e| e.path.strip_prefix(PREFIX).map(|s| s.to_string()))
-            .filter(|name| !name.is_empty())
+            .filter_map(|e| {
+                let name = e.path.strip_prefix(PREFIX)?.to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                // Prefer the `updated_at` written into metadata by
+                // `update_policy_content`, falling back to the entry's own
+                // `updated_at` field.  Mirrors `get_policy_content`.
+                let updated_at = e
+                    .metadata
+                    .get("updated_at")
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .unwrap_or(e.updated_at);
+                Some((name, e.created_at, updated_at))
+            })
             .collect())
     }
 
