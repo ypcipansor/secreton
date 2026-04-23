@@ -416,7 +416,16 @@ impl AuthenticationService {
         }
 
         if let Some(mfa) = &self.mfa_service {
-            let user_uuid = Uuid::parse_str(user_id).unwrap_or_default();
+            let user_uuid = Uuid::parse_str(user_id).map_err(|_| {
+                tracing::error!(
+                    "enforce_mfa: failed to parse user_id '{}' as UUID for user '{}'; \
+                     denying access to prevent nil-UUID TOFU bypass",
+                    user_id, username
+                );
+                AuthError::Internal(anyhow::anyhow!(
+                    "Cannot enforce MFA: invalid user ID format"
+                ))
+            })?;
             let mfa_configured = match mfa.is_mfa_required(user_uuid).await {
                 Ok(configured) => configured,
                 Err(e) => {
@@ -1428,17 +1437,16 @@ impl AuthenticationService {
             aud: self.config.jwt.audience.clone(),
         };
 
+        let jwt_secret = self.config.jwt.secret.as_ref().ok_or_else(|| {
+            AuthError::Internal(anyhow::anyhow!(
+                "JWT secret must be configured for refresh token generation"
+            ))
+        })?;
+
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &claims,
-            &jsonwebtoken::EncodingKey::from_secret(
-                self.config
-                    .jwt
-                    .secret
-                    .as_ref()
-                    .expect("JWT secret must be configured")
-                    .as_bytes(),
-            ),
+            &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
         )
         .map_err(|e| {
             AuthError::Internal(anyhow::anyhow!("Refresh token generation failed: {}", e))

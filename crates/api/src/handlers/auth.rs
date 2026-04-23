@@ -763,15 +763,21 @@ pub async fn login(
             Ok(Json(ApiResponse::success(response)))
         }
         Err(e) => {
-            // Audit: authentication failure
-            let _ = state
-                .audit
-                .log_event(SecurityEventType::AuthenticationFailure {
-                    user: request.username.clone(),
-                    method: "password".to_string(),
-                    reason: e.to_string(),
-                })
-                .await;
+            // Audit: log authentication failures, but skip MfaRequired since
+            // it is a normal first step in a two-step MFA flow (not a real
+            // failure).  Logging it as AuthenticationFailure would inflate
+            // failure counts in security dashboards and confuse incident
+            // response.
+            if !matches!(e, AuthError::MfaRequired) {
+                let _ = state
+                    .audit
+                    .log_event(SecurityEventType::AuthenticationFailure {
+                        user: request.username.clone(),
+                        method: "password".to_string(),
+                        reason: e.to_string(),
+                    })
+                    .await;
+            }
 
             // Map specific auth errors to appropriate HTTP status codes.
             match e {

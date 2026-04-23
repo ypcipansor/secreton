@@ -1518,6 +1518,11 @@ pub async fn get_policy(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // Validate policy name to prevent path-traversal attacks.
+    // The name comes from a URL path parameter and is used to construct
+    // storage paths like `sys/policies/content/{name}`.
+    crate::handlers::validate_name(&name)?;
+
     // Try structured policy first
     match state.secreton.get_policy(&name, &user).await {
         Ok(policy) => {
@@ -1567,6 +1572,9 @@ pub async fn create_policy(
     Path(name): Path<String>,
     Json(request): Json<CreatePolicyRequest>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
+    // Validate policy name to prevent path-traversal attacks.
+    crate::handlers::validate_name(&name)?;
+
     // Convert metadata
     let metadata = if let Some(meta) = &request.metadata {
         crate::services::secret::PolicyMetadata {
@@ -1619,6 +1627,9 @@ pub async fn update_policy(
     Path(name): Path<String>,
     Json(request): Json<serde_json::Value>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // Validate policy name to prevent path-traversal attacks.
+    crate::handlers::validate_name(&name)?;
+
     // Support two modes:
     // 1. Structured policy update (if 'rules' is present)
     // 2. Raw content update for UI/system-config (if 'content' is present)
@@ -1736,6 +1747,9 @@ pub async fn delete_policy(
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
+    // Validate policy name to prevent path-traversal attacks.
+    crate::handlers::validate_name(&name)?;
+
     // Delete policy via secreton service
     state
         .secreton
