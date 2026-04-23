@@ -766,6 +766,13 @@ impl SecretService {
         self.check_permission(user, &format!("sys/policies/{}", name), "delete")
             .await?;
 
+        // Serialize with `_upsert_policy` so that a concurrent upsert cannot
+        // observe `existing_entry = Some(...)` and then `storage.update()` a
+        // now-deleted entry, nor observe `existing_entry = None` after this
+        // delete has started and race ahead of the delete with a `store()`.
+        // See `policy_write_lock` field doc for the full rationale.
+        let _write_guard = self.policy_write_lock.lock().await;
+
         let path = format!("sys/policies/{}", name);
         let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
 

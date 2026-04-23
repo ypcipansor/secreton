@@ -29,6 +29,19 @@ struct PolicyResponse {
     metadata: PolicyMetadata,
     created_at: String,
     updated_at: String,
+    /// Discriminator: `"structured"` (rules-based) or `"raw"` (opaque content).
+    /// Matches the `type` field on the backend's `PolicyResponse`
+    /// (`crates/api/src/handlers/secret.rs`).  Defaults to `"structured"` for
+    /// backward compatibility with responses that predate the field.
+    #[serde(rename = "type", default = "default_policy_type")]
+    policy_type: String,
+    /// Raw policy content — populated when `policy_type == "raw"`.
+    #[serde(default)]
+    content: Option<String>,
+}
+
+fn default_policy_type() -> String {
+    "structured".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -223,6 +236,8 @@ pub fn PoliciesList() -> impl IntoView {
                                                     let p_name = policy.name.clone();
                                                     let p_del = policy.name.clone();
                                                     let p_desc = policy.metadata.description.clone().unwrap_or_default();
+                                                    let is_raw = policy.policy_type == "raw";
+                                                    let raw_content = policy.content.clone().unwrap_or_default();
 
                                                     view! {
                                                         <Card
@@ -237,21 +252,37 @@ pub fn PoliciesList() -> impl IntoView {
                                                                 </button>
                                                             }.into_any()
                                                         >
-                                                            <div class="mt-2">
-                                                                <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">"Rules"</h4>
-                                                                <div class="space-y-1">
-                                                                    {policy.rules.iter().take(3).map(|rule| view! {
-                                                                        <div class="text-xs font-mono bg-gray-50 p-1 rounded truncate">
-                                                                            {rule.clone()}
+                                                            {if is_raw {
+                                                                view! {
+                                                                    <div class="mt-2">
+                                                                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 mr-2">"RAW"</span>
+                                                                            "Content"
+                                                                        </h4>
+                                                                        <pre class="text-xs font-mono bg-gray-50 p-2 rounded max-h-32 overflow-auto whitespace-pre-wrap">
+                                                                            {raw_content.clone()}
+                                                                        </pre>
+                                                                    </div>
+                                                                }.into_any()
+                                                            } else {
+                                                                view! {
+                                                                    <div class="mt-2">
+                                                                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">"Rules"</h4>
+                                                                        <div class="space-y-1">
+                                                                            {policy.rules.iter().take(3).map(|rule| view! {
+                                                                                <div class="text-xs font-mono bg-gray-50 p-1 rounded truncate">
+                                                                                    {rule.clone()}
+                                                                                </div>
+                                                                            }).collect_view()}
+                                                                            {if policy.rules.len() > 3 {
+                                                                                view! { <div class="text-[10px] text-gray-400">"plus " {policy.rules.len() - 3} " more..."</div> }.into_any()
+                                                                            } else {
+                                                                                view! {}.into_any()
+                                                                            }}
                                                                         </div>
-                                                                    }).collect_view()}
-                                                                    {if policy.rules.len() > 3 {
-                                                                        view! { <div class="text-[10px] text-gray-400">"plus " {policy.rules.len() - 3} " more..."</div> }.into_any()
-                                                                    } else {
-                                                                        view! {}.into_any()
-                                                                    }}
-                                                                </div>
-                                                            </div>
+                                                                    </div>
+                                                                }.into_any()
+                                                            }}
                                                         </Card>
                                                     }
                                                 }).collect_view()}

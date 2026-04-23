@@ -652,6 +652,49 @@ fn default_policy_type() -> String {
     "structured".to_string()
 }
 
+/// Strongly-typed request body for `PUT /policies/{name}`.
+///
+/// `update_policy` supports two distinct request shapes:
+///   - **Structured**: `{ "rules": [...], "metadata": {...} }` — full
+///     RBAC-style policy with rule strings.
+///   - **Raw**: `{ "content": "..." }` — opaque policy content (HCL/text)
+///     stored under `sys/policies/content/{name}` for admin UI management.
+///
+/// Using `#[serde(untagged)]` keeps the wire format unchanged (clients
+/// send either shape with no discriminator field) while giving handlers
+/// and OpenAPI tooling a strongly-typed view instead of a raw
+/// `serde_json::Value`.  Deserialization tries `Structured` first; if
+/// `rules` is absent it falls through to `Raw`.
+///
+/// The handler retains the cross-shape validation (e.g. rejecting
+/// `rules: []` with a non-null `content`, which `#[serde(untagged)]`
+/// cannot express).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum UpdatePolicyRequest {
+    /// Structured update with rules.  `rules` is required (non-null) to
+    /// disambiguate from the `Raw` variant.
+    Structured {
+        /// Policy name — ignored; the authoritative name comes from the URL
+        /// path.  Kept for backward compatibility with clients that include
+        /// it in the body.
+        #[serde(default)]
+        name: Option<String>,
+        rules: Vec<String>,
+        #[serde(default)]
+        metadata: Option<PolicyMetadata>,
+        /// Accepted and ignored when `rules` is present.  Captured here so
+        /// the handler can detect `{rules: [], content: "..."}` and reject
+        /// it rather than silently wiping the raw content.
+        #[serde(default)]
+        content: Option<String>,
+    },
+    /// Raw-content update (admin-only).  `content` is required.
+    Raw {
+        content: String,
+    },
+}
+
 /// Get secret by path
 pub async fn get_secret(
     State(state): State<AppState>,
@@ -1753,28 +1796,31 @@ pub async fn update_policy(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
-    Json(request): Json<serde_json::Value>,
+    Json(request): Json<UpdatePolicyRequest>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
     // Validate policy name to prevent path-traversal attacks.
     crate::handlers::validate_name(&name)?;
 
-    // Support two modes:
-    // 1. Structured policy update (if 'rules' is present)
-    // 2. Raw content update for UI/system-config (if 'content' is present)
+    // `UpdatePolicyRequest` is an `#[serde(untagged)]` enum whose
+    // `Structured` variant matches any body containing `rules` and whose
+    // `Raw` variant matches any body containing only `content`.  This
+    // gives us strongly-typed request handling while preserving the
+    // original wire format (no discriminator tag on the client side).
 
-    if request.get("rules").is_some_and(|v| !v.is_null()) {
+    match request {
+        UpdatePolicyRequest::Structured {
+            name: _body_name,
+            rules,
+            metadata: req_metadata,
+            content: stray_content,
+        } => {
         // Reject an empty `rules` array accompanied by a non-null `content`:
         // this is almost certainly a client mistake — sending an empty
         // structured update would silently wipe rules AND drop the raw
         // content the caller also supplied.  Fail fast instead of losing
         // data.
-        let rules_is_empty_array = request
-            .get("rules")
-            .and_then(|v| v.as_array())
-            .map(|a| a.is_empty())
-            .unwrap_or(false);
-        let content_present = request.get("content").is_some_and(|v| !v.is_null());
-        if rules_is_empty_array && content_present {
+        let content_present = stray_content.is_some();
+        if rules.is_empty() && content_present {
             return Err(crate::ApiError::BadRequest(
                 "Invalid request: 'rules' is empty and 'content' is also provided; \
                  send either 'rules' with at least one rule or 'content' alone"
@@ -1790,14 +1836,6 @@ pub async fn update_policy(
                 name
             );
         }
-
-        // Parse and validate the request body BEFORE making any destructive
-        // changes to storage.  If deserialization fails we return 400 without
-        // having touched existing raw content — otherwise a malformed request
-        // (e.g. `{"rules": [123]}`) would wipe the raw-content entry and then
-        // leave the caller with a 400 and no recoverable state.
-        let req: CreatePolicyRequest = serde_json::from_value(request)
-            .map_err(|e| crate::ApiError::BadRequest(format!("Invalid policy request: {}", e)))?;
 
         // Now that the request is known-valid, remove any stale raw-content
         // entry at `sys/policies/content/{name}` so that the two namespaces do
@@ -1843,7 +1881,7 @@ pub async fn update_policy(
             }
         }
 
-        let metadata = if let Some(meta) = &req.metadata {
+        let metadata = if let Some(meta) = &req_metadata {
             crate::services::secret::PolicyMetadata {
                 description: meta.description.clone(),
                 tags: meta.tags.iter().map(|t| (t.clone(), "true".to_string())).collect(),
@@ -1861,7 +1899,7 @@ pub async fn update_policy(
 
         let policy = state
             .secreton
-            .update_policy(&name, req.rules, metadata, &user)
+            .update_policy(&name, rules, metadata, &user)
             .await
             .map_err(|e| match e {
                 secret::SecretError::PolicyNotFound { .. } => {
@@ -1886,64 +1924,65 @@ pub async fn update_policy(
         };
 
         Ok(Json(ApiResponse::success(response)))
-    } else if request.get("content").is_some_and(|v| !v.is_null()) {
-        // Validate that 'content' is a string — non-string values (e.g.
-        // numbers, booleans, objects) are not valid policy content.
-        let content = request
-            .get("content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                crate::ApiError::BadRequest(
-                    "Invalid request: 'content' must be a string".to_string(),
-                )
-            })?;
-
-        // Only admin/root may update raw policy content
-        if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
-            return Err(crate::ApiError::Authorization("Admin privileges required".to_string()));
         }
-
-        // Enforce RBAC policy checks for the policy path, not just role
-        // membership.  This ensures that an admin whose access has been
-        // restricted via fine-grained RBAC policies cannot bypass those
-        // restrictions through the raw content update path.
-        if let Err(e) = state.secreton.check_policy_permission(&name, &user, "update").await {
-            if let secret::SecretError::PermissionDenied(msg) = e {
-                return Err(crate::ApiError::Authorization(msg));
+        UpdatePolicyRequest::Raw { content } => {
+            // Only admin/root may update raw policy content
+            if !user.roles.contains(&"admin".to_string())
+                && !user.roles.contains(&"root".to_string())
+            {
+                return Err(crate::ApiError::Authorization(
+                    "Admin privileges required".to_string(),
+                ));
             }
-            return Err(crate::ApiError::Internal(format!(
-                "Failed to verify policy permissions: {}", e
-            )));
-        }
 
-        // `update_policy_content` returns the authoritative
-        // `(created_at, updated_at)` for the write it just performed, so we
-        // don't need to read back the entry — which would race with a
-        // concurrent update and could surface the other writer's timestamps.
-        let (created_at, updated_at) =
-            state.admin.update_policy_content(&name, content).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
-            })?;
-        // Return the same `PolicyResponse` shape as structured policies so
-        // strongly-typed clients can parse either variant.  `policy_type =
-        // "raw"` and the raw `content` is echoed back so callers can verify
-        // the stored value without an additional GET round-trip.
-        let response = PolicyResponse {
-            name: name.clone(),
-            rules: Vec::new(),
-            metadata: PolicyMetadata {
-                description: None,
-                tags: Vec::new(),
-                owner: None,
-            },
-            created_at,
-            updated_at,
-            policy_type: "raw".to_string(),
-            content: Some(content.to_string()),
-        };
-        Ok(Json(ApiResponse::success(response)))
-    } else {
-        Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
+            // Enforce RBAC policy checks for the policy path, not just role
+            // membership.  This ensures that an admin whose access has been
+            // restricted via fine-grained RBAC policies cannot bypass those
+            // restrictions through the raw content update path.
+            if let Err(e) = state
+                .secreton
+                .check_policy_permission(&name, &user, "update")
+                .await
+            {
+                if let secret::SecretError::PermissionDenied(msg) = e {
+                    return Err(crate::ApiError::Authorization(msg));
+                }
+                return Err(crate::ApiError::Internal(format!(
+                    "Failed to verify policy permissions: {}",
+                    e
+                )));
+            }
+
+            // `update_policy_content` returns the authoritative
+            // `(created_at, updated_at)` for the write it just performed, so we
+            // don't need to read back the entry — which would race with a
+            // concurrent update and could surface the other writer's timestamps.
+            let (created_at, updated_at) = state
+                .admin
+                .update_policy_content(&name, &content)
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
+                })?;
+            // Return the same `PolicyResponse` shape as structured policies so
+            // strongly-typed clients can parse either variant.  `policy_type =
+            // "raw"` and the raw `content` is echoed back so callers can verify
+            // the stored value without an additional GET round-trip.
+            let response = PolicyResponse {
+                name: name.clone(),
+                rules: Vec::new(),
+                metadata: PolicyMetadata {
+                    description: None,
+                    tags: Vec::new(),
+                    owner: None,
+                },
+                created_at,
+                updated_at,
+                policy_type: "raw".to_string(),
+                content: Some(content),
+            };
+            Ok(Json(ApiResponse::success(response)))
+        }
     }
 }
 
