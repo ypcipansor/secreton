@@ -207,9 +207,9 @@ impl AuthService {
     /// mirrors the rotation enforced by the API-layer
     /// `AuthenticationService::refresh_token`.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, SecretonError> {
-        // Reject replay of a previously-exchanged refresh token.  Must happen
-        // BEFORE validation so that a blacklisted-but-still-signed token is
-        // rejected with the same error surface as an invalid token.
+        // Fast-path early reject for a previously-exchanged refresh token.
+        // This is purely an optimisation — the authoritative single-use
+        // check is the atomic check-and-insert after validation, below.
         {
             let blacklist = self.token_blacklist.read().await;
             if blacklist.contains_key(refresh_token) {
@@ -220,6 +220,9 @@ impl AuthService {
         }
 
         // Validate the refresh token to extract the user's identity.
+        // Validation is side-effect-free so performing it before the CAS is
+        // safe — two concurrent requests will both validate, but only one
+        // will win the atomic insert below.
         let claims = self
             .token_service
             .validate_refresh_token(refresh_token)
@@ -227,11 +230,22 @@ impl AuthService {
                 message: format!("Token refresh failed: {}", e),
             })?;
 
-        // Blacklist the old refresh token so it cannot be reused.  Use the
+        // Atomically check-and-insert the refresh token into the blacklist
+        // while holding the write lock across both operations.  This closes
+        // the TOCTOU window between the fast-path read above and the insert:
+        // two concurrent requests for the same refresh token will both pass
+        // the read check, but only the first one to acquire the write lock
+        // will find the slot empty and insert — the second will observe the
+        // existing entry and be rejected with `InvalidToken`.  Use the
         // token's own `exp` as the TTL so the blacklist entry survives as
         // long as the token would have been valid.
         {
             let mut blacklist = self.token_blacklist.write().await;
+            if blacklist.contains_key(refresh_token) {
+                return Err(SecretonError::Authentication {
+                    message: "Token has been revoked".to_string(),
+                });
+            }
             let exp = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
                 .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(7));
             blacklist.insert(refresh_token.to_string(), exp);

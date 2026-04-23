@@ -1787,15 +1787,35 @@ pub async fn update_policy(
         // block is a no-op, which is safe because only admins can have created
         // raw content in the first place.
         if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
-            if let Err(e) = state.admin.delete_policy_content(&name).await {
-                // Don't fail the structured update on raw-content cleanup
-                // failures — log and continue.  The structured policy is the
-                // authoritative representation after this update.
-                tracing::warn!(
-                    "update_policy '{}': failed to delete stale raw content during \
-                     structured update: {}",
-                    name, e
-                );
+            // Enforce fine-grained RBAC before touching raw content, consistent
+            // with the update_policy raw-content branch and `delete_policy`.
+            // The structured `update_policy` call below performs its own RBAC
+            // check on the same path with "update" action, but the raw-content
+            // cleanup is a logically distinct operation (delete on
+            // sys/policies/content/{name}) so we verify explicitly.  A permission
+            // failure here is a soft error — log and continue with the
+            // structured update, since an admin who cannot clean up stale raw
+            // content should still be able to update the structured policy.
+            match state.secreton.check_policy_permission(&name, &user, "delete").await {
+                Ok(()) => {
+                    if let Err(e) = state.admin.delete_policy_content(&name).await {
+                        // Don't fail the structured update on raw-content cleanup
+                        // failures — log and continue.  The structured policy is the
+                        // authoritative representation after this update.
+                        tracing::warn!(
+                            "update_policy '{}': failed to delete stale raw content during \
+                             structured update: {}",
+                            name, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "update_policy '{}': skipping raw-content cleanup during structured \
+                         update because RBAC check failed: {}",
+                        name, e
+                    );
+                }
             }
         }
 

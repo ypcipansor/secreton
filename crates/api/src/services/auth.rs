@@ -1187,14 +1187,19 @@ impl AuthenticationService {
 
     /// Refresh access token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthToken, AuthError> {
-        // Check if the refresh token has been revoked (single-use enforcement).
-        // This must happen BEFORE validation so that a previously-used refresh
-        // token is rejected even if its JWT signature and expiry are still valid.
+        // Fast-path early reject for a previously-exchanged refresh token.
+        // This is purely an optimisation — the authoritative single-use
+        // check is the atomic check-and-insert on the in-memory blacklist
+        // below, which closes the TOCTOU window between this check and the
+        // eventual `revoke_token` call.
         if self.is_token_revoked(refresh_token).await {
             return Err(AuthError::InvalidToken);
         }
 
-        // Validate first to get user info for session creation
+        // Validate first to get user info for session creation.  Validation
+        // is side-effect-free so performing it before the CAS is safe —
+        // two concurrent requests will both validate, but only one will win
+        // the atomic insert below.
         let claims = self
             .token_service
             .validate_refresh_token(refresh_token)
@@ -1209,10 +1214,36 @@ impl AuthenticationService {
         // We also attempt to find and revoke the old session that was
         // associated with this refresh token, so that the old access token
         // is invalidated as well.
+        let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
+        // Atomically check-and-insert the refresh token into the in-memory
+        // blacklist while holding the write lock across both operations.
+        // This closes the TOCTOU window between the `is_token_revoked` call
+        // above and the `revoke_token` insert below: two concurrent requests
+        // for the same refresh token will both pass the fast-path check, but
+        // only the first one to acquire the write lock will find the slot
+        // empty and insert — the second will observe the existing entry and
+        // be rejected with `InvalidToken`.
+        //
+        // The shared storage layer is still updated via `revoke_token` below
+        // so that cross-instance revocation continues to work; that call is
+        // idempotent on the storage side (same hash-keyed path).
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            if let Some(expires_at) = blacklist.get(refresh_token) {
+                if *expires_at > chrono::Utc::now() {
+                    return Err(AuthError::InvalidToken);
+                }
+            }
+            blacklist.insert(refresh_token.to_string(), refresh_expiry);
+        }
         {
             // Revoke the refresh token itself (add to blacklist with a
             // generous expiry — refresh tokens are long-lived).
-            let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
+            //
+            // The in-memory insert was already done atomically above; this
+            // call re-inserts the same entry (idempotent) and additionally
+            // persists the revocation to shared storage for cross-instance
+            // propagation.
             self.revoke_token(refresh_token.to_string(), refresh_expiry).await;
 
             // Best-effort: find and delete the old session whose refresh_token
