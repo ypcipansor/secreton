@@ -1530,13 +1530,27 @@ impl AuthenticationService {
                 Ok(decrypted) => decrypted,
                 Err(_) => entry.encrypted_data.clone(),
             };
-            if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
-                if session.user_id != user_id {
-                    return Err(AuthError::PermissionDenied);
-                }
-                // Revoke the token associated with this session
-                self.revoke_token(session.token, session.expires_at).await;
+            // The ownership check is security-critical: we MUST verify that
+            // the caller owns this session before deleting it.  If
+            // deserialization fails (e.g. because the encrypted data could
+            // not be decrypted and the raw ciphertext is not valid JSON),
+            // deny the request rather than skipping the ownership check and
+            // allowing any authenticated user to delete arbitrary sessions.
+            let session = serde_json::from_slice::<Session>(&session_bytes).map_err(|e| {
+                tracing::warn!(
+                    "Failed to deserialize session '{}' during revocation \
+                     (ownership check cannot be performed): {}",
+                    session_id, e
+                );
+                AuthError::Internal(anyhow::anyhow!(
+                    "Cannot verify session ownership: failed to read session data"
+                ))
+            })?;
+            if session.user_id != user_id {
+                return Err(AuthError::PermissionDenied);
             }
+            // Revoke the token associated with this session
+            self.revoke_token(session.token, session.expires_at).await;
         } else {
             return Err(AuthError::Storage(
                 secreton_storage::StorageError::NotFound {
