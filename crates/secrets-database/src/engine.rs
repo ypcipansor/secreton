@@ -247,20 +247,46 @@ impl DatabaseEngine {
 
         let params: &[&(dyn ToSql + Sync)] = &[];
 
+        // Check whether the role exists before attempting REASSIGN/DROP OWNED.
+        // Both commands raise an error when the target role is missing, which
+        // would otherwise cause the transaction to abort and prevent the lease
+        // record from being deleted — leaving the lease permanently stuck.
+        // If the role is already gone (e.g. an operator removed it manually,
+        // or VALID UNTIL elapsed and it was cleaned up), skip REASSIGN/DROP
+        // OWNED and fall through to DROP USER IF EXISTS (a no-op).
+        let role_exists_row = client
+            .query_opt(
+                "SELECT 1 FROM pg_roles WHERE rolname = $1",
+                &[&username],
+            )
+            .await
+            .map_err(|e| {
+                DatabaseError::QueryFailed(format!("Failed to check role existence: {}", e))
+            })?;
+        let role_exists = role_exists_row.is_some();
+
         client
             .execute("BEGIN", params)
             .await
             .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
         let result = async {
-            client
-                .execute(&reassign_sql, params)
-                .await
-                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
-            client
-                .execute(&drop_owned_sql, params)
-                .await
-                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+            if role_exists {
+                client
+                    .execute(&reassign_sql, params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
+                client
+                    .execute(&drop_owned_sql, params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+            } else {
+                tracing::info!(
+                    "PostgreSQL role '{}' does not exist; skipping REASSIGN/DROP OWNED \
+                     and treating revocation as a no-op",
+                    username
+                );
+            }
             client
                 .execute(&drop_user_sql, params)
                 .await
