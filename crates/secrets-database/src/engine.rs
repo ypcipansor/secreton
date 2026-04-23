@@ -213,6 +213,20 @@ impl DatabaseEngine {
     /// Revoke PostgreSQL credentials
     #[cfg(feature = "postgres")]
     async fn revoke_postgres_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Validate that the username matches the format produced by
+        // `generate_username()` (ASCII alphanumeric + underscore).  This is
+        // a defense-in-depth measure consistent with `revoke_mysql_credentials`.
+        // PostgreSQL identifier quoting (double-quote escaping) is more robust
+        // than MySQL string-literal escaping, but we still reject unexpected
+        // characters to maintain a strict security posture.
+        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "Refusing to revoke PostgreSQL user '{}': username contains \
+                 characters outside the expected [a-zA-Z0-9_] set",
+                username
+            )));
+        }
+
         let pool = self.get_pg_pool().await?;
         let client = pool.get().await.map_err(|e| {
             DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {}", e))
@@ -358,6 +372,23 @@ impl DatabaseEngine {
     /// Revoke MySQL credentials
     #[cfg(feature = "mysql")]
     async fn revoke_mysql_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Validate that the username matches the format produced by
+        // `generate_username()` (ASCII alphanumeric + underscore, prefixed
+        // with "s_").  This is a defense-in-depth measure: if
+        // `revoke_credentials` is ever called with a username not generated
+        // by `generate_username()` (e.g. from a manually-created lease),
+        // we reject it rather than risk SQL injection through the string
+        // interpolation below.  The escaping (`replace`) is kept as a
+        // secondary safeguard but should never be exercised for valid
+        // usernames.
+        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "Refusing to revoke MySQL user '{}': username contains \
+                 characters outside the expected [a-zA-Z0-9_] set",
+                username
+            )));
+        }
+
         let pool = self.get_mysql_pool().await?;
         let mut conn = pool.get_conn().await.map_err(|e| {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))

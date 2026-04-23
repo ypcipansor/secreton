@@ -657,12 +657,25 @@ pub fn enforce_mfa_pending(
         .unwrap_or(false);
 
     if mfa_pending {
-        // Use exact prefix matching for MFA endpoints to prevent bypass via
+        // Use exact path matching for MFA endpoints to prevent bypass via
         // user-controlled path segments (e.g. a secret named "mfa" would
         // match `path.contains("/mfa/")`).
-        let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/setup")
-            || path.starts_with("/api/v1/auth/mfa/verify")
-            || path.starts_with("/api/v1/auth/logout");
+        //
+        // Allowed during TOFU (MFA enrollment pending):
+        //   - /api/v1/auth/mfa/setup          — start MFA enrollment
+        //   - /api/v1/auth/mfa/setup/complete  — finish MFA enrollment
+        //   - /api/v1/auth/mfa/verify          — verify an MFA code
+        //   - /api/v1/auth/logout              — allow the user to log out
+        //
+        // NOT allowed during TOFU:
+        //   - /api/v1/auth/mfa/disable — a TOFU user has not enrolled yet,
+        //     so there is nothing to disable.  Allowing it would let a
+        //     privileged user call disable (which is a no-op or error) and
+        //     remain in the TOFU state indefinitely.
+        let is_mfa_endpoint = path == "/api/v1/auth/mfa/setup"
+            || path == "/api/v1/auth/mfa/setup/complete"
+            || path == "/api/v1/auth/mfa/verify"
+            || path == "/api/v1/auth/logout";
         if !is_mfa_endpoint {
             return Err(axum::http::StatusCode::FORBIDDEN);
         }

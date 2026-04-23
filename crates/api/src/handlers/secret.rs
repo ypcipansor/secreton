@@ -1802,27 +1802,15 @@ pub async fn delete_policy(
     // Validate policy name to prevent path-traversal attacks.
     crate::handlers::validate_name(&name)?;
 
-    // Delete structured policy via secreton service.
-    // Track whether the structured policy existed so we can decide whether
-    // to return 404 when neither the structured nor raw content entry exists.
-    let structured_deleted = match state.secreton.delete_policy(&name, &user).await {
-        Ok(_) => true,
-        Err(secret::SecretError::PolicyNotFound { .. }) => false,
-        Err(secret::SecretError::PermissionDenied(msg)) => {
-            return Err(crate::ApiError::Authorization(msg));
-        }
-        Err(e) => {
-            return Err(crate::ApiError::Internal(format!("Failed to delete policy: {}", e)));
-        }
-    };
-
-    // Also delete the raw content counterpart at `sys/policies/content/{name}`
-    // so that orphaned entries do not accumulate in storage.  A raw content
-    // entry may exist independently of (or alongside) a structured policy.
+    // Delete raw content FIRST so that a failure does not leave the system
+    // in a partially-deleted state (structured policy gone, raw content
+    // orphaned).  By attempting the raw content deletion before the
+    // structured deletion, a storage error aborts the entire operation
+    // and the caller can safely retry.
     //
     // Only admin/root users may manage raw policy content — mirrors the
     // role gates in `get_policy` and `update_policy`.  Non-admin users
-    // skip this step; the structured deletion above is sufficient for them.
+    // skip this step; the structured deletion below is sufficient for them.
     let raw_deleted = if user.roles.contains(&"admin".to_string())
         || user.roles.contains(&"root".to_string())
     {
@@ -1846,6 +1834,20 @@ pub async fn delete_policy(
             })?
     } else {
         false
+    };
+
+    // Delete structured policy via secreton service.
+    // Track whether the structured policy existed so we can decide whether
+    // to return 404 when neither the structured nor raw content entry exists.
+    let structured_deleted = match state.secreton.delete_policy(&name, &user).await {
+        Ok(_) => true,
+        Err(secret::SecretError::PolicyNotFound { .. }) => false,
+        Err(secret::SecretError::PermissionDenied(msg)) => {
+            return Err(crate::ApiError::Authorization(msg));
+        }
+        Err(e) => {
+            return Err(crate::ApiError::Internal(format!("Failed to delete policy: {}", e)));
+        }
     };
 
     // If neither a structured policy nor a raw content entry was found,
