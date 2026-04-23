@@ -198,8 +198,27 @@ impl AuthService {
         Ok(token_pair)
     }
 
-    /// Refresh an access token using a refresh token
+    /// Refresh an access token using a refresh token.
+    ///
+    /// Implements single-use refresh token rotation: each refresh token can
+    /// only be exchanged once.  The old token is added to the blacklist with
+    /// its own `exp` as the TTL, so a captured refresh token cannot be
+    /// replayed even while its signature and expiry are still valid.  This
+    /// mirrors the rotation enforced by the API-layer
+    /// `AuthenticationService::refresh_token`.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, SecretonError> {
+        // Reject replay of a previously-exchanged refresh token.  Must happen
+        // BEFORE validation so that a blacklisted-but-still-signed token is
+        // rejected with the same error surface as an invalid token.
+        {
+            let blacklist = self.token_blacklist.read().await;
+            if blacklist.contains_key(refresh_token) {
+                return Err(SecretonError::Authentication {
+                    message: "Token has been revoked".to_string(),
+                });
+            }
+        }
+
         // Validate the refresh token to extract the user's identity.
         let claims = self
             .token_service
@@ -207,6 +226,16 @@ impl AuthService {
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token refresh failed: {}", e),
             })?;
+
+        // Blacklist the old refresh token so it cannot be reused.  Use the
+        // token's own `exp` as the TTL so the blacklist entry survives as
+        // long as the token would have been valid.
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            let exp = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+                .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(7));
+            blacklist.insert(refresh_token.to_string(), exp);
+        }
 
         // Load the user's current roles, policies, and email.  The deprecated
         // `refresh_access_token` produced tokens with empty roles/policies
