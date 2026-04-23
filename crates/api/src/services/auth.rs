@@ -1118,12 +1118,21 @@ impl AuthenticationService {
                 for entry in entries {
                     let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
                         Ok(decrypted) => decrypted,
-                        Err(_) => {
+                        Err(decrypt_err) => {
                             // Only fall back to raw bytes if they look like
                             // valid JSON (legacy plaintext session).
                             if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
+                                tracing::warn!(
+                                    "Session '{}': decryption failed, using legacy plaintext fallback",
+                                    entry.path
+                                );
                                 entry.encrypted_data.clone()
                             } else {
+                                tracing::warn!(
+                                    "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
+                                     skipping corrupt entry",
+                                    entry.path, decrypt_err
+                                );
                                 continue; // skip corrupt entries
                             }
                         }
