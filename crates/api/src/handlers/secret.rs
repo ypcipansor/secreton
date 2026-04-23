@@ -1706,8 +1706,20 @@ pub async fn update_policy(
             Err(secret::SecretError::PermissionDenied(msg)) => {
                 return Err(crate::ApiError::Authorization(msg));
             }
-            // PolicyNotFound or Ok — RBAC check passed, proceed
-            _ => {}
+            // PolicyNotFound — the structured policy may not exist yet,
+            // which is expected when creating raw content for the first time.
+            Err(secret::SecretError::PolicyNotFound { .. }) => {}
+            // Structured policy exists — RBAC check passed.
+            Ok(_) => {}
+            // Any other error (storage timeout, deserialization failure,
+            // etc.) must be propagated.  Silently ignoring these would
+            // allow the update to proceed even though the RBAC engine
+            // could not verify the user's permissions (fail-open).
+            Err(e) => {
+                return Err(crate::ApiError::Internal(format!(
+                    "Failed to verify policy permissions: {}", e
+                )));
+            }
         }
 
         state.admin.update_policy_content(&name, content).await.map_err(|e| {
