@@ -1426,7 +1426,22 @@ impl SecretService {
         let entries = self.storage.list(&query_params).await.map_err(SecretError::Storage)?;
         let mut policies = Vec::new();
 
+        // Structured policies live at `sys/policies/{name}` and raw-content
+        // policies live at `sys/policies/content/{name}`.  The path prefix
+        // query matches both namespaces, so explicitly skip the raw-content
+        // sub-prefix — those entries are not `Policy` structs and are
+        // surfaced separately via `AdminService::list_policy_content_metadata`
+        // (see the admin-only merge in the `list_policies` handler).
+        //
+        // Without this filter, every raw-content entry would fail
+        // `serde_json::from_slice::<Policy>` and emit a spurious WARN log
+        // on every listing call.
+        const RAW_CONTENT_PREFIX: &str = "sys/policies/content/";
+
         for entry in entries {
+            if entry.path.starts_with(RAW_CONTENT_PREFIX) {
+                continue;
+            }
             match self.crypto.decrypt(&entry.encrypted_data).await {
                 Ok(decrypted) => {
                     match serde_json::from_slice::<Policy>(&decrypted) {
