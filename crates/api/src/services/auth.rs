@@ -545,13 +545,11 @@ impl AuthenticationService {
                 // during initial bootstrap.  They are allowed through so
                 // they can set up MFA immediately after first login.
                 //
-                // WARNING: There is currently no mechanism to restrict the
-                // token scope or force MFA enrollment after TOFU.  A
-                // privileged user could operate indefinitely without MFA
-                // if they never complete enrollment.  A future improvement
-                // should set `mfa_required: true` on the issued token and
-                // have authorization middleware reject non-MFA-verified
-                // tokens for sensitive operations.
+                // The callers (`login()` and `authenticate()`) set
+                // `mfa_required: true` on the issued token when TOFU
+                // applies (`is_privileged && !mfa_verified`), and the
+                // `enforce_mfa_pending` middleware restricts scope to
+                // MFA-enrollment and logout endpoints only.
                 tracing::warn!(
                     "TOFU: privileged user '{}' authenticated without MFA; \
                      MFA enrollment should be completed immediately",
