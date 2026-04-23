@@ -1775,18 +1775,32 @@ pub async fn update_policy(
         state.admin.update_policy_content(&name, content).await.map_err(|e| {
             crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
         })?;
+        // Read back the stored entry so that the response reflects the real
+        // `created_at` (preserved from the original entry) and `updated_at`
+        // (set by `update_policy_content`).  Previously this used
+        // `chrono::Utc::now()` for both, which was incorrect for updates of
+        // existing policies — the client would see a `created_at` that
+        // differs from what `get_policy` returns.
+        let (created_at, updated_at) = match state.admin.get_policy_content(&name).await {
+            Ok(Some((_content, ca, ua))) => (ca, ua),
+            _ => {
+                // Fallback: if the read-back fails (unlikely since we just
+                // wrote), use now for both — same as the old behavior.
+                let now = chrono::Utc::now();
+                (now, now)
+            }
+        };
         // Return a response shape that includes the same top-level fields as
         // the structured PolicyResponse (name, rules, metadata, created_at,
         // updated_at) so that strongly-typed clients can parse either variant.
         // The `type` discriminator lets clients distinguish the two modes.
-        let now = chrono::Utc::now();
         Ok(Json(ApiResponse::success(serde_json::json!({
             "type": "raw",
             "name": name,
             "rules": [],
             "metadata": { "description": null, "tags": [], "owner": null },
-            "created_at": now,
-            "updated_at": now,
+            "created_at": created_at,
+            "updated_at": updated_at,
             "status": "updated"
         }))))
     } else {
