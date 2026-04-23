@@ -636,6 +636,41 @@ mod tests {
     }
 }
 
+/// Check whether the authenticated user has a pending MFA enrollment (TOFU)
+/// and, if so, whether the requested path is allowed.
+///
+/// Returns `Err(FORBIDDEN)` when MFA enrollment is pending and the path is
+/// NOT an MFA or logout endpoint.  Returns `Ok(())` otherwise.
+///
+/// This is the **single source of truth** for the MFA-pending allowlist so
+/// that `AuthMiddleware::authenticate` (used by `create_router`) and
+/// `auth_middleware` (used by `create_api_router`) stay in sync.  Any change
+/// to the allowlist must be made here only.
+pub fn enforce_mfa_pending(
+    user: &secreton_auth::User,
+    path: &str,
+) -> Result<(), axum::http::StatusCode> {
+    let mfa_pending = user
+        .metadata
+        .get("mfa_pending")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    if mfa_pending {
+        // Use exact prefix matching for MFA endpoints to prevent bypass via
+        // user-controlled path segments (e.g. a secret named "mfa" would
+        // match `path.contains("/mfa/")`).
+        let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/")
+            || path == "/api/v1/auth/mfa"
+            || path.starts_with("/api/v1/auth/logout");
+        if !is_mfa_endpoint {
+            return Err(axum::http::StatusCode::FORBIDDEN);
+        }
+    }
+
+    Ok(())
+}
+
 pub mod auth {
     use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 
@@ -658,7 +693,7 @@ pub mod auth {
             if path == "/" 
                 || path.ends_with("/health") 
                 || path.ends_with("/version") 
-                || path.ends_with("/login")  // Handler unit test uses /login directly
+                || path == "/login"  // Handler unit test uses /login directly
                 || path.ends_with("/auth/login")
                 || path.ends_with("/auth/refresh")
                 || path.ends_with("/auth/verify")
@@ -692,28 +727,9 @@ pub mod auth {
                 .await
                 .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-            // Enforce TOFU MFA enrollment: if the token was issued with
-            // `mfa_required: true` (TOFU — privileged user who has not
-            // yet configured MFA), only allow access to MFA enrollment
-            // endpoints and logout.  All other operations are blocked
-            // until the user completes MFA setup.
-            let mfa_pending = user
-                .metadata
-                .get("mfa_pending")
-                .map(|v| v == "true")
-                .unwrap_or(false);
-
-            if mfa_pending {
-                // Use exact prefix matching for MFA endpoints to prevent
-                // bypass via user-controlled path segments (e.g. a secret
-                // named "mfa" would match `path.contains("/mfa/")`).
-                let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/")
-                    || path == "/api/v1/auth/mfa"
-                    || path.starts_with("/api/v1/auth/logout");
-                if !is_mfa_endpoint {
-                    return Err(StatusCode::FORBIDDEN);
-                }
-            }
+            // Enforce TOFU MFA enrollment via the shared helper so that
+            // the allowlist stays in sync with `auth_middleware` in lib.rs.
+            crate::middleware::enforce_mfa_pending(&user, &path)?;
 
             // Create request context or simplified user info to store in extensions
             // The handlers expect AuthenticatedUser extractor which likely looks for User in extensions

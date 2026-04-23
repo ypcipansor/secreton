@@ -1820,13 +1820,34 @@ pub async fn delete_policy(
     // Also delete the raw content counterpart at `sys/policies/content/{name}`
     // so that orphaned entries do not accumulate in storage.  A raw content
     // entry may exist independently of (or alongside) a structured policy.
-    let raw_deleted = state
-        .admin
-        .delete_policy_content(&name)
-        .await
-        .map_err(|e| {
-            crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
-        })?;
+    //
+    // Only admin/root users may manage raw policy content — mirrors the
+    // role gates in `get_policy` and `update_policy`.  Non-admin users
+    // skip this step; the structured deletion above is sufficient for them.
+    let raw_deleted = if user.roles.contains(&"admin".to_string())
+        || user.roles.contains(&"root".to_string())
+    {
+        // Enforce fine-grained RBAC in addition to the role check, consistent
+        // with the update_policy raw-content path.
+        if let Err(e) = state.secreton.check_policy_permission(&name, &user, "delete").await {
+            if let secret::SecretError::PermissionDenied(msg) = e {
+                return Err(crate::ApiError::Authorization(msg));
+            }
+            return Err(crate::ApiError::Internal(format!(
+                "Failed to verify policy permissions: {}", e
+            )));
+        }
+
+        state
+            .admin
+            .delete_policy_content(&name)
+            .await
+            .map_err(|e| {
+                crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
+            })?
+    } else {
+        false
+    };
 
     // If neither a structured policy nor a raw content entry was found,
     // return 404 — the policy does not exist in any form.

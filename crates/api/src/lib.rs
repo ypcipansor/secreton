@@ -1419,29 +1419,11 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => match state.auth.validate_token(token).await {
             Ok(user) => {
-                // Enforce TOFU MFA enrollment: if the token was issued with
-                // `mfa_required: true` (TOFU — privileged user who has not
-                // yet configured MFA), only allow access to MFA enrollment
-                // endpoints.  All other operations are blocked until the
-                // user completes MFA setup.
-                let mfa_pending = user
-                    .metadata
-                    .get("mfa_pending")
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
-
-                if mfa_pending {
-                    let path = req.uri().path();
-                    // Use exact prefix matching for MFA endpoints to prevent
-                    // bypass via user-controlled path segments (e.g. a secret
-                    // named "mfa" would match `path.contains("/mfa/")`).
-                    let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/")
-                        || path == "/api/v1/auth/mfa"
-                        || path.starts_with("/api/v1/auth/logout");
-                    if !is_mfa_endpoint {
-                        return Err(axum::http::StatusCode::FORBIDDEN);
-                    }
-                }
+                // Enforce TOFU MFA enrollment via the shared helper so that
+                // the allowlist stays in sync with `AuthMiddleware::authenticate`
+                // in middleware.rs.
+                let path = req.uri().path();
+                crate::middleware::enforce_mfa_pending(&user, path)?;
 
                 let mut req = req;
                 req.extensions_mut().insert(user);

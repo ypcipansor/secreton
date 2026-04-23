@@ -1118,7 +1118,15 @@ impl AuthenticationService {
                 for entry in entries {
                     let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
                         Ok(decrypted) => decrypted,
-                        Err(_) => entry.encrypted_data.clone(), // legacy plaintext fallback
+                        Err(_) => {
+                            // Only fall back to raw bytes if they look like
+                            // valid JSON (legacy plaintext session).
+                            if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
+                                entry.encrypted_data.clone()
+                            } else {
+                                continue; // skip corrupt entries
+                            }
+                        }
                     };
                     if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
                         if session.refresh_token.as_deref() == Some(refresh_token) {
@@ -1498,7 +1506,27 @@ impl AuthenticationService {
             // Decrypt session data, with fallback for legacy plaintext entries.
             let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
                 Ok(decrypted) => decrypted,
-                Err(_) => entry.encrypted_data.clone(), // legacy plaintext fallback
+                Err(decrypt_err) => {
+                    // Only fall back to raw bytes if they look like valid JSON
+                    // (i.e. a legacy plaintext session).  If the raw bytes are
+                    // NOT valid JSON either, this is genuine data corruption —
+                    // log it and skip the entry rather than silently producing
+                    // a garbage Session.
+                    if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
+                        tracing::debug!(
+                            "Session '{}': decryption failed, using legacy plaintext fallback",
+                            entry.path
+                        );
+                        entry.encrypted_data.clone()
+                    } else {
+                        tracing::warn!(
+                            "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
+                             skipping corrupt entry",
+                            entry.path, decrypt_err
+                        );
+                        continue;
+                    }
+                }
             };
             if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
                 if session.user_id == user_id {
@@ -1528,7 +1556,28 @@ impl AuthenticationService {
             // Decrypt session data, with fallback for legacy plaintext entries.
             let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
                 Ok(decrypted) => decrypted,
-                Err(_) => entry.encrypted_data.clone(),
+                Err(decrypt_err) => {
+                    // Only fall back to raw bytes if they look like valid JSON
+                    // (i.e. a legacy plaintext session).  If the raw bytes are
+                    // NOT valid JSON either, this is genuine data corruption —
+                    // deny the request rather than risking a failed ownership check.
+                    if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
+                        tracing::debug!(
+                            "Session '{}': decryption failed, using legacy plaintext fallback",
+                            session_id
+                        );
+                        entry.encrypted_data.clone()
+                    } else {
+                        tracing::warn!(
+                            "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
+                             cannot verify ownership",
+                            session_id, decrypt_err
+                        );
+                        return Err(AuthError::Internal(anyhow::anyhow!(
+                            "Cannot verify session ownership: failed to decrypt session data"
+                        )));
+                    }
+                }
             };
             // The ownership check is security-critical: we MUST verify that
             // the caller owns this session before deleting it.  If
