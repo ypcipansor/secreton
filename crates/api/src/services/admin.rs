@@ -1065,7 +1065,16 @@ impl AdminService {
     /// Returns `Ok(true)` when the entry existed and was deleted, `Ok(false)`
     /// when no raw content entry was found (not an error — the policy may only
     /// have had a structured definition), and `Err` on storage failures.
+    ///
+    /// Acquires `policy_content_write_lock` to serialize with concurrent
+    /// `update_policy_content` calls for the same path.  Without this guard,
+    /// an interleaving such as `update.read(existing=Some) → delete →
+    /// update.store()` could observe a stale snapshot and resurrect a policy
+    /// the operator just deleted, or cause `storage.update()` to run against
+    /// a now-deleted entry.  Raw-content mutations are admin-only and rare,
+    /// so sharing a single global mutex with `update_policy_content` is fine.
     pub async fn delete_policy_content(&self, name: &str) -> Result<bool, AdminError> {
+        let _write_guard = self.policy_content_write_lock.lock().await;
         let path = format!("sys/policies/content/{}", name);
         self.storage.delete_by_path(&path).await.map_err(AdminError::Storage)
     }
