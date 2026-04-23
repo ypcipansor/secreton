@@ -691,18 +691,18 @@ pub mod auth {
             // MFA-pending enforcement below.
             // Exempt sys initialization endpoints
             if path == "/" 
-                || path.ends_with("/health") 
-                || path.ends_with("/version") 
+                || path == "/health"
+                || path == "/version"
                 || path == "/login"  // Handler unit test uses /login directly
-                || path.ends_with("/auth/login")
-                || path.ends_with("/auth/refresh")
-                || path.ends_with("/auth/verify")
-                || path.contains("/auth/oauth/")
-                || path.ends_with("/oauth")
-                || path.contains("/sys/init")
-                || path.contains("/sys/unseal")
-                || path.contains("/sys/seal-status")
-                || path.contains("/sys/health")
+                || path == "/api/v1/sys/health"
+                || path == "/api/v1/auth/login"
+                || path == "/api/v1/auth/refresh"
+                || path == "/api/v1/auth/verify"
+                || path.starts_with("/api/v1/auth/oauth/")
+                || path == "/api/v1/auth/oauth"
+                || path == "/api/v1/sys/init"
+                || path == "/api/v1/sys/unseal"
+                || path == "/api/v1/sys/seal-status"
             {
                 return Ok(next.run(req).await);
             }
