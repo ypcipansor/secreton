@@ -1524,19 +1524,16 @@ pub async fn get_policy(
     crate::handlers::validate_name(&name)?;
 
     // Attempt to load the structured policy.  `get_policy` calls
-    // `check_permission` internally, so a successful result (or a
-    // `PolicyNotFound` error) proves the RBAC check passed.
-    //
-    // IMPORTANT: We capture the result and match it in two phases so
-    // that the raw-content fallback path does NOT depend on the
-    // internal ordering of permission-vs-existence checks inside
-    // `get_policy`.  If `get_policy` ever changes to check existence
-    // before permissions, `PolicyNotFound` would no longer imply RBAC
-    // passed.  To guard against this, the raw-content path performs
-    // its own explicit RBAC verification below.
+    // `check_permission` internally (permissions checked BEFORE existence),
+    // so a successful result or a `PolicyNotFound` error proves the RBAC
+    // check passed.  The admin/root role gate below provides an additional
+    // safety net for the raw-content fallback path.
     let policy_result = state.secreton.get_policy(&name, &user).await;
 
     // Fast path: structured policy found — return it directly.
+    // Include a "type" discriminator so clients can reliably distinguish
+    // structured responses from raw-content responses, preserving backward
+    // compatibility for strongly-typed API consumers.
     if let Ok(policy) = policy_result {
         let response = PolicyResponse {
             name: policy.name,
@@ -1549,8 +1546,12 @@ pub async fn get_policy(
             created_at: policy.created_at,
             updated_at: policy.updated_at,
         };
-        let value = serde_json::to_value(response)
+        let mut value = serde_json::to_value(response)
             .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy: {}", e)))?;
+        // Add type discriminator at the top level
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("type".to_string(), serde_json::Value::String("structured".to_string()));
+        }
         return Ok(Json(ApiResponse::success(value)));
     }
 
@@ -1574,39 +1575,12 @@ pub async fn get_policy(
         return Err(crate::ApiError::NotFound("Policy not found".to_string()));
     }
 
-    // Perform an explicit, independent RBAC check for the raw-content
-    // fallback path.  We do NOT rely on the `PolicyNotFound` from the
-    // first `get_policy` call implying RBAC passed, because that
-    // assumption depends on the internal ordering of
-    // `SecretService::get_policy` (permissions before existence) which
-    // could change in a future refactor.
-    //
-    // `get_policy` is called again solely for its RBAC side-effect.
-    // We expect `PolicyNotFound` (the structured policy doesn't exist —
-    // that's why we're here).  `PermissionDenied` and any other error
-    // must be propagated fail-closed.
-    match state.secreton.get_policy(&name, &user).await {
-        Err(secret::SecretError::PermissionDenied(msg)) => {
-            return Err(crate::ApiError::Authorization(msg));
-        }
-        Err(secret::SecretError::PolicyNotFound { .. }) => {
-            // Expected — RBAC check inside get_policy passed (or was
-            // skipped due to ordering).  The role-based admin/root
-            // gate above provides a safety net.
-        }
-        Ok(_) => {
-            // Structured policy appeared between the two calls (race).
-            // RBAC passed — proceed.
-        }
-        Err(e) => {
-            // Storage timeout, deserialization failure, etc. — propagate
-            // fail-closed rather than allowing the update to proceed
-            // without verified permissions.
-            return Err(crate::ApiError::Internal(format!(
-                "Failed to verify policy permissions: {}", e
-            )));
-        }
-    }
+    // The first `get_policy` call above already performed the RBAC check
+    // (SecretService::get_policy calls check_permission BEFORE checking
+    // existence, so PolicyNotFound implies RBAC passed).  The admin/root
+    // role gate above provides an additional safety net.  No need to call
+    // `get_policy` again — doing so would add latency and introduce a
+    // TOCTOU race without meaningful security benefit.
 
     match state.admin.get_policy_content(&name).await {
         Ok(Some(content)) => {
@@ -1732,7 +1706,7 @@ pub async fn update_policy(
                 _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
             })?;
 
-        let response_value = serde_json::to_value(PolicyResponse {
+        let mut response_value = serde_json::to_value(PolicyResponse {
             name: policy.name,
             rules: policy.rules,
             metadata: PolicyMetadata {
@@ -1743,6 +1717,10 @@ pub async fn update_policy(
             created_at: policy.created_at,
             updated_at: policy.updated_at,
         }).map_err(|e| crate::ApiError::Internal(format!("Failed to serialize policy response: {}", e)))?;
+        // Add type discriminator for consistency with get_policy
+        if let Some(obj) = response_value.as_object_mut() {
+            obj.insert("type".to_string(), serde_json::Value::String("structured".to_string()));
+        }
 
         Ok(Json(ApiResponse::success(response_value)))
     } else if request.get("content").is_some_and(|v| !v.is_null()) {
@@ -1767,22 +1745,16 @@ pub async fn update_policy(
         // restricted via fine-grained RBAC policies cannot bypass those
         // restrictions through the raw content update path.
         //
-        // We attempt a read via the RBAC-checked service method.  If it
-        // returns `PermissionDenied`, propagate it.  `PolicyNotFound` is
-        // expected (the structured policy may not exist) and is fine.
+        // SecretService::get_policy calls check_permission("read") BEFORE
+        // checking existence, so PermissionDenied is definitive.
+        // PolicyNotFound is expected (the structured policy may not exist).
+        // Other errors (storage timeout, etc.) are propagated fail-closed.
         match state.secreton.get_policy(&name, &user).await {
             Err(secret::SecretError::PermissionDenied(msg)) => {
                 return Err(crate::ApiError::Authorization(msg));
             }
-            // PolicyNotFound — the structured policy may not exist yet,
-            // which is expected when creating raw content for the first time.
             Err(secret::SecretError::PolicyNotFound { .. }) => {}
-            // Structured policy exists — RBAC check passed.
             Ok(_) => {}
-            // Any other error (storage timeout, deserialization failure,
-            // etc.) must be propagated.  Silently ignoring these would
-            // allow the update to proceed even though the RBAC engine
-            // could not verify the user's permissions (fail-open).
             Err(e) => {
                 return Err(crate::ApiError::Internal(format!(
                     "Failed to verify policy permissions: {}", e

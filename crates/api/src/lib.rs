@@ -1432,9 +1432,12 @@ async fn auth_middleware(
 
                 if mfa_pending {
                     let path = req.uri().path();
-                    let is_mfa_endpoint = path.contains("/mfa/")
-                        || path.ends_with("/mfa")
-                        || path.ends_with("/logout");
+                    // Use exact prefix matching for MFA endpoints to prevent
+                    // bypass via user-controlled path segments (e.g. a secret
+                    // named "mfa" would match `path.contains("/mfa/")`).
+                    let is_mfa_endpoint = path.starts_with("/api/v1/auth/mfa/")
+                        || path == "/api/v1/auth/mfa"
+                        || path.starts_with("/api/v1/auth/logout");
                     if !is_mfa_endpoint {
                         return Err(axum::http::StatusCode::FORBIDDEN);
                     }
