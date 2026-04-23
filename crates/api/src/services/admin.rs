@@ -1028,6 +1028,16 @@ impl AdminService {
         Ok(())
     }
 
+    /// Delete raw policy content previously stored by `update_policy_content`.
+    ///
+    /// Returns `Ok(true)` when the entry existed and was deleted, `Ok(false)`
+    /// when no raw content entry was found (not an error — the policy may only
+    /// have had a structured definition), and `Err` on storage failures.
+    pub async fn delete_policy_content(&self, name: &str) -> Result<bool, AdminError> {
+        let path = format!("sys/policies/content/{}", name);
+        self.storage.delete_by_path(&path).await.map_err(AdminError::Storage)
+    }
+
     /// Check password security
     async fn check_password_security(&self) -> Result<Vec<SecurityFinding>, AdminError> {
         let mut findings = Vec::new();

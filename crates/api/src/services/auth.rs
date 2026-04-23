@@ -1210,13 +1210,42 @@ impl AuthenticationService {
         // `mfa_required: false`, completely bypassing MFA enforcement.
         let token_mfa_required = if is_privileged {
             if let Some(mfa) = &self.mfa_service {
-                let user_uuid = Uuid::parse_str(&stored_user.id).unwrap_or_default();
-                let mfa_configured = mfa.is_mfa_required(user_uuid).await.unwrap_or(false);
+                let user_uuid = Uuid::parse_str(&stored_user.id).map_err(|_| {
+                    tracing::error!(
+                        "refresh_token: failed to parse user_id '{}' as UUID for user '{}'; \
+                         denying refresh to prevent nil-UUID TOFU bypass",
+                        stored_user.id, claims.username
+                    );
+                    AuthError::Internal(anyhow::anyhow!(
+                        "Cannot check MFA status: invalid user ID format"
+                    ))
+                })?;
+                let mfa_configured = match mfa.is_mfa_required(user_uuid).await {
+                    Ok(configured) => configured,
+                    Err(e) => {
+                        // Fail-safe: treat MFA service errors as "MFA is
+                        // required" and deny the refresh entirely, consistent
+                        // with `enforce_mfa()`.  A transient MFA service
+                        // failure should not allow a privileged user to obtain
+                        // a new token — even a restricted one — when their MFA
+                        // enrollment status cannot be verified.
+                        tracing::warn!(
+                            "MFA service error during token refresh for user '{}': {}; \
+                             denying refresh (fail-safe)",
+                            claims.username, e
+                        );
+                        return Err(AuthError::Internal(anyhow::anyhow!(
+                            "Cannot verify MFA status during token refresh; please try again later"
+                        )));
+                    }
+                };
                 !mfa_configured // mfa_required = true when NOT configured
             } else {
-                // MFA service not available — fail-safe: mark as required
-                // so the user cannot operate without MFA.
-                true
+                // MFA service not available — fail-safe: deny the refresh
+                // rather than issuing a token without MFA verification.
+                return Err(AuthError::Internal(anyhow::anyhow!(
+                    "MFA service not configured but required for privileged token refresh"
+                )));
             }
         } else {
             false

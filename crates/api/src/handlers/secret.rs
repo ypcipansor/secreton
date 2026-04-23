@@ -1803,18 +1803,36 @@ pub async fn delete_policy(
     // Validate policy name to prevent path-traversal attacks.
     crate::handlers::validate_name(&name)?;
 
-    // Delete policy via secreton service
-    state
-        .secreton
-        .delete_policy(&name, &user)
+    // Delete structured policy via secreton service.
+    // Track whether the structured policy existed so we can decide whether
+    // to return 404 when neither the structured nor raw content entry exists.
+    let structured_deleted = match state.secreton.delete_policy(&name, &user).await {
+        Ok(()) => true,
+        Err(secret::SecretError::PolicyNotFound { .. }) => false,
+        Err(secret::SecretError::PermissionDenied(msg)) => {
+            return Err(crate::ApiError::Authorization(msg));
+        }
+        Err(e) => {
+            return Err(crate::ApiError::Internal(format!("Failed to delete policy: {}", e)));
+        }
+    };
+
+    // Also delete the raw content counterpart at `sys/policies/content/{name}`
+    // so that orphaned entries do not accumulate in storage.  A raw content
+    // entry may exist independently of (or alongside) a structured policy.
+    let raw_deleted = state
+        .admin
+        .delete_policy_content(&name)
         .await
-        .map_err(|e| match e {
-            secret::SecretError::PolicyNotFound { .. } => {
-                crate::ApiError::NotFound("Policy not found".to_string())
-            }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to delete policy: {}", e)),
+        .map_err(|e| {
+            crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
         })?;
+
+    // If neither a structured policy nor a raw content entry was found,
+    // return 404 — the policy does not exist in any form.
+    if !structured_deleted && !raw_deleted {
+        return Err(crate::ApiError::NotFound("Policy not found".to_string()));
+    }
 
     let data = serde_json::json!({
         "message": "Policy deleted successfully",
