@@ -990,7 +990,25 @@ impl AuthenticationService {
         })
     }
 
-    /// Validate access token
+    /// Validate access token.
+    ///
+    /// # Contract: MFA-pending metadata propagation
+    ///
+    /// When the JWT carries `mfa_required: true` (a TOFU token issued to a
+    /// user who has not yet completed MFA enrollment), this method **must**
+    /// insert `metadata["mfa_pending"] = "true"` on the returned `User`.
+    ///
+    /// Downstream authorization layers rely on this contract:
+    ///   - `crate::middleware::enforce_mfa_pending` (`crates/api/src/middleware.rs`)
+    ///     reads `metadata["mfa_pending"]` to restrict the token's scope to
+    ///     MFA-enrollment endpoints.
+    ///   - The refresh handler (`crates/api/src/handlers/auth.rs`) propagates
+    ///     the flag onto refreshed tokens so TOFU users cannot escape the
+    ///     restriction by refreshing.
+    ///
+    /// Removing or changing this propagation silently disables the entire
+    /// TOFU MFA enforcement chain — any change here must be accompanied by
+    /// matching changes in both call sites above.
     pub async fn validate_token(&self, token: &str) -> Result<User, AuthError> {
         // Check blacklist
         if self.is_token_revoked(token).await {

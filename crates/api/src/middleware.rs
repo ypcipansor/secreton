@@ -634,6 +634,99 @@ mod tests {
         // Different client should be allowed
         assert!(rate_limiter.check_rate_limit("other-client"));
     }
+
+    /// Build a User with the given `mfa_pending` metadata flag for testing.
+    fn make_user(mfa_pending: bool) -> secreton_auth::User {
+        let mut metadata = HashMap::new();
+        if mfa_pending {
+            metadata.insert("mfa_pending".to_string(), "true".to_string());
+        }
+        secreton_auth::User {
+            id: "00000000-0000-0000-0000-000000000001".to_string(),
+            username: "testuser".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: None,
+            full_name: None,
+            roles: vec![],
+            permissions: vec![],
+            policies: vec!["default".to_string()],
+            metadata,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            disabled: false,
+            password_hash: String::new(),
+            is_active: true,
+            is_superuser: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            failed_login_attempts: 0,
+            locked_until: None,
+        }
+    }
+
+    /// A user without `mfa_pending` metadata can access any path.
+    #[test]
+    fn enforce_mfa_pending_allows_everything_when_not_pending() {
+        let user = make_user(false);
+        for path in [
+            "/api/v1/auth/login",
+            "/api/v1/secret/data/foo",
+            "/api/v1/sys/config",
+            "/api/v1/auth/mfa/disable",
+        ] {
+            assert!(
+                enforce_mfa_pending(&user, path).is_ok(),
+                "path {} should be allowed when mfa_pending is false",
+                path
+            );
+        }
+    }
+
+    /// TOFU users can access only the MFA-enrollment and logout endpoints.
+    #[test]
+    fn enforce_mfa_pending_allows_enrollment_paths_when_pending() {
+        let user = make_user(true);
+        for path in [
+            "/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/complete",
+            "/api/v1/auth/mfa/verify",
+            "/api/v1/auth/logout",
+        ] {
+            assert!(
+                enforce_mfa_pending(&user, path).is_ok(),
+                "path {} should be allowed during TOFU",
+                path
+            );
+        }
+    }
+
+    /// TOFU users are blocked from any non-enrollment endpoint, and the
+    /// allowlist is path-exact so substring tricks (e.g. secret paths
+    /// containing "/mfa/") cannot bypass it.
+    #[test]
+    fn enforce_mfa_pending_blocks_other_paths_when_pending() {
+        let user = make_user(true);
+        for path in [
+            "/api/v1/secret/data/foo",
+            "/api/v1/sys/config",
+            // `/mfa/disable` is intentionally NOT allowed for TOFU users —
+            // disable has no effect when MFA is not yet enrolled.
+            "/api/v1/auth/mfa/disable",
+            // Substring bypass attempts must be rejected by exact matching.
+            "/api/v1/secret/data/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/../secret/data/foo",
+            "/api/v1/auth/login",
+        ] {
+            assert_eq!(
+                enforce_mfa_pending(&user, path).unwrap_err(),
+                StatusCode::FORBIDDEN,
+                "path {} must be forbidden during TOFU",
+                path
+            );
+        }
+    }
 }
 
 /// Check whether the authenticated user has a pending MFA enrollment (TOFU)
