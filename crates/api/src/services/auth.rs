@@ -453,8 +453,18 @@ impl AuthenticationService {
         self
     }
 
-    /// Enforce MFA for the given user, returning `Ok(())` if the user is
-    /// allowed to proceed (either MFA was validated or TOFU applies).
+    /// Enforce MFA for the given user, returning `Ok(mfa_verified)` if the
+    /// user is allowed to proceed.
+    ///
+    /// The boolean indicates whether MFA was actually verified:
+    /// - `true`  — MFA code was validated successfully.
+    /// - `false` — MFA was not required (non-privileged + global MFA off)
+    ///             or TOFU applies (privileged user without MFA configured).
+    ///
+    /// Callers should set `mfa_required: true` on issued tokens when the
+    /// return value is `false` and the user is privileged (TOFU), so that
+    /// downstream authorization middleware can restrict scope until MFA
+    /// enrollment is completed.
     ///
     /// This is the single source of truth for MFA enforcement so that
     /// `login()` and `authenticate()` stay in sync.
@@ -465,10 +475,12 @@ impl AuthenticationService {
         is_privileged: bool,
         global_mfa_enabled: bool,
         mfa_code: Option<String>,
-    ) -> Result<(), AuthError> {
+    ) -> Result<bool, AuthError> {
         if !(is_privileged || global_mfa_enabled) {
-            return Ok(());
+            return Ok(false);
         }
+
+        let mut mfa_verified = false;
 
         if let Some(mfa) = &self.mfa_service {
             let user_uuid = Uuid::parse_str(user_id).map_err(|_| {
@@ -527,10 +539,24 @@ impl AuthenticationService {
                     }
                     return Err(AuthError::InvalidMfaCode);
                 }
+                mfa_verified = true;
             } else if is_privileged {
                 // TOFU (Trust On First Use) — only for privileged users
                 // during initial bootstrap.  They are allowed through so
                 // they can set up MFA immediately after first login.
+                //
+                // WARNING: There is currently no mechanism to restrict the
+                // token scope or force MFA enrollment after TOFU.  A
+                // privileged user could operate indefinitely without MFA
+                // if they never complete enrollment.  A future improvement
+                // should set `mfa_required: true` on the issued token and
+                // have authorization middleware reject non-MFA-verified
+                // tokens for sensitive operations.
+                tracing::warn!(
+                    "TOFU: privileged user '{}' authenticated without MFA; \
+                     MFA enrollment should be completed immediately",
+                    username
+                );
                 if let Some(audit) = &self.audit {
                     let _ = audit
                         .log_event(
@@ -577,7 +603,7 @@ impl AuthenticationService {
             )));
         }
 
-        Ok(())
+        Ok(mfa_verified)
     }
 
     /// Authenticate user with username and password
@@ -761,7 +787,7 @@ impl AuthenticationService {
             .into());
         }
 
-        if let Err(mfa_err) = self.enforce_mfa(
+        let mfa_verified = match self.enforce_mfa(
             &req.username,
             &user.id,
             is_privileged,
@@ -770,6 +796,8 @@ impl AuthenticationService {
         )
         .await
         {
+            Ok(verified) => verified,
+            Err(mfa_err) => {
             // Increment failed_login_attempts on MFA failure so that the
             // lockout mechanism also covers MFA brute-force attempts.
             // Without this, an attacker who knows the password could try
@@ -833,7 +861,8 @@ impl AuthenticationService {
                 },
             }
             .into());
-        }
+            }
+        };
 
         // Reset failed login attempts on success
         // Also ensure user is persisted if it didn't exist (new user)
@@ -884,6 +913,11 @@ impl AuthenticationService {
         ))
         .unwrap_or(chrono::Duration::hours(1));
 
+        // Set mfa_required on the token when TOFU was used (privileged user
+        // authenticated without MFA).  This allows downstream authorization
+        // middleware to restrict token scope until MFA enrollment is completed.
+        let token_mfa_required = is_privileged && !mfa_verified;
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
@@ -892,7 +926,7 @@ impl AuthenticationService {
                 user.email.as_deref(), // Convert Option<&String> to Option<&str>
                 &user.roles,
                 &user.policies, // Use user.policies which we just created
-                false,          // MFA status from auth result
+                token_mfa_required,
                 Some(session_id.clone()),
                 Some(session_duration),
             )
@@ -912,17 +946,24 @@ impl AuthenticationService {
             last_accessed: now,
         };
 
-        // Serialize session
-        let session_data =
+        // Serialize and encrypt session data to prevent plaintext session
+        // tokens from being exposed if an attacker gains storage access.
+        let session_json =
             serde_json::to_vec(&session).map_err(|e| secreton_errors::SecretonError::Internal {
                 message: format!("Failed to serialize session: {}", e),
             })?;
+
+        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
+            secreton_errors::SecretonError::Internal {
+                message: format!("Failed to encrypt session: {}", e),
+            }
+        })?;
 
         // Create storage entry
         let entry = SecretEntry::new(
             format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
             session_data,
-            EncryptionMetadata::default(), // No actual encryption for now as we don't have CryptoService active
+            EncryptionMetadata::default(),
             SecurityLevel::Secret,
             Uuid::parse_str(&user.id).unwrap_or_default(),
         )
@@ -1116,8 +1157,12 @@ impl AuthenticationService {
             last_accessed: now,
         };
 
-        let session_data = serde_json::to_vec(&session).map_err(|e| {
+        let session_json = serde_json::to_vec(&session).map_err(|e| {
             AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e))
+        })?;
+
+        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
         })?;
 
         let entry = SecretEntry::new(
@@ -1326,9 +1371,12 @@ impl AuthenticationService {
 
         let mut sessions = Vec::new();
         for entry in entries {
-            // Session data is currently stored as plaintext JSON in
-            // encrypted_data (no actual encryption for sessions yet).
-            if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+            // Decrypt session data, with fallback for legacy plaintext entries.
+            let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
+                Ok(decrypted) => decrypted,
+                Err(_) => entry.encrypted_data.clone(), // legacy plaintext fallback
+            };
+            if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
                 if session.user_id == user_id {
                     sessions.push(session);
                 }
@@ -1353,7 +1401,12 @@ impl AuthenticationService {
             .await
             .map_err(AuthError::Storage)?
         {
-            if let Ok(session) = serde_json::from_slice::<Session>(&entry.encrypted_data) {
+            // Decrypt session data, with fallback for legacy plaintext entries.
+            let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
+                Ok(decrypted) => decrypted,
+                Err(_) => entry.encrypted_data.clone(),
+            };
+            if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
                 if session.user_id != user_id {
                     return Err(AuthError::PermissionDenied);
                 }
@@ -1452,8 +1505,12 @@ impl AuthenticationService {
             last_accessed: now,
         };
 
-        let session_data = serde_json::to_vec(&session)
+        let session_json = serde_json::to_vec(&session)
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+
+        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
+        })?;
 
         let entry = SecretEntry::new(
             format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
@@ -1689,7 +1746,7 @@ impl AuthenticationService {
             )));
         }
 
-        if let Err(mfa_err) = self.enforce_mfa(
+        let mfa_verified = match self.enforce_mfa(
             &credentials.username,
             effective_user_id,
             is_privileged,
@@ -1698,6 +1755,8 @@ impl AuthenticationService {
         )
         .await
         {
+            Ok(verified) => verified,
+            Err(mfa_err) => {
             // Only count `InvalidMfaCode` toward lockout — see the
             // matching comment in `login()` for the full rationale.
             if matches!(mfa_err, AuthError::InvalidMfaCode) {
@@ -1733,7 +1792,8 @@ impl AuthenticationService {
             }
 
             return Err(mfa_err);
-        }
+            }
+        };
 
         // Reset failed login attempts on success — mirrors the logic in
         // `login()` so that the counter does not accumulate across
@@ -1765,6 +1825,10 @@ impl AuthenticationService {
 
         // Generate tokens with session binding, using the dynamic timeout so
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
+        // Set mfa_required on the token when TOFU was used (privileged user
+        // authenticated without MFA), mirroring the logic in `login()`.
+        let token_mfa_required = (is_privileged && !mfa_verified) || result.mfa_required;
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
@@ -1773,7 +1837,7 @@ impl AuthenticationService {
                 user_info.email.as_deref(),
                 user_roles,
                 &policies,
-                result.mfa_required,
+                token_mfa_required,
                 Some(session_id.clone()),
                 Some(session_duration),
             )
@@ -1791,8 +1855,12 @@ impl AuthenticationService {
             last_accessed: now,
         };
 
-        let session_data = serde_json::to_vec(&session)
+        let session_json = serde_json::to_vec(&session)
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+
+        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
+        })?;
 
         let entry = SecretEntry::new(
             format!("{}{}", SESSION_STORAGE_PREFIX, session_id),

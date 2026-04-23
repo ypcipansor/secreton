@@ -1543,16 +1543,22 @@ pub async fn get_policy(
         }
         Err(secret::SecretError::PolicyNotFound { .. }) => {
             // Fall back to raw policy content (admin-only).
+            //
             // The RBAC permission check for "sys/policies/{name}" was already
-            // performed by `state.secreton.get_policy()` above — if the user
-            // lacked read access, that call would have returned
-            // `PermissionDenied` (handled below), not `PolicyNotFound`.
+            // performed by `state.secreton.get_policy()` above — its
+            // implementation calls `check_permission()` BEFORE checking
+            // existence, so `PolicyNotFound` implies RBAC passed.  The
+            // admin/root role gate below is an additional safety net in case
+            // that ordering ever changes.
             if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
                 return Err(crate::ApiError::NotFound("Policy not found".to_string()));
             }
             match state.admin.get_policy_content(&name).await {
                 Ok(Some(content)) => {
+                    // Include a "type" discriminator so clients can distinguish
+                    // raw-content responses from structured PolicyResponse objects.
                     Ok(Json(ApiResponse::success(serde_json::json!({
+                        "type": "raw",
                         "name": name,
                         "content": content,
                     }))))
@@ -1736,7 +1742,7 @@ pub async fn update_policy(
         state.admin.update_policy_content(&name, content).await.map_err(|e| {
             crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
         })?;
-        Ok(Json(ApiResponse::success(serde_json::json!({"status": "updated", "name": name}))))
+        Ok(Json(ApiResponse::success(serde_json::json!({"type": "raw", "status": "updated", "name": name}))))
     } else {
         Err(crate::ApiError::BadRequest("Invalid request: must provide 'rules' or 'content'".to_string()))
     }
