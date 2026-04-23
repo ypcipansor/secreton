@@ -682,6 +682,21 @@ impl AuthenticationService {
         // Delegates to the shared `enforce_mfa()` helper so that `login()` and
         // `authenticate()` use identical enforcement logic.
         let is_privileged = user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string());
+
+        // Guard against empty user IDs for privileged users — mirrors the
+        // check in `authenticate()` at lines 1624-1632.  An empty user ID
+        // would cause `Uuid::parse_str("").unwrap_or_default()` inside
+        // `enforce_mfa()` to yield `Uuid::nil()`, making
+        // `is_mfa_required(nil_uuid)` return `false` and triggering the
+        // TOFU path — silently bypassing MFA for the privileged user.
+        if user.id.is_empty() && is_privileged {
+            return Err(secreton_errors::SecretonError::Internal {
+                message: "Cannot enforce MFA: no valid user ID available for privileged user"
+                    .to_string(),
+            }
+            .into());
+        }
+
         if let Err(mfa_err) = self.enforce_mfa(
             &req.username,
             &user.id,
@@ -744,7 +759,7 @@ impl AuthenticationService {
                     }
                 }
                 AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
-                    message: "Invalid MFA code".to_string(),
+                    message: "Authentication failed".to_string(),
                 },
                 AuthError::Internal(ref inner) => secreton_errors::SecretonError::Configuration {
                     message: inner.to_string(),
