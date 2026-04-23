@@ -27,6 +27,11 @@ use thiserror::Error;
 
 pub const USER_STORAGE_PREFIX: &str = "users/";
 const SESSION_STORAGE_PREFIX: &str = "sys/auth/sessions/";
+/// Storage prefix for persisted revoked tokens.  Each entry is keyed by the
+/// SHA-256 hash of the token so the raw token material is never written to
+/// storage.  Entries carry `expires_at` equal to the token's own expiry and
+/// are cleaned up via `delete_expired`.
+const REVOKED_TOKEN_STORAGE_PREFIX: &str = "sys/auth/revoked-tokens/";
 
 #[derive(Debug, Deserialize)]
 pub struct ApiLoginRequest {
@@ -540,20 +545,33 @@ impl AuthenticationService {
                     return Err(AuthError::InvalidMfaCode);
                 }
                 mfa_verified = true;
-            } else if is_privileged {
-                // TOFU (Trust On First Use) — only for privileged users
-                // during initial bootstrap.  They are allowed through so
-                // they can set up MFA immediately after first login.
+            } else {
+                // TOFU (Trust On First Use) — the user has not yet
+                // configured MFA, but MFA is required (either because the
+                // user is privileged or because global MFA is enabled).
                 //
-                // The callers (`login()` and `authenticate()`) set
-                // `mfa_required: true` on the issued token when TOFU
-                // applies (`is_privileged && !mfa_verified`), and the
-                // `enforce_mfa_pending` middleware restricts scope to
-                // MFA-enrollment and logout endpoints only.
+                // Rather than hard-denying the login — which would lock
+                // out every non-privileged user the moment an admin flips
+                // on global MFA, since there is no self-service enrollment
+                // path without an authenticated session — we issue a
+                // restricted-scope token.  The callers (`login()` and
+                // `authenticate()`) set `mfa_required: true` on the issued
+                // token when TOFU applies (`!mfa_verified` and MFA was
+                // required), and the `enforce_mfa_pending` middleware
+                // restricts the token's scope to MFA-enrollment and
+                // logout endpoints only.  The user must complete MFA
+                // enrollment before the token grants access to anything
+                // else.
+                let reason = if is_privileged {
+                    "privileged user authenticated without MFA"
+                } else {
+                    "global MFA enabled but user has not enrolled; \
+                     granting restricted token for enrollment"
+                };
                 tracing::warn!(
-                    "TOFU: privileged user '{}' authenticated without MFA; \
-                     MFA enrollment should be completed immediately",
-                    username
+                    "TOFU: user '{}' — {}; MFA enrollment should be completed immediately",
+                    username,
+                    reason
                 );
                 if let Some(audit) = &self.audit {
                     let _ = audit
@@ -565,22 +583,6 @@ impl AuthenticationService {
                         )
                         .await;
                 }
-            } else {
-                // Global MFA is enabled and the user has not configured
-                // MFA yet.  Deny login so they are forced to set up MFA
-                // through the enrollment flow before gaining access.
-                if let Some(audit) = &self.audit {
-                    let _ = audit
-                        .log_event(
-                            crate::services::audit::SecurityEventType::AuthenticationFailure {
-                                user: username.to_string(),
-                                method: "global_mfa".to_string(),
-                                reason: "MFA not configured but globally required".to_string(),
-                            },
-                        )
-                        .await;
-                }
-                return Err(AuthError::MfaNotConfigured(username.to_string()));
             }
         } else if is_privileged {
             return Err(AuthError::Internal(anyhow::anyhow!(
@@ -911,10 +913,13 @@ impl AuthenticationService {
         ))
         .unwrap_or(chrono::Duration::hours(1));
 
-        // Set mfa_required on the token when TOFU was used (privileged user
-        // authenticated without MFA).  This allows downstream authorization
-        // middleware to restrict token scope until MFA enrollment is completed.
-        let token_mfa_required = is_privileged && !mfa_verified;
+        // Set mfa_required on the token when TOFU was used (user
+        // authenticated without MFA but MFA was required — either because
+        // they are privileged or because global MFA is enabled).  This
+        // allows downstream authorization middleware (`enforce_mfa_pending`)
+        // to restrict token scope to MFA-enrollment endpoints until the
+        // user completes enrollment.
+        let token_mfa_required = (is_privileged || global_mfa_enabled) && !mfa_verified;
 
         let token_pair = self
             .token_service
@@ -1056,21 +1061,109 @@ impl AuthenticationService {
         })
     }
 
-    /// Revoke a token
-    pub async fn revoke_token(&self, token: String, expires_at: chrono::DateTime<chrono::Utc>) {
-        let mut blacklist = self.token_blacklist.write().await;
-        // Clean up expired entries while we're at it
-        blacklist.retain(|_, &mut exp| exp > chrono::Utc::now());
-        blacklist.insert(token, expires_at);
+    /// Compute the storage path for a revoked-token entry.
+    ///
+    /// Uses SHA-256 so the raw token material is never written to storage —
+    /// we only persist a hash that's sufficient to detect replay of the same
+    /// token.
+    fn revoked_token_path(token: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(token.as_bytes());
+        let digest = hasher.finalize();
+        format!("{}{}", REVOKED_TOKEN_STORAGE_PREFIX, hex::encode(digest))
     }
 
-    /// Check if a token is revoked
+    /// Revoke a token.
+    ///
+    /// Writes the revocation to both the in-memory blacklist (fast path for
+    /// the local instance) and the shared storage backend (so other
+    /// instances see the revocation).  Storage failures are logged but do
+    /// not fail the call — the in-memory entry still prevents replay on
+    /// this instance, and the session-binding check in `validate_token`
+    /// provides additional defense when sessions are deleted.
+    pub async fn revoke_token(&self, token: String, expires_at: chrono::DateTime<chrono::Utc>) {
+        // In-memory update (fast path).
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            // Clean up expired entries while we're at it
+            blacklist.retain(|_, &mut exp| exp > chrono::Utc::now());
+            blacklist.insert(token.clone(), expires_at);
+        }
+
+        // Persist the revocation so other instances see it.  We store an
+        // empty encrypted payload — the presence of the entry at the
+        // hash-keyed path is what signals revocation, and `expires_at`
+        // drives automatic cleanup via `delete_expired`.
+        let path = Self::revoked_token_path(&token);
+        let entry = SecretEntry::new(
+            path,
+            Vec::new(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::nil(),
+        )
+        .with_expiration(expires_at);
+
+        if let Err(e) = self.storage.store(&entry).await {
+            tracing::warn!(
+                "Failed to persist revoked token to storage: {}; \
+                 revocation is still active on this instance but may not \
+                 propagate to other instances",
+                e
+            );
+        }
+    }
+
+    /// Check if a token is revoked.
+    ///
+    /// Checks the in-memory blacklist first (fast path), then falls back to
+    /// the shared storage backend so revocations made on other instances
+    /// are honored.  A storage lookup failure is treated as "not revoked"
+    /// (fail-open) so that a transient storage hiccup does not lock out
+    /// every user — the session-binding check in `validate_token` remains
+    /// the authoritative defense.
     pub async fn is_token_revoked(&self, token: &str) -> bool {
-        let blacklist = self.token_blacklist.read().await;
-        if let Some(expires_at) = blacklist.get(token) {
-            *expires_at > chrono::Utc::now()
-        } else {
-            false
+        // In-memory fast path.
+        {
+            let blacklist = self.token_blacklist.read().await;
+            if let Some(expires_at) = blacklist.get(token) {
+                if *expires_at > chrono::Utc::now() {
+                    return true;
+                }
+            }
+        }
+
+        // Shared-storage fallback: check whether another instance has
+        // persisted a revocation for this token.
+        let path = Self::revoked_token_path(token);
+        match self.storage.get_by_path(&path).await {
+            Ok(Some(entry)) => {
+                // If the entry exists and has not yet expired, the token is
+                // revoked.  Populate the in-memory cache so subsequent
+                // checks hit the fast path.
+                let still_valid = entry
+                    .expires_at
+                    .map(|exp| exp > chrono::Utc::now())
+                    .unwrap_or(true);
+                if still_valid {
+                    if let Some(exp) = entry.expires_at {
+                        let mut blacklist = self.token_blacklist.write().await;
+                        blacklist.insert(token.to_string(), exp);
+                    }
+                    return true;
+                }
+                false
+            }
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to check persisted revoked-token store: {}; \
+                     falling back to in-memory check only",
+                    e
+                );
+                false
+            }
         }
     }
 
@@ -1216,14 +1309,20 @@ impl AuthenticationService {
         let is_privileged = stored_user.roles.contains(&"admin".to_string())
             || stored_user.roles.contains(&"root".to_string());
 
-        // Check whether the user still needs MFA enrollment.  If the user
-        // is privileged and has not yet configured MFA, the refreshed token
-        // must carry `mfa_required: true` so that the auth_middleware
-        // continues to restrict scope.  Without this, a TOFU user could
-        // call the refresh endpoint (which does not go through
-        // validate_token) to obtain a new access token with
-        // `mfa_required: false`, completely bypassing MFA enforcement.
-        let token_mfa_required = if is_privileged {
+        // Re-read the global MFA flag so that a user who authenticated under
+        // the TOFU path (non-privileged + global MFA on) cannot escape the
+        // `mfa_pending` restriction simply by refreshing their token.
+        let (_, global_mfa_enabled_for_refresh) = self.get_effective_config().await;
+
+        // Check whether the user still needs MFA enrollment.  If MFA is
+        // required for this user (privileged or global MFA enabled) and
+        // they have not yet configured it, the refreshed token must carry
+        // `mfa_required: true` so that the auth_middleware continues to
+        // restrict scope.  Without this, a TOFU user could call the refresh
+        // endpoint (which does not go through validate_token) to obtain a
+        // new access token with `mfa_required: false`, completely bypassing
+        // MFA enforcement.
+        let token_mfa_required = if is_privileged || global_mfa_enabled_for_refresh {
             if let Some(mfa) = &self.mfa_service {
                 let user_uuid = Uuid::parse_str(&stored_user.id).map_err(|_| {
                     tracing::error!(
@@ -1624,7 +1723,11 @@ impl AuthenticationService {
         Ok(())
     }
 
-    /// Cleanup expired sessions
+    /// Cleanup expired sessions and revoked-token entries.
+    ///
+    /// Also prunes stale revocations from the shared storage backend so the
+    /// revoked-token store does not grow unboundedly.  The in-memory
+    /// blacklist is self-cleaning on every `revoke_token` call.
     pub async fn cleanup_expired_sessions(&self) -> Result<u64, AuthError> {
         let deleted_count = self
             .storage
@@ -1634,6 +1737,23 @@ impl AuthenticationService {
 
         if deleted_count > 0 {
             tracing::info!("Cleaned up {} expired sessions", deleted_count);
+        }
+
+        // Also prune expired revocation entries.  Failures are logged but
+        // not propagated — session cleanup succeeding is still useful even
+        // if the revocation store is temporarily unavailable.
+        match self
+            .storage
+            .delete_expired(Some(REVOKED_TOKEN_STORAGE_PREFIX.to_string()))
+            .await
+        {
+            Ok(n) if n > 0 => {
+                tracing::info!("Cleaned up {} expired token revocations", n);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Failed to clean up expired token revocations: {}", e);
+            }
         }
 
         Ok(deleted_count)
@@ -2019,16 +2139,17 @@ impl AuthenticationService {
 
         // Generate tokens with session binding, using the dynamic timeout so
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
-        // Set mfa_required on the token when TOFU was used (privileged user
-        // authenticated without MFA), mirroring the logic in `login()`.
-        // Use the same formula as `login()` — `is_privileged && !mfa_verified`.
+        // Set mfa_required on the token when TOFU was used (user
+        // authenticated without MFA but MFA was required), mirroring the
+        // logic in `login()`.  Uses the same formula as `login()` —
+        // `(is_privileged || global_mfa_enabled) && !mfa_verified`.
         // Previously this also OR'd in `result.mfa_required` from the underlying
         // auth service, but `login()` did not, creating an inconsistency.  Since
         // we pass `mfa_code: None` to `auth_service.login()` and handle MFA
         // entirely via `enforce_mfa()`, `result.mfa_required` is not meaningful
         // here and would only cause divergent behavior if the auth service
         // evolves to set it independently.
-        let token_mfa_required = is_privileged && !mfa_verified;
+        let token_mfa_required = (is_privileged || global_mfa_enabled) && !mfa_verified;
 
         let token_pair = self
             .token_service
