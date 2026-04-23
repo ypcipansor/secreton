@@ -1544,14 +1544,41 @@ pub async fn get_policy(
         Err(secret::SecretError::PolicyNotFound { .. }) => {
             // Fall back to raw policy content (admin-only).
             //
-            // The RBAC permission check for "sys/policies/{name}" was already
-            // performed by `state.secreton.get_policy()` above — its
-            // implementation calls `check_permission()` BEFORE checking
-            // existence, so `PolicyNotFound` implies RBAC passed.  The
-            // admin/root role gate below is an additional safety net in case
-            // that ordering ever changes.
+            // Only admin/root users may access raw policy content.
+            // Non-admin users get a generic 404 to avoid revealing
+            // whether a raw-content policy exists at this path.
             if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
                 return Err(crate::ApiError::NotFound("Policy not found".to_string()));
+            }
+
+            // Explicitly verify RBAC permissions for the raw-content
+            // fallback path instead of relying on the assumption that
+            // `state.secreton.get_policy()` always checks permissions
+            // before existence.  If that ordering ever changes,
+            // `PolicyNotFound` would no longer imply RBAC passed,
+            // and the raw-content path would silently bypass RBAC.
+            //
+            // We re-check via `get_policy` which calls
+            // `check_permission` first.  `PolicyNotFound` is expected
+            // (the structured policy doesn't exist — that's why we're
+            // here).  `PermissionDenied` must be propagated.  Any
+            // other error (storage, crypto) is propagated fail-closed.
+            match state.secreton.get_policy(&name, &user).await {
+                Err(secret::SecretError::PermissionDenied(msg)) => {
+                    return Err(crate::ApiError::Authorization(msg));
+                }
+                Err(secret::SecretError::PolicyNotFound { .. }) => {
+                    // Expected — proceed to raw-content lookup below.
+                }
+                Ok(_) => {
+                    // Structured policy appeared between the two calls
+                    // (race).  This is fine — RBAC passed.
+                }
+                Err(e) => {
+                    return Err(crate::ApiError::Internal(format!(
+                        "Failed to verify policy permissions: {}", e
+                    )));
+                }
             }
             match state.admin.get_policy_content(&name).await {
                 Ok(Some(content)) => {

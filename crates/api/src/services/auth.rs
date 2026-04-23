@@ -1006,6 +1006,18 @@ impl AuthenticationService {
             return Err(AuthError::InvalidToken);
         }
 
+        // Enforce TOFU MFA enrollment: if the token was issued with
+        // `mfa_required: true` (TOFU — privileged user who has not yet
+        // configured MFA), reject the token so the user is forced to
+        // complete MFA enrollment before performing any operations.
+        //
+        // Without this check a privileged user could operate indefinitely
+        // without MFA by simply never completing enrollment, since the
+        // TOFU path in `enforce_mfa()` allows the initial login through.
+        if claims.claims.mfa_required {
+            return Err(AuthError::PermissionDenied);
+        }
+
         // Convert claims to User — use the roles AND policies embedded in the
         // JWT so that authorization checks after token validation see the same
         // claims the token was issued with.  Previously `policies` was hardcoded
@@ -1889,7 +1901,7 @@ impl AuthenticationService {
             user_info: result.user_info,
             policies,
             metadata: result_metadata,
-            mfa_required: result.mfa_required,
+            mfa_required: token_mfa_required,
         })
     }
 
