@@ -19,6 +19,11 @@ pub struct LifecycleService {
     manager: Arc<SecretLifecycleManagement>,
     shutdown: Arc<Notify>,
     enabled: bool,
+    /// When false, `process_lifecycle_events` skips the destructive
+    /// `storage.delete_expired` sweep. Mirrors `LifecycleConfig.cleanup_enabled`
+    /// so that the flag gates the primary cleanup path (not just the
+    /// secondary in-memory manager cleanup).
+    cleanup_enabled: bool,
     /// Handle for the background worker task, stored so that shutdown can
     /// await its completion and ensure any in-flight processing finishes.
     worker: Mutex<Option<JoinHandle<()>>>,
@@ -31,12 +36,14 @@ impl LifecycleService {
         config: LifecycleConfig,
     ) -> Self {
         let enabled = config.enabled;
+        let cleanup_enabled = config.cleanup_enabled;
         Self {
             storage,
             _secreton: secreton,
             manager: Arc::new(SecretLifecycleManagement::new(config)),
             shutdown: Arc::new(Notify::new()),
             enabled,
+            cleanup_enabled,
             worker: Mutex::new(None),
         }
     }
@@ -133,15 +140,21 @@ impl LifecycleService {
 
         // Use the storage backend's built-in expiration cleanup.
         // This performs the actual deletion of expired entries from the database.
-        match self.storage.delete_expired(None).await {
-            Ok(count) if count > 0 => {
-                info!("Successfully cleaned up {} expired secrets", count);
+        // Gated by `cleanup_enabled` so operators can disable destructive
+        // sweeps without having to also disable the whole lifecycle service.
+        if self.cleanup_enabled {
+            match self.storage.delete_expired(None).await {
+                Ok(count) if count > 0 => {
+                    info!("Successfully cleaned up {} expired secrets", count);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to clean up expired secrets: {}", e);
+                    return Err(e.into());
+                }
             }
-            Ok(_) => {}
-            Err(e) => {
-                error!("Failed to clean up expired secrets: {}", e);
-                return Err(e.into());
-            }
+        } else {
+            info!("Skipping storage.delete_expired: cleanup_enabled is false");
         }
 
         // TODO: Implement real notification support (Email/Webhooks)
