@@ -17,6 +17,7 @@ pub struct LifecycleService {
     _secreton: Arc<SecretService>,
     manager: Arc<SecretLifecycleManagement>,
     shutdown: Arc<Notify>,
+    enabled: bool,
 }
 
 impl LifecycleService {
@@ -25,11 +26,13 @@ impl LifecycleService {
         secreton: Arc<SecretService>,
         config: LifecycleConfig,
     ) -> Self {
+        let enabled = config.enabled;
         Self {
             storage,
             _secreton: secreton,
             manager: Arc::new(SecretLifecycleManagement::new(config)),
             shutdown: Arc::new(Notify::new()),
+            enabled,
         }
     }
 
@@ -66,6 +69,14 @@ impl LifecycleService {
 
     /// Process expired and expiring secrets
     pub async fn process_lifecycle_events(&self) -> Result<()> {
+        // Defense-in-depth: honor the `enabled` flag even if the worker was
+        // somehow started. This guards against the flag being flipped at runtime
+        // or the service being driven from an external caller (e.g. tests).
+        if !self.enabled {
+            info!("Skipping lifecycle processing: service is disabled");
+            return Ok(());
+        }
+
         info!("Processing secret lifecycle events");
 
         // Use the storage backend's built-in expiration cleanup.

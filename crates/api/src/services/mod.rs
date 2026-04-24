@@ -268,12 +268,19 @@ impl ApiServiceContainer {
                 auto_archive_enabled: true,
                 cleanup_enabled: true,
             };
+        let lifecycle_enabled = lifecycle_config.enabled;
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
             secreton.clone(),
             lifecycle_config,
         ));
-        tokio::spawn(lifecycle.clone().start_worker());
+        if lifecycle_enabled {
+            tokio::spawn(lifecycle.clone().start_worker());
+        } else {
+            tracing::info!(
+                "Secret Lifecycle service is disabled via LifecycleConfig.enabled; background worker will not be spawned"
+            );
+        }
 
         // Register in registry (optional if we use fields, but good for trait support)
         let mut registry = StandardServiceContainer::new();
