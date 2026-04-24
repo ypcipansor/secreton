@@ -281,6 +281,7 @@ impl ApiServiceContainer {
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
             secreton.clone(),
+            audit.clone(),
             lifecycle_config,
         ));
 

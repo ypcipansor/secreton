@@ -7,22 +7,44 @@ use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant, interval_at};
 use tracing::{error, info, warn};
 
+use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::secret::SecretService;
 use secreton_integrations::integrations::secret_lifecycle_management::{
     LifecycleConfig, SecretLifecycleManagement,
 };
-use secreton_storage::StorageBackend;
+use secreton_storage::{QueryParams, StorageBackend};
+
+/// Reserved path prefixes that must NOT be swept by the lifecycle worker.
+///
+/// These namespaces are owned by other subsystems (version history, policies,
+/// encryption key material, audit log, backups) and have their own retention
+/// or cleanup policies. Blanket-deleting expired entries across them would
+/// overlap with dedicated cleaners (e.g. `delete_expired_oauth_states`) and
+/// could silently drop orphaned history or audit records that are still
+/// referenced by the primary secret.
+const RESERVED_PATH_PREFIXES: &[&str] = &[
+    "sys/",
+    "keys/",
+    "key_data/",
+];
+
+/// Actor string recorded in the audit trail for automated lifecycle deletions.
+/// Uses a `system:` prefix so that audit consumers can distinguish automated
+/// sweeps from user-initiated `SecretService::delete_secret` calls (which
+/// record the user's UUID).
+const LIFECYCLE_AUDIT_ACTOR: &str = "system:lifecycle";
 
 pub struct LifecycleService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     _secreton: Arc<SecretService>,
+    audit: Arc<AuditLogger>,
     manager: Arc<SecretLifecycleManagement>,
     shutdown: Arc<Notify>,
     enabled: bool,
     /// When false, `process_lifecycle_events` skips the destructive
-    /// `storage.delete_expired` sweep. Mirrors `LifecycleConfig.cleanup_enabled`
-    /// so that the flag gates the primary cleanup path (not just the
-    /// secondary in-memory manager cleanup).
+    /// storage sweep. Mirrors `LifecycleConfig.cleanup_enabled` so that the
+    /// flag gates the primary cleanup path (not just the secondary in-memory
+    /// manager cleanup).
     cleanup_enabled: bool,
     /// Handle for the background worker task, stored so that shutdown can
     /// await its completion and ensure any in-flight processing finishes.
@@ -33,6 +55,7 @@ impl LifecycleService {
     pub fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
         secreton: Arc<SecretService>,
+        audit: Arc<AuditLogger>,
         config: LifecycleConfig,
     ) -> Self {
         let enabled = config.enabled;
@@ -40,12 +63,21 @@ impl LifecycleService {
         Self {
             storage,
             _secreton: secreton,
+            audit,
             manager: Arc::new(SecretLifecycleManagement::new(config)),
             shutdown: Arc::new(Notify::new()),
             enabled,
             cleanup_enabled,
             worker: Mutex::new(None),
         }
+    }
+
+    /// Returns true if the given path belongs to a reserved namespace that
+    /// must not be swept by the lifecycle worker. See `RESERVED_PATH_PREFIXES`.
+    fn is_reserved_path(path: &str) -> bool {
+        RESERVED_PATH_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
     }
 
     /// Spawn the background worker task and retain its `JoinHandle` so that
@@ -143,33 +175,35 @@ impl LifecycleService {
 
         info!("Processing secret lifecycle events");
 
-        // Use the storage backend's built-in expiration cleanup.
-        // This performs the actual deletion of expired entries from the database.
+        // Scoped expiration cleanup with audit trail.
+        //
+        // Two properties this implementation guarantees (neither of which
+        // `storage.delete_expired(None)` provides):
+        //
+        // 1. **Scope**: only user-owned secret entries are swept. Paths under
+        //    reserved namespaces (`sys/`, `keys/`, `key_data/` — see
+        //    `RESERVED_PATH_PREFIXES`) are skipped, so version history,
+        //    policies, key material, audit logs, and backups are left to
+        //    their own dedicated cleaners (e.g. `delete_expired_oauth_states`).
+        // 2. **Audit trail**: every deletion emits a `SecretDeletion` audit
+        //    event attributed to `LIFECYCLE_AUDIT_ACTOR`, matching the trail
+        //    that user-initiated `SecretService::delete_secret` would produce.
+        //
         // Gated by `cleanup_enabled` so operators can disable destructive
         // sweeps without having to also disable the whole lifecycle service.
-        //
-        // TODO: Scope this sweep to the secrets path prefix instead of `None`.
-        // Passing `None` deletes every expired entry across storage, which can
-        // overlap with dedicated cleaners (e.g. `delete_expired_oauth_states`)
-        // and deletes unrelated ephemeral entries.
-        //
-        // TODO: Emit a `SecretDeletion` (or dedicated `LifecycleExpiration`)
-        // audit event for each deleted entry. Direct `storage.delete_expired`
-        // bypasses the audit trail that `SecretService::delete_secret` would
-        // otherwise produce — unacceptable long-term for a secrets manager.
         if self.cleanup_enabled {
-            match self.storage.delete_expired(None).await {
+            match self.sweep_expired_secrets().await {
                 Ok(count) if count > 0 => {
                     info!("Successfully cleaned up {} expired secrets", count);
                 }
                 Ok(_) => {}
                 Err(e) => {
                     error!("Failed to clean up expired secrets: {}", e);
-                    return Err(e.into());
+                    return Err(e);
                 }
             }
         } else {
-            info!("Skipping storage.delete_expired: cleanup_enabled is false");
+            info!("Skipping expired-secret sweep: cleanup_enabled is false");
         }
 
         // TODO: Implement real notification support (Email/Webhooks)
@@ -190,6 +224,61 @@ impl LifecycleService {
 
     pub fn manager(&self) -> Arc<SecretLifecycleManagement> {
         self.manager.clone()
+    }
+
+    /// Delete expired user-owned secret entries and emit a `SecretDeletion`
+    /// audit event for each one.
+    ///
+    /// Entries under reserved namespaces (see `RESERVED_PATH_PREFIXES`) are
+    /// skipped — those are owned by other subsystems with their own cleanup
+    /// policies. Returns the number of entries actually deleted.
+    ///
+    /// Errors from individual deletions are logged but do not abort the sweep,
+    /// so a single bad entry cannot block cleanup of the rest. A listing
+    /// failure (which affects the whole sweep) is propagated.
+    async fn sweep_expired_secrets(&self) -> Result<u64> {
+        let params = QueryParams {
+            include_expired: true,
+            ..Default::default()
+        };
+
+        let entries = self.storage.list(&params).await?;
+        let mut deleted: u64 = 0;
+
+        for entry in entries {
+            if !entry.is_expired() {
+                continue;
+            }
+            if Self::is_reserved_path(&entry.path) {
+                continue;
+            }
+
+            match self.storage.delete_by_id(entry.id).await {
+                Ok(true) => {
+                    deleted += 1;
+                    // Emit audit event. `log_event` is infallible (buffers
+                    // internally and logs on flush failures) so there's no
+                    // Result to propagate here.
+                    self.audit
+                        .log_event(SecurityEventType::SecretDeletion {
+                            secret_path: entry.path.clone(),
+                            user: LIFECYCLE_AUDIT_ACTOR.to_string(),
+                        })
+                        .await;
+                }
+                Ok(false) => {
+                    // Entry vanished between list and delete — benign race.
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to delete expired secret at path {}: {}",
+                        entry.path, e
+                    );
+                }
+            }
+        }
+
+        Ok(deleted)
     }
 }
 
@@ -221,7 +310,7 @@ mod tests {
             SecretService::new(
                 storage.clone(),
                 crypto.clone(),
-                audit,
+                audit.clone(),
                 identity,
                 policy,
                 performance,
@@ -236,7 +325,7 @@ mod tests {
             auto_archive_enabled: false,
             cleanup_enabled,
         };
-        Arc::new(LifecycleService::new(storage, secreton, cfg))
+        Arc::new(LifecycleService::new(storage, secreton, audit, cfg))
     }
 
     #[tokio::test]
@@ -282,6 +371,99 @@ mod tests {
         // With cleanup_enabled=false the storage sweep is skipped;
         // process_lifecycle_events should still succeed.
         svc.process_lifecycle_events().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sweep_skips_reserved_paths_and_deletes_user_secrets() {
+        use chrono::{Duration as ChronoDuration, Utc};
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
+        use uuid::Uuid;
+
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(InMemoryStorage::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(
+            crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
+                .await
+                .unwrap(),
+        );
+        let identity: Arc<dyn IdentityService + Send + Sync> =
+            Arc::new(InMemoryIdentityService::new());
+        let policy = Arc::new(PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::new(
+            SecretPerformanceConfig::default(),
+        ));
+        let secreton = Arc::new(
+            SecretService::new(
+                storage.clone(),
+                crypto.clone(),
+                audit.clone(),
+                identity,
+                policy,
+                performance,
+            )
+            .await
+            .unwrap(),
+        );
+
+        let owner = Uuid::new_v4();
+        let past = Utc::now() - ChronoDuration::hours(1);
+
+        // Expired user-owned secret — should be deleted.
+        let user_entry = SecretEntry::new(
+            "app/prod/api-key".to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata::default(),
+            SecurityLevel::Confidential,
+            owner,
+        )
+        .with_expiration(past);
+        storage.store(&user_entry).await.unwrap();
+
+        // Expired entry under a reserved namespace — must be preserved.
+        let reserved_entry = SecretEntry::new(
+            "sys/history/app/prod/api-key::v1".to_string(),
+            vec![9, 9, 9],
+            EncryptionMetadata::default(),
+            SecurityLevel::Confidential,
+            owner,
+        )
+        .with_expiration(past);
+        storage.store(&reserved_entry).await.unwrap();
+
+        let cfg = LifecycleConfig {
+            enabled: true,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: true,
+        };
+        let svc = Arc::new(LifecycleService::new(
+            storage.clone(),
+            secreton,
+            audit,
+            cfg,
+        ));
+
+        svc.process_lifecycle_events().await.unwrap();
+
+        // User secret is gone.
+        assert!(
+            storage
+                .get_by_path("app/prod/api-key")
+                .await
+                .unwrap()
+                .is_none(),
+            "expired user secret should be deleted"
+        );
+        // Reserved-namespace entry is preserved.
+        assert!(
+            storage
+                .get_by_path("sys/history/app/prod/api-key::v1")
+                .await
+                .unwrap()
+                .is_some(),
+            "entries under sys/ must not be swept by the lifecycle worker"
+        );
     }
 }
 

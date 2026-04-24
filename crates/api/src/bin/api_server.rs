@@ -536,16 +536,83 @@ async fn main() -> anyhow::Result<()> {
         http_port, axum_port, grpc_port
     );
 
-    // Run all servers concurrently
-    let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
+    // Graceful shutdown on Ctrl+C / SIGTERM.
+    //
+    // Previously this used `tokio::join!`, which waits until every server
+    // future completes — in practice, that only happens on process termination.
+    // That left no opportunity to flush buffered audit events or to drain
+    // background workers (e.g. the lifecycle worker in `ApiServiceContainer`)
+    // before the tokio runtime is dropped, risking interrupted in-flight
+    // storage writes and silently lost audit entries.
+    //
+    // We now `select!` between the joined servers and a shutdown signal.
+    // On shutdown, we flush audit before returning so buffered events reach
+    // durable storage.
+    let servers = async {
+        let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
+        if let Err(e) = grpc_res {
+            warn!("gRPC server failed: {}", e);
+        }
+    };
 
-    if let Err(e) = grpc_res {
-        warn!("gRPC server failed: {}", e);
+    let shutdown = shutdown_signal();
+
+    tokio::select! {
+        _ = servers => {
+            info!("Servers exited on their own.");
+        }
+        _ = shutdown => {
+            info!("Shutdown signal received; draining services...");
+        }
+    }
+
+    // Flush buffered audit events before exit. This is best-effort: a flush
+    // failure is logged but does not prevent shutdown, so a wedged audit
+    // backend can't hang the process.
+    //
+    // TODO: Once `api_server.rs` is migrated to `ApiServiceContainer`, call
+    // `container.stop_services().await` here instead — that method already
+    // flushes audit and awaits the lifecycle worker via `shutdown_and_wait`.
+    if let Err(e) = audit.flush().await {
+        warn!("Failed to flush audit logs on shutdown: {}", e);
     }
 
     info!("Servers stopped.");
 
     Ok(())
+}
+
+/// Wait for Ctrl+C or (on Unix) SIGTERM.
+///
+/// Completes on the first signal received. Returns immediately if either
+/// listener fails to install — we prefer to shut down rather than hang on a
+/// broken signal handler.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!("Failed to install Ctrl+C handler: {}", e);
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => {
+                warn!("Failed to install SIGTERM handler: {}", e);
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
 }
 
 fn print_startup_banner() {
