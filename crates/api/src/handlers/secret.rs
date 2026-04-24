@@ -660,39 +660,93 @@ fn default_policy_type() -> String {
 ///   - **Raw**: `{ "content": "..." }` — opaque policy content (HCL/text)
 ///     stored under `sys/policies/content/{name}` for admin UI management.
 ///
-/// Using `#[serde(untagged)]` keeps the wire format unchanged (clients
-/// send either shape with no discriminator field) while giving handlers
-/// and OpenAPI tooling a strongly-typed view instead of a raw
-/// `serde_json::Value`.  Deserialization tries `Structured` first; if
-/// `rules` is absent it falls through to `Raw`.
-///
-/// The handler retains the cross-shape validation (e.g. rejecting
-/// `rules: []` with a non-null `content`, which `#[serde(untagged)]`
-/// cannot express).
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+/// Dispatch is based on the **presence** of the `rules` key rather than on
+/// whether the `Structured` variant happens to deserialize successfully.
+/// A prior implementation used `#[serde(untagged)]` which silently fell
+/// through to `Raw` whenever `Structured` failed for *any* reason — e.g.
+/// `{"rules": "not-an-array", "content": "..."}` would be reinterpreted
+/// as a raw-content update, silently overwriting a structured policy
+/// with the request's `content` field as raw HCL.  The custom
+/// `Deserialize` impl below surfaces structured-shape errors instead of
+/// masking them, so malformed `rules`/`metadata` produce a 400 error.
+#[derive(Debug)]
 pub enum UpdatePolicyRequest {
-    /// Structured update with rules.  `rules` is required (non-null) to
-    /// disambiguate from the `Raw` variant.
+    /// Structured update with rules.  Selected when the request body
+    /// contains a `rules` key (regardless of whether the value is a
+    /// valid `Vec<String>` — malformed rules surface as errors instead
+    /// of falling through to `Raw`).
     Structured {
         /// Policy name — ignored; the authoritative name comes from the URL
         /// path.  Kept for backward compatibility with clients that include
         /// it in the body.
-        #[serde(default)]
         name: Option<String>,
         rules: Vec<String>,
-        #[serde(default)]
         metadata: Option<PolicyMetadata>,
         /// Accepted and ignored when `rules` is present.  Captured here so
         /// the handler can detect `{rules: [], content: "..."}` and reject
         /// it rather than silently wiping the raw content.
-        #[serde(default)]
         content: Option<String>,
     },
-    /// Raw-content update (admin-only).  `content` is required.
+    /// Raw-content update (admin-only).  Selected when the request body
+    /// does not contain a `rules` key but does contain a `content` key.
     Raw {
         content: String,
     },
+}
+
+impl<'de> Deserialize<'de> for UpdatePolicyRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Buffer the input as a `serde_json::Value` so we can peek at the
+        // object keys before committing to a variant.  This is an
+        // acceptable cost for an admin-only endpoint and avoids the
+        // silent-fallthrough pitfall of `#[serde(untagged)]`.
+        let v = serde_json::Value::deserialize(deserializer)?;
+        let obj = v.as_object().ok_or_else(|| {
+            serde::de::Error::custom(
+                "UpdatePolicyRequest: expected a JSON object with either 'rules' or 'content'",
+            )
+        })?;
+
+        if obj.contains_key("rules") {
+            // Commit to the Structured variant — surface any deserialization
+            // errors (e.g. `rules` not an array, malformed `metadata`)
+            // rather than falling through to `Raw`.
+            #[derive(Deserialize)]
+            struct StructuredHelper {
+                #[serde(default)]
+                name: Option<String>,
+                rules: Vec<String>,
+                #[serde(default)]
+                metadata: Option<PolicyMetadata>,
+                #[serde(default)]
+                content: Option<String>,
+            }
+            let s = serde_json::from_value::<StructuredHelper>(v)
+                .map_err(serde::de::Error::custom)?;
+            Ok(UpdatePolicyRequest::Structured {
+                name: s.name,
+                rules: s.rules,
+                metadata: s.metadata,
+                content: s.content,
+            })
+        } else if obj.contains_key("content") {
+            #[derive(Deserialize)]
+            struct RawHelper {
+                content: String,
+            }
+            let r =
+                serde_json::from_value::<RawHelper>(v).map_err(serde::de::Error::custom)?;
+            Ok(UpdatePolicyRequest::Raw { content: r.content })
+        } else {
+            Err(serde::de::Error::custom(
+                "UpdatePolicyRequest: request body must contain either 'rules' \
+                 (structured update) or 'content' (raw update)",
+            ))
+        }
+    }
 }
 
 /// Get secret by path
