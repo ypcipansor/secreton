@@ -214,6 +214,8 @@ impl ApiServiceContainer {
             storage.clone(),
             crypto.clone(),
         ));
+        // TODO: Register other integration services (AWS Secrets Manager, Azure Key Vault)
+        // here as they are developed for end-to-end usage.
 
         // Initialize PKI service
         let pki = Arc::new(pki::PkiPersistentService::new(
