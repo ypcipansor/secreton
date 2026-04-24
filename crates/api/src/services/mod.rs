@@ -264,13 +264,19 @@ impl ApiServiceContainer {
         // a background task in contexts (e.g. tests) that only construct the
         // container without starting it.
         // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
+        // Defaults are intentionally conservative: `enabled: false` and
+        // `cleanup_enabled: false` ensure that no destructive
+        // `storage.delete_expired` sweep runs on upgrade until an operator
+        // explicitly opts in via configuration. Flipping these on by default
+        // would risk silently deleting expired-but-still-referenced secrets
+        // on the first startup after this feature lands.
         let lifecycle_config =
             secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
-                enabled: true,
+                enabled: false,
                 default_ttl_days: 90,
                 grace_period_days: 7,
-                auto_archive_enabled: true,
-                cleanup_enabled: true,
+                auto_archive_enabled: false,
+                cleanup_enabled: false,
             };
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),

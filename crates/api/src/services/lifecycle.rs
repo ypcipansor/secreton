@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, Instant, interval_at};
 use tracing::{error, info, warn};
 
 use crate::services::secret::SecretService;
@@ -103,7 +103,12 @@ impl LifecycleService {
     /// `shutdown_and_wait` from awaiting in-flight processing.
     async fn start_worker(self: Arc<Self>) {
         info!("Starting Secret Lifecycle background worker");
-        let mut ticker = interval(Duration::from_secs(3600)); // Run every hour
+        // Delay the first tick by one period so that `process_lifecycle_events`
+        // does not run immediately on startup. `tokio::time::interval` would
+        // fire its first tick instantly, which is surprising for a destructive
+        // periodic sweep and could interact badly with migrations/warm-up.
+        let period = Duration::from_secs(3600);
+        let mut ticker = interval_at(Instant::now() + period, period);
         let shutdown = self.shutdown.clone();
 
         loop {
@@ -142,6 +147,16 @@ impl LifecycleService {
         // This performs the actual deletion of expired entries from the database.
         // Gated by `cleanup_enabled` so operators can disable destructive
         // sweeps without having to also disable the whole lifecycle service.
+        //
+        // TODO: Scope this sweep to the secrets path prefix instead of `None`.
+        // Passing `None` deletes every expired entry across storage, which can
+        // overlap with dedicated cleaners (e.g. `delete_expired_oauth_states`)
+        // and deletes unrelated ephemeral entries.
+        //
+        // TODO: Emit a `SecretDeletion` (or dedicated `LifecycleExpiration`)
+        // audit event for each deleted entry. Direct `storage.delete_expired`
+        // bypasses the audit trail that `SecretService::delete_secret` would
+        // otherwise produce — unacceptable long-term for a secrets manager.
         if self.cleanup_enabled {
             match self.storage.delete_expired(None).await {
                 Ok(count) if count > 0 => {
@@ -177,3 +192,96 @@ impl LifecycleService {
         self.manager.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::crypto::CryptoService;
+    use crate::services::secret::SecretService;
+    use secreton_auth::policies::service::PolicyService;
+    use secreton_auth::{IdentityService, InMemoryIdentityService};
+    use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
+    use secreton_storage::memory::InMemoryStorage;
+
+    async fn make_service(enabled: bool, cleanup_enabled: bool) -> Arc<LifecycleService> {
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(InMemoryStorage::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let audit = Arc::new(
+            crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
+                .await
+                .unwrap(),
+        );
+        let identity: Arc<dyn IdentityService + Send + Sync> =
+            Arc::new(InMemoryIdentityService::new());
+        let policy = Arc::new(PolicyService::new());
+        let performance = Arc::new(SecretPerformanceOptimizer::new(
+            SecretPerformanceConfig::default(),
+        ));
+        let secreton = Arc::new(
+            SecretService::new(
+                storage.clone(),
+                crypto.clone(),
+                audit,
+                identity,
+                policy,
+                performance,
+            )
+            .await
+            .unwrap(),
+        );
+        let cfg = LifecycleConfig {
+            enabled,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled,
+        };
+        Arc::new(LifecycleService::new(storage, secreton, cfg))
+    }
+
+    #[tokio::test]
+    async fn disabled_service_skips_processing() {
+        let svc = make_service(false, true).await;
+        assert!(!svc.is_enabled());
+        // Should be a no-op Ok(()) — defense-in-depth check.
+        svc.process_lifecycle_events().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disabled_service_does_not_spawn_worker() {
+        let svc = make_service(false, true).await;
+        svc.spawn_worker().await;
+        let guard = svc.worker.lock().await;
+        assert!(guard.is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_worker_is_idempotent() {
+        let svc = make_service(true, false).await;
+        svc.spawn_worker().await;
+        svc.spawn_worker().await;
+        {
+            let guard = svc.worker.lock().await;
+            assert!(guard.is_some());
+        }
+        svc.shutdown_and_wait().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_and_wait_terminates_worker() {
+        let svc = make_service(true, false).await;
+        svc.spawn_worker().await;
+        svc.shutdown_and_wait().await;
+        let guard = svc.worker.lock().await;
+        assert!(guard.is_none());
+    }
+
+    #[tokio::test]
+    async fn cleanup_disabled_skips_storage_delete() {
+        let svc = make_service(true, false).await;
+        // With cleanup_enabled=false the storage sweep is skipped;
+        // process_lifecycle_events should still succeed.
+        svc.process_lifecycle_events().await.unwrap();
+    }
+}
+
