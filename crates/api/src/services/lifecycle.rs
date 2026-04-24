@@ -1,11 +1,13 @@
 //! Lifecycle service for managing secret expiration and archival.
 
 use anyhow::Result;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant, interval_at};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::secret::SecretService;
@@ -245,6 +247,19 @@ impl LifecycleService {
         let mut deleted: u64 = 0;
         let mut offset: u32 = 0;
 
+        // Track entry IDs we've already observed this sweep. Several storage
+        // backends (PostgreSQL, MySQL, CockroachDB, and the default mock) do
+        // not honor `QueryParams.offset` and will return the same page on
+        // every call. Without this guard, a sweep where all entries are
+        // skipped (non-expired or under a reserved prefix) would loop forever:
+        // `skipped_this_page` would grow `offset`, the backend would ignore
+        // it, and we'd re-fetch and re-skip the same rows indefinitely.
+        //
+        // If we ever observe a duplicate ID on a subsequent page, we know the
+        // backend isn't paginating and we bail out. On backends that *do*
+        // honor offset this set only grows with genuinely new rows.
+        let mut seen_ids: HashSet<Uuid> = HashSet::new();
+
         loop {
             let params = QueryParams {
                 include_expired: true,
@@ -259,6 +274,19 @@ impl LifecycleService {
                 break;
             }
 
+            // Detect backends that ignore `offset`: if every entry on this
+            // page has already been seen on a prior page, we're not making
+            // progress and must stop to avoid an infinite loop.
+            if offset > 0 && entries.iter().all(|e| seen_ids.contains(&e.id)) {
+                warn!(
+                    "Storage backend appears to ignore QueryParams.offset; \
+                     halting sweep at offset {} after {} deletions to avoid \
+                     an infinite loop",
+                    offset, deleted
+                );
+                break;
+            }
+
             // Track skipped entries so we advance `offset` past non-deletable
             // rows (non-expired or reserved) on the next page. Deleted rows
             // shift subsequent entries back by one, so they don't contribute
@@ -266,6 +294,8 @@ impl LifecycleService {
             let mut skipped_this_page: u32 = 0;
 
             for entry in entries {
+                seen_ids.insert(entry.id);
+
                 if !entry.is_expired() {
                     skipped_this_page += 1;
                     continue;
