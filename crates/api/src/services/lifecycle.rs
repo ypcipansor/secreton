@@ -2,12 +2,13 @@
 
 use anyhow::Result;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::{Duration, interval};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::services::secret::SecretService;
 use secreton_integrations::integrations::secret_lifecycle_management::{
-    SecretLifecycleManagement, LifecycleConfig
+    LifecycleConfig, SecretLifecycleManagement,
 };
 use secreton_storage::StorageBackend;
 
@@ -15,37 +16,45 @@ pub struct LifecycleService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     _secreton: Arc<SecretService>,
     manager: Arc<SecretLifecycleManagement>,
+    shutdown: Arc<Notify>,
 }
 
 impl LifecycleService {
     pub fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
         secreton: Arc<SecretService>,
+        config: LifecycleConfig,
     ) -> Self {
-        let config = LifecycleConfig {
-            enabled: true,
-            default_ttl_days: 90,
-            grace_period_days: 7,
-            auto_archive_enabled: true,
-            cleanup_enabled: true,
-        };
-
         Self {
             storage,
             _secreton: secreton,
             manager: Arc::new(SecretLifecycleManagement::new(config)),
+            shutdown: Arc::new(Notify::new()),
         }
     }
 
-    /// Start the background lifecycle worker
+    /// Signal the background worker to stop on its next tick.
+    pub fn shutdown(&self) {
+        self.shutdown.notify_waiters();
+    }
+
+    /// Start the background lifecycle worker. Returns when `shutdown` is signalled.
     pub async fn start_worker(self: Arc<Self>) {
         info!("Starting Secret Lifecycle background worker");
-        let mut interval = interval(Duration::from_secs(3600)); // Run every hour
+        let mut ticker = interval(Duration::from_secs(3600)); // Run every hour
+        let shutdown = self.shutdown.clone();
 
         loop {
-            interval.tick().await;
-            if let Err(e) = self.process_lifecycle_events().await {
-                error!("Error processing lifecycle events: {}", e);
+            tokio::select! {
+                _ = shutdown.notified() => {
+                    info!("Secret Lifecycle background worker received shutdown signal");
+                    break;
+                }
+                _ = ticker.tick() => {
+                    if let Err(e) = self.process_lifecycle_events().await {
+                        error!("Error processing lifecycle events: {}", e);
+                    }
+                }
             }
         }
     }
@@ -63,6 +72,7 @@ impl LifecycleService {
             Ok(_) => {}
             Err(e) => {
                 error!("Failed to clean up expired secrets: {}", e);
+                return Err(e.into());
             }
         }
 

@@ -7,6 +7,7 @@ pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod database;
+pub mod lifecycle;
 pub mod pki;
 pub mod secret;
 pub mod ssh;
@@ -69,6 +70,7 @@ pub struct ApiServiceContainer {
     pub mfa: Arc<CombinedMfaService>,
     pub telemetry: Arc<TelemetryCollector>,
     pub identity: Arc<dyn IdentityService + Send + Sync>,
+    pub lifecycle: Arc<lifecycle::LifecycleService>,
 }
 
 impl ApiServiceContainer {
@@ -256,6 +258,23 @@ impl ApiServiceContainer {
             tracing::warn!("Failed to start telemetry collection: {}", e);
         }
 
+        // Initialize Secret Lifecycle service and spawn its background worker.
+        // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
+        let lifecycle_config =
+            secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
+                enabled: true,
+                default_ttl_days: 90,
+                grace_period_days: 7,
+                auto_archive_enabled: true,
+                cleanup_enabled: true,
+            };
+        let lifecycle = Arc::new(lifecycle::LifecycleService::new(
+            storage.clone(),
+            secreton.clone(),
+            lifecycle_config,
+        ));
+        tokio::spawn(lifecycle.clone().start_worker());
+
         // Register in registry (optional if we use fields, but good for trait support)
         let mut registry = StandardServiceContainer::new();
         registry.register_service("storage".to_string(), storage.clone());
@@ -275,6 +294,7 @@ impl ApiServiceContainer {
         registry.register_service("totp_engine".to_string(), totp_engine.clone());
         registry.register_service("telemetry".to_string(), telemetry.clone());
         registry.register_service("identity".to_string(), identity.clone());
+        registry.register_service("lifecycle".to_string(), lifecycle.clone());
 
         Ok(Self {
             config: config.clone(),
@@ -297,6 +317,7 @@ impl ApiServiceContainer {
             mfa,
             telemetry,
             identity,
+            lifecycle,
         })
     }
 
@@ -336,6 +357,9 @@ impl ServiceContainer for ApiServiceContainer {
 
     async fn stop_services(&self) -> InitResult<()> {
         // Stop services in reverse dependency order
+
+        // Signal lifecycle worker to shut down cooperatively.
+        self.lifecycle.shutdown();
 
         // Flush audit logs
         if let Err(e) = self.audit.flush().await {
