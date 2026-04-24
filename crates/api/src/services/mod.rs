@@ -258,7 +258,11 @@ impl ApiServiceContainer {
             tracing::warn!("Failed to start telemetry collection: {}", e);
         }
 
-        // Initialize Secret Lifecycle service and spawn its background worker.
+        // Initialize Secret Lifecycle service. The background worker is
+        // deliberately NOT spawned here — it is spawned in `start_services()`
+        // to match the `ServiceContainer` trait pattern and to avoid running
+        // a background task in contexts (e.g. tests) that only construct the
+        // container without starting it.
         // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
         let lifecycle_config =
             secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
@@ -268,19 +272,11 @@ impl ApiServiceContainer {
                 auto_archive_enabled: true,
                 cleanup_enabled: true,
             };
-        let lifecycle_enabled = lifecycle_config.enabled;
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
             secreton.clone(),
             lifecycle_config,
         ));
-        if lifecycle_enabled {
-            lifecycle.spawn_worker().await;
-        } else {
-            tracing::info!(
-                "Secret Lifecycle service is disabled via LifecycleConfig.enabled; background worker will not be spawned"
-            );
-        }
 
         // Register in registry (optional if we use fields, but good for trait support)
         let mut registry = StandardServiceContainer::new();
@@ -357,8 +353,12 @@ impl ServiceContainer for ApiServiceContainer {
     }
 
     async fn start_services(&self) -> InitResult<()> {
-        // Start services in dependency order
-        // Implementation would start each service that implements the Service trait
+        // Start services in dependency order.
+        // Spawning the lifecycle worker here (rather than in `new`) ensures
+        // that contexts which only construct the container without starting
+        // it (e.g. unit tests) don't pay the cost of a background task, and
+        // keeps start/stop symmetrical.
+        self.lifecycle.spawn_worker().await;
         Ok(())
     }
 

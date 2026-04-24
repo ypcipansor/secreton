@@ -43,14 +43,25 @@ impl LifecycleService {
 
     /// Spawn the background worker task and retain its `JoinHandle` so that
     /// `shutdown_and_wait` can await its completion. If a worker is already
-    /// running, this is a no-op.
+    /// running, or if the service is disabled, this is a no-op.
     pub async fn spawn_worker(self: &Arc<Self>) {
+        if !self.enabled {
+            info!(
+                "Secret Lifecycle service is disabled via LifecycleConfig.enabled; background worker will not be spawned"
+            );
+            return;
+        }
         let mut guard = self.worker.lock().await;
         if guard.is_some() {
             return;
         }
         let handle = tokio::spawn(self.clone().start_worker());
         *guard = Some(handle);
+    }
+
+    /// Returns whether the service is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 
     /// Signal the background worker to stop on its next tick.
