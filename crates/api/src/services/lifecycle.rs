@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 use tracing::{error, info, warn};
 
@@ -18,6 +19,9 @@ pub struct LifecycleService {
     manager: Arc<SecretLifecycleManagement>,
     shutdown: Arc<Notify>,
     enabled: bool,
+    /// Handle for the background worker task, stored so that shutdown can
+    /// await its completion and ensure any in-flight processing finishes.
+    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl LifecycleService {
@@ -33,7 +37,20 @@ impl LifecycleService {
             manager: Arc::new(SecretLifecycleManagement::new(config)),
             shutdown: Arc::new(Notify::new()),
             enabled,
+            worker: Mutex::new(None),
         }
+    }
+
+    /// Spawn the background worker task and retain its `JoinHandle` so that
+    /// `shutdown_and_wait` can await its completion. If a worker is already
+    /// running, this is a no-op.
+    pub async fn spawn_worker(self: &Arc<Self>) {
+        let mut guard = self.worker.lock().await;
+        if guard.is_some() {
+            return;
+        }
+        let handle = tokio::spawn(self.clone().start_worker());
+        *guard = Some(handle);
     }
 
     /// Signal the background worker to stop on its next tick.
@@ -44,6 +61,21 @@ impl LifecycleService {
     /// immediately. `notify_waiters` would silently drop the signal in that case.
     pub fn shutdown(&self) {
         self.shutdown.notify_one();
+    }
+
+    /// Signal shutdown and await the background worker's completion, so that
+    /// any in-flight `process_lifecycle_events` call finishes before returning.
+    pub async fn shutdown_and_wait(&self) {
+        self.shutdown.notify_one();
+        let handle = {
+            let mut guard = self.worker.lock().await;
+            guard.take()
+        };
+        if let Some(handle) = handle {
+            if let Err(e) = handle.await {
+                warn!("Lifecycle worker task did not shut down cleanly: {}", e);
+            }
+        }
     }
 
     /// Start the background lifecycle worker. Returns when `shutdown` is signalled.

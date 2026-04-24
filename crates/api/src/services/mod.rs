@@ -275,7 +275,7 @@ impl ApiServiceContainer {
             lifecycle_config,
         ));
         if lifecycle_enabled {
-            tokio::spawn(lifecycle.clone().start_worker());
+            lifecycle.spawn_worker().await;
         } else {
             tracing::info!(
                 "Secret Lifecycle service is disabled via LifecycleConfig.enabled; background worker will not be spawned"
@@ -365,8 +365,9 @@ impl ServiceContainer for ApiServiceContainer {
     async fn stop_services(&self) -> InitResult<()> {
         // Stop services in reverse dependency order
 
-        // Signal lifecycle worker to shut down cooperatively.
-        self.lifecycle.shutdown();
+        // Signal lifecycle worker to shut down cooperatively and wait for any
+        // in-flight processing (e.g. storage.delete_expired) to finish.
+        self.lifecycle.shutdown_and_wait().await;
 
         // Flush audit logs
         if let Err(e) = self.audit.flush().await {
