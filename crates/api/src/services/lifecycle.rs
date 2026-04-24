@@ -237,45 +237,76 @@ impl LifecycleService {
     /// so a single bad entry cannot block cleanup of the rest. A listing
     /// failure (which affects the whole sweep) is propagated.
     async fn sweep_expired_secrets(&self) -> Result<u64> {
-        let params = QueryParams {
-            include_expired: true,
-            ..Default::default()
-        };
+        // Page through storage to bound peak memory usage on backends with
+        // many entries. Without pagination, a single `list` call would pull
+        // every entry into a `Vec<SecretEntry>` in memory each sweep.
+        const PAGE_SIZE: u32 = 500;
 
-        let entries = self.storage.list(&params).await?;
         let mut deleted: u64 = 0;
+        let mut offset: u32 = 0;
 
-        for entry in entries {
-            if !entry.is_expired() {
-                continue;
-            }
-            if Self::is_reserved_path(&entry.path) {
-                continue;
+        loop {
+            let params = QueryParams {
+                include_expired: true,
+                limit: Some(PAGE_SIZE),
+                offset: Some(offset),
+                ..Default::default()
+            };
+
+            let entries = self.storage.list(&params).await?;
+            let page_len = entries.len() as u32;
+            if page_len == 0 {
+                break;
             }
 
-            match self.storage.delete_by_id(entry.id).await {
-                Ok(true) => {
-                    deleted += 1;
-                    // Emit audit event. `log_event` is infallible (buffers
-                    // internally and logs on flush failures) so there's no
-                    // Result to propagate here.
-                    self.audit
-                        .log_event(SecurityEventType::SecretDeletion {
-                            secret_path: entry.path.clone(),
-                            user: LIFECYCLE_AUDIT_ACTOR.to_string(),
-                        })
-                        .await;
+            // Track skipped entries so we advance `offset` past non-deletable
+            // rows (non-expired or reserved) on the next page. Deleted rows
+            // shift subsequent entries back by one, so they don't contribute
+            // to the offset.
+            let mut skipped_this_page: u32 = 0;
+
+            for entry in entries {
+                if !entry.is_expired() {
+                    skipped_this_page += 1;
+                    continue;
                 }
-                Ok(false) => {
-                    // Entry vanished between list and delete — benign race.
+                if Self::is_reserved_path(&entry.path) {
+                    skipped_this_page += 1;
+                    continue;
                 }
-                Err(e) => {
-                    warn!(
-                        "Failed to delete expired secret at path {}: {}",
-                        entry.path, e
-                    );
+
+                match self.storage.delete_by_id(entry.id).await {
+                    Ok(true) => {
+                        deleted += 1;
+                        // Emit audit event. `log_event` is infallible (buffers
+                        // internally and logs on flush failures) so there's no
+                        // Result to propagate here.
+                        self.audit
+                            .log_event(SecurityEventType::SecretDeletion {
+                                secret_path: entry.path.clone(),
+                                user: LIFECYCLE_AUDIT_ACTOR.to_string(),
+                            })
+                            .await;
+                    }
+                    Ok(false) => {
+                        // Entry vanished between list and delete — benign race.
+                    }
+                    Err(e) => {
+                        // Count as skipped so we don't re-fetch the same
+                        // failing entry forever on the next page.
+                        skipped_this_page += 1;
+                        warn!(
+                            "Failed to delete expired secret at path {}: {}",
+                            entry.path, e
+                        );
+                    }
                 }
             }
+
+            if page_len < PAGE_SIZE {
+                break;
+            }
+            offset = offset.saturating_add(skipped_this_page);
         }
 
         Ok(deleted)
