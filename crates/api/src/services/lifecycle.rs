@@ -34,8 +34,13 @@ impl LifecycleService {
     }
 
     /// Signal the background worker to stop on its next tick.
+    ///
+    /// Uses `notify_one` so that if no task is currently awaiting
+    /// `notified()` (e.g. the worker is busy inside `process_lifecycle_events`),
+    /// a permit is stored and the next `notified()` call will complete
+    /// immediately. `notify_waiters` would silently drop the signal in that case.
     pub fn shutdown(&self) {
-        self.shutdown.notify_waiters();
+        self.shutdown.notify_one();
     }
 
     /// Start the background lifecycle worker. Returns when `shutdown` is signalled.
