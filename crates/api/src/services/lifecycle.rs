@@ -90,6 +90,11 @@ impl LifecycleService {
 
         loop {
             tokio::select! {
+                // `biased;` ensures the shutdown branch is polled before the
+                // ticker branch when both are ready. Without this, a concurrent
+                // shutdown signal and ticker tick could non-deterministically
+                // cause one final `process_lifecycle_events` run before exit.
+                biased;
                 _ = shutdown.notified() => {
                     info!("Secret Lifecycle background worker received shutdown signal");
                     break;
