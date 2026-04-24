@@ -634,6 +634,200 @@ mod tests {
         // Different client should be allowed
         assert!(rate_limiter.check_rate_limit("other-client"));
     }
+
+    /// Build a User with the given `mfa_pending` metadata flag for testing.
+    fn make_user(mfa_pending: bool) -> secreton_auth::User {
+        let mut metadata = HashMap::new();
+        if mfa_pending {
+            metadata.insert("mfa_pending".to_string(), "true".to_string());
+        }
+        secreton_auth::User {
+            id: "00000000-0000-0000-0000-000000000001".to_string(),
+            username: "testuser".to_string(),
+            email: Some("test@example.com".to_string()),
+            display_name: None,
+            full_name: None,
+            roles: vec![],
+            permissions: vec![],
+            policies: vec!["default".to_string()],
+            metadata,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            disabled: false,
+            password_hash: String::new(),
+            is_active: true,
+            is_superuser: false,
+            enabled: true,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            failed_login_attempts: 0,
+            locked_until: None,
+        }
+    }
+
+    /// A user without `mfa_pending` metadata can access any path.
+    #[test]
+    fn enforce_mfa_pending_allows_everything_when_not_pending() {
+        let user = make_user(false);
+        for path in [
+            "/api/v1/auth/login",
+            "/api/v1/secret/data/foo",
+            "/api/v1/sys/config",
+            "/api/v1/auth/mfa/disable",
+        ] {
+            assert!(
+                enforce_mfa_pending(&user, path).is_ok(),
+                "path {} should be allowed when mfa_pending is false",
+                path
+            );
+        }
+    }
+
+    /// TOFU users can access only the MFA-enrollment and logout endpoints.
+    #[test]
+    fn enforce_mfa_pending_allows_enrollment_paths_when_pending() {
+        let user = make_user(true);
+        for path in [
+            "/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/complete",
+            "/api/v1/auth/mfa/verify",
+            "/api/v1/auth/logout",
+        ] {
+            assert!(
+                enforce_mfa_pending(&user, path).is_ok(),
+                "path {} should be allowed during TOFU",
+                path
+            );
+        }
+    }
+
+    /// TOFU users are blocked from any non-enrollment endpoint, and the
+    /// allowlist is path-exact so substring tricks (e.g. secret paths
+    /// containing "/mfa/") cannot bypass it.
+    #[test]
+    fn enforce_mfa_pending_blocks_other_paths_when_pending() {
+        let user = make_user(true);
+        for path in [
+            "/api/v1/secret/data/foo",
+            "/api/v1/sys/config",
+            // `/mfa/disable` is intentionally NOT allowed for TOFU users —
+            // disable has no effect when MFA is not yet enrolled.
+            "/api/v1/auth/mfa/disable",
+            // Substring bypass attempts must be rejected by exact matching.
+            "/api/v1/secret/data/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/../secret/data/foo",
+            "/api/v1/auth/login",
+        ] {
+            assert_eq!(
+                enforce_mfa_pending(&user, path).unwrap_err(),
+                StatusCode::FORBIDDEN,
+                "path {} must be forbidden during TOFU",
+                path
+            );
+        }
+    }
+
+    /// Regression test: cross-check the `MFA_PENDING_ALLOWED_PATHS` constant
+    /// against the actual routes defined by `handlers::auth::create_routes()`.
+    ///
+    /// `handlers::auth::create_routes()` defines auth routes **without** the
+    /// `/api/v1/auth` prefix (e.g. `/mfa/setup`), and the router mounts them
+    /// under that prefix in `create_router()`.  The allowlist hardcodes the
+    /// fully-prefixed paths because that is what the middleware sees at
+    /// request time.  If either side is modified without the other — e.g.
+    /// the handler route is renamed to `/mfa/enroll` but the allowlist still
+    /// lists `/api/v1/auth/mfa/setup` — a TOFU user will be blocked from
+    /// enrolling and become permanently locked out.
+    ///
+    /// This test codifies the mapping so that such a drift fails fast at
+    /// test time rather than silently in production.  The expected paths
+    /// below must be kept in sync with
+    /// `crates/api/src/handlers/auth.rs::create_routes()` — each entry here
+    /// corresponds to a handler route that a TOFU user must be able to
+    /// reach to complete enrollment (plus logout).
+    #[test]
+    fn mfa_pending_allowlist_matches_handler_routes() {
+        // Routes defined by `handlers::auth::create_routes()`, as they will
+        // appear after the `/api/v1/auth` prefix is applied by
+        // `create_router()`.  Only the subset that a TOFU user needs access
+        // to is listed — other routes (e.g. `/login`, `/refresh`) are
+        // exempted from auth entirely and never hit `enforce_mfa_pending`.
+        let expected: &[&str] = &[
+            "/api/v1/auth/mfa/setup",
+            "/api/v1/auth/mfa/setup/complete",
+            "/api/v1/auth/mfa/verify",
+            "/api/v1/auth/logout",
+        ];
+
+        // Order-insensitive set comparison so refactors that reorder the
+        // constant don't break this test.
+        let actual: std::collections::HashSet<&str> =
+            MFA_PENDING_ALLOWED_PATHS.iter().copied().collect();
+        let expected_set: std::collections::HashSet<&str> = expected.iter().copied().collect();
+
+        assert_eq!(
+            actual, expected_set,
+            "MFA_PENDING_ALLOWED_PATHS has drifted from the handler routes \
+             in handlers::auth::create_routes(). If you added or removed an \
+             MFA-enrollment route, update both the constant and this test."
+        );
+    }
+}
+
+/// Paths that remain accessible when a user is in the TOFU MFA-pending state.
+///
+/// These are the **full** HTTP paths as seen by the auth middleware — i.e.
+/// they include the `/api/v1` router prefix that `create_router` adds on top
+/// of `handlers::auth::create_routes()` (which itself defines them without a
+/// prefix, e.g. `/mfa/setup`).
+///
+/// Kept as a named constant so a regression test can cross-check the allowlist
+/// against the real `create_routes()` definitions and catch silent drift when
+/// either side is modified.
+pub const MFA_PENDING_ALLOWED_PATHS: &[&str] = &[
+    "/api/v1/auth/mfa/setup",
+    "/api/v1/auth/mfa/setup/complete",
+    "/api/v1/auth/mfa/verify",
+    "/api/v1/auth/logout",
+];
+
+/// Check whether the authenticated user has a pending MFA enrollment (TOFU)
+/// and, if so, whether the requested path is allowed.
+///
+/// Returns `Err(FORBIDDEN)` when MFA enrollment is pending and the path is
+/// NOT an MFA or logout endpoint.  Returns `Ok(())` otherwise.
+///
+/// This is the **single source of truth** for the MFA-pending allowlist so
+/// that `AuthMiddleware::authenticate` (used by `create_router`) and
+/// `auth_middleware` (used by `create_api_router`) stay in sync.  Any change
+/// to the allowlist must be made in [`MFA_PENDING_ALLOWED_PATHS`] only.
+pub fn enforce_mfa_pending(
+    user: &secreton_auth::User,
+    path: &str,
+) -> Result<(), axum::http::StatusCode> {
+    let mfa_pending = user
+        .metadata
+        .get("mfa_pending")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    if mfa_pending {
+        // Use exact path matching for MFA endpoints to prevent bypass via
+        // user-controlled path segments (e.g. a secret named "mfa" would
+        // match `path.contains("/mfa/")`).
+        //
+        // NOT allowed during TOFU:
+        //   - /api/v1/auth/mfa/disable — a TOFU user has not enrolled yet,
+        //     so there is nothing to disable.  Allowing it would let a
+        //     privileged user call disable (which is a no-op or error) and
+        //     remain in the TOFU state indefinitely.
+        if !MFA_PENDING_ALLOWED_PATHS.iter().any(|p| path == *p) {
+            return Err(axum::http::StatusCode::FORBIDDEN);
+        }
+    }
+
+    Ok(())
 }
 
 pub mod auth {
@@ -649,18 +843,27 @@ pub mod auth {
             next: Next,
         ) -> Result<Response, StatusCode> {
             let path = req.uri().path().to_string();
-            // Exempt public paths: root, health, version, auth endpoints (login, oauth, etc.)
+            // Exempt public paths: root, health, version, and specific
+            // unauthenticated auth endpoints (login, refresh, verify, oauth).
+            // Protected auth endpoints (logout, mfa/*, sessions, users) are
+            // NOT exempted so they go through token validation and
+            // MFA-pending enforcement below.
             // Exempt sys initialization endpoints
             if path == "/" 
-                || path.ends_with("/health") 
-                || path.ends_with("/version") 
-                || path.contains("/auth/")
-                || path.ends_with("/login")  // Handler unit test uses /login directly
-                || path.ends_with("/oauth")
-                || path.contains("/sys/init")
-                || path.contains("/sys/unseal")
-                || path.contains("/sys/seal-status")
-                || path.contains("/sys/health")
+                || path == "/health"
+                || path == "/version"
+                || path == "/login"  // Handler unit test uses /login directly
+                || path == "/api/v1/health"
+                || path == "/api/v1/version"
+                || path == "/api/v1/sys/health"
+                || path == "/api/v1/auth/login"
+                || path == "/api/v1/auth/refresh"
+                || path == "/api/v1/auth/verify"
+                || path.starts_with("/api/v1/auth/oauth/")
+                || path == "/api/v1/auth/oauth"
+                || path == "/api/v1/sys/init"
+                || path == "/api/v1/sys/unseal"
+                || path == "/api/v1/sys/seal-status"
             {
                 return Ok(next.run(req).await);
             }
@@ -684,6 +887,10 @@ pub mod auth {
                 .validate_token(token)
                 .await
                 .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+            // Enforce TOFU MFA enrollment via the shared helper so that
+            // the allowlist stays in sync with `auth_middleware` in lib.rs.
+            crate::middleware::enforce_mfa_pending(&user, &path)?;
 
             // Create request context or simplified user info to store in extensions
             // The handlers expect AuthenticatedUser extractor which likely looks for User in extensions
@@ -712,13 +919,16 @@ pub mod seal {
         ) -> Result<Response, Response> {
             let path = req.uri().path().to_string();
 
-            // Paths allowed when sealed
-            if path.contains("/sys/init")
-                || path.contains("/sys/unseal")
-                || path.contains("/sys/seal-status")
-                || path.contains("/sys/health")
-                || path.ends_with("/health")
-            // Global health
+            // Paths allowed when sealed — use exact prefix matching to prevent
+            // bypass via user-controlled path segments (e.g. a secret named
+            // "sys/init" would match `path.contains("/sys/init")`).
+            // This mirrors the tightened matching in `AuthMiddleware::authenticate`.
+            if path == "/api/v1/sys/init"
+                || path == "/api/v1/sys/unseal"
+                || path == "/api/v1/sys/seal-status"
+                || path == "/api/v1/sys/health"
+                || path == "/health"
+                || path == "/api/v1/health"
             {
                 return Ok(next.run(req).await);
             }

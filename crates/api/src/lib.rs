@@ -1168,9 +1168,18 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::FORBIDDEN,
                 format!("Password expired: {}", username),
             ),
-            SecretonError::RateLimitExceeded { ref message } => (
+            SecretonError::RateLimitExceeded { message } => (
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 format!("Rate limit exceeded: {}", message),
+            ),
+            SecretonError::MfaNotConfigured { .. } => (
+                axum::http::StatusCode::UNAUTHORIZED,
+                // Return 401 with a generic message identical to invalid
+                // credentials to prevent credential enumeration.
+                // MfaNotConfigured only fires after successful password
+                // verification, so a distinct message would confirm valid
+                // credentials.
+                "Authentication failed".to_string(),
             ),
             _ => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1210,6 +1219,17 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             SecretonError::Validation { .. } | SecretonError::InvalidInput { .. } => {
                 code = warp::http::StatusCode::BAD_REQUEST;
                 message = "Invalid request format";
+            }
+            SecretonError::MfaRequired => {
+                code = warp::http::StatusCode::UNAUTHORIZED;
+                message = "MFA required";
+            }
+            SecretonError::MfaNotConfigured { .. } => {
+                // Return 401 with a generic message identical to invalid
+                // credentials to prevent credential enumeration — mirrors
+                // the axum IntoResponse implementation.
+                code = warp::http::StatusCode::UNAUTHORIZED;
+                message = "Authentication failed";
             }
             SecretonError::Internal { message: ref msg } => {
                 warn!("Internal error: {}", msg);
@@ -1399,6 +1419,12 @@ async fn auth_middleware(
     match auth_header {
         Some(token) => match state.auth.validate_token(token).await {
             Ok(user) => {
+                // Enforce TOFU MFA enrollment via the shared helper so that
+                // the allowlist stays in sync with `AuthMiddleware::authenticate`
+                // in middleware.rs.
+                let path = req.uri().path();
+                crate::middleware::enforce_mfa_pending(&user, path)?;
+
                 let mut req = req;
                 req.extensions_mut().insert(user);
                 Ok(next.run(req).await)

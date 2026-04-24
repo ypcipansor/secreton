@@ -79,6 +79,42 @@ impl DatabaseEngine {
         }
     }
 
+    /// Revoke database credentials
+    pub async fn revoke_credentials(
+        &self,
+        username: &str,
+    ) -> Result<(), DatabaseError> {
+        if !self.enabled {
+            return Err(DatabaseError::EngineDisabled);
+        }
+
+        // Determine database type from connection URL
+        let db_type = self.detect_database_type(&self.config.connection_url)?;
+
+        match db_type {
+            #[cfg(feature = "postgres")]
+            DatabaseType::PostgreSQL => {
+                self.revoke_postgres_credentials(username).await
+            }
+            #[cfg(not(feature = "postgres"))]
+            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration("PostgreSQL feature disabled".to_string())),
+
+            #[cfg(feature = "mysql")]
+            DatabaseType::MySQL => {
+                self.revoke_mysql_credentials(username).await
+            }
+            #[cfg(not(feature = "mysql"))]
+            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration("MySQL feature disabled".to_string())),
+
+            DatabaseType::MongoDB => {
+                self.revoke_mongodb_credentials(username).await
+            }
+            DatabaseType::Redis => {
+                self.revoke_redis_credentials(username).await
+            }
+        }
+    }
+
     /// Get or create PostgreSQL connection pool
     #[cfg(feature = "postgres")]
     async fn get_pg_pool(&self) -> Result<PgPool, DatabaseError> {
@@ -174,6 +210,115 @@ impl DatabaseEngine {
         Ok(pool)
     }
 
+    /// Revoke PostgreSQL credentials
+    #[cfg(feature = "postgres")]
+    async fn revoke_postgres_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Validate that the username matches the format produced by
+        // `generate_username()` (ASCII alphanumeric + underscore).  This is
+        // a defense-in-depth measure consistent with `revoke_mysql_credentials`.
+        // PostgreSQL identifier quoting (double-quote escaping) is more robust
+        // than MySQL string-literal escaping, but we still reject unexpected
+        // characters to maintain a strict security posture.
+        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "Refusing to revoke PostgreSQL user '{}': username contains \
+                 characters outside the expected [a-zA-Z0-9_] set",
+                username
+            )));
+        }
+
+        let pool = self.get_pg_pool().await?;
+        let client = pool.get().await.map_err(|e| {
+            DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {}", e))
+        })?;
+
+        // In PostgreSQL, we must reassign owned objects and revoke all privileges
+        // before dropping the user. Without this, DROP USER fails with
+        // "role cannot be dropped because some objects depend on it" when the
+        // role SQL used during credential generation contained GRANT statements.
+        //
+        // All three statements are wrapped in a transaction so that a failure
+        // in any step rolls back the previous ones, preventing a partially
+        // cleaned-up state (e.g. objects reassigned but user not dropped).
+        let safe_username = username.replace('"', "\"\"");
+        let reassign_sql = format!("REASSIGN OWNED BY \"{}\" TO CURRENT_USER", safe_username);
+        let drop_owned_sql = format!("DROP OWNED BY \"{}\"", safe_username);
+        let drop_user_sql = format!("DROP USER IF EXISTS \"{}\"", safe_username);
+
+        let params: &[&(dyn ToSql + Sync)] = &[];
+
+        client
+            .execute("BEGIN", params)
+            .await
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
+
+        let result = async {
+            // Check whether the role exists before attempting REASSIGN/DROP OWNED.
+            // Both commands raise an error when the target role is missing, which
+            // would otherwise cause the transaction to abort and prevent the lease
+            // record from being deleted — leaving the lease permanently stuck.
+            // If the role is already gone (e.g. an operator removed it manually,
+            // or VALID UNTIL elapsed and it was cleaned up), skip REASSIGN/DROP
+            // OWNED and fall through to DROP USER IF EXISTS (a no-op).
+            //
+            // The existence check is performed INSIDE the transaction so that the
+            // role cannot be concurrently dropped between the check and the
+            // REASSIGN/DROP OWNED statements.  Running the check inside the
+            // transaction serializes it with any concurrent DROP USER against
+            // pg_authid, closing the TOCTOU window.
+            let role_exists_row = client
+                .query_opt(
+                    "SELECT 1 FROM pg_roles WHERE rolname = $1",
+                    &[&username],
+                )
+                .await
+                .map_err(|e| {
+                    DatabaseError::QueryFailed(format!("Failed to check role existence: {}", e))
+                })?;
+            let role_exists = role_exists_row.is_some();
+
+            if role_exists {
+                client
+                    .execute(&reassign_sql, params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
+                client
+                    .execute(&drop_owned_sql, params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+            } else {
+                tracing::info!(
+                    "PostgreSQL role '{}' does not exist; skipping REASSIGN/DROP OWNED \
+                     and treating revocation as a no-op",
+                    username
+                );
+            }
+            client
+                .execute(&drop_user_sql, params)
+                .await
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
+            Ok::<(), DatabaseError>(())
+        }
+        .await;
+
+        match result {
+            Ok(()) => {
+                client
+                    .execute("COMMIT", params)
+                    .await
+                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
+                Ok(())
+            }
+            Err(e) => {
+                // Best-effort rollback — if this fails the connection will be
+                // returned to the pool in an aborted transaction state, which
+                // deadpool-postgres handles via its recycling method.
+                let _ = client.execute("ROLLBACK", params).await;
+                Err(e)
+            }
+        }
+    }
+
     /// Generate PostgreSQL credentials
     #[cfg(feature = "postgres")]
     async fn generate_postgres_credentials(
@@ -256,6 +401,42 @@ impl DatabaseEngine {
             .replace("{{expiration}}", expiration)
     }
 
+    /// Revoke MySQL credentials
+    #[cfg(feature = "mysql")]
+    async fn revoke_mysql_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Validate that the username matches the format produced by
+        // `generate_username()` (ASCII alphanumeric + underscore, prefixed
+        // with "s_").  This is a defense-in-depth measure: if
+        // `revoke_credentials` is ever called with a username not generated
+        // by `generate_username()` (e.g. from a manually-created lease),
+        // we reject it rather than risk SQL injection through the string
+        // interpolation below.  The escaping (`replace`) is kept as a
+        // secondary safeguard but should never be exercised for valid
+        // usernames.
+        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "Refusing to revoke MySQL user '{}': username contains \
+                 characters outside the expected [a-zA-Z0-9_] set",
+                username
+            )));
+        }
+
+        let pool = self.get_mysql_pool().await?;
+        let mut conn = pool.get_conn().await.map_err(|e| {
+            DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
+        })?;
+
+        let safe_username = username.replace('\\', "\\\\").replace('\'', "''");
+        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", safe_username);
+
+        use mysql_async::prelude::Queryable;
+        conn.query_drop(revoke_sql).await.map_err(|e| {
+             DatabaseError::QueryFailed(format!("Failed to drop MySQL user: {}", e))
+        })?;
+
+        Ok(())
+    }
+
     /// Generate MySQL credentials
     #[cfg(feature = "mysql")]
     async fn generate_mysql_credentials(
@@ -331,6 +512,23 @@ impl DatabaseEngine {
         Ok(data)
     }
 
+    /// Revoke MongoDB credentials
+    async fn revoke_mongodb_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // MongoDB revocation is not yet implemented. Return a dedicated
+        // error so the caller can distinguish "not implemented" from a
+        // real failure and decide whether to delete the lease record.
+        tracing::warn!(
+            "MongoDB credential revocation not implemented; \
+             user '{}' may still be active on the target database",
+            username
+        );
+        Err(DatabaseError::RevocationNotImplemented(format!(
+            "MongoDB credential revocation not implemented; \
+             user '{}' must be removed manually",
+            username
+        )))
+    }
+
     /// Generate MongoDB credentials
     async fn generate_mongodb_credentials(
         &self,
@@ -350,6 +548,23 @@ impl DatabaseEngine {
         );
 
         Ok(data)
+    }
+
+    /// Revoke Redis credentials
+    async fn revoke_redis_credentials(&self, username: &str) -> Result<(), DatabaseError> {
+        // Redis revocation is not yet implemented. Return a dedicated
+        // error so the caller can distinguish "not implemented" from a
+        // real failure and decide whether to delete the lease record.
+        tracing::warn!(
+            "Redis credential revocation not implemented; \
+             user '{}' may still be active on the target database",
+            username
+        );
+        Err(DatabaseError::RevocationNotImplemented(format!(
+            "Redis credential revocation not implemented; \
+             user '{}' must be removed manually",
+            username
+        )))
     }
 
     /// Generate Redis credentials

@@ -168,8 +168,10 @@ mod tests {
         let claims = Claims {
             sub: "123e4567-e89b-12d3-a456-426614174000".to_string(), // valid uuid
             username: "testuser".to_string(),
-            email: "test@example.com".to_string(),
+            email: Some("test@example.com".to_string()),
             roles: vec![],
+            policies: vec!["default".to_string()],
+            mfa_required: false,
             iat: chrono::Utc::now().timestamp() as usize,
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             jti: "unique".to_string(),
@@ -723,11 +725,19 @@ pub async fn login(
                 crate::ApiError::Authentication("User info not available".to_string())
             })?;
 
+            // Read dynamic expires_in from AuthResult metadata (set by
+            // authenticate()), falling back to 3600 for backward compat.
+            let expires_in: i64 = auth_token
+                .metadata
+                .get("expires_in")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(3600);
+
             let response = LoginResponse {
                 access_token: Some(access_token.clone()),
                 refresh_token: auth_token.refresh_token.clone(),
                 token_type: "Bearer".to_string(),
-                expires_in: 3600, // 1 hour default
+                expires_in,
                 user: UserInfo {
                     id: user_info.id.clone(),
                     username: user_info.username.clone(),
@@ -753,17 +763,94 @@ pub async fn login(
             Ok(Json(ApiResponse::success(response)))
         }
         Err(e) => {
-            // Audit: authentication failure
-            let _ = state
-                .audit
-                .log_event(SecurityEventType::AuthenticationFailure {
-                    user: request.username.clone(),
-                    method: "password".to_string(),
-                    reason: e.to_string(),
-                })
-                .await;
+            // Audit: log authentication failures, but skip errors that are
+            // already audited inside `enforce_mfa()` to avoid duplicate
+            // entries in security dashboards:
+            //   - MfaRequired: normal first step in a two-step MFA flow
+            //     (not a real failure; no audit is emitted by enforce_mfa
+            //     either, matching the design — MFA-required prompts are
+            //     not security events).
+            //   - InvalidMfaCode: already logged by `enforce_mfa()` as
+            //     `AuthenticationFailure { method: "totp", reason:
+            //     "Invalid MFA code" }` at crates/api/src/services/auth.rs.
+            //     Skipping the duplicate keeps a single canonical entry so
+            //     brute-force MFA attempts remain accurately counted in
+            //     security dashboards.
+            //   - MfaNotConfigured: `enforce_mfa()` does NOT currently emit
+            //     this variant (TOFU users take a different code path), so
+            //     this arm is a defensive no-op.  It is retained so that if
+            //     `enforce_mfa()` is ever changed to return
+            //     `MfaNotConfigured`, the login handler will not duplicate
+            //     the audit entry.
+            if !matches!(
+                e,
+                AuthError::MfaRequired
+                    | AuthError::InvalidMfaCode
+                    | AuthError::MfaNotConfigured(_)
+            ) {
+                let _ = state
+                    .audit
+                    .log_event(SecurityEventType::AuthenticationFailure {
+                        user: request.username.clone(),
+                        method: "password".to_string(),
+                        reason: e.to_string(),
+                    })
+                    .await;
+            }
 
-            Err(crate::ApiError::Authentication(e.to_string()))
+            // Map specific auth errors to appropriate HTTP status codes.
+            match e {
+                AuthError::MfaNotConfigured(_) => {
+                    // Return 401 with a generic message identical to invalid
+                    // credentials to prevent credential enumeration.
+                    // MfaNotConfigured only fires after successful password
+                    // verification, so a distinct message would confirm that
+                    // the credentials are valid.
+                    Err(crate::ApiError::Authentication(
+                        "Authentication failed".to_string(),
+                    ))
+                }
+                AuthError::MfaRequired => {
+                    // NOTE: "MFA required" implicitly confirms valid credentials
+                    // (it only fires after successful password verification).
+                    // This is an inherent limitation of two-step MFA flows — the
+                    // client needs to know when to prompt for a code.  We use a
+                    // dedicated SecretonError variant so the HTTP layer returns
+                    // the correct 401 status with the MFA-specific message.
+                    Err(crate::ApiError(secreton_errors::SecretonError::MfaRequired))
+                }
+                AuthError::Internal(ref inner) => {
+                    tracing::error!("Internal error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                }
+                AuthError::Storage(ref inner) => {
+                    tracing::error!("Storage error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                }
+                AuthError::Crypto(ref inner) => {
+                    tracing::error!("Crypto error during login for '{}': {}", request.username, inner);
+                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                }
+                // InvalidMfaCode only fires after successful password
+                // verification, so returning "Invalid MFA code" would
+                // confirm that the credentials are valid.  Use a generic
+                // message consistent with MfaNotConfigured handling above.
+                AuthError::InvalidMfaCode => {
+                    Err(crate::ApiError::Authentication(
+                        "Authentication failed".to_string(),
+                    ))
+                }
+                // UserNotFound / UserAlreadyExists — return a generic
+                // message to prevent user enumeration.
+                AuthError::UserNotFound | AuthError::UserAlreadyExists => {
+                    Err(crate::ApiError::Authentication(
+                        "Authentication failed".to_string(),
+                    ))
+                }
+                _ => Err(crate::ApiError::Authentication(
+                    "Authentication failed".to_string(),
+                )),
+            }
         }
     }
 }
@@ -818,35 +905,77 @@ pub async fn refresh_token(
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Validate refresh token and get new tokens
-    let auth_token = state
-        .auth
-        .refresh_token(&request.refresh_token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+    let auth_token = match state.auth.refresh_token(&request.refresh_token).await {
+        Ok(token) => token,
+        Err(e) => {
+            // Map specific auth errors to appropriate HTTP responses,
+            // sanitizing internal details to prevent information leakage.
+            // This mirrors the error handling in the login handler.
+            return Err(match e {
+                AuthError::Storage(ref inner) => {
+                    tracing::error!("Storage error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                AuthError::Internal(ref inner) => {
+                    tracing::error!("Internal error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                AuthError::Crypto(ref inner) => {
+                    tracing::error!("Crypto error during token refresh: {}", inner);
+                    crate::ApiError::Internal(
+                        "An internal error occurred during token refresh".to_string(),
+                    )
+                }
+                // InvalidCredentials covers disabled/locked accounts and
+                // UserNotFound — return a generic auth failure message to
+                // avoid confirming whether the account exists or its status.
+                AuthError::InvalidCredentials | AuthError::UserNotFound => {
+                    crate::ApiError::Authentication("Token refresh failed".to_string())
+                }
+                AuthError::InvalidToken | AuthError::TokenExpired => {
+                    crate::ApiError::Authentication(e.to_string())
+                }
+                _ => crate::ApiError::Authentication("Token refresh failed".to_string()),
+            });
+        }
+    };
 
-    // Fetch user info using the new token
-    let user = state
-        .auth
-        .validate_token(&auth_token.access_token)
-        .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+    // Use the User embedded in the refreshed AuthToken directly instead of
+    // re-validating the just-issued access token.  `refresh_token()` populates
+    // `auth_token.user` with the current roles/policies loaded from storage
+    // and sets `metadata["mfa_pending"] = "true"` when the refreshed token
+    // carries `mfa_required: true`, so we can read the TOFU flag without
+    // another JWT decode + session lookup round-trip.
+    let user = &auth_token.user;
+
+    // Propagate the mfa_pending flag from the refreshed token so that
+    // clients know whether the user still needs to complete MFA enrollment.
+    let mfa_required = user
+        .metadata
+        .get("mfa_pending")
+        .map(|v| v == "true")
+        .unwrap_or(false);
 
     let response = LoginResponse {
         access_token: Some(auth_token.access_token.clone()),
         refresh_token: Some(auth_token.refresh_token.clone()),
-        token_type: auth_token.token_type,
+        token_type: auth_token.token_type.clone(),
         expires_in: auth_token.expires_in as i64,
         user: UserInfo {
             id: Some(user.id.to_string()),
             username: user.username.clone(),
             email: user.email.clone(),
-            display_name: user.display_name,
-            roles: user.roles,
+            display_name: user.display_name.clone(),
+            roles: user.roles.clone(),
             permissions: vec![],
-            metadata: user.metadata,
+            metadata: user.metadata.clone(),
             last_login: user.last_login,
         },
-        mfa_required: false,
+        mfa_required,
     };
 
     // Audit: token refresh

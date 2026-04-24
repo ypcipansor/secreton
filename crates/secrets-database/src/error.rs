@@ -28,4 +28,7 @@ pub enum DatabaseError {
 
     #[error("Database engine is disabled")]
     EngineDisabled,
+
+    #[error("Credential revocation not implemented for this database type: {0}")]
+    RevocationNotImplemented(String),
 }

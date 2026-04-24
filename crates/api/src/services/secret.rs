@@ -95,6 +95,18 @@ pub struct SecretService {
     _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
+
+    /// Serializes concurrent structured policy upserts.
+    ///
+    /// `_upsert_policy` performs a read-modify-write over `sys/policies/{name}`.
+    /// Two concurrent `create_policy`/`update_policy` requests for the same
+    /// policy name could both observe `existing_entry = None` and both call
+    /// `storage.store()`, which on backends without a unique constraint on
+    /// `path` would create duplicate rows.  Holding this lock across the
+    /// whole RMW sequence closes the TOCTOU window.  Structured-policy
+    /// upserts are admin-only and rare, so a single global mutex is fine —
+    /// mirrors `AdminService::policy_content_write_lock`.
+    policy_write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SecretService {
@@ -114,6 +126,7 @@ impl SecretService {
             _identity: identity,
             policy_service,
             performance,
+            policy_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -707,6 +720,22 @@ impl SecretService {
         self._upsert_policy(name, rules, metadata).await
     }
 
+    /// Check whether the user has the given permission on a policy path.
+    ///
+    /// This is a thin wrapper around `check_permission` exposed publicly so
+    /// that handlers can perform an explicit RBAC check without loading the
+    /// full policy object.  It is intentionally cheap (in-memory RBAC
+    /// evaluation, no storage I/O).
+    pub async fn check_policy_permission(
+        &self,
+        name: &str,
+        user: &secreton_auth::User,
+        action: &str,
+    ) -> Result<(), SecretError> {
+        self.check_permission(user, &format!("sys/policies/{}", name), action)
+            .await
+    }
+
     /// Get policy by name
     pub async fn get_policy(
         &self,
@@ -736,6 +765,13 @@ impl SecretService {
     ) -> Result<bool, SecretError> {
         self.check_permission(user, &format!("sys/policies/{}", name), "delete")
             .await?;
+
+        // Serialize with `_upsert_policy` so that a concurrent upsert cannot
+        // observe `existing_entry = Some(...)` and then `storage.update()` a
+        // now-deleted entry, nor observe `existing_entry = None` after this
+        // delete has started and race ahead of the delete with a `store()`.
+        // See `policy_write_lock` field doc for the full rationale.
+        let _write_guard = self.policy_write_lock.lock().await;
 
         let path = format!("sys/policies/{}", name);
         let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
@@ -1361,10 +1397,33 @@ impl SecretService {
         rules: Vec<String>,
         metadata: PolicyMetadata,
     ) -> Result<Policy, SecretError> {
+        // Serialize the read-modify-write sequence so that two concurrent
+        // upserts cannot both observe `existing_entry = None` and both call
+        // `storage.store()`.  See `policy_write_lock` field doc for the full
+        // rationale.  The guard is held across the entire RMW sequence below
+        // and released when it drops at function end.
+        let _write_guard = self.policy_write_lock.lock().await;
+
+        // Read the existing entry FIRST so that `created_at` can be preserved
+        // in both the serialized `Policy` JSON and on the outer `SecretEntry`.
+        // Previously the `Policy` struct was constructed with
+        // `created_at: chrono::Utc::now()` on every upsert, so subsequent
+        // `get_policy` reads (which deserialize this JSON — see
+        // `Self::get_policy`) would report the wrong creation timestamp after
+        // every update.  This also brings the structured-policy path in line
+        // with the raw-content path added in this PR
+        // (`AdminService::update_policy_content`), which correctly preserves
+        // `created_at` from the existing entry.
+        let policy_path = format!("sys/policies/{}", name);
+        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
+        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
+
         let policy = Policy {
             name: name.to_string(),
             rules,
-            created_at: chrono::Utc::now(),
+            created_at,
             updated_at: chrono::Utc::now(),
             metadata,
         };
@@ -1377,12 +1436,6 @@ impl SecretService {
             SecretError::Internal(anyhow::anyhow!("Failed to encrypt policy: {}", e))
         })?;
 
-        let policy_path = format!("sys/policies/{}", name);
-        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
-        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
-        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
-        let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
-
         let mut entry = secreton_storage::SecretEntry::new(
             policy_path,
             encrypted_data,
@@ -1394,12 +1447,21 @@ impl SecretService {
         entry.created_at = created_at;
         entry.version = version;
 
-        self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+        // Use `update()` for existing entries and `store()` for new ones.
+        // Storage backends with a unique constraint on `path` (e.g. PostgreSQL)
+        // would otherwise reject `store()` on an existing entry, and backends
+        // that treat `store()` as INSERT could silently create duplicate rows.
+        // This mirrors the pattern in `AdminService::update_policy_content`.
+        if existing_entry.is_some() {
+            self.storage.update(&entry).await.map_err(SecretError::Storage)?;
+        } else {
+            self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+        }
 
         Ok(policy)
     }
 
-    pub async fn list_policies(&self, _filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
+    pub async fn list_policies(&self, filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/policies/".to_string()),
             limit: None,
@@ -1410,11 +1472,37 @@ impl SecretService {
         let entries = self.storage.list(&query_params).await.map_err(SecretError::Storage)?;
         let mut policies = Vec::new();
 
+        // Structured policies live at `sys/policies/{name}` and raw-content
+        // policies live at `sys/policies/content/{name}`.  The path prefix
+        // query matches both namespaces, so explicitly skip the raw-content
+        // sub-prefix — those entries are not `Policy` structs and are
+        // surfaced separately via `AdminService::list_policy_content_metadata`
+        // (see the admin-only merge in the `list_policies` handler).
+        //
+        // Without this filter, every raw-content entry would fail
+        // `serde_json::from_slice::<Policy>` and emit a spurious WARN log
+        // on every listing call.
+        const RAW_CONTENT_PREFIX: &str = "sys/policies/content/";
+
         for entry in entries {
+            if entry.path.starts_with(RAW_CONTENT_PREFIX) {
+                continue;
+            }
             match self.crypto.decrypt(&entry.encrypted_data).await {
                 Ok(decrypted) => {
                     match serde_json::from_slice::<Policy>(&decrypted) {
-                        Ok(policy) => policies.push(policy),
+                        Ok(policy) => {
+                            // Apply substring filter on the policy name,
+                            // mirroring the semantics used in the handler's
+                            // merge of raw-content policies so that both
+                            // sources filter consistently.
+                            if let Some(f) = filter {
+                                if !policy.name.contains(f) {
+                                    continue;
+                                }
+                            }
+                            policies.push(policy);
+                        }
                         Err(e) => tracing::warn!("Failed to deserialize policy at {}: {}", entry.path, e),
                     }
                 }

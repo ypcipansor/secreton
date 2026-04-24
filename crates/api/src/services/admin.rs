@@ -165,6 +165,17 @@ pub struct AdminService {
     performance: Arc<SecretPerformanceOptimizer>,
     audit: Arc<crate::services::audit::AuditLogger>,
     crypto: Option<Arc<CryptoService>>,
+    /// Serializes concurrent raw policy-content writes.
+    ///
+    /// `update_policy_content` performs a read-modify-write over
+    /// `sys/policies/content/{name}`.  Two concurrent admin requests for the
+    /// same policy name could both observe `existing = None` and both call
+    /// `storage.store()`, which on backends without a unique constraint on
+    /// `path` would create duplicate entries.  Acquiring this lock across
+    /// the whole RMW sequence closes the TOCTOU window.  Raw-content
+    /// updates are admin-only and rare, so a single global mutex is fine —
+    /// a per-path sharded map would only matter if this became a hot path.
+    policy_content_write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AdminService {
@@ -181,6 +192,7 @@ impl AdminService {
             performance,
             audit,
             crypto: None,
+            policy_content_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -907,11 +919,244 @@ impl AdminService {
         })
     }
 
-    /// Update a policy definition
-    pub async fn update_policy(&self, _name: &str, _content: &str) -> Result<(), AdminError> {
-        // Placeholder - requires reference to PolicyService or storage update
-        // In a real implementation this would validate and store the policy JSON/HCL
-        Ok(())
+    /// Retrieve raw policy content previously stored by `update_policy_content`.
+    ///
+    /// Returns `Ok(Some((content, created_at, updated_at)))` when the policy
+    /// exists, `Ok(None)` when it does not, and `Err` on storage/crypto failures.
+    pub async fn get_policy_content(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>, AdminError> {
+        let path = format!("sys/policies/content/{}", name);
+
+        let entry = match self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?
+        {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
+        let created_at = entry.created_at;
+        // Use the metadata `updated_at` if available (set by update_policy_content),
+        // otherwise fall back to the entry's `updated_at` field.
+        let updated_at = entry
+            .metadata
+            .get("updated_at")
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or(entry.updated_at);
+
+        // Prefer decrypting `encrypted_data` when crypto is available and the
+        // blob is non-empty (i.e. the entry was stored with encryption).
+        if let Some(crypto) = &self.crypto {
+            if !entry.encrypted_data.is_empty() {
+                let decrypted = crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Failed to decrypt policy content: {}",
+                        e
+                    ))
+                })?;
+                let content = String::from_utf8(decrypted).map_err(|e| {
+                    AdminError::Internal(anyhow::anyhow!(
+                        "Policy content is not valid UTF-8: {}",
+                        e
+                    ))
+                })?;
+                return Ok(Some((content, created_at, updated_at)));
+            }
+        }
+
+        // Fallback: read from metadata (unencrypted path).
+        Ok(entry.metadata.get("content").map(|c| (c.clone(), created_at, updated_at)))
+    }
+
+    /// Update a policy definition.
+    ///
+    /// Returns `(created_at, updated_at)` for the stored entry so callers can
+    /// construct a response without a separate read-back (which would race
+    /// with any concurrent `update_policy_content` call and could surface the
+    /// other writer's timestamps to this caller).
+    pub async fn update_policy_content(
+        &self,
+        name: &str,
+        content: &str,
+    ) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), AdminError> {
+        // Persist raw policy content to storage.
+        // This is primarily for the UI to manage policy files.
+        //
+        // Use a separate path namespace (`sys/policies/content/`) so that raw
+        // content entries never collide with the structured policies stored by
+        // `SecretService::_upsert_policy` at `sys/policies/{name}`.
+        //
+        // When a CryptoService is available the content is encrypted into
+        // `encrypted_data` so that policy definitions (which may reveal the
+        // security posture) are not stored as plaintext.  When crypto is not
+        // configured we fall back to storing in metadata, consistent with
+        // `update_config`.
+        let path = format!("sys/policies/content/{}", name);
+
+        // Serialize the read-modify-write sequence so that two concurrent
+        // writes cannot both observe `existing = None` and both call
+        // `storage.store()`.  See `policy_content_write_lock` field doc
+        // for the full rationale.  The guard is held across the entire
+        // RMW sequence below and released when it drops at function end.
+        let _write_guard = self.policy_content_write_lock.lock().await;
+
+        // Preserve the existing entry's id so that storage backends that index
+        // by UUID perform an upsert rather than creating orphan rows.
+        // Propagate storage errors instead of silently treating them as
+        // "entry not found" — a transient failure could otherwise cause a
+        // duplicate `store()` instead of `update()`, creating orphan rows.
+        let existing = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)?;
+        let entry_id = existing.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let version = existing.as_ref().map(|e| e.version + 1).unwrap_or(1);
+
+        let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
+            let enc = crypto.encrypt_data(content.as_bytes()).await.map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!("Failed to encrypt policy content: {}", e))
+            })?;
+            // The encrypted blob is a self-contained CryptoPacket (JSON with
+            // embedded key_id, IV, and auth_tag).  `CryptoService::decrypt`
+            // reads all parameters from that blob, so the EncryptionMetadata
+            // on the SecretEntry is informational.  We mark it clearly so
+            // readers know the real parameters live inside `encrypted_data`.
+            (
+                enc,
+                secreton_storage::EncryptionMetadata {
+                    algorithm: "aes-256-gcm-cryptopacket".to_string(),
+                    key_id: "embedded".to_string(),
+                    iv: Vec::new(),
+                    auth_tag: None,
+                    aad: None,
+                    kdf_params: None,
+                },
+            )
+        } else {
+            (Vec::new(), secreton_storage::EncryptionMetadata::default())
+        };
+
+        let mut entry = secreton_storage::SecretEntry::new(
+            path,
+            encrypted_data,
+            encryption_metadata,
+            secreton_storage::SecurityLevel::Secret,
+            uuid::Uuid::nil(), // system-owned
+        );
+        entry.id = entry_id;
+        entry.created_at = created_at;
+        entry.version = version;
+        let updated_at = chrono::Utc::now();
+        entry.metadata.insert("updated_at".to_string(), updated_at.to_rfc3339());
+
+        // When crypto is not available, store the raw content in metadata as a
+        // fallback so the UI can still retrieve it.
+        if self.crypto.is_none() {
+            entry.metadata.insert("content".to_string(), content.to_string());
+        }
+
+        if existing.is_some() {
+            self.storage.update(&entry).await.map_err(AdminError::Storage)?;
+        } else {
+            self.storage.store(&entry).await.map_err(AdminError::Storage)?;
+        }
+        Ok((created_at, updated_at))
+    }
+
+    /// Delete raw policy content previously stored by `update_policy_content`.
+    ///
+    /// Returns `Ok(true)` when the entry existed and was deleted, `Ok(false)`
+    /// when no raw content entry was found (not an error — the policy may only
+    /// have had a structured definition), and `Err` on storage failures.
+    ///
+    /// Acquires `policy_content_write_lock` to serialize with concurrent
+    /// `update_policy_content` calls for the same path.  Without this guard,
+    /// an interleaving such as `update.read(existing=Some) → delete →
+    /// update.store()` could observe a stale snapshot and resurrect a policy
+    /// the operator just deleted, or cause `storage.update()` to run against
+    /// a now-deleted entry.  Raw-content mutations are admin-only and rare,
+    /// so sharing a single global mutex with `update_policy_content` is fine.
+    pub async fn delete_policy_content(&self, name: &str) -> Result<bool, AdminError> {
+        let _write_guard = self.policy_content_write_lock.lock().await;
+        let path = format!("sys/policies/content/{}", name);
+        self.storage.delete_by_path(&path).await.map_err(AdminError::Storage)
+    }
+
+    /// List the names of raw-content-only policies stored under
+    /// `sys/policies/content/`.
+    ///
+    /// Structured policies are listed separately via `SecretService::list_policies`
+    /// (which scans `sys/policies/`).  Because `update_policy_content` stores
+    /// entries under a disjoint prefix (`sys/policies/content/`), callers that
+    /// want to surface *all* policies — including those created purely via the
+    /// raw-content path — must combine the two results.  This method returns
+    /// just the names so the caller can deduplicate against the structured list.
+    pub async fn list_policy_content_names(&self) -> Result<Vec<String>, AdminError> {
+        Ok(self
+            .list_policy_content_metadata()
+            .await?
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect())
+    }
+
+    /// List raw-content-only policies with their timestamps.
+    ///
+    /// Returns `(name, created_at, updated_at)` tuples read directly from the
+    /// storage listing — no additional `get_by_path` calls or decryption.
+    /// This exists to avoid an N+1 read/decrypt pattern when a caller needs
+    /// timestamps for every raw-content policy (e.g. `list_policies` in the
+    /// secret handler).  The `updated_at` metadata override written by
+    /// `update_policy_content` is honoured, matching `get_policy_content`.
+    pub async fn list_policy_content_metadata(
+        &self,
+    ) -> Result<
+        Vec<(
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+        )>,
+        AdminError,
+    > {
+        const PREFIX: &str = "sys/policies/content/";
+        let query_params = QueryParams {
+            path_prefix: Some(PREFIX.to_string()),
+            limit: None,
+            offset: Some(0),
+            ..Default::default()
+        };
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
+            .map_err(AdminError::Storage)?;
+
+        Ok(entries
+            .into_iter()
+            .filter_map(|e| {
+                let name = e.path.strip_prefix(PREFIX)?.to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                // Prefer the `updated_at` written into metadata by
+                // `update_policy_content`, falling back to the entry's own
+                // `updated_at` field.  Mirrors `get_policy_content`.
+                let updated_at = e
+                    .metadata
+                    .get("updated_at")
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .unwrap_or(e.updated_at);
+                Some((name, e.created_at, updated_at))
+            })
+            .collect())
     }
 
     /// Check password security

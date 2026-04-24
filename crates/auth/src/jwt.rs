@@ -192,6 +192,11 @@ impl JwtTokenService {
     }
 
     /// Create access token
+    ///
+    /// If `duration_override` is provided it takes precedence over the
+    /// configured `access_token_duration`.  This allows callers to honour
+    /// dynamic configuration (e.g. runtime session-timeout changes) while
+    /// keeping the JWT `exp` claim in sync with the session record.
     pub fn create_access_token(
         &self,
         user_id: &str,
@@ -202,9 +207,34 @@ impl JwtTokenService {
         mfa_required: bool,
         jti: Option<String>,
     ) -> Result<String, JwtError> {
+        self.create_access_token_with_duration(
+            user_id,
+            username,
+            email,
+            roles,
+            policies,
+            mfa_required,
+            jti,
+            None,
+        )
+    }
+
+    /// Create access token with an optional explicit duration.
+    pub fn create_access_token_with_duration(
+        &self,
+        user_id: &str,
+        username: &str,
+        email: Option<&str>,
+        roles: &[String],
+        policies: &[String],
+        mfa_required: bool,
+        jti: Option<String>,
+        duration_override: Option<Duration>,
+    ) -> Result<String, JwtError> {
+        let duration = duration_override.unwrap_or(self.config.access_token_duration);
         let now = Utc::now();
         let iat = now.timestamp() as usize;
-        let exp = (now + self.config.access_token_duration).timestamp() as usize;
+        let exp = (now + duration).timestamp() as usize;
 
         let claims = AccessTokenClaims {
             claims: Claims {
@@ -262,15 +292,52 @@ impl JwtTokenService {
         mfa_required: bool,
         jti: Option<String>,
     ) -> Result<TokenPair, JwtError> {
-        let access_token =
-            self.create_access_token(user_id, username, email, roles, policies, mfa_required, jti)?;
+        self.create_token_pair_with_duration(
+            user_id,
+            username,
+            email,
+            roles,
+            policies,
+            mfa_required,
+            jti,
+            None,
+        )
+    }
+
+    /// Create token pair with an optional explicit access-token duration.
+    ///
+    /// When `duration_override` is `Some`, it is used for the access token's
+    /// `exp` claim **and** the returned `expires_in` value, keeping the JWT
+    /// lifetime in sync with the session record.
+    pub fn create_token_pair_with_duration(
+        &self,
+        user_id: &str,
+        username: &str,
+        email: Option<&str>,
+        roles: &[String],
+        policies: &[String],
+        mfa_required: bool,
+        jti: Option<String>,
+        duration_override: Option<Duration>,
+    ) -> Result<TokenPair, JwtError> {
+        let effective_duration = duration_override.unwrap_or(self.config.access_token_duration);
+        let access_token = self.create_access_token_with_duration(
+            user_id,
+            username,
+            email,
+            roles,
+            policies,
+            mfa_required,
+            jti,
+            Some(effective_duration),
+        )?;
         let refresh_token = self.create_refresh_token(user_id, username)?;
 
         Ok(TokenPair {
             access_token,
             refresh_token,
             token_type: "Bearer".to_string(),
-            expires_in: self.config.access_token_duration.num_seconds() as u64,
+            expires_in: effective_duration.num_seconds() as u64,
             metadata: std::collections::HashMap::new(),
         })
     }
@@ -323,7 +390,17 @@ impl JwtTokenService {
         Ok(token_data.claims)
     }
 
-    /// Refresh access token using refresh token
+    /// Refresh access token using refresh token.
+    ///
+    /// **Deprecated**: This method creates tokens with empty roles and policies
+    /// because refresh tokens do not carry those claims.  Callers should load
+    /// the user from storage and call `create_token_pair_with_duration` with
+    /// the current roles/policies instead.  See `AuthenticationService::refresh_token`
+    /// for the correct pattern.
+    #[deprecated(
+        since = "2.1.0",
+        note = "produces tokens with empty roles/policies; use create_token_pair_with_duration after loading user from storage"
+    )]
     pub fn refresh_access_token(
         &self,
         refresh_token: &str,

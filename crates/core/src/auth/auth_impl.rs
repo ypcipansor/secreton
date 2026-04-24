@@ -117,13 +117,24 @@ impl AuthService {
                 Ok(true) => {
                      // Fetch actual user details including roles from DB
                      if let Ok(Some(details)) = storage.get_user_details(username).await {
+                         // `UserInfo` from the storage trait does not carry policies.
+                         // Try to read them from the in-memory store first (which has
+                         // the real values); fall back to ["default"] only when the
+                         // user is not in the in-memory cache.  This mirrors the
+                         // pattern used in `refresh_token()`.
+                         let user_policies = {
+                             let user_store = self.user_store.read().await;
+                             user_store.get(username)
+                                 .map(|r| r.policies.clone())
+                                 .unwrap_or_else(|| vec!["default".to_string()])
+                         };
                          Some(UserRecord {
                             id: details.id.unwrap_or_else(|| username.to_string()),
                             username: details.username,
                             email: details.email,
                             password_hash: "".to_string(), // Not needed
                             roles: details.roles,
-                            policies: vec!["default".to_string()], // Policies might need to be fetched too if stored separately
+                            policies: user_policies,
                             created_at: chrono::Utc::now(), // Ideally fetched from details if available in UserInfo
                             last_login: Some(chrono::Utc::now()),
                          })
@@ -187,11 +198,103 @@ impl AuthService {
         Ok(token_pair)
     }
 
-    /// Refresh an access token using a refresh token
+    /// Refresh an access token using a refresh token.
+    ///
+    /// Implements single-use refresh token rotation: each refresh token can
+    /// only be exchanged once.  The old token is added to the blacklist with
+    /// its own `exp` as the TTL, so a captured refresh token cannot be
+    /// replayed even while its signature and expiry are still valid.  This
+    /// mirrors the rotation enforced by the API-layer
+    /// `AuthenticationService::refresh_token`.
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, SecretonError> {
+        // Fast-path early reject for a previously-exchanged refresh token.
+        // This is purely an optimisation — the authoritative single-use
+        // check is the atomic check-and-insert after validation, below.
+        {
+            let blacklist = self.token_blacklist.read().await;
+            if blacklist.contains_key(refresh_token) {
+                return Err(SecretonError::Authentication {
+                    message: "Token has been revoked".to_string(),
+                });
+            }
+        }
+
+        // Validate the refresh token to extract the user's identity.
+        // Validation is side-effect-free so performing it before the CAS is
+        // safe — two concurrent requests will both validate, but only one
+        // will win the atomic insert below.
+        let claims = self
+            .token_service
+            .validate_refresh_token(refresh_token)
+            .map_err(|e| SecretonError::Authentication {
+                message: format!("Token refresh failed: {}", e),
+            })?;
+
+        // Atomically check-and-insert the refresh token into the blacklist
+        // while holding the write lock across both operations.  This closes
+        // the TOCTOU window between the fast-path read above and the insert:
+        // two concurrent requests for the same refresh token will both pass
+        // the read check, but only the first one to acquire the write lock
+        // will find the slot empty and insert — the second will observe the
+        // existing entry and be rejected with `InvalidToken`.  Use the
+        // token's own `exp` as the TTL so the blacklist entry survives as
+        // long as the token would have been valid.
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            if blacklist.contains_key(refresh_token) {
+                return Err(SecretonError::Authentication {
+                    message: "Token has been revoked".to_string(),
+                });
+            }
+            let exp = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+                .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(7));
+            blacklist.insert(refresh_token.to_string(), exp);
+        }
+
+        // Load the user's current roles, policies, and email.  The deprecated
+        // `refresh_access_token` produced tokens with empty roles/policies
+        // because refresh tokens don't carry those claims.
+        let (roles, policies, email) = if let Some(storage) = &self.storage {
+            if let Ok(Some(details)) = storage.get_user_details(&claims.username).await {
+                // `UserInfo` from the storage trait does not carry policies.
+                // Try to read them from the in-memory store first (which has
+                // the real values); fall back to ["default"] only when the
+                // user is not in the in-memory cache.
+                let user_policies = {
+                    let user_store = self.user_store.read().await;
+                    user_store.get(&claims.username)
+                        .map(|r| r.policies.clone())
+                        .unwrap_or_else(|| vec!["default".to_string()])
+                };
+                (details.roles, user_policies, details.email)
+            } else {
+                return Err(SecretonError::Authentication {
+                    message: format!("User '{}' not found during token refresh", claims.username),
+                });
+            }
+        } else {
+            let user_store = self.user_store.read().await;
+            if let Some(record) = user_store.get(&claims.username) {
+                (record.roles.clone(), record.policies.clone(), record.email.clone())
+            } else {
+                return Err(SecretonError::Authentication {
+                    message: format!("User '{}' not found during token refresh", claims.username),
+                });
+            }
+        };
+
         let token_pair = self
             .token_service
-            .refresh_access_token(refresh_token, None)
+            .create_token_pair_with_duration(
+                &claims.sub,
+                &claims.username,
+                email.as_deref(),
+                &roles,
+                &policies,
+                false,
+                None,
+                None,
+            )
             .map_err(|e| SecretonError::Authentication {
                 message: format!("Token refresh failed: {}", e),
             })?;

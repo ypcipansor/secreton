@@ -388,29 +388,66 @@ impl DatabaseService {
         lease_id: &str,
     ) -> std::result::Result<(), DatabaseServiceError> {
         self.ensure_initialized().await?;
-        // TODO: The engine does not currently expose a revoke/drop-user API.
-        // This only deletes the lease tracking record — the database user
-        // created on the target database remains active until its VALID UNTIL
-        // expires (PostgreSQL) or is manually removed.  A future improvement
-        // should add `DatabaseEngine::revoke_credentials(username)` to DROP
-        // the user on the target database before removing the lease record.
+
         let lease_path = format!("{}{}", DB_LEASE_PREFIX, lease_id);
-        warn!(
-            "Revoking lease '{}': only the tracking record is deleted; \
-             the database credential may still be active on the target database",
-            lease_id
-        );
+
+        // Fetch lease info to get the username
+        let entry = self
+            .storage
+            .get_by_path(&lease_path)
+            .await
+            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?
+            .ok_or_else(|| DatabaseServiceError::NotFound(format!("Lease '{}' not found", lease_id)))?;
+
+        let decrypted = self.crypto.decrypt(&entry.encrypted_data).await
+            .map_err(|e| DatabaseServiceError::Internal(format!("Failed to decrypt lease: {}", e)))?;
+
+        let lease_info: Value = serde_json::from_slice(&decrypted)
+            .map_err(|e| DatabaseServiceError::Internal(format!("Failed to parse lease: {}", e)))?;
+
+        let username = lease_info.get("username")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| DatabaseServiceError::Internal("Lease missing username".to_string()))?;
+
+        // Call engine to revoke credentials.
+        // If the backend returns `RevocationNotImplemented` (e.g. MongoDB,
+        // Redis), we warn but still proceed with deleting the lease tracking
+        // record so it does not become permanently irrecoverable.  For any
+        // other error (connection failure, query failure, etc.) we propagate
+        // the error and leave the lease record intact for retry.
+        {
+            let engine = self.engine.read().await;
+            match engine.revoke_credentials(username).await {
+                Ok(()) => {}
+                Err(secreton_secrets_database::DatabaseError::RevocationNotImplemented(ref msg)) => {
+                    warn!(
+                        "Revoking lease '{}': credential revocation not implemented — \
+                         the database user '{}' may still be active on the target database. \
+                         Detail: {}",
+                        lease_id, username, msg
+                    );
+                }
+                Err(e) => {
+                    warn!("Failed to revoke database credentials for '{}': {}", username, e);
+                    return Err(DatabaseServiceError::Internal(format!("Database revocation failed: {}", e)));
+                }
+            }
+        }
+
+        // Delete the lease tracking record
         let deleted = self
             .storage
             .delete_by_path(&lease_path)
             .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+
         if !deleted {
             return Err(DatabaseServiceError::NotFound(format!(
-                "Lease '{}' not found",
+                "Lease '{}' not found during deletion",
                 lease_id
             )));
         }
+
         Ok(())
     }
 }
