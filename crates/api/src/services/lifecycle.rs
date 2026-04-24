@@ -79,7 +79,11 @@ impl LifecycleService {
     }
 
     /// Start the background lifecycle worker. Returns when `shutdown` is signalled.
-    pub async fn start_worker(self: Arc<Self>) {
+    ///
+    /// This is intentionally not `pub`: spawning the worker outside of
+    /// `spawn_worker` would bypass `JoinHandle` tracking and prevent
+    /// `shutdown_and_wait` from awaiting in-flight processing.
+    async fn start_worker(self: Arc<Self>) {
         info!("Starting Secret Lifecycle background worker");
         let mut ticker = interval(Duration::from_secs(3600)); // Run every hour
         let shutdown = self.shutdown.clone();
