@@ -13,6 +13,7 @@ use warp::Filter;
 use secreton_api::services::audit::AuditLogger;
 use secreton_api::services::auth::AuthenticationService;
 use secreton_api::services::crypto::CryptoService;
+use secreton_api::services::lifecycle::LifecycleService;
 use secreton_api::services::seal::SealService;
 use secreton_api::services::secret::SecretService;
 use secreton_api::{SecurityAPI, handle_rejection};
@@ -321,6 +322,30 @@ async fn main() -> anyhow::Result<()> {
         .await?,
     );
 
+    // Initialize Secret Lifecycle service.
+    //
+    // Defaults match `ApiServiceContainer::new` — conservative `enabled: false`
+    // and `cleanup_enabled: false` so this binary can't silently delete
+    // expired secrets until the feature is opted into explicitly. The worker
+    // is spawned below; when disabled this is a no-op. We keep an `Arc` so we
+    // can call `shutdown_and_wait()` on exit to drain any in-flight sweep.
+    // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
+    let lifecycle_config =
+        secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
+            enabled: false,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: false,
+        };
+    let lifecycle = Arc::new(LifecycleService::new(
+        storage.clone(),
+        secreton.clone(),
+        audit.clone(),
+        lifecycle_config,
+    ));
+    lifecycle.spawn_worker().await;
+
     // Construct HTTP Routes
     // Pass the SHARED mfa instance
     let warp_routes = SecurityAPI::routes(
@@ -566,13 +591,19 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Drain the lifecycle worker first so any in-flight sweep finishes before
+    // we flush audit — otherwise a sweep in progress could emit audit events
+    // after the flush and lose them. When the service is disabled this is a
+    // cheap no-op (no worker was spawned).
+    lifecycle.shutdown_and_wait().await;
+
     // Flush buffered audit events before exit. This is best-effort: a flush
     // failure is logged but does not prevent shutdown, so a wedged audit
     // backend can't hang the process.
     //
     // TODO: Once `api_server.rs` is migrated to `ApiServiceContainer`, call
-    // `container.stop_services().await` here instead — that method already
-    // flushes audit and awaits the lifecycle worker via `shutdown_and_wait`.
+    // `container.stop_services().await` here instead of managing shutdown of
+    // individual services by hand.
     if let Err(e) = audit.flush().await {
         warn!("Failed to flush audit logs on shutdown: {}", e);
     }

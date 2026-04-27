@@ -1,13 +1,11 @@
 //! Lifecycle service for managing secret expiration and archival.
 
 use anyhow::Result;
-use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant, interval_at};
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::secret::SecretService;
@@ -239,104 +237,66 @@ impl LifecycleService {
     /// so a single bad entry cannot block cleanup of the rest. A listing
     /// failure (which affects the whole sweep) is propagated.
     async fn sweep_expired_secrets(&self) -> Result<u64> {
-        // Page through storage to bound peak memory usage on backends with
-        // many entries. Without pagination, a single `list` call would pull
-        // every entry into a `Vec<SecretEntry>` in memory each sweep.
-        const PAGE_SIZE: u32 = 500;
-
-        let mut deleted: u64 = 0;
-        let mut offset: u32 = 0;
-
-        // Track entry IDs we've already observed this sweep. Several storage
-        // backends (PostgreSQL, MySQL, CockroachDB, and the default mock) do
-        // not honor `QueryParams.offset` and will return the same page on
-        // every call. Without this guard, a sweep where all entries are
-        // skipped (non-expired or under a reserved prefix) would loop forever:
-        // `skipped_this_page` would grow `offset`, the backend would ignore
-        // it, and we'd re-fetch and re-skip the same rows indefinitely.
+        // Single-pass sweep.
         //
-        // If we ever observe a duplicate ID on a subsequent page, we know the
-        // backend isn't paginating and we bail out. On backends that *do*
-        // honor offset this set only grows with genuinely new rows.
-        let mut seen_ids: HashSet<Uuid> = HashSet::new();
+        // We previously paginated via `QueryParams.offset`, but most production
+        // backends (PostgreSQL, MySQL, CockroachDB, and the in-memory mock)
+        // silently ignore `offset` — only the File and Raft backends honor it.
+        // That made offset-based pagination fragile at best: on offset-ignoring
+        // backends the sweep either looped forever (pre-fix) or bailed out
+        // after the first page (with the duplicate-ID guard), leaving expired
+        // entries beyond `PAGE_SIZE` uncleaned indefinitely.
+        //
+        // Instead we pull the full list of expired entries in one query. This
+        // is correct on every backend. Memory use is bounded by the number of
+        // expired entries at sweep time (a small fraction of total entries for
+        // an hourly sweep), and each `SecretEntry` row is dominated by the
+        // encrypted payload — which we could clear before delete, but since
+        // we delete by ID immediately after and drop the entry, the Vec is
+        // short-lived.
+        //
+        // If very large deployments ever need bounded memory, the right fix
+        // is a backend-level streaming/cursor API (e.g. keyset pagination on
+        // `(expires_at, id)`), not application-level offset paging.
+        let params = QueryParams {
+            include_expired: true,
+            ..Default::default()
+        };
 
-        loop {
-            let params = QueryParams {
-                include_expired: true,
-                limit: Some(PAGE_SIZE),
-                offset: Some(offset),
-                ..Default::default()
-            };
+        let entries = self.storage.list(&params).await?;
+        let mut deleted: u64 = 0;
 
-            let entries = self.storage.list(&params).await?;
-            let page_len = entries.len() as u32;
-            if page_len == 0 {
-                break;
+        for entry in entries {
+            if !entry.is_expired() {
+                continue;
+            }
+            if Self::is_reserved_path(&entry.path) {
+                continue;
             }
 
-            // Detect backends that ignore `offset`: if every entry on this
-            // page has already been seen on a prior page, we're not making
-            // progress and must stop to avoid an infinite loop.
-            if offset > 0 && entries.iter().all(|e| seen_ids.contains(&e.id)) {
-                warn!(
-                    "Storage backend appears to ignore QueryParams.offset; \
-                     halting sweep at offset {} after {} deletions to avoid \
-                     an infinite loop",
-                    offset, deleted
-                );
-                break;
-            }
-
-            // Track skipped entries so we advance `offset` past non-deletable
-            // rows (non-expired or reserved) on the next page. Deleted rows
-            // shift subsequent entries back by one, so they don't contribute
-            // to the offset.
-            let mut skipped_this_page: u32 = 0;
-
-            for entry in entries {
-                seen_ids.insert(entry.id);
-
-                if !entry.is_expired() {
-                    skipped_this_page += 1;
-                    continue;
+            match self.storage.delete_by_id(entry.id).await {
+                Ok(true) => {
+                    deleted += 1;
+                    // Emit audit event. `log_event` is infallible (buffers
+                    // internally and logs on flush failures) so there's no
+                    // Result to propagate here.
+                    self.audit
+                        .log_event(SecurityEventType::SecretDeletion {
+                            secret_path: entry.path.clone(),
+                            user: LIFECYCLE_AUDIT_ACTOR.to_string(),
+                        })
+                        .await;
                 }
-                if Self::is_reserved_path(&entry.path) {
-                    skipped_this_page += 1;
-                    continue;
+                Ok(false) => {
+                    // Entry vanished between list and delete — benign race.
                 }
-
-                match self.storage.delete_by_id(entry.id).await {
-                    Ok(true) => {
-                        deleted += 1;
-                        // Emit audit event. `log_event` is infallible (buffers
-                        // internally and logs on flush failures) so there's no
-                        // Result to propagate here.
-                        self.audit
-                            .log_event(SecurityEventType::SecretDeletion {
-                                secret_path: entry.path.clone(),
-                                user: LIFECYCLE_AUDIT_ACTOR.to_string(),
-                            })
-                            .await;
-                    }
-                    Ok(false) => {
-                        // Entry vanished between list and delete — benign race.
-                    }
-                    Err(e) => {
-                        // Count as skipped so we don't re-fetch the same
-                        // failing entry forever on the next page.
-                        skipped_this_page += 1;
-                        warn!(
-                            "Failed to delete expired secret at path {}: {}",
-                            entry.path, e
-                        );
-                    }
+                Err(e) => {
+                    warn!(
+                        "Failed to delete expired secret at path {}: {}",
+                        entry.path, e
+                    );
                 }
             }
-
-            if page_len < PAGE_SIZE {
-                break;
-            }
-            offset = offset.saturating_add(skipped_this_page);
         }
 
         Ok(deleted)
