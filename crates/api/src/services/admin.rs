@@ -1385,9 +1385,22 @@ impl AdminService {
         let mut findings = Vec::new();
 
         // Check for certificates/keys expiring soon
-        // Scan certificate storage for entries with expiry dates
+        // Scan certificate storage for entries with expiry dates.
+        //
+        // We cap the scan with an explicit `limit` to avoid loading the entire
+        // `secreton_entries` table into memory on large deployments. Before
+        // the PostgreSQL backend's default `LIMIT 100` was removed (in the
+        // lifecycle PR), this call was implicitly bounded; without an explicit
+        // limit it would now perform an unbounded full-table scan twice
+        // (here and in the PKI block below).
+        //
+        // TODO: Replace this with a path-prefixed scan once certificates are
+        // stored under a dedicated namespace, so we only read certificate
+        // entries instead of filtering every entry by metadata.
+        const CERT_SCAN_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CERT_SCAN_MAX_ENTRIES),
             ..Default::default()
         };
 
@@ -1474,9 +1487,12 @@ impl AdminService {
         }
 
         // Also check for PKI certificates if available
-        // This would integrate with the PKI service to check CA and issued certificates
+        // This would integrate with the PKI service to check CA and issued certificates.
+        // Same memory-safety reasoning as the certificate scan above —
+        // see `CERT_SCAN_MAX_ENTRIES` for the rationale.
         let pki_query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CERT_SCAN_MAX_ENTRIES),
             ..Default::default()
         };
 
