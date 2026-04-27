@@ -183,6 +183,13 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
+        // Filter out expired entries unless explicitly requested. This matches
+        // the behavior of the InMemory and MySQL backends so that callers see
+        // a consistent contract across storage implementations.
+        if !params.include_expired {
+            query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
+        }
+
         query.push_str(" ORDER BY created_at DESC");
         if let Some(limit) = params.limit {
             query.push_str(&format!(" LIMIT ${}", param_count));
