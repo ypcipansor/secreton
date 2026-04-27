@@ -22,10 +22,25 @@ use secreton_storage::{QueryParams, StorageBackend};
 /// overlap with dedicated cleaners (e.g. `delete_expired_oauth_states`) and
 /// could silently drop orphaned history or audit records that are still
 /// referenced by the primary secret.
+//
+// Defense-in-depth: in addition to the `sys/`, `keys/`, and `key_data/`
+// namespaces, we also reserve prefixes used by other API services
+// (`sessions/`, `users/`, `db/`, `totp/`, `pki/`, `auth/`, `mfa/`). These
+// services manage their own entry lifecycles (e.g. session expiration,
+// dynamic database lease revocation, TOTP secret rotation) and could store
+// entries with `expires_at` set for purposes other than user-secret cleanup.
+// Sweeping them from this worker would race with their owning subsystems.
 const RESERVED_PATH_PREFIXES: &[&str] = &[
     "sys/",
     "keys/",
     "key_data/",
+    "sessions/",
+    "users/",
+    "db/",
+    "totp/",
+    "pki/",
+    "auth/",
+    "mfa/",
 ];
 
 /// Actor string recorded in the audit trail for automated lifecycle deletions.
