@@ -237,7 +237,7 @@ impl LifecycleService {
     /// so a single bad entry cannot block cleanup of the rest. A listing
     /// failure (which affects the whole sweep) is propagated.
     async fn sweep_expired_secrets(&self) -> Result<u64> {
-        // Single-pass sweep.
+        // Single-pass sweep with a safety bound.
         //
         // We previously paginated via `QueryParams.offset`, but most production
         // backends (PostgreSQL, MySQL, CockroachDB, and the in-memory mock)
@@ -247,19 +247,31 @@ impl LifecycleService {
         // after the first page (with the duplicate-ID guard), leaving expired
         // entries beyond `PAGE_SIZE` uncleaned indefinitely.
         //
-        // Instead we pull the full list of expired entries in one query. This
-        // is correct on every backend. Memory use is bounded by the number of
-        // expired entries at sweep time (a small fraction of total entries for
-        // an hourly sweep), and each `SecretEntry` row is dominated by the
-        // encrypted payload — which we could clear before delete, but since
-        // we delete by ID immediately after and drop the entry, the Vec is
-        // short-lived.
+        // Note on scope: `QueryParams.include_expired = true` means "do not
+        // filter out expired entries from the result" — it does NOT mean
+        // "return only expired entries". As a result, `list(...)` returns
+        // every entry the backend stores (both expired and non-expired) and
+        // we filter for `is_expired()` in the loop below. Combined with the
+        // PostgreSQL backend no longer imposing a default `LIMIT 100`, this
+        // means an unbounded sweep could load the entire secrets table into
+        // memory on a large deployment. We mitigate that with an explicit
+        // `SWEEP_MAX_ENTRIES` cap: if the backend has more entries than the
+        // cap, only the first `SWEEP_MAX_ENTRIES` are considered per tick
+        // and the rest will be picked up on subsequent ticks. This is a
+        // conservative safety bound, not a correctness guarantee.
         //
-        // If very large deployments ever need bounded memory, the right fix
-        // is a backend-level streaming/cursor API (e.g. keyset pagination on
-        // `(expires_at, id)`), not application-level offset paging.
+        // The right long-term fix is a backend-level "only expired" query
+        // (e.g. a new `QueryParams.only_expired` flag with backend support,
+        // or a dedicated `list_expired()` method), which would let us pull
+        // just the rows we intend to delete. Tracked as a TODO below.
+        //
+        // TODO: Add backend-level filtering so only expired entries are
+        // returned, avoiding the need to load non-expired rows into memory.
+        const SWEEP_MAX_ENTRIES: u32 = 10_000;
+
         let params = QueryParams {
             include_expired: true,
+            limit: Some(SWEEP_MAX_ENTRIES),
             ..Default::default()
         };
 
@@ -311,10 +323,10 @@ mod tests {
     use secreton_auth::policies::service::PolicyService;
     use secreton_auth::{IdentityService, InMemoryIdentityService};
     use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
-    use secreton_storage::memory::InMemoryStorage;
+    use secreton_storage::MockStorageBackend;
 
     async fn make_service(enabled: bool, cleanup_enabled: bool) -> Arc<LifecycleService> {
-        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(InMemoryStorage::new());
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(
             crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
@@ -400,7 +412,7 @@ mod tests {
         use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
         use uuid::Uuid;
 
-        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(InMemoryStorage::new());
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(
             crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
