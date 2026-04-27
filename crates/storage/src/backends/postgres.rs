@@ -183,9 +183,11 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
-        query.push_str(&format!(" ORDER BY created_at DESC LIMIT ${}", param_count));
-        let limit = params.limit.unwrap_or(100);
-        bind_params.push(Box::new(limit as i64));
+        query.push_str(" ORDER BY created_at DESC");
+        if let Some(limit) = params.limit {
+            query.push_str(&format!(" LIMIT ${}", param_count));
+            bind_params.push(Box::new(limit as i64));
+        }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
             .iter()
