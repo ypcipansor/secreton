@@ -294,7 +294,42 @@ impl LifecycleService {
                 continue;
             }
 
-            match self.storage.delete_by_id(entry.id).await {
+            // TOCTOU guard: re-read the entry immediately before deleting and
+            // re-check `is_expired()`. The `entries` vec is a stale snapshot
+            // from the `list()` call above; between that call and the
+            // `delete_by_id` below, the user may have renewed (extended
+            // `expires_at`) or rotated the secret. Without this re-check we
+            // would silently delete a just-renewed secret — a data-loss bug
+            // for the user whose renewal appeared to succeed.
+            //
+            // This narrows the race window from "duration of the whole sweep"
+            // down to "between `get_by_id` and `delete_by_id`". A fully
+            // race-free fix requires a conditional `DELETE ... WHERE id = $1
+            // AND expires_at < NOW()` at the storage layer, which the current
+            // `StorageBackend` trait does not expose. Tracked as a TODO.
+            //
+            // TODO: Add a conditional delete (e.g. `delete_if_expired`) to
+            // the `StorageBackend` trait so this guard can be made atomic.
+            let fresh = match self.storage.get_by_id(entry.id).await {
+                Ok(Some(e)) => e,
+                Ok(None) => {
+                    // Entry vanished between list and re-read — benign race.
+                    continue;
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to re-read expired secret at path {} before delete: {}",
+                        entry.path, e
+                    );
+                    continue;
+                }
+            };
+            if !fresh.is_expired() {
+                // Renewed between list and re-read — preserve it.
+                continue;
+            }
+
+            match self.storage.delete_by_id(fresh.id).await {
                 Ok(true) => {
                     deleted += 1;
                     // Emit audit event. `log_event` is infallible (buffers
@@ -302,18 +337,18 @@ impl LifecycleService {
                     // Result to propagate here.
                     self.audit
                         .log_event(SecurityEventType::SecretDeletion {
-                            secret_path: entry.path.clone(),
+                            secret_path: fresh.path.clone(),
                             user: LIFECYCLE_AUDIT_ACTOR.to_string(),
                         })
                         .await;
                 }
                 Ok(false) => {
-                    // Entry vanished between list and delete — benign race.
+                    // Entry vanished between re-read and delete — benign race.
                 }
                 Err(e) => {
                     warn!(
                         "Failed to delete expired secret at path {}: {}",
-                        entry.path, e
+                        fresh.path, e
                     );
                 }
             }
