@@ -1249,9 +1249,20 @@ impl AuthenticationService {
             // Best-effort: find and delete the old session whose refresh_token
             // matches the one being exchanged.  This is a scan over the
             // session prefix — acceptable because refresh is infrequent.
+            //
+            // Cap the scan with an explicit upper bound.  Before the
+            // PostgreSQL backend's default `LIMIT 100` was removed (in the
+            // lifecycle PR), this scan was implicitly bounded; without an
+            // explicit limit it would now load every active session into
+            // memory on every refresh.
+            //
+            // TODO: Index sessions by refresh-token hash so this scan can be
+            // replaced with a direct lookup.
+            const SESSION_REFRESH_SCAN_MAX_ENTRIES: u32 = 10_000;
             let params = secreton_storage::QueryParams {
                 path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
                 include_expired: false,
+                limit: Some(SESSION_REFRESH_SCAN_MAX_ENTRIES),
                 ..Default::default()
             };
             if let Ok(entries) = self.storage.list(&params).await {

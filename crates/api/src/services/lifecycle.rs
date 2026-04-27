@@ -30,6 +30,14 @@ use secreton_storage::{QueryParams, StorageBackend};
 // dynamic database lease revocation, TOTP secret rotation) and could store
 // entries with `expires_at` set for purposes other than user-secret cleanup.
 // Sweeping them from this worker would race with their owning subsystems.
+//
+// We also reserve `policies/`, `backups/`, and `config/` as additional
+// top-level subsystem namespaces. These are not currently expected to
+// carry `expires_at`, so they are unreachable in practice today, but
+// listing them explicitly avoids the "exclusion depends on assumption"
+// failure mode if a future change ever sets a TTL on a policy or backup
+// entry — for example, a transient scheduled-deletion policy would be
+// silently swept here without this entry.
 const RESERVED_PATH_PREFIXES: &[&str] = &[
     "sys/",
     "keys/",
@@ -41,6 +49,9 @@ const RESERVED_PATH_PREFIXES: &[&str] = &[
     "pki/",
     "auth/",
     "mfa/",
+    "policies/",
+    "backups/",
+    "config/",
 ];
 
 /// Actor string recorded in the audit trail for automated lifecycle deletions.

@@ -604,9 +604,20 @@ impl AuditLogger {
             "sys/audit/".to_string()
         };
 
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this query was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan on a busy audit
+        // log (potentially millions of entries) and load the entire result
+        // set into memory.
+        //
+        // TODO: Replace the in-memory filter loop below with backend-level
+        // filtering on user/action/path/timestamp so this cap is no longer
+        // necessary.
+        const AUDIT_QUERY_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
-            limit: None,
+            limit: Some(AUDIT_QUERY_MAX_ENTRIES),
             ..Default::default()
         };
 
