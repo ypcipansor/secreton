@@ -1,7 +1,7 @@
 //! Lifecycle service for managing secret expiration and archival.
 
 use anyhow::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant, interval_at};
@@ -109,7 +109,16 @@ impl LifecycleService {
         if guard.is_some() {
             return;
         }
-        let handle = tokio::spawn(self.clone().start_worker());
+        // Hand the worker a `Weak<Self>` rather than a strong `Arc`. Otherwise
+        // the spawned task would keep the `LifecycleService` alive forever:
+        // even if every external `Arc<LifecycleService>` is dropped (e.g. an
+        // owning container is dropped without anyone calling
+        // `stop_services()` / `shutdown_and_wait()`), the worker's strong
+        // reference would prevent the service from being dropped and the
+        // hourly sweep would keep running until process exit. With `Weak`,
+        // the worker exits naturally once no external owner remains.
+        let weak = Arc::downgrade(self);
+        let handle = tokio::spawn(start_worker(weak));
         *guard = Some(handle);
     }
 
@@ -139,41 +148,6 @@ impl LifecycleService {
         if let Some(handle) = handle {
             if let Err(e) = handle.await {
                 warn!("Lifecycle worker task did not shut down cleanly: {}", e);
-            }
-        }
-    }
-
-    /// Start the background lifecycle worker. Returns when `shutdown` is signalled.
-    ///
-    /// This is intentionally not `pub`: spawning the worker outside of
-    /// `spawn_worker` would bypass `JoinHandle` tracking and prevent
-    /// `shutdown_and_wait` from awaiting in-flight processing.
-    async fn start_worker(self: Arc<Self>) {
-        info!("Starting Secret Lifecycle background worker");
-        // Delay the first tick by one period so that `process_lifecycle_events`
-        // does not run immediately on startup. `tokio::time::interval` would
-        // fire its first tick instantly, which is surprising for a destructive
-        // periodic sweep and could interact badly with migrations/warm-up.
-        let period = Duration::from_secs(3600);
-        let mut ticker = interval_at(Instant::now() + period, period);
-        let shutdown = self.shutdown.clone();
-
-        loop {
-            tokio::select! {
-                // `biased;` ensures the shutdown branch is polled before the
-                // ticker branch when both are ready. Without this, a concurrent
-                // shutdown signal and ticker tick could non-deterministically
-                // cause one final `process_lifecycle_events` run before exit.
-                biased;
-                _ = shutdown.notified() => {
-                    info!("Secret Lifecycle background worker received shutdown signal");
-                    break;
-                }
-                _ = ticker.tick() => {
-                    if let Err(e) = self.process_lifecycle_events().await {
-                        error!("Error processing lifecycle events: {}", e);
-                    }
-                }
             }
         }
     }
@@ -241,6 +215,13 @@ impl LifecycleService {
         self.manager.clone()
     }
 
+    /// Snapshot the `Notify` handle without holding a strong `Arc<Self>`.
+    /// Used by the worker (which holds a `Weak<Self>`) so that it can await
+    /// shutdown signals even when no strong reference is currently held.
+    fn shutdown_handle(&self) -> Arc<Notify> {
+        self.shutdown.clone()
+    }
+
     /// Delete expired user-owned secret entries and emit a `SecretDeletion`
     /// audit event for each one.
     ///
@@ -284,9 +265,21 @@ impl LifecycleService {
         // returned, avoiding the need to load non-expired rows into memory.
         const SWEEP_MAX_ENTRIES: u32 = 10_000;
 
+        // Sort by `expires_at ASC` so that already-expired entries (the rows
+        // we actually intend to delete) come first within the
+        // `SWEEP_MAX_ENTRIES` window. The default ordering on the PostgreSQL
+        // backend is `created_at DESC` (newest first), which on a deployment
+        // with more than `SWEEP_MAX_ENTRIES` non-expired-but-newer entries
+        // would push every expired entry past the cap and leave them
+        // uncleaned indefinitely. The PostgreSQL backend translates this to
+        // `ORDER BY expires_at ASC NULLS LAST` so non-expiring rows sort to
+        // the end. Backends that ignore `sort_by` (MySQL, InMemory, etc.)
+        // are unaffected by this hint.
         let params = QueryParams {
             include_expired: true,
             limit: Some(SWEEP_MAX_ENTRIES),
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
             ..Default::default()
         };
 
@@ -327,6 +320,69 @@ impl LifecycleService {
         }
 
         Ok(deleted)
+    }
+}
+
+/// Background worker driver. Holds only a `Weak<LifecycleService>` so that
+/// the worker does not keep the service alive on its own — once every
+/// external `Arc<LifecycleService>` is dropped, `weak.upgrade()` returns
+/// `None` and the worker exits. This makes ungraceful shutdowns safe: even
+/// if `shutdown_and_wait()` is never called, the worker terminates as soon
+/// as its owner is dropped, instead of leaking a periodic sweep until
+/// process exit.
+async fn start_worker(weak: Weak<LifecycleService>) {
+    info!("Starting Secret Lifecycle background worker");
+    // Snapshot the `Notify` while we still have a strong reference. The
+    // owner can later signal shutdown through this handle even after the
+    // worker only holds a `Weak`, because `Notify` is independently `Arc`'d.
+    let shutdown = match weak.upgrade() {
+        Some(svc) => svc.shutdown_handle(),
+        None => return,
+    };
+
+    // Delay the first tick by one period so that `process_lifecycle_events`
+    // does not run immediately on startup. `tokio::time::interval` would
+    // fire its first tick instantly, which is surprising for a destructive
+    // periodic sweep and could interact badly with migrations/warm-up.
+    let period = Duration::from_secs(3600);
+    let mut ticker = interval_at(Instant::now() + period, period);
+
+    loop {
+        tokio::select! {
+            // `biased;` ensures the shutdown branch is polled before the
+            // ticker branch when both are ready. Without this, a concurrent
+            // shutdown signal and ticker tick could non-deterministically
+            // cause one final `process_lifecycle_events` run before exit.
+            biased;
+            _ = shutdown.notified() => {
+                info!("Secret Lifecycle background worker received shutdown signal");
+                break;
+            }
+            _ = ticker.tick() => {
+                // Only upgrade for the duration of one tick. If the service
+                // has been dropped, exit cleanly without running the sweep.
+                let Some(svc) = weak.upgrade() else {
+                    info!("Secret Lifecycle service dropped; worker exiting");
+                    break;
+                };
+                if let Err(e) = svc.process_lifecycle_events().await {
+                    error!("Error processing lifecycle events: {}", e);
+                }
+                // `svc` (strong Arc) goes out of scope here, so we don't
+                // pin the service alive between ticks.
+            }
+        }
+    }
+}
+
+impl Drop for LifecycleService {
+    /// Defense-in-depth: signal the background worker on drop so it stops
+    /// promptly even when callers forget to invoke `shutdown_and_wait()`.
+    /// The worker's `Weak<Self>` will also fail to upgrade on the next
+    /// tick, but `notify_one` makes the exit immediate rather than
+    /// waiting up to one period for the next tick.
+    fn drop(&mut self) {
+        self.shutdown.notify_one();
     }
 }
 

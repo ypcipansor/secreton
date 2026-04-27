@@ -190,7 +190,33 @@ impl StorageBackend for PostgresBackend {
             query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
         }
 
-        query.push_str(" ORDER BY created_at DESC");
+        // Resolve ORDER BY clause from `sort_by` / `sort_order`. We whitelist
+        // both inputs to avoid SQL injection (these are concatenated into the
+        // query string, not bound parameters). Default ordering is unchanged
+        // (`created_at DESC`) so existing callers keep their previous behavior.
+        //
+        // For `expires_at ASC` we append `NULLS LAST` so that non-expiring
+        // entries (NULL `expires_at`) sort to the end. This is what the
+        // lifecycle sweep needs: it requests `expires_at ASC` to surface the
+        // oldest-expired entries first, which would otherwise be hidden
+        // behind the default newest-first ordering and missed by the
+        // `SWEEP_MAX_ENTRIES` cap.
+        let sort_column = match params.sort_by.as_deref() {
+            Some("path") => "path",
+            Some("created_at") => "created_at",
+            Some("updated_at") => "updated_at",
+            Some("expires_at") => "expires_at",
+            _ => "created_at",
+        };
+        let sort_dir = match params.sort_order.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("asc") => "ASC",
+            _ => "DESC",
+        };
+        if sort_column == "expires_at" && sort_dir == "ASC" {
+            query.push_str(" ORDER BY expires_at ASC NULLS LAST");
+        } else {
+            query.push_str(&format!(" ORDER BY {} {}", sort_column, sort_dir));
+        }
         if let Some(limit) = params.limit {
             query.push_str(&format!(" LIMIT ${}", param_count));
             bind_params.push(Box::new(limit as i64));
