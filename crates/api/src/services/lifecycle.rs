@@ -366,6 +366,25 @@ impl LifecycleService {
                             user: LIFECYCLE_AUDIT_ACTOR.to_string(),
                         })
                         .await;
+
+                    // Clean up version history entries scoped to this secret.
+                    //
+                    // `SecretService::put_secret` archives prior versions to
+                    // `sys/history/{path}::v{N}` and `SecretService::delete_secret`
+                    // (the user-initiated path) deletes them as part of the
+                    // delete operation (see `crates/api/src/services/secret.rs`
+                    // around the `HISTORY_DELETE_MAX_ENTRIES` block). Without
+                    // an equivalent cleanup here, expired secrets swept by the
+                    // lifecycle worker would leave orphaned encrypted history
+                    // entries indefinitely: those entries live under `sys/`,
+                    // which is in `RESERVED_PATH_PREFIXES`, so they will never
+                    // be picked up by a future sweep tick.
+                    //
+                    // The history-prefix scan is scoped to a specific just-
+                    // deleted user secret's path, so it does not violate the
+                    // reserved-namespace contract — we are only removing
+                    // entries that belong to a secret we just removed.
+                    self.cleanup_history_for(&fresh.path).await;
                 }
                 Ok(false) => {
                     // Entry vanished between re-read and delete — benign race.
@@ -380,6 +399,42 @@ impl LifecycleService {
         }
 
         Ok(deleted)
+    }
+
+    /// Delete `sys/history/{path}::v*` entries for a secret that was just
+    /// swept. Errors are logged but do not abort the sweep — leaving a
+    /// history entry behind is recoverable; aborting the sweep is not.
+    async fn cleanup_history_for(&self, path: &str) {
+        // Mirrors the bound used by `SecretService::delete_secret`'s history
+        // cleanup. 10k history entries for a single secret is far above
+        // realistic usage; capping prevents the lifecycle worker from
+        // scanning arbitrary numbers of rows on a single deletion.
+        const HISTORY_DELETE_MAX_ENTRIES: u32 = 10_000;
+
+        let history_prefix = format!("sys/history/{}::v", path);
+        let query = QueryParams::new()
+            .with_path_prefix(history_prefix)
+            .with_limit(HISTORY_DELETE_MAX_ENTRIES);
+
+        let entries = match self.storage.list(&query).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                warn!(
+                    "Failed to list history entries for swept secret {}: {}",
+                    path, e
+                );
+                return;
+            }
+        };
+
+        for entry in entries {
+            if let Err(e) = self.storage.delete_by_id(entry.id).await {
+                warn!(
+                    "Failed to delete orphaned history entry {} for swept secret {}: {}",
+                    entry.path, path, e
+                );
+            }
+        }
     }
 }
 
@@ -583,16 +638,33 @@ mod tests {
         .with_expiration(past);
         storage.store(&user_entry).await.unwrap();
 
-        // Expired entry under a reserved namespace — must be preserved.
-        let reserved_entry = SecretEntry::new(
+        // History entry belonging to the secret being swept — should be
+        // cleaned up alongside the primary entry to prevent orphaned
+        // encrypted history rows from accumulating under `sys/history/`.
+        // No `expires_at` is set: history entries are removed because their
+        // owning secret is being deleted, not because they expired
+        // independently.
+        let history_entry = SecretEntry::new(
             "sys/history/app/prod/api-key::v1".to_string(),
             vec![9, 9, 9],
             EncryptionMetadata::default(),
             SecurityLevel::Confidential,
             owner,
+        );
+        storage.store(&history_entry).await.unwrap();
+
+        // Unrelated entry under a reserved namespace (different secret) —
+        // must be preserved. This proves the reserved-namespace guard is
+        // still honored for entries that are not history of a swept secret.
+        let unrelated_reserved = SecretEntry::new(
+            "sys/history/other/secret::v1".to_string(),
+            vec![7, 7, 7],
+            EncryptionMetadata::default(),
+            SecurityLevel::Confidential,
+            owner,
         )
         .with_expiration(past);
-        storage.store(&reserved_entry).await.unwrap();
+        storage.store(&unrelated_reserved).await.unwrap();
 
         let cfg = LifecycleConfig {
             enabled: true,
@@ -619,14 +691,27 @@ mod tests {
                 .is_none(),
             "expired user secret should be deleted"
         );
-        // Reserved-namespace entry is preserved.
+        // History entry for the swept secret is also gone — otherwise it
+        // would be an orphaned `sys/history/` row that no future sweep can
+        // ever reach (the `sys/` namespace is reserved).
         assert!(
             storage
                 .get_by_path("sys/history/app/prod/api-key::v1")
                 .await
                 .unwrap()
+                .is_none(),
+            "history entries of a swept secret must be cleaned up to avoid orphans"
+        );
+        // Unrelated reserved-namespace entry is preserved — the lifecycle
+        // worker still does not touch reserved entries that don't belong to
+        // a secret it just deleted.
+        assert!(
+            storage
+                .get_by_path("sys/history/other/secret::v1")
+                .await
+                .unwrap()
                 .is_some(),
-            "entries under sys/ must not be swept by the lifecycle worker"
+            "unrelated entries under sys/ must not be swept by the lifecycle worker"
         );
     }
 }
