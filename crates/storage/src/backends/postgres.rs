@@ -383,6 +383,25 @@ impl StorageBackend for PostgresBackend {
         if let Some(owner) = &params.owner_id {
             query.push_str(&format!(" AND owner_id = ${}", param_count));
             bind_params.push(Box::new(*owner));
+            param_count += 1;
+        }
+
+        // Mirror the filters applied in `list()` so that `count()` and
+        // `list()` agree on which rows are visible for a given `QueryParams`.
+        // Without this, callers like `get_active_session_count()` (which uses
+        // the default `include_expired: false`) would see expired sessions
+        // counted by `count()` but excluded by `list()` — a silent contract
+        // violation between the two methods that other backends (e.g. MySQL,
+        // whose `count()` delegates to `list().len()`) do not exhibit.
+        for prefix in &params.excluded_path_prefixes {
+            query.push_str(&format!(" AND path NOT LIKE ${}", param_count));
+            let prefix_pattern = format!("{}%", prefix);
+            bind_params.push(Box::new(prefix_pattern));
+            param_count += 1;
+        }
+
+        if !params.include_expired {
+            query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
         }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
