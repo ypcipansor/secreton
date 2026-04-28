@@ -284,8 +284,10 @@ impl LifecycleService {
         // would push every expired entry past the cap and leave them
         // uncleaned indefinitely. The PostgreSQL backend translates this to
         // `ORDER BY expires_at ASC NULLS LAST` so non-expiring rows sort to
-        // the end. Backends that ignore `sort_by` (MySQL, InMemory, etc.)
-        // are unaffected by this hint.
+        // the end. The MySQL backend honors `sort_by`/`sort_order` as well
+        // (using `COALESCE(expires_at, '9999-12-31') ASC` to emulate
+        // `NULLS LAST`). Backends that ignore `sort_by` (e.g. the in-memory
+        // mock) are unaffected by this hint.
         //
         // Push reserved-namespace exclusion down to the storage layer via
         // `excluded_path_prefixes`. This prevents reserved entries (notably

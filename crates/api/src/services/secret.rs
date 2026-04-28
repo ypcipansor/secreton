@@ -633,10 +633,18 @@ impl SecretService {
 
         // Delete history if requested
         if delete_history {
+            // Cap the scan with an explicit upper bound. Before the
+            // PostgreSQL backend's default `LIMIT 100` was removed (in the
+            // lifecycle PR), this scan was implicitly bounded; without an
+            // explicit limit it would now perform an unbounded scan of the
+            // history namespace on every delete. 10k history entries for a
+            // single secret is far above realistic usage.
+            const HISTORY_DELETE_MAX_ENTRIES: u32 = 10_000;
             let history_prefix = format!("sys/history/{}::v", path);
             let query = secreton_storage::QueryParams::new()
                 .with_path_prefix(history_prefix)
-                .with_owner(Self::get_user_uuid(user));
+                .with_owner(Self::get_user_uuid(user))
+                .with_limit(HISTORY_DELETE_MAX_ENTRIES);
 
             if let Ok(entries) = self.storage.list(&query).await {
                 for entry in entries {
@@ -821,11 +829,20 @@ impl SecretService {
         }
 
         // 2. Get history versions
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the history namespace on
+        // every list call. 10k versions for a single secret is far above
+        // realistic usage.
+        const HISTORY_LIST_MAX_ENTRIES: u32 = 10_000;
         let history_prefix = format!("sys/history/{}::v", path);
         // We use query with owner to let backend filter, but we also double check
         let query = secreton_storage::QueryParams::new()
             .with_path_prefix(history_prefix)
-            .with_owner(user_uuid);
+            .with_owner(user_uuid)
+            .with_limit(HISTORY_LIST_MAX_ENTRIES);
 
         let history_entries = self
             .storage
@@ -1176,9 +1193,18 @@ impl SecretService {
         self.check_permission(user, &format!("keys/{}/", user.id), "list")
             .await?;
 
-        // Build query params for keys
+        // Build query params for keys.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the keys namespace on every
+        // list call. 10k keys per user is far above realistic usage.
+        const KEY_LIST_MAX_ENTRIES: u32 = 10_000;
         let keys_prefix = format!("keys/{}/", user.id);
-        let query = secreton_storage::QueryParams::new().with_path_prefix(keys_prefix.clone());
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(keys_prefix.clone())
+            .with_limit(KEY_LIST_MAX_ENTRIES);
 
         let entries = self
             .storage
@@ -1547,9 +1573,18 @@ impl SecretService {
         // Get current key info to ensure it exists and get base metadata
         let current_key = self.get_key(key_id, user).await?;
 
-        // Build query params for key versions in key_data
+        // Build query params for key versions in key_data.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the key_data namespace on
+        // every call. 10k versions per key is far above realistic usage.
+        const KEY_VERSION_LIST_MAX_ENTRIES: u32 = 10_000;
         let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
-        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(key_data_prefix.clone())
+            .with_limit(KEY_VERSION_LIST_MAX_ENTRIES);
 
         let entries = self
             .storage
@@ -1648,9 +1683,18 @@ impl SecretService {
              return Err(SecretError::KeyNotFound { key_id: key_id.to_string() });
         }
 
-        // 2. Delete all versioned key material
+        // 2. Delete all versioned key material.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the key_data namespace on
+        // every delete. 10k versions per key is far above realistic usage.
+        const KEY_VERSION_DELETE_MAX_ENTRIES: u32 = 10_000;
         let key_data_prefix = format!("key_data/{}/{}_v", user.id, key_id);
-        let query = secreton_storage::QueryParams::new().with_path_prefix(key_data_prefix.clone());
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(key_data_prefix.clone())
+            .with_limit(KEY_VERSION_DELETE_MAX_ENTRIES);
         let entries = self.storage.list(&query).await.map_err(SecretError::Storage)?;
 
         for entry in entries {
