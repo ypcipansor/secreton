@@ -553,7 +553,22 @@ pub struct AuditFilters {
     pub path: Option<String>,
     pub start_date: Option<chrono::DateTime<chrono::Utc>>,
     pub end_date: Option<chrono::DateTime<chrono::Utc>>,
+    /// Maximum number of storage entries to scan. `None` falls back to
+    /// [`AUDIT_QUERY_DEFAULT_MAX_ENTRIES`] inside `get_entries`. Compliance
+    /// callers (e.g. `export_data`) override this to a much higher value to
+    /// avoid silently truncating the export.
+    pub limit: Option<u32>,
 }
+
+/// Default safety cap for `get_entries` scans when `AuditFilters.limit` is
+/// `None`. Bounds memory use on large audit logs (PostgreSQL no longer
+/// imposes an implicit `LIMIT 100` after the lifecycle PR).
+pub const AUDIT_QUERY_DEFAULT_MAX_ENTRIES: u32 = 10_000;
+
+/// Higher cap used by `export_data` so that compliance exports are not
+/// silently truncated at the default 10k. If the export ever returns
+/// exactly this many rows the operator is warned (see `export_data`).
+pub const AUDIT_EXPORT_MAX_ENTRIES: u32 = 1_000_000;
 
 impl AuditFilters {
     pub fn new() -> Self {
@@ -604,9 +619,37 @@ impl AuditLogger {
             "sys/audit/".to_string()
         };
 
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this query was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan on a busy audit
+        // log (potentially millions of entries) and load the entire result
+        // set into memory.
+        //
+        // The cap is overridable via `AuditFilters.limit` so that compliance
+        // callers (e.g. `export_data`) can request a much larger window
+        // without silently truncating. When the cap is hit we log a WARN so
+        // operators notice that results may be incomplete.
+        //
+        // TODO: Replace the in-memory filter loop below with backend-level
+        // filtering on user/action/path/timestamp so this cap is no longer
+        // necessary.
+        let scan_limit = filters.limit.unwrap_or(AUDIT_QUERY_DEFAULT_MAX_ENTRIES);
+        // Set `include_expired: true` so the storage layer does not filter out
+        // audit entries whose `expires_at` (set to `now + retention_days` by
+        // `StorageAuditDevice`) has passed. The audit subsystem owns its own
+        // retention via dedicated cleanup paths; the query layer must not
+        // silently drop entries that are still on disk and still within the
+        // caller's requested time window. Without this flag, the PostgreSQL
+        // backend (which now honors `include_expired`) would hide post-retention
+        // audit rows from compliance exports while older backends (InMemory,
+        // MySQL, etc.) would behave consistently — but only because PostgreSQL
+        // previously had no expiration filter. This makes that consistency
+        // explicit instead of relying on backend-specific quirks.
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
-            limit: None,
+            limit: Some(scan_limit),
+            include_expired: true,
             ..Default::default()
         };
 
@@ -620,6 +663,20 @@ impl AuditLogger {
         }
 
         let entries = self.storage.list(&query_params).await?;
+        // Warn when the storage scan returns exactly `scan_limit` rows: this
+        // strongly suggests the cap was hit and additional matching entries
+        // exist beyond it. Filtering happens client-side below, so a rare
+        // filter could legitimately drop everything and produce zero results
+        // even though matches exist past the cap — operators relying on
+        // user/action/path filters should be aware that the cap applies
+        // *before* filtering.
+        if entries.len() as u32 >= scan_limit {
+            tracing::warn!(
+                "Audit query reached scan limit of {} entries; results may be incomplete. \
+                 Pass `AuditFilters.limit` to widen the window or narrow the time range.",
+                scan_limit,
+            );
+        }
         let mut results = Vec::new();
 
         for entry in entries {
@@ -679,11 +736,20 @@ impl AuditLogger {
     }
 
     /// Export audit data
+    ///
+    /// Compliance-oriented exports widen the storage scan cap to
+    /// [`AUDIT_EXPORT_MAX_ENTRIES`] when the caller has not specified one,
+    /// so that the default `get_entries` cap (10k) does not silently
+    /// truncate exports of large audit logs. Callers who need different
+    /// behaviour can pre-populate `filters.limit`.
     pub async fn export_data(
         &self,
         format: ExportFormat,
-        filters: AuditFilters,
+        mut filters: AuditFilters,
     ) -> Result<Vec<u8>> {
+        if filters.limit.is_none() {
+            filters.limit = Some(AUDIT_EXPORT_MAX_ENTRIES);
+        }
         let entries = self.get_entries(filters).await?;
 
         match format {

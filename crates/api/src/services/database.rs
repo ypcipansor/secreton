@@ -81,9 +81,18 @@ impl DatabaseService {
                 None
             };
 
-        // Load roles from storage
+        // Load roles from storage.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now load every role into memory and decrypt each one on
+        // every initialization. 10k DB roles is far above realistic
+        // deployments while still bounding worst-case startup memory.
+        const DB_ROLE_LOAD_MAX_ENTRIES: u32 = 10_000;
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
+            limit: Some(DB_ROLE_LOAD_MAX_ENTRIES),
             ..Default::default()
         };
         let entries = self.storage.list(&query).await?;
@@ -172,8 +181,15 @@ impl DatabaseService {
         // Load roles from storage BEFORE persisting the new config.  If the
         // role-loading step fails, we return an error without having written
         // the config — keeping storage and the in-memory engine consistent.
+        //
+        // Cap mirrors `ensure_initialized` — see DB_ROLE_LOAD_MAX_ENTRIES
+        // there for the rationale. Without an explicit limit, set_config
+        // would now perform an unbounded scan of the role namespace on
+        // PostgreSQL after the lifecycle PR removed the default LIMIT 100.
+        const DB_ROLE_LOAD_MAX_ENTRIES: u32 = 10_000;
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_ROLE_PREFIX.to_string()),
+            limit: Some(DB_ROLE_LOAD_MAX_ENTRIES),
             ..Default::default()
         };
         let entries = self.storage.list(&query).await
@@ -363,8 +379,16 @@ impl DatabaseService {
     pub async fn list_leases(&self) -> std::result::Result<Vec<Value>, DatabaseServiceError> {
         self.ensure_initialized().await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        // Cap the lease scan with an explicit upper bound. Before the
+        // PostgreSQL backend's default `LIMIT 100` was removed (in the
+        // lifecycle PR), this scan was implicitly bounded; without an
+        // explicit limit `list_leases` would now perform an unbounded
+        // scan of the lease namespace on every call. 10k active leases is
+        // far above realistic deployments while still bounding memory.
+        const DB_LEASE_LIST_MAX_ENTRIES: u32 = 10_000;
         let query = secreton_storage::QueryParams {
             path_prefix: Some(DB_LEASE_PREFIX.to_string()),
+            limit: Some(DB_LEASE_LIST_MAX_ENTRIES),
             ..Default::default()
         };
         let entries = self.storage.list(&query).await

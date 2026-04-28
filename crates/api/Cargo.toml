@@ -78,6 +78,7 @@ secreton-secrets-database = { path = "../secrets-database" }
 secreton-config = { path = "../config" }
 secreton-performance = { path = "../performance" }
 secreton-grpc = { path = "../grpc" }
+secreton-integrations = { path = "../integrations" }
 
 # Metrics
 prometheus.workspace = true

@@ -425,25 +425,35 @@ impl MySQLStorage {
             "SELECT id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at FROM `{}`",
             table_name
         );
-        let mut where_clauses = Vec::new();
+        let mut where_clauses: Vec<String> = Vec::new();
         let mut values: Vec<mysql_async::Value> = Vec::new();
 
         if let Some(prefix) = &params.path_prefix {
             if !prefix.is_empty() {
-                where_clauses.push("path LIKE ?");
+                where_clauses.push("path LIKE ?".to_string());
                 values.push(mysql_async::Value::from(format!("{}%", prefix)));
             }
         }
 
         if let Some(owner_id) = params.owner_id {
-            where_clauses.push("owner_id = ?");
+            where_clauses.push("owner_id = ?".to_string());
             values.push(mysql_async::Value::from(owner_id.to_string()));
+        }
+
+        // Exclude reserved namespaces at the SQL layer so they don't consume
+        // rows from `limit`. Mirrors the PostgreSQL backend behaviour so that
+        // callers (notably the lifecycle sweep) get consistent results across
+        // backends. Each prefix becomes its own bound `path NOT LIKE ?`
+        // clause to keep this SQL-injection safe.
+        for prefix in &params.excluded_path_prefixes {
+            where_clauses.push("path NOT LIKE ?".to_string());
+            values.push(mysql_async::Value::from(format!("{}%", prefix)));
         }
 
         if !params.include_expired {
             // entry.is_expired() checks if expires_at is some and <= now.
             // So we want (expires_at IS NULL OR expires_at > NOW())
-            where_clauses.push("(expires_at IS NULL OR expires_at > NOW())");
+            where_clauses.push("(expires_at IS NULL OR expires_at > NOW())".to_string());
         }
 
         if !where_clauses.is_empty() {
@@ -451,7 +461,45 @@ impl MySQLStorage {
             query.push_str(&where_clauses.join(" AND "));
         }
 
-        query.push_str(" ORDER BY path");
+        // Resolve ORDER BY clause from `sort_by` / `sort_order`. We whitelist
+        // both inputs to avoid SQL injection (these are concatenated into the
+        // query string, not bound parameters). Default ordering remains
+        // `path ASC` so existing callers keep their previous behaviour.
+        //
+        // For `expires_at ASC` we coalesce NULL `expires_at` to a
+        // far-future timestamp so non-expiring entries sort to the end —
+        // matching the PostgreSQL backend's `NULLS LAST` semantics. MySQL
+        // sorts NULLs first by default for ASC, which would push the
+        // already-expired rows the lifecycle sweep needs past the LIMIT.
+        let sort_column = match params.sort_by.as_deref() {
+            Some("path") => "path",
+            Some("created_at") => "created_at",
+            Some("updated_at") => "updated_at",
+            Some("expires_at") => "expires_at",
+            _ => "path",
+        };
+        // Default direction is `ASC` to preserve the pre-existing behaviour
+        // of this backend (which previously emitted `ORDER BY path` with no
+        // explicit direction, i.e. ASC). Changing the default would silently
+        // flip the result order for every existing caller that sets only
+        // `sort_by` without `sort_order` (e.g. `list_backups`, `list_users`,
+        // `list_policies`, `list_leases`). The lifecycle sweep always sets
+        // both fields explicitly, so it is unaffected by this default. Note
+        // that this differs from the PostgreSQL backend's `DESC` default —
+        // that inconsistency is a separate issue tracked at the
+        // `QueryParams` API level.
+        let sort_dir = match params.sort_order.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("desc") => "DESC",
+            Some(s) if s.eq_ignore_ascii_case("asc") => "ASC",
+            _ => "ASC",
+        };
+        if sort_column == "expires_at" && sort_dir == "ASC" {
+            query.push_str(
+                " ORDER BY COALESCE(expires_at, '9999-12-31 23:59:59') ASC",
+            );
+        } else {
+            query.push_str(&format!(" ORDER BY {} {}", sort_column, sort_dir));
+        }
 
         if let Some(limit) = params.limit {
             query.push_str(" LIMIT ?");

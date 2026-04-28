@@ -183,9 +183,58 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
-        query.push_str(&format!(" ORDER BY created_at DESC LIMIT ${}", param_count));
-        let limit = params.limit.unwrap_or(100);
-        bind_params.push(Box::new(limit as i64));
+        // Exclude reserved namespaces at the SQL layer so they don't consume
+        // rows from `limit`. Without this, e.g. the lifecycle sweep on a
+        // deployment with >SWEEP_MAX_ENTRIES expired audit entries (under
+        // `sys/audit/`, sorted earliest by `expires_at ASC`) would have its
+        // entire window filled with reserved entries and never reach a
+        // user-owned secret. Each excluded prefix becomes its own bound
+        // `path NOT LIKE $N` clause to keep this SQL-injection safe.
+        for prefix in &params.excluded_path_prefixes {
+            query.push_str(&format!(" AND path NOT LIKE ${}", param_count));
+            let prefix_pattern = format!("{}%", prefix);
+            bind_params.push(Box::new(prefix_pattern));
+            param_count += 1;
+        }
+
+        // Filter out expired entries unless explicitly requested. This matches
+        // the behavior of the InMemory and MySQL backends so that callers see
+        // a consistent contract across storage implementations.
+        if !params.include_expired {
+            query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
+        }
+
+        // Resolve ORDER BY clause from `sort_by` / `sort_order`. We whitelist
+        // both inputs to avoid SQL injection (these are concatenated into the
+        // query string, not bound parameters). Default ordering is unchanged
+        // (`created_at DESC`) so existing callers keep their previous behavior.
+        //
+        // For `expires_at ASC` we append `NULLS LAST` so that non-expiring
+        // entries (NULL `expires_at`) sort to the end. This is what the
+        // lifecycle sweep needs: it requests `expires_at ASC` to surface the
+        // oldest-expired entries first, which would otherwise be hidden
+        // behind the default newest-first ordering and missed by the
+        // `SWEEP_MAX_ENTRIES` cap.
+        let sort_column = match params.sort_by.as_deref() {
+            Some("path") => "path",
+            Some("created_at") => "created_at",
+            Some("updated_at") => "updated_at",
+            Some("expires_at") => "expires_at",
+            _ => "created_at",
+        };
+        let sort_dir = match params.sort_order.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("asc") => "ASC",
+            _ => "DESC",
+        };
+        if sort_column == "expires_at" && sort_dir == "ASC" {
+            query.push_str(" ORDER BY expires_at ASC NULLS LAST");
+        } else {
+            query.push_str(&format!(" ORDER BY {} {}", sort_column, sort_dir));
+        }
+        if let Some(limit) = params.limit {
+            query.push_str(&format!(" LIMIT ${}", param_count));
+            bind_params.push(Box::new(limit as i64));
+        }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
             .iter()
@@ -334,6 +383,25 @@ impl StorageBackend for PostgresBackend {
         if let Some(owner) = &params.owner_id {
             query.push_str(&format!(" AND owner_id = ${}", param_count));
             bind_params.push(Box::new(*owner));
+            param_count += 1;
+        }
+
+        // Mirror the filters applied in `list()` so that `count()` and
+        // `list()` agree on which rows are visible for a given `QueryParams`.
+        // Without this, callers like `get_active_session_count()` (which uses
+        // the default `include_expired: false`) would see expired sessions
+        // counted by `count()` but excluded by `list()` — a silent contract
+        // violation between the two methods that other backends (e.g. MySQL,
+        // whose `count()` delegates to `list().len()`) do not exhibit.
+        for prefix in &params.excluded_path_prefixes {
+            query.push_str(&format!(" AND path NOT LIKE ${}", param_count));
+            let prefix_pattern = format!("{}%", prefix);
+            bind_params.push(Box::new(prefix_pattern));
+            param_count += 1;
+        }
+
+        if !params.include_expired {
+            query.push_str(" AND (expires_at IS NULL OR expires_at > NOW())");
         }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params

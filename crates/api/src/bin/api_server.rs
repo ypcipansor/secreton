@@ -13,6 +13,7 @@ use warp::Filter;
 use secreton_api::services::audit::AuditLogger;
 use secreton_api::services::auth::AuthenticationService;
 use secreton_api::services::crypto::CryptoService;
+use secreton_api::services::lifecycle::LifecycleService;
 use secreton_api::services::seal::SealService;
 use secreton_api::services::secret::SecretService;
 use secreton_api::{SecurityAPI, handle_rejection};
@@ -321,6 +322,30 @@ async fn main() -> anyhow::Result<()> {
         .await?,
     );
 
+    // Initialize Secret Lifecycle service.
+    //
+    // Defaults match `ApiServiceContainer::new` — conservative `enabled: false`
+    // and `cleanup_enabled: false` so this binary can't silently delete
+    // expired secrets until the feature is opted into explicitly. The worker
+    // is spawned below; when disabled this is a no-op. We keep an `Arc` so we
+    // can call `shutdown_and_wait()` on exit to drain any in-flight sweep.
+    // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
+    let lifecycle_config =
+        secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
+            enabled: false,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: false,
+        };
+    let lifecycle = Arc::new(LifecycleService::new(
+        storage.clone(),
+        secreton.clone(),
+        audit.clone(),
+        lifecycle_config,
+    ));
+    lifecycle.spawn_worker().await;
+
     // Construct HTTP Routes
     // Pass the SHARED mfa instance
     let warp_routes = SecurityAPI::routes(
@@ -403,6 +428,12 @@ async fn main() -> anyhow::Result<()> {
         "admin".to_string(),
         admin.clone(),
     );
+    // Register the lifecycle service so handlers/middleware that look it up
+    // by name from the container behave consistently with the
+    // `ApiServiceContainer` code path (which also registers it under
+    // "lifecycle").
+    container
+        .register_service::<Arc<LifecycleService>>("lifecycle".to_string(), lifecycle.clone());
     container.register_service::<Arc<SecretPerformanceOptimizer>>(
         "performance".to_string(),
         performance.clone(),
@@ -507,14 +538,39 @@ async fn main() -> anyhow::Result<()> {
     let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
     let listener = tokio::net::TcpListener::bind(axum_addr).await?;
 
+    // Broadcast channel used to fan out a single shutdown signal to every
+    // server. `broadcast::channel(1)` is sufficient since we only ever send
+    // one `()` value: each subscriber's `recv()` will resolve as soon as that
+    // value is sent (or with `RecvError::Closed` if the sender is dropped,
+    // which we treat the same as a shutdown signal).
+    //
+    // Each server below is given its own `Receiver` (via `subscribe()`) and
+    // wired into the framework's native graceful-shutdown hook
+    // (`axum::serve(...).with_graceful_shutdown`,
+    // `warp::serve(...).bind_with_graceful_shutdown`,
+    // `tonic::Server::serve_with_shutdown`). This lets in-flight requests
+    // drain instead of being torn down mid-response when the runtime is
+    // dropped.
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+
+    let mut axum_shutdown_rx = shutdown_tx.subscribe();
     let axum_server = async move {
-        if let Err(e) = axum::serve(listener, axum_router).await {
+        let result = axum::serve(listener, axum_router)
+            .with_graceful_shutdown(async move {
+                let _ = axum_shutdown_rx.recv().await;
+            })
+            .await;
+        if let Err(e) = result {
             warn!("Axum server failed: {}", e);
         }
     };
 
-    // Spawn Warp Server (Legacy/Core)
-    let warp_server = warp::serve(warp_routes).run((host_ip, http_port));
+    // Spawn Warp Server (Legacy/Core) with graceful shutdown.
+    let mut warp_shutdown_rx = shutdown_tx.subscribe();
+    let (_warp_addr, warp_server) = warp::serve(warp_routes)
+        .bind_with_graceful_shutdown((host_ip, http_port), async move {
+            let _ = warp_shutdown_rx.recv().await;
+        });
 
     info!("📋 Available endpoints:");
     info!("   GET  /health - System health check");
@@ -527,25 +583,110 @@ async fn main() -> anyhow::Result<()> {
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
     let grpc_service = GrpcSecretService::new(secreton.clone(), auth.clone());
 
+    let mut grpc_shutdown_rx = shutdown_tx.subscribe();
     let grpc_server = Server::builder()
         .add_service(SecretServiceServer::new(grpc_service))
-        .serve(grpc_addr);
+        .serve_with_shutdown(grpc_addr, async move {
+            let _ = grpc_shutdown_rx.recv().await;
+        });
 
     info!(
         "🚀 Servers starting (HTTP: {}, Enhanced API: {}, gRPC: {})...",
         http_port, axum_port, grpc_port
     );
 
-    // Run all servers concurrently
-    let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
+    // Graceful shutdown on Ctrl+C / SIGTERM.
+    //
+    // Previously this used `tokio::join!`, which waits until every server
+    // future completes — in practice, that only happens on process termination.
+    // That left no opportunity to flush buffered audit events or to drain
+    // background workers (e.g. the lifecycle worker in `ApiServiceContainer`)
+    // before the tokio runtime is dropped, risking interrupted in-flight
+    // storage writes and silently lost audit entries.
+    //
+    // We now wait for either (a) all three servers to exit on their own, or
+    // (b) a shutdown signal. On (b) we broadcast to every server's
+    // graceful-shutdown hook so in-flight requests drain instead of being
+    // torn down when their futures are dropped, then await the joined
+    // servers to completion.
+    let joined_servers = async {
+        let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
+        if let Err(e) = grpc_res {
+            warn!("gRPC server failed: {}", e);
+        }
+    };
+    tokio::pin!(joined_servers);
 
-    if let Err(e) = grpc_res {
-        warn!("gRPC server failed: {}", e);
+    tokio::select! {
+        _ = &mut joined_servers => {
+            info!("Servers exited on their own.");
+        }
+        _ = shutdown_signal() => {
+            info!("Shutdown signal received; draining services...");
+            // Fan out the shutdown to every subscribed server. A send error
+            // here just means no receivers are listening (all servers
+            // already exited), which is benign.
+            let _ = shutdown_tx.send(());
+            // Wait for the servers to finish draining. Without this await,
+            // dropping `joined_servers` would cancel in-flight requests
+            // mid-response — defeating the purpose of `with_graceful_shutdown`.
+            joined_servers.await;
+        }
+    }
+
+    // Drain the lifecycle worker first so any in-flight sweep finishes before
+    // we flush audit — otherwise a sweep in progress could emit audit events
+    // after the flush and lose them. When the service is disabled this is a
+    // cheap no-op (no worker was spawned).
+    lifecycle.shutdown_and_wait().await;
+
+    // Flush buffered audit events before exit. This is best-effort: a flush
+    // failure is logged but does not prevent shutdown, so a wedged audit
+    // backend can't hang the process.
+    //
+    // TODO: Once `api_server.rs` is migrated to `ApiServiceContainer`, call
+    // `container.stop_services().await` here instead of managing shutdown of
+    // individual services by hand.
+    if let Err(e) = audit.flush().await {
+        warn!("Failed to flush audit logs on shutdown: {}", e);
     }
 
     info!("Servers stopped.");
 
     Ok(())
+}
+
+/// Wait for Ctrl+C or (on Unix) SIGTERM.
+///
+/// Completes on the first signal received. Returns immediately if either
+/// listener fails to install — we prefer to shut down rather than hang on a
+/// broken signal handler.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!("Failed to install Ctrl+C handler: {}", e);
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => {
+                warn!("Failed to install SIGTERM handler: {}", e);
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
 }
 
 fn print_startup_banner() {

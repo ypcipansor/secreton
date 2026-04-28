@@ -482,6 +482,8 @@ pub fn SecretsList() -> impl IntoView {
                                                 </Show>
                                                 <div class="flex justify-end text-xs text-gray-400 uppercase font-bold tracking-wider">
                                                     {format!("Version: {}", version)}
+                                                        // TODO: Display detailed lifecycle status (Expiring, Archived)
+                                                        // and integration status (Synced to AWS/Azure) here.
                                                 </div>
                                                 <div class="grid gap-4">
                                                     {map.iter().map(|(k, v)| {

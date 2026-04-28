@@ -172,6 +172,16 @@ pub struct QueryParams {
     /// Filter by path prefix
     pub path_prefix: Option<String>,
 
+    /// Exclude entries whose path starts with any of these prefixes.
+    ///
+    /// Used by the lifecycle sweep to skip reserved namespaces (e.g. `sys/`,
+    /// `keys/`) at the storage layer instead of paying for them with the
+    /// query's `limit` budget. Backends that ignore this field are not
+    /// incorrect — callers must still apply their own in-memory exclusion as
+    /// a fallback — but on backends that honor it (e.g. PostgreSQL), reserved
+    /// entries no longer consume rows from `limit`.
+    pub excluded_path_prefixes: Vec<String>,
+
     /// Filter by security level (minimum)
     pub security_level: Option<SecurityLevel>,
 
@@ -207,6 +217,15 @@ impl QueryParams {
 
     pub fn with_path_prefix(mut self, prefix: String) -> Self {
         self.path_prefix = Some(prefix);
+        self
+    }
+
+    pub fn with_excluded_path_prefixes<I, S>(mut self, prefixes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.excluded_path_prefixes = prefixes.into_iter().map(Into::into).collect();
         self
     }
 

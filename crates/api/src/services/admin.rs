@@ -326,9 +326,18 @@ impl AdminService {
             "sys/audit/".to_string()
         };
 
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit
+        // `get_system_stats` (which calls this) would perform an unbounded
+        // scan of the audit-log namespace on every metrics request. 10k
+        // audit entries within a 5-minute window is far above realistic
+        // throughput, so hitting the cap effectively means the rate is at
+        // least the cap / 5 minutes regardless.
+        const REQUESTS_PER_MINUTE_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
-            limit: None,
+            limit: Some(REQUESTS_PER_MINUTE_MAX_ENTRIES),
             ..Default::default()
         };
 
@@ -363,12 +372,33 @@ impl AdminService {
         let backup_id = uuid::Uuid::new_v4().to_string();
         let backup_path = format!("backups/{}", backup_id);
 
-        // Get all secreton entries to backup
+        // Get all secreton entries to backup.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded to 100 entries (which would have
+        // produced a silently-truncated backup). Now it is explicitly capped
+        // at 1M entries, which is generous for typical deployments while
+        // still bounding worst-case memory.
+        //
+        // Set `include_expired: true` so the storage layer does not filter
+        // out entries whose `expires_at` has passed. Backups must capture
+        // every persisted row regardless of its expiration timestamp —
+        // expired-but-not-yet-swept secrets, audit log rows (which set
+        // `expires_at = now + retention_days`), and any other entries with
+        // a TTL must all be present on restore. Without this flag, the
+        // PostgreSQL backend (which now honors `include_expired` after the
+        // lifecycle PR) would silently drop these rows from backups,
+        // producing incomplete snapshots and data loss on restore.
+        //
+        // TODO: Stream backups in chunks instead of loading the full table
+        // into memory, so very large deployments can be backed up reliably.
+        const BACKUP_MAX_ENTRIES: u32 = 1_000_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: None,
-
-            limit: None,
+            limit: Some(BACKUP_MAX_ENTRIES),
             offset: Some(0),
+            include_expired: true,
             ..Default::default()
         };
 
@@ -478,10 +508,17 @@ impl AdminService {
 
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan filtered to the
+        // `backups/` prefix in memory. We push the prefix down to the
+        // storage layer and cap the result at 10k backup entries (well above
+        // realistic backup retention).
+        const LIST_BACKUPS_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
-            path_prefix: None,
-
-            limit: None,
+            path_prefix: Some("backups/".to_string()),
+            limit: Some(LIST_BACKUPS_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         };
@@ -1126,9 +1163,15 @@ impl AdminService {
         AdminError,
     > {
         const PREFIX: &str = "sys/policies/content/";
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the policy-content
+        // namespace. 10k policies is far above realistic deployments.
+        const POLICY_CONTENT_LIST_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: Some(PREFIX.to_string()),
-            limit: None,
+            limit: Some(POLICY_CONTENT_LIST_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         };
@@ -1385,9 +1428,22 @@ impl AdminService {
         let mut findings = Vec::new();
 
         // Check for certificates/keys expiring soon
-        // Scan certificate storage for entries with expiry dates
+        // Scan certificate storage for entries with expiry dates.
+        //
+        // We cap the scan with an explicit `limit` to avoid loading the entire
+        // `secreton_entries` table into memory on large deployments. Before
+        // the PostgreSQL backend's default `LIMIT 100` was removed (in the
+        // lifecycle PR), this call was implicitly bounded; without an explicit
+        // limit it would now perform an unbounded full-table scan twice
+        // (here and in the PKI block below).
+        //
+        // TODO: Replace this with a path-prefixed scan once certificates are
+        // stored under a dedicated namespace, so we only read certificate
+        // entries instead of filtering every entry by metadata.
+        const CERT_SCAN_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CERT_SCAN_MAX_ENTRIES),
             ..Default::default()
         };
 
@@ -1474,9 +1530,12 @@ impl AdminService {
         }
 
         // Also check for PKI certificates if available
-        // This would integrate with the PKI service to check CA and issued certificates
+        // This would integrate with the PKI service to check CA and issued certificates.
+        // Same memory-safety reasoning as the certificate scan above —
+        // see `CERT_SCAN_MAX_ENTRIES` for the rationale.
         let pki_query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CERT_SCAN_MAX_ENTRIES),
             ..Default::default()
         };
 
@@ -2895,8 +2954,17 @@ impl AdminService {
         let now = chrono::Utc::now();
 
         // Query for all secrets with expiry metadata
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan on large
+        // deployments and risk OOM. 10k entries per sweep is a conservative
+        // ceiling; remaining expired entries will be picked up on
+        // subsequent calls to `run_garbage_collection`.
+        const CLEANUP_EXPIRED_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CLEANUP_EXPIRED_MAX_ENTRIES),
             ..Default::default()
         };
 
