@@ -381,6 +381,16 @@ impl AdminService {
         // at 1M entries, which is generous for typical deployments while
         // still bounding worst-case memory.
         //
+        // Set `include_expired: true` so the storage layer does not filter
+        // out entries whose `expires_at` has passed. Backups must capture
+        // every persisted row regardless of its expiration timestamp —
+        // expired-but-not-yet-swept secrets, audit log rows (which set
+        // `expires_at = now + retention_days`), and any other entries with
+        // a TTL must all be present on restore. Without this flag, the
+        // PostgreSQL backend (which now honors `include_expired` after the
+        // lifecycle PR) would silently drop these rows from backups,
+        // producing incomplete snapshots and data loss on restore.
+        //
         // TODO: Stream backups in chunks instead of loading the full table
         // into memory, so very large deployments can be backed up reliably.
         const BACKUP_MAX_ENTRIES: u32 = 1_000_000;
@@ -388,6 +398,7 @@ impl AdminService {
             path_prefix: None,
             limit: Some(BACKUP_MAX_ENTRIES),
             offset: Some(0),
+            include_expired: true,
             ..Default::default()
         };
 
