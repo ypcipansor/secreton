@@ -635,9 +635,21 @@ impl AuditLogger {
         // filtering on user/action/path/timestamp so this cap is no longer
         // necessary.
         let scan_limit = filters.limit.unwrap_or(AUDIT_QUERY_DEFAULT_MAX_ENTRIES);
+        // Set `include_expired: true` so the storage layer does not filter out
+        // audit entries whose `expires_at` (set to `now + retention_days` by
+        // `StorageAuditDevice`) has passed. The audit subsystem owns its own
+        // retention via dedicated cleanup paths; the query layer must not
+        // silently drop entries that are still on disk and still within the
+        // caller's requested time window. Without this flag, the PostgreSQL
+        // backend (which now honors `include_expired`) would hide post-retention
+        // audit rows from compliance exports while older backends (InMemory,
+        // MySQL, etc.) would behave consistently — but only because PostgreSQL
+        // previously had no expiration filter. This makes that consistency
+        // explicit instead of relying on backend-specific quirks.
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
             limit: Some(scan_limit),
+            include_expired: true,
             ..Default::default()
         };
 

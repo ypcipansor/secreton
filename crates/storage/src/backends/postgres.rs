@@ -183,6 +183,20 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
+        // Exclude reserved namespaces at the SQL layer so they don't consume
+        // rows from `limit`. Without this, e.g. the lifecycle sweep on a
+        // deployment with >SWEEP_MAX_ENTRIES expired audit entries (under
+        // `sys/audit/`, sorted earliest by `expires_at ASC`) would have its
+        // entire window filled with reserved entries and never reach a
+        // user-owned secret. Each excluded prefix becomes its own bound
+        // `path NOT LIKE $N` clause to keep this SQL-injection safe.
+        for prefix in &params.excluded_path_prefixes {
+            query.push_str(&format!(" AND path NOT LIKE ${}", param_count));
+            let prefix_pattern = format!("{}%", prefix);
+            bind_params.push(Box::new(prefix_pattern));
+            param_count += 1;
+        }
+
         // Filter out expired entries unless explicitly requested. This matches
         // the behavior of the InMemory and MySQL backends so that callers see
         // a consistent contract across storage implementations.

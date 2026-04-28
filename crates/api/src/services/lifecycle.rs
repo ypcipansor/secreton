@@ -286,11 +286,23 @@ impl LifecycleService {
         // `ORDER BY expires_at ASC NULLS LAST` so non-expiring rows sort to
         // the end. Backends that ignore `sort_by` (MySQL, InMemory, etc.)
         // are unaffected by this hint.
+        //
+        // Push reserved-namespace exclusion down to the storage layer via
+        // `excluded_path_prefixes`. This prevents reserved entries (notably
+        // `sys/audit/` rows, which carry `expires_at` and accumulate
+        // indefinitely without a dedicated cleaner) from consuming rows
+        // from the `limit` budget and starving user-secret cleanup. The
+        // in-memory `is_reserved_path` check below remains as defense-in-depth
+        // for backends that ignore this field.
         let params = QueryParams {
             include_expired: true,
             limit: Some(SWEEP_MAX_ENTRIES),
             sort_by: Some("expires_at".to_string()),
             sort_order: Some("asc".to_string()),
+            excluded_path_prefixes: RESERVED_PATH_PREFIXES
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect(),
             ..Default::default()
         };
 

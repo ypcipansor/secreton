@@ -398,3 +398,21 @@ impl ServiceContainer for ApiServiceContainer {
         self.registry.register_service(name, service);
     }
 }
+
+impl Drop for ApiServiceContainer {
+    /// Defense-in-depth: signal the lifecycle worker to stop on container
+    /// drop, even when callers (e.g. tests, ad-hoc `main` functions, future
+    /// embedders) never invoke `stop_services()`. `LifecycleService::Drop`
+    /// already issues the same signal once the last `Arc` is dropped, but
+    /// this container holds the only strong reference in many call paths,
+    /// so signaling here makes shutdown immediate instead of waiting on the
+    /// worker's next tick (up to one period away).
+    ///
+    /// We deliberately do NOT `await` worker completion here — `Drop` is
+    /// synchronous and blocking on a tokio task from inside `Drop` is
+    /// unsound. Callers that need to wait for in-flight sweeps (e.g. to
+    /// flush audit before exit) must call `stop_services()` explicitly.
+    fn drop(&mut self) {
+        self.lifecycle.shutdown();
+    }
+}
