@@ -641,10 +641,22 @@ impl SecretService {
             // single secret is far above realistic usage.
             const HISTORY_DELETE_MAX_ENTRIES: u32 = 10_000;
             let history_prefix = format!("sys/history/{}::v", path);
-            let query = secreton_storage::QueryParams::new()
-                .with_path_prefix(history_prefix)
-                .with_owner(Self::get_user_uuid(user))
-                .with_limit(HISTORY_DELETE_MAX_ENTRIES);
+            // `include_expired: true` is critical here. History entries are
+            // archived via `put_secret` as a clone of the parent secret
+            // (see the `existing.clone()` block above), so they inherit the
+            // parent's `expires_at`. If the parent secret is past its
+            // expiration, the history rows are also expired — and the
+            // PostgreSQL backend's default `include_expired: false` filter
+            // (`AND (expires_at IS NULL OR expires_at > NOW())`) would
+            // silently exclude them from this query, leaving orphaned
+            // entries under `sys/history/` after the user-initiated delete.
+            let query = secreton_storage::QueryParams {
+                path_prefix: Some(history_prefix),
+                owner_id: Some(Self::get_user_uuid(user)),
+                limit: Some(HISTORY_DELETE_MAX_ENTRIES),
+                include_expired: true,
+                ..Default::default()
+            };
 
             if let Ok(entries) = self.storage.list(&query).await {
                 for entry in entries {

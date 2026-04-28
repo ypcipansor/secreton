@@ -412,9 +412,23 @@ impl LifecycleService {
         const HISTORY_DELETE_MAX_ENTRIES: u32 = 10_000;
 
         let history_prefix = format!("sys/history/{}::v", path);
-        let query = QueryParams::new()
-            .with_path_prefix(history_prefix)
-            .with_limit(HISTORY_DELETE_MAX_ENTRIES);
+        // `include_expired: true` is critical here. History entries are stored
+        // via `SecretService::put_secret` as a clone of the parent secret
+        // (`existing.clone()` in `crates/api/src/services/secret.rs`), which
+        // means they inherit the parent's `expires_at`. By the time the
+        // lifecycle sweep is deleting an expired parent, those history
+        // entries are necessarily also past their `expires_at`. With the
+        // default `include_expired: false`, the PostgreSQL backend's
+        // expiration filter (`AND (expires_at IS NULL OR expires_at > NOW())`)
+        // would silently drop them from this query — leaving orphaned
+        // history rows under `sys/history/` that no future sweep can ever
+        // reach (the `sys/` namespace is reserved).
+        let query = QueryParams {
+            path_prefix: Some(history_prefix),
+            limit: Some(HISTORY_DELETE_MAX_ENTRIES),
+            include_expired: true,
+            ..Default::default()
+        };
 
         let entries = match self.storage.list(&query).await {
             Ok(entries) => entries,
