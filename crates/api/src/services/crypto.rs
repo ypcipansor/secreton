@@ -101,8 +101,16 @@ impl KeyStorage for SystemKeyStorage {
     }
 
     async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, CryptoError> {
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the system-key namespace
+        // on every call. 10k system keys is far above realistic deployments.
+        const SYSTEM_KEY_LIST_MAX_ENTRIES: u32 = 10_000;
         let path_prefix = format!("sys/keys/{}", prefix);
-        let query = secreton_storage::QueryParams::new().with_path_prefix(path_prefix.clone());
+        let query = secreton_storage::QueryParams::new()
+            .with_path_prefix(path_prefix.clone())
+            .with_limit(SYSTEM_KEY_LIST_MAX_ENTRIES);
 
         let entries = self
             .storage

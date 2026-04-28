@@ -1475,9 +1475,17 @@ impl SecretService {
     }
 
     pub async fn list_policies(&self, filter: Option<&str>) -> Result<Vec<Policy>, SecretError> {
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the policy namespace and
+        // decrypt every entry on every list call. 10k policies is far above
+        // realistic deployments while still bounding worst-case memory and
+        // crypto work.
+        const POLICY_LIST_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some("sys/policies/".to_string()),
-            limit: None,
+            limit: Some(POLICY_LIST_MAX_ENTRIES),
             offset: None,
             ..Default::default()
         };
