@@ -406,8 +406,23 @@ impl AuthenticationService {
             .register_method("userpass".to_string(), userpass_method.clone())
             .await;
 
-        // Load existing users from storage
-        let params = QueryParams::new().with_path_prefix(USER_STORAGE_PREFIX.to_string());
+        // Load existing users from storage.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded to 100 users; without an explicit
+        // limit it would now load every user row into memory (and decrypt
+        // each one) on every service construction. 50k is generous enough
+        // for typical deployments while still bounding worst-case startup
+        // memory.
+        //
+        // TODO: Move user-cache hydration off the startup path entirely so
+        // that `UserPassAuthMethod` lazy-loads users on first authentication
+        // instead of bulk-loading them up front.
+        const USER_LOAD_MAX_ENTRIES: u32 = 50_000;
+        let params = QueryParams::new()
+            .with_path_prefix(USER_STORAGE_PREFIX.to_string())
+            .with_limit(USER_LOAD_MAX_ENTRIES);
         if let Ok(entries) = storage.list(&params).await {
             for entry in entries {
                 // Try decrypting the data, strictly requiring encryption
@@ -1664,10 +1679,22 @@ impl AuthenticationService {
     /// List sessions for a specific user
     pub async fn list_user_sessions(&self, user_id: &str) -> Result<Vec<Session>, AuthError> {
         // We scan all sessions and filter by user_id
-        // In a real DB we would index this or use a secondary index
+        // In a real DB we would index this or use a secondary index.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now load every active session into memory and decrypt each
+        // one. 10k is generous for a single user's session list while still
+        // bounding worst-case memory.
+        //
+        // TODO: Index sessions by `user_id` so this scan can be replaced
+        // with a direct lookup.
+        const SESSION_LIST_MAX_ENTRIES: u32 = 10_000;
         let params = QueryParams {
             path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
             include_expired: false,
+            limit: Some(SESSION_LIST_MAX_ENTRIES),
             ..Default::default()
         };
 

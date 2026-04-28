@@ -861,8 +861,21 @@ impl SecretService {
         // Parse user_id as UUID for ownership check
         let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
-        // Strict isolation: always filter by owner ID
-        let mut query = secreton_storage::QueryParams::new().with_owner(user_uuid);
+        // Strict isolation: always filter by owner ID.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now decrypt and parse every secret owned by the user on
+        // every list call. 10k secrets per user is well above typical
+        // usage while still bounding worst-case memory and crypto work.
+        //
+        // TODO: Add pagination support to the secret-listing API and
+        // pass the caller's page size through here.
+        const SECRET_LIST_MAX_ENTRIES: u32 = 10_000;
+        let mut query = secreton_storage::QueryParams::new()
+            .with_owner(user_uuid)
+            .with_limit(SECRET_LIST_MAX_ENTRIES);
 
         if let Some(p) = prefix {
             query = query.with_path_prefix(p.to_string());

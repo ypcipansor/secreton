@@ -326,9 +326,18 @@ impl AdminService {
             "sys/audit/".to_string()
         };
 
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit
+        // `get_system_stats` (which calls this) would perform an unbounded
+        // scan of the audit-log namespace on every metrics request. 10k
+        // audit entries within a 5-minute window is far above realistic
+        // throughput, so hitting the cap effectively means the rate is at
+        // least the cap / 5 minutes regardless.
+        const REQUESTS_PER_MINUTE_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: Some(prefix),
-            limit: None,
+            limit: Some(REQUESTS_PER_MINUTE_MAX_ENTRIES),
             ..Default::default()
         };
 

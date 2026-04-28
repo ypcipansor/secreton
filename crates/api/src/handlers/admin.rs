@@ -746,12 +746,24 @@ pub async fn get_system_metrics(
     // with get_system_status, health_check, and liveness_check).
     let uptime = state.telemetry.uptime_seconds();
 
-    // Count total policies from storage
+    // Count total policies from storage.
+    //
+    // Cap the scan with an explicit upper bound. Before the PostgreSQL
+    // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+    // this scan was implicitly bounded; without an explicit limit the
+    // metrics endpoint would now load every policy entry into memory on
+    // every call. We use `count()` instead of `list()+len()` since the
+    // backend's count primitive avoids materializing rows.
+    //
+    // TODO: Replace this in-memory list-and-count with `storage.count()`
+    // once a `count()` call is reliably implemented across all backends
+    // (some currently fall back to `list().len()` internally).
+    const POLICY_COUNT_MAX_ENTRIES: u32 = 100_000;
     let total_policies: u64 = state
         .storage
         .list(&secreton_storage::QueryParams {
             path_prefix: Some("policies/".to_string()),
-            limit: None,
+            limit: Some(POLICY_COUNT_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         })
