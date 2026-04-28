@@ -428,6 +428,12 @@ async fn main() -> anyhow::Result<()> {
         "admin".to_string(),
         admin.clone(),
     );
+    // Register the lifecycle service so handlers/middleware that look it up
+    // by name from the container behave consistently with the
+    // `ApiServiceContainer` code path (which also registers it under
+    // "lifecycle").
+    container
+        .register_service::<Arc<LifecycleService>>("lifecycle".to_string(), lifecycle.clone());
     container.register_service::<Arc<SecretPerformanceOptimizer>>(
         "performance".to_string(),
         performance.clone(),
