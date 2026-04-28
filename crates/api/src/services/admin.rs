@@ -372,11 +372,21 @@ impl AdminService {
         let backup_id = uuid::Uuid::new_v4().to_string();
         let backup_path = format!("backups/{}", backup_id);
 
-        // Get all secreton entries to backup
+        // Get all secreton entries to backup.
+        //
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded to 100 entries (which would have
+        // produced a silently-truncated backup). Now it is explicitly capped
+        // at 1M entries, which is generous for typical deployments while
+        // still bounding worst-case memory.
+        //
+        // TODO: Stream backups in chunks instead of loading the full table
+        // into memory, so very large deployments can be backed up reliably.
+        const BACKUP_MAX_ENTRIES: u32 = 1_000_000;
         let query_params = secreton_storage::QueryParams {
             path_prefix: None,
-
-            limit: None,
+            limit: Some(BACKUP_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         };
@@ -487,10 +497,17 @@ impl AdminService {
 
     /// List available backups
     pub async fn list_backups(&self) -> Result<Vec<BackupInfo>, AdminError> {
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan filtered to the
+        // `backups/` prefix in memory. We push the prefix down to the
+        // storage layer and cap the result at 10k backup entries (well above
+        // realistic backup retention).
+        const LIST_BACKUPS_MAX_ENTRIES: u32 = 10_000;
         let query_params = secreton_storage::QueryParams {
-            path_prefix: None,
-
-            limit: None,
+            path_prefix: Some("backups/".to_string()),
+            limit: Some(LIST_BACKUPS_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         };
@@ -1135,9 +1152,15 @@ impl AdminService {
         AdminError,
     > {
         const PREFIX: &str = "sys/policies/content/";
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded scan of the policy-content
+        // namespace. 10k policies is far above realistic deployments.
+        const POLICY_CONTENT_LIST_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: Some(PREFIX.to_string()),
-            limit: None,
+            limit: Some(POLICY_CONTENT_LIST_MAX_ENTRIES),
             offset: Some(0),
             ..Default::default()
         };
