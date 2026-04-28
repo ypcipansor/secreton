@@ -478,14 +478,20 @@ impl MySQLStorage {
             Some("expires_at") => "expires_at",
             _ => "path",
         };
-        // Default direction matches the PostgreSQL backend (`DESC`) so that
-        // callers who set only `sort_by` without `sort_order` get consistent
-        // ordering across backends. The lifecycle sweep always sets both
-        // fields explicitly, so it is unaffected by this default.
+        // Default direction is `ASC` to preserve the pre-existing behaviour
+        // of this backend (which previously emitted `ORDER BY path` with no
+        // explicit direction, i.e. ASC). Changing the default would silently
+        // flip the result order for every existing caller that sets only
+        // `sort_by` without `sort_order` (e.g. `list_backups`, `list_users`,
+        // `list_policies`, `list_leases`). The lifecycle sweep always sets
+        // both fields explicitly, so it is unaffected by this default. Note
+        // that this differs from the PostgreSQL backend's `DESC` default —
+        // that inconsistency is a separate issue tracked at the
+        // `QueryParams` API level.
         let sort_dir = match params.sort_order.as_deref() {
             Some(s) if s.eq_ignore_ascii_case("desc") => "DESC",
             Some(s) if s.eq_ignore_ascii_case("asc") => "ASC",
-            _ => "DESC",
+            _ => "ASC",
         };
         if sort_column == "expires_at" && sort_dir == "ASC" {
             query.push_str(
