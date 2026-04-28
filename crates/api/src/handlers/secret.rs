@@ -88,6 +88,7 @@ pub async fn get_audit_logs(
         path: None,
         start_date: None,
         end_date: None,
+        limit: None,
     };
 
     let entries = state
@@ -151,6 +152,7 @@ pub async fn export_audit_logs(
         path: None,
         start_date: None,
         end_date: None,
+        limit: None,
     };
 
     let format_str = query

@@ -2954,8 +2954,17 @@ impl AdminService {
         let now = chrono::Utc::now();
 
         // Query for all secrets with expiry metadata
+        // Cap the scan with an explicit upper bound. Before the PostgreSQL
+        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
+        // this scan was implicitly bounded; without an explicit limit it
+        // would now perform an unbounded full-table scan on large
+        // deployments and risk OOM. 10k entries per sweep is a conservative
+        // ceiling; remaining expired entries will be picked up on
+        // subsequent calls to `run_garbage_collection`.
+        const CLEANUP_EXPIRED_MAX_ENTRIES: u32 = 10_000;
         let query_params = QueryParams {
             path_prefix: None,
+            limit: Some(CLEANUP_EXPIRED_MAX_ENTRIES),
             ..Default::default()
         };
 
