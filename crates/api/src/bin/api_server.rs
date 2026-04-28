@@ -538,14 +538,39 @@ async fn main() -> anyhow::Result<()> {
     let axum_addr = std::net::SocketAddr::from((host_ip, axum_port));
     let listener = tokio::net::TcpListener::bind(axum_addr).await?;
 
+    // Broadcast channel used to fan out a single shutdown signal to every
+    // server. `broadcast::channel(1)` is sufficient since we only ever send
+    // one `()` value: each subscriber's `recv()` will resolve as soon as that
+    // value is sent (or with `RecvError::Closed` if the sender is dropped,
+    // which we treat the same as a shutdown signal).
+    //
+    // Each server below is given its own `Receiver` (via `subscribe()`) and
+    // wired into the framework's native graceful-shutdown hook
+    // (`axum::serve(...).with_graceful_shutdown`,
+    // `warp::serve(...).bind_with_graceful_shutdown`,
+    // `tonic::Server::serve_with_shutdown`). This lets in-flight requests
+    // drain instead of being torn down mid-response when the runtime is
+    // dropped.
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+
+    let mut axum_shutdown_rx = shutdown_tx.subscribe();
     let axum_server = async move {
-        if let Err(e) = axum::serve(listener, axum_router).await {
+        let result = axum::serve(listener, axum_router)
+            .with_graceful_shutdown(async move {
+                let _ = axum_shutdown_rx.recv().await;
+            })
+            .await;
+        if let Err(e) = result {
             warn!("Axum server failed: {}", e);
         }
     };
 
-    // Spawn Warp Server (Legacy/Core)
-    let warp_server = warp::serve(warp_routes).run((host_ip, http_port));
+    // Spawn Warp Server (Legacy/Core) with graceful shutdown.
+    let mut warp_shutdown_rx = shutdown_tx.subscribe();
+    let (_warp_addr, warp_server) = warp::serve(warp_routes)
+        .bind_with_graceful_shutdown((host_ip, http_port), async move {
+            let _ = warp_shutdown_rx.recv().await;
+        });
 
     info!("📋 Available endpoints:");
     info!("   GET  /health - System health check");
@@ -558,9 +583,12 @@ async fn main() -> anyhow::Result<()> {
     let grpc_addr = format!("0.0.0.0:{}", grpc_port).parse()?;
     let grpc_service = GrpcSecretService::new(secreton.clone(), auth.clone());
 
+    let mut grpc_shutdown_rx = shutdown_tx.subscribe();
     let grpc_server = Server::builder()
         .add_service(SecretServiceServer::new(grpc_service))
-        .serve(grpc_addr);
+        .serve_with_shutdown(grpc_addr, async move {
+            let _ = grpc_shutdown_rx.recv().await;
+        });
 
     info!(
         "🚀 Servers starting (HTTP: {}, Enhanced API: {}, gRPC: {})...",
@@ -576,24 +604,33 @@ async fn main() -> anyhow::Result<()> {
     // before the tokio runtime is dropped, risking interrupted in-flight
     // storage writes and silently lost audit entries.
     //
-    // We now `select!` between the joined servers and a shutdown signal.
-    // On shutdown, we flush audit before returning so buffered events reach
-    // durable storage.
-    let servers = async {
+    // We now wait for either (a) all three servers to exit on their own, or
+    // (b) a shutdown signal. On (b) we broadcast to every server's
+    // graceful-shutdown hook so in-flight requests drain instead of being
+    // torn down when their futures are dropped, then await the joined
+    // servers to completion.
+    let joined_servers = async {
         let (_, _, grpc_res) = tokio::join!(axum_server, warp_server, grpc_server);
         if let Err(e) = grpc_res {
             warn!("gRPC server failed: {}", e);
         }
     };
-
-    let shutdown = shutdown_signal();
+    tokio::pin!(joined_servers);
 
     tokio::select! {
-        _ = servers => {
+        _ = &mut joined_servers => {
             info!("Servers exited on their own.");
         }
-        _ = shutdown => {
+        _ = shutdown_signal() => {
             info!("Shutdown signal received; draining services...");
+            // Fan out the shutdown to every subscribed server. A send error
+            // here just means no receivers are listening (all servers
+            // already exited), which is benign.
+            let _ = shutdown_tx.send(());
+            // Wait for the servers to finish draining. Without this await,
+            // dropping `joined_servers` would cancel in-flight requests
+            // mid-response — defeating the purpose of `with_graceful_shutdown`.
+            joined_servers.await;
         }
     }
 
