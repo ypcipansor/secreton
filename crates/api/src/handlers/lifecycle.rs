@@ -8,6 +8,13 @@ use crate::handlers::AppState;
 use crate::{ApiResponse, ApiResult, ApiError};
 pub use secreton_common::dto::lifecycle::{SecretLifecycle, LifecycleStatistics};
 
+// NOTE: These routes are not yet mounted in `handlers::mod::create_router`.
+// Before wiring them up, each handler MUST gain a per-request authentication
+// extractor (the global auth middleware covers transport-level auth, but
+// `extend_secret_ttl` in particular requires verifying that the caller has
+// write access to the target secret path).  See CONTRIBUTING.md "Secure
+// Coding Checklist".
+
 pub fn create_routes() -> Router<AppState> {
     Router::new()
         .route("/stats", get(get_lifecycle_stats))

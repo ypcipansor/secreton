@@ -510,9 +510,16 @@ pub fn SecretsList() -> impl IntoView {
                                                                 let secret_resource = secret_resource.clone();
                                                                 spawn_local(async move {
                                                                     let url = format!("/lifecycle/extend/{}", current_path);
-                                                                    if let Ok(_) = api::post::<serde_json::Value, _>(&url, serde_json::json!({ "additional_days": 30 })).await {
-                                                                        secret_resource.refetch();
-                                                                        if let Some(w) = web_sys::window() { let _ = w.alert_with_message("TTL extended by 30 days"); }
+                                                                    match api::post::<serde_json::Value, _>(&url, serde_json::json!({ "additional_days": 30 })).await {
+                                                                        Ok(_) => {
+                                                                            secret_resource.refetch();
+                                                                            if let Some(w) = web_sys::window() { let _ = w.alert_with_message("TTL extended by 30 days"); }
+                                                                        }
+                                                                        Err(e) => {
+                                                                            if let Some(w) = web_sys::window() {
+                                                                                let _ = w.alert_with_message(&format!("Failed to extend TTL: {}", e));
+                                                                            }
+                                                                        }
                                                                     }
                                                                 });
                                                             }
