@@ -186,6 +186,21 @@ impl SecretLifecycleManagement {
         Ok(archive_record)
     }
 
+    /// Remove the lifecycle tracking entry for a secret.
+    ///
+    /// Called by callers (e.g. `SecretService::delete_secret_internal`,
+    /// or `put_secret_internal` when an update clears `expires_at`) to keep
+    /// the in-memory tracking state in sync with the authoritative storage
+    /// record.  Returning `Ok(false)` (rather than an error) when no entry
+    /// exists lets callers invoke this unconditionally without needing a
+    /// pre-check, since the lifecycle manager's state is ephemeral and may
+    /// legitimately not contain a path that storage knows about (e.g. after
+    /// a server restart).
+    pub async fn remove_expiration(&self, secret_path: &str) -> Result<bool> {
+        let mut lifecycles = self.lifecycles.write().await;
+        Ok(lifecycles.remove(secret_path).is_some())
+    }
+
     /// Extend TTL
     pub async fn extend_ttl(
         &self,

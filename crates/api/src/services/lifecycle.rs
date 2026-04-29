@@ -394,6 +394,18 @@ impl LifecycleService {
                     // reserved-namespace contract — we are only removing
                     // entries that belong to a secret we just removed.
                     self.cleanup_history_for(&fresh.path).await;
+
+                    // Drop the in-memory lifecycle tracking entry for the
+                    // swept path so dashboard stats stop reporting a
+                    // now-deleted secret.  Best-effort: the manager may not
+                    // have an entry (e.g. after a server restart), in which
+                    // case `remove_expiration` is a no-op.
+                    if let Err(e) = self.manager.remove_expiration(&fresh.path).await {
+                        warn!(
+                            "Failed to clear lifecycle for swept secret {}: {}",
+                            fresh.path, e
+                        );
+                    }
                 }
                 Ok(false) => {
                     // Entry vanished between re-read and delete — benign race.

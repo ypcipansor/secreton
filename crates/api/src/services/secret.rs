@@ -692,8 +692,8 @@ impl SecretService {
         // ephemeral until those endpoints are rebuilt to read from
         // storage directly.  See the lifecycle handler stubs in
         // `crates/api/src/handlers/lifecycle.rs`.
-        if let Some(expires_at) = entry.expires_at {
-            if let Some(lifecycle_svc) = &self.lifecycle {
+        if let Some(lifecycle_svc) = &self.lifecycle {
+            if let Some(expires_at) = entry.expires_at {
                 let now = chrono::Utc::now();
                 let remaining_secs = (expires_at - now).num_seconds().max(0) as u64;
                 let ttl_days = remaining_secs.div_ceil(86_400).max(1) as u32;
@@ -703,6 +703,15 @@ impl SecretService {
                     .await
                 {
                     warn!("Failed to update lifecycle for {}: {}", path, e);
+                }
+            } else {
+                // The new entry has no expiration (either it never had one,
+                // or a rollback / explicit override cleared it).  Remove any
+                // stale lifecycle tracking entry for this path so that
+                // dashboard stats and `list_by_status` don't continue to
+                // report a now-non-expiring secret as Active/Expiring.
+                if let Err(e) = lifecycle_svc.manager().remove_expiration(path).await {
+                    warn!("Failed to clear lifecycle for {}: {}", path, e);
                 }
             }
         }
@@ -840,6 +849,17 @@ impl SecretService {
 
         // Invalidate cache
         let _ = self.performance.invalidate_cached(path).await;
+
+        // Drop any in-memory lifecycle tracking entry for the deleted path
+        // so that dashboard stats and `list_by_status` don't continue to
+        // report a deleted secret.  The lifecycle manager is best-effort
+        // (in-memory only) and may not contain an entry for this path,
+        // which is fine — `remove_expiration` is a no-op in that case.
+        if let Some(lifecycle_svc) = &self.lifecycle {
+            if let Err(e) = lifecycle_svc.manager().remove_expiration(path).await {
+                warn!("Failed to clear lifecycle for {}: {}", path, e);
+            }
+        }
 
         self.performance
             .record_access(path, AccessType::Delete, start_time.elapsed(), true)
