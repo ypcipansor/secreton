@@ -198,18 +198,21 @@ impl ApiServiceContainer {
             SecretPerformanceConfig::default(),
         ));
 
-        // Initialize secret service
-        let secreton = Arc::new(
-            secret::SecretService::new(
-                storage.clone(),
-                crypto.clone(),
-                audit.clone(),
-                identity.clone(),
-                policy_service.clone(),
-                performance.clone(),
-            )
-            .await?,
-        );
+        // Initialize secret service.
+        //
+        // The lifecycle service will be constructed below and injected into
+        // `secreton` via `with_lifecycle` before the `Arc` is shared with the
+        // rest of the system, so there is exactly one `SecretService`
+        // instance and it always has its lifecycle wiring populated.
+        let secreton_inner = secret::SecretService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
+            identity.clone(),
+            policy_service.clone(),
+            performance.clone(),
+        )
+        .await?;
 
         // Initialize database service
         let database = Arc::new(database::DatabaseService::new(
@@ -280,13 +283,16 @@ impl ApiServiceContainer {
             };
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
-            secreton.clone(),
             audit.clone(),
             lifecycle_config,
         ));
 
-        // Inject lifecycle into secret service for end-to-end integration
-        let secreton = Arc::new(Arc::unwrap_or_clone(secreton).with_lifecycle(lifecycle.clone()));
+        // Inject lifecycle into the (still unique) secret service before
+        // sharing it via `Arc`, so every consumer sees the wired-up version.
+        // Doing the injection on the unique value avoids the
+        // `Arc::unwrap_or_clone` footgun that would otherwise silently
+        // produce a stale clone whose `lifecycle` field is `None`.
+        let secreton = Arc::new(secreton_inner.with_lifecycle(lifecycle.clone()));
 
         // Register in registry (optional if we use fields, but good for trait support)
         let mut registry = StandardServiceContainer::new();

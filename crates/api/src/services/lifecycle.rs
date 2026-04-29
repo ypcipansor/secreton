@@ -8,7 +8,6 @@ use tokio::time::{Duration, Instant, interval_at};
 use tracing::{error, info, warn};
 
 use crate::services::audit::{AuditLogger, SecurityEventType};
-use crate::services::secret::SecretService;
 use secreton_integrations::integrations::secret_lifecycle_management::{
     LifecycleConfig, SecretLifecycleManagement,
 };
@@ -62,7 +61,19 @@ const LIFECYCLE_AUDIT_ACTOR: &str = "system:lifecycle";
 
 pub struct LifecycleService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
-    _secreton: Arc<SecretService>,
+    // NOTE: We deliberately do NOT hold an `Arc<SecretService>` here. The
+    // service-construction order in `ApiServiceContainer::new` builds
+    // `SecretService` first, then `LifecycleService` (which would need the
+    // SecretService), then injects the lifecycle back into SecretService via
+    // `with_lifecycle`. Holding a strong `Arc<SecretService>` here would (a)
+    // create a reference cycle with the lifecycle field on `SecretService`,
+    // and (b) require an `Arc::unwrap_or_clone` dance during injection that
+    // silently produces a stale clone whose `lifecycle` field is `None` —
+    // a subtle footgun if any caller starts using that field. Future work
+    // that needs to call back into `SecretService` (e.g. routing the
+    // sweep through `delete_secret` instead of raw `storage.delete_by_id`)
+    // should plumb a `Weak<SecretService>` or use a `OnceLock` to break the
+    // initialization cycle cleanly, not a strong `Arc`.
     audit: Arc<AuditLogger>,
     manager: Arc<SecretLifecycleManagement>,
     shutdown: Arc<Notify>,
@@ -80,7 +91,6 @@ pub struct LifecycleService {
 impl LifecycleService {
     pub fn new(
         storage: Arc<dyn StorageBackend + Send + Sync>,
-        secreton: Arc<SecretService>,
         audit: Arc<AuditLogger>,
         config: LifecycleConfig,
     ) -> Self {
@@ -88,7 +98,6 @@ impl LifecycleService {
         let cleanup_enabled = config.cleanup_enabled;
         Self {
             storage,
-            _secreton: secreton,
             audit,
             manager: Arc::new(SecretLifecycleManagement::new(config)),
             shutdown: Arc::new(Notify::new()),
@@ -518,38 +527,14 @@ impl Drop for LifecycleService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::crypto::CryptoService;
-    use crate::services::secret::SecretService;
-    use secreton_auth::policies::service::PolicyService;
-    use secreton_auth::{IdentityService, InMemoryIdentityService};
-    use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
     use secreton_storage::MockStorageBackend;
 
     async fn make_service(enabled: bool, cleanup_enabled: bool) -> Arc<LifecycleService> {
         let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(
             crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
                 .await
                 .unwrap(),
-        );
-        let identity: Arc<dyn IdentityService + Send + Sync> =
-            Arc::new(InMemoryIdentityService::new());
-        let policy = Arc::new(PolicyService::new());
-        let performance = Arc::new(SecretPerformanceOptimizer::new(
-            SecretPerformanceConfig::default(),
-        ));
-        let secreton = Arc::new(
-            SecretService::new(
-                storage.clone(),
-                crypto.clone(),
-                audit.clone(),
-                identity,
-                policy,
-                performance,
-            )
-            .await
-            .unwrap(),
         );
         let cfg = LifecycleConfig {
             enabled,
@@ -558,7 +543,7 @@ mod tests {
             auto_archive_enabled: false,
             cleanup_enabled,
         };
-        Arc::new(LifecycleService::new(storage, secreton, audit, cfg))
+        Arc::new(LifecycleService::new(storage, audit, cfg))
     }
 
     #[tokio::test]
@@ -613,29 +598,10 @@ mod tests {
         use uuid::Uuid;
 
         let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let audit = Arc::new(
             crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
                 .await
                 .unwrap(),
-        );
-        let identity: Arc<dyn IdentityService + Send + Sync> =
-            Arc::new(InMemoryIdentityService::new());
-        let policy = Arc::new(PolicyService::new());
-        let performance = Arc::new(SecretPerformanceOptimizer::new(
-            SecretPerformanceConfig::default(),
-        ));
-        let secreton = Arc::new(
-            SecretService::new(
-                storage.clone(),
-                crypto.clone(),
-                audit.clone(),
-                identity,
-                policy,
-                performance,
-            )
-            .await
-            .unwrap(),
         );
 
         let owner = Uuid::new_v4();
@@ -687,12 +653,7 @@ mod tests {
             auto_archive_enabled: false,
             cleanup_enabled: true,
         };
-        let svc = Arc::new(LifecycleService::new(
-            storage.clone(),
-            secreton,
-            audit,
-            cfg,
-        ));
+        let svc = Arc::new(LifecycleService::new(storage.clone(), audit, cfg));
 
         svc.process_lifecycle_events().await.unwrap();
 

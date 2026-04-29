@@ -401,7 +401,20 @@ impl SecretService {
         })
     }
 
-    /// Create or update secret
+    /// Create or update secret.
+    ///
+    /// `ttl` semantics (in seconds):
+    ///   * `Some(n)` — set `expires_at = now + n`.
+    ///   * `None`    — **carry forward** the existing entry's `expires_at`
+    ///                 (or leave it unset for a brand-new entry).
+    ///
+    /// There is intentionally no value of `ttl` that *clears* a previously
+    /// set expiration through this public API: the carry-forward branch is
+    /// what allows TTL-unaware callers (gRPC, the warp adapter, internal
+    /// rollback) to update a secret's data without silently stripping its
+    /// expiration. Callers that genuinely want to remove an expiration from
+    /// an existing secret must delete and recreate it, or use the internal
+    /// `put_secret_internal(..., expires_at_override = Some(None))` path.
     pub async fn put_secret(
         &self,
         path: &str,
@@ -638,6 +651,15 @@ impl SecretService {
         // days) are not rounded down.  The lifecycle manager tracks
         // day-granular expirations; the authoritative second-precision
         // expiration lives on `entry.expires_at` above.
+        //
+        // CAVEAT: `SecretLifecycleManagement` keeps its tracking state in
+        // an in-memory `HashMap`, so on every server restart this side of
+        // the world is wiped.  The storage-level `expires_at` is
+        // persistent (so the sweep keeps working correctly), but the
+        // lifecycle stats / `get_lifecycle` / `extend_ttl` API surface is
+        // ephemeral until those endpoints are rebuilt to read from
+        // storage directly.  See the lifecycle handler stubs in
+        // `crates/api/src/handlers/lifecycle.rs`.
         if let Some(expires_at) = entry.expires_at {
             if let Some(lifecycle_svc) = &self.lifecycle {
                 let now = chrono::Utc::now();
@@ -824,6 +846,27 @@ impl SecretService {
 
         // 1. Fetch the historical version
         let historical_data = self.get_secret(path, user, Some(version)).await?;
+
+        // Reject rollback when the historical version's `expires_at` is
+        // already in the past.  Without this guard we would faithfully
+        // restore the absolute timestamp (so rollback round-trips
+        // losslessly), but the lifecycle sweep — which reads the same
+        // authoritative `expires_at` — would then delete the entry on its
+        // next tick.  Users initiating a rollback rarely expect "restore
+        // and immediately delete" behaviour; failing loudly here lets
+        // them either re-set a TTL via a follow-up `put_secret` call or
+        // pick a different version.
+        if let Some(historical_expires_at) = historical_data.expires_at {
+            if historical_expires_at <= chrono::Utc::now() {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Cannot rollback to version {}: its expires_at ({}) is in the past, \
+                     which would make the rolled-back secret immediately eligible for \
+                     lifecycle cleanup. Update the secret with a fresh TTL after rollback, \
+                     or rollback to a different version.",
+                    version, historical_expires_at
+                )));
+            }
+        }
 
         // 2. Promotion: Put it as the new latest version.
         // `put_secret_internal` handles archiving the current one and
