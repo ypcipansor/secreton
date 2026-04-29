@@ -541,6 +541,15 @@ impl SecretService {
             }
         }
 
+        // Apply TTL to the storage entry so that `is_expired()` and the
+        // lifecycle sweep work against the authoritative storage record.
+        // We use second precision here to match the API contract (TTL is
+        // expressed in seconds).
+        if let Some(ttl_secs) = ttl {
+            entry.expires_at =
+                Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64));
+        }
+
         // Store encrypted data
         self.storage
             .store(&entry)
@@ -550,7 +559,12 @@ impl SecretService {
         // Update lifecycle if TTL was provided
         if let Some(ttl_secs) = ttl {
             if let Some(lifecycle_svc) = &self.lifecycle {
-                let ttl_days = (ttl_secs / 86400).max(1) as u32;
+                // Round up to whole days so that sub-day TTLs (e.g. 1 hour)
+                // are not silently truncated to 0, and partial-day TTLs
+                // (e.g. 1.5 days) are not rounded down. The lifecycle
+                // manager tracks day-granular expirations; the authoritative
+                // second-precision expiration is on `entry.expires_at` above.
+                let ttl_days = ttl_secs.div_ceil(86400).max(1) as u32;
                 if let Err(e) = lifecycle_svc.manager().set_expiration(path.to_string(), ttl_days).await {
                     warn!("Failed to update lifecycle for {}: {}", path, e);
                 }
