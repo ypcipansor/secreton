@@ -503,29 +503,15 @@ pub fn SecretsList() -> impl IntoView {
                                                         <span class="text-gray-700 font-mono lowercase">
                                                             {move || expires_at.clone().unwrap_or_else(|| "Never".to_string())}
                                                         </span>
-                                                        <button
-                                                            class="ml-2 text-blue-600 hover:underline normal-case font-medium"
-                                                            on:click=move |_| {
-                                                                let current_path = path();
-                                                                let secret_resource = secret_resource.clone();
-                                                                spawn_local(async move {
-                                                                    let url = format!("/lifecycle/extend/{}", current_path);
-                                                                    match api::post::<serde_json::Value, _>(&url, serde_json::json!({ "additional_days": 30 })).await {
-                                                                        Ok(_) => {
-                                                                            secret_resource.refetch();
-                                                                            if let Some(w) = web_sys::window() { let _ = w.alert_with_message("TTL extended by 30 days"); }
-                                                                        }
-                                                                        Err(e) => {
-                                                                            if let Some(w) = web_sys::window() {
-                                                                                let _ = w.alert_with_message(&format!("Failed to extend TTL: {}", e));
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                });
-                                                            }
-                                                        >
-                                                            "Extend +30d"
-                                                        </button>
+                                                        // NOTE: "Extend +30d" button removed until the
+                                                        // `/lifecycle/extend/*` backend route is mounted and
+                                                        // authenticated.  Re-add once the lifecycle handler
+                                                        // module is wired into the API router and updates the
+                                                        // storage-level `expires_at` (not just the in-memory
+                                                        // lifecycle manager).
+                                                        <span class="ml-2 text-gray-300 normal-case font-medium" title="Extend TTL is not yet available">
+                                                            "Extend (coming soon)"
+                                                        </span>
                                                     </div>
                                                 </div>
                                                 <div class="grid gap-4">

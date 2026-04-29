@@ -38,8 +38,10 @@ async fn sync_to_aws(
     // "enterprise features enabled" which is semantically incorrect (MFA SMS
     // configuration is unrelated to AWS integration).  Until proper config
     // plumbing exists, this endpoint is unconditionally unimplemented.
-    Err(ApiError::Internal(
-        "AWS Secrets Manager integration is not yet implemented".to_string(),
+    // SECURITY: reject until per-request auth + per-secret authorization
+    // are added.  See CONTRIBUTING.md "Secure Coding Checklist".
+    Err(ApiError::Unauthorized(
+        "AWS Secrets Manager integration requires authentication wiring before use".to_string(),
     ))
 }
 
@@ -52,5 +54,9 @@ async fn sync_from_aws(
     State(_state): State<AppState>,
     Path(_path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SyncOperation>>> {
-    Err(ApiError::Internal("Not implemented".to_string()))
+    // SECURITY: reject until per-request auth + per-secret authorization
+    // are added.  See CONTRIBUTING.md "Secure Coding Checklist".
+    Err(ApiError::Unauthorized(
+        "AWS Secrets Manager integration requires authentication wiring before use".to_string(),
+    ))
 }

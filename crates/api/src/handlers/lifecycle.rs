@@ -22,23 +22,29 @@ pub fn create_routes() -> Router<AppState> {
         .route("/extend/{*path}", post(extend_secret_ttl))
 }
 
+// SECURITY: All handlers below intentionally reject every request with
+// Unauthorized until per-request authentication and per-secret authorization
+// checks are added (see CONTRIBUTING.md "Secure Coding Checklist").  This
+// prevents the routes from becoming an unauthenticated attack surface if
+// `create_routes` is mounted before the auth wiring is finished.
+
 /// Get system-wide lifecycle statistics
 async fn get_lifecycle_stats(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> ApiResult<Json<ApiResponse<LifecycleStatistics>>> {
-    let stats = state.lifecycle.get_statistics().await;
-    Ok(Json(ApiResponse::success(stats)))
+    Err(ApiError::Unauthorized(
+        "Lifecycle endpoints require authentication wiring before use".to_string(),
+    ))
 }
 
 /// Get lifecycle status for a specific secret
 async fn get_secret_lifecycle_status(
-    State(state): State<AppState>,
-    Path(path): Path<String>,
+    State(_state): State<AppState>,
+    Path(_path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<SecretLifecycle>>> {
-    let lifecycle = state.lifecycle.get_lifecycle(&path).await
-        .ok_or_else(|| ApiError::NotFound(format!("Lifecycle for secret {}", path)))?;
-
-    Ok(Json(ApiResponse::success(lifecycle)))
+    Err(ApiError::Unauthorized(
+        "Lifecycle endpoints require authentication wiring before use".to_string(),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,13 +53,18 @@ pub struct ExtendTtlRequest {
 }
 
 /// Extend the TTL of a secret
+///
+/// NOTE: Once authentication is wired, this handler MUST also persist the
+/// new expiration on the storage-level `SecretEntry.expires_at` (matching
+/// what `put_secret` does), not just the in-memory lifecycle manager.
+/// Otherwise the lifecycle sweep and `get_secret` responses will continue
+/// to use the original `expires_at`.
 async fn extend_secret_ttl(
-    State(state): State<AppState>,
-    Path(path): Path<String>,
-    Json(payload): Json<ExtendTtlRequest>,
+    State(_state): State<AppState>,
+    Path(_path): Path<String>,
+    Json(_payload): Json<ExtendTtlRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretLifecycle>>> {
-    let lifecycle = state.lifecycle.extend_ttl(&path, payload.additional_days).await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    Ok(Json(ApiResponse::success(lifecycle)))
+    Err(ApiError::Unauthorized(
+        "Lifecycle endpoints require authentication wiring before use".to_string(),
+    ))
 }
