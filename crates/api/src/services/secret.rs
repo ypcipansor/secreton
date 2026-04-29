@@ -87,8 +87,14 @@ pub enum SecretError {
     Internal(#[from] anyhow::Error),
 }
 
-/// Secret service for business logic operations
-#[derive(Clone)]
+/// Secret service for business logic operations.
+//
+// NOTE: intentionally NOT `#[derive(Clone)]`. `SecretService` is only ever
+// shared via `Arc<SecretService>` (see `ApiServiceContainer::new` and
+// `api_server::main`), so exposing `Clone` would expand the public API
+// surface with no caller — a one-way change that would later be breaking
+// to walk back. `with_lifecycle(mut self)` below works by move semantics
+// and does not require `Clone`.
 pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
@@ -415,6 +421,20 @@ impl SecretService {
     /// expiration. Callers that genuinely want to remove an expiration from
     /// an existing secret must delete and recreate it, or use the internal
     /// `put_secret_internal(..., expires_at_override = Some(None))` path.
+    ///
+    /// API-contract implication for handler authors: once a TTL has been
+    /// set on a secret via a REST `POST /secret/{path}` with `ttl`, there
+    /// is no REST-level request shape that makes the secret non-expiring
+    /// again — every subsequent update either sets a fresh TTL (`ttl:
+    /// Some(n)`) or preserves the existing one (`ttl: None`). This is
+    /// deliberate: without the carry-forward rule, any TTL-unaware update
+    /// path (gRPC, the warp adapter used by the CLI) would silently strip
+    /// the expiration, which is a far worse failure mode than "user must
+    /// delete and recreate to drop a TTL". If a future API revision wants
+    /// to expose explicit clearing (e.g. a sentinel `ttl: Some(0)` or a
+    /// separate `clear_ttl: true` flag), it should route through
+    /// `put_secret_internal` with `expires_at_override = Some(None)`
+    /// rather than extending the carry-forward branch of this method.
     pub async fn put_secret(
         &self,
         path: &str,
