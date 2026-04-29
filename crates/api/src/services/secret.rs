@@ -439,6 +439,24 @@ impl SecretService {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
 
+        // Validate TTL upper bound before any unchecked numeric casts below
+        // (`as i64` for `chrono::Duration::seconds`, `as u32` for the
+        // lifecycle manager's `ttl_days`).  Without this guard, an
+        // attacker-controlled u64 above `i64::MAX` would silently wrap to a
+        // negative `Duration`, producing a `expires_at` in the past and
+        // marking the secret as immediately expired.  100 years is far
+        // above any realistic operational TTL while staying well within
+        // both `i64` seconds and `u32` days.
+        const MAX_TTL_SECONDS: u64 = 100 * 365 * 86_400;
+        if let Some(ttl_secs) = ttl {
+            if ttl_secs > MAX_TTL_SECONDS {
+                return Err(SecretError::InvalidOperation(format!(
+                    "TTL of {} seconds exceeds the maximum of {} seconds (~100 years)",
+                    ttl_secs, MAX_TTL_SECONDS
+                )));
+            }
+        }
+
         // Validate path for reserved delimiter. We only block paths that end with ::v followed by digits
         // or paths that attempt to write directly into the sys/history/ namespace.
         if path.starts_with("sys/history/") {
@@ -606,16 +624,30 @@ impl SecretService {
             .await
             .map_err(SecretError::Storage)?;
 
-        // Update lifecycle if TTL was provided
-        if let Some(ttl_secs) = ttl {
+        // Sync the in-memory lifecycle manager with the authoritative
+        // storage-level `entry.expires_at`.  We compute `ttl_days` from
+        // the *final* expiration on the entry (rather than only from the
+        // `ttl` parameter) so that carry-forward updates and rollbacks —
+        // which both leave `ttl == None` but still produce a meaningful
+        // `entry.expires_at` — keep the lifecycle dashboard / stats in
+        // sync.  An entry with no expiration is intentionally left
+        // un-tracked by the lifecycle manager.
+        //
+        // Round up to whole days so that sub-day TTLs (e.g. 1 hour) are
+        // not silently truncated to 0, and partial-day TTLs (e.g. 1.5
+        // days) are not rounded down.  The lifecycle manager tracks
+        // day-granular expirations; the authoritative second-precision
+        // expiration lives on `entry.expires_at` above.
+        if let Some(expires_at) = entry.expires_at {
             if let Some(lifecycle_svc) = &self.lifecycle {
-                // Round up to whole days so that sub-day TTLs (e.g. 1 hour)
-                // are not silently truncated to 0, and partial-day TTLs
-                // (e.g. 1.5 days) are not rounded down. The lifecycle
-                // manager tracks day-granular expirations; the authoritative
-                // second-precision expiration is on `entry.expires_at` above.
-                let ttl_days = ttl_secs.div_ceil(86400).max(1) as u32;
-                if let Err(e) = lifecycle_svc.manager().set_expiration(path.to_string(), ttl_days).await {
+                let now = chrono::Utc::now();
+                let remaining_secs = (expires_at - now).num_seconds().max(0) as u64;
+                let ttl_days = remaining_secs.div_ceil(86_400).max(1) as u32;
+                if let Err(e) = lifecycle_svc
+                    .manager()
+                    .set_expiration(path.to_string(), ttl_days)
+                    .await
+                {
                     warn!("Failed to update lifecycle for {}: {}", path, e);
                 }
             }
