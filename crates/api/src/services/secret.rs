@@ -410,6 +410,32 @@ impl SecretService {
         user: &secreton_auth::User,
         ttl: Option<u64>,
     ) -> Result<SecretData, SecretError> {
+        self.put_secret_internal(path, data, metadata, user, ttl, None)
+            .await
+    }
+
+    /// Internal put_secret that allows callers (e.g. `rollback_secret`) to
+    /// supply an absolute `expires_at` value that takes precedence over both
+    /// the TTL and the carry-forward-from-existing logic.
+    ///
+    /// `expires_at_override` semantics:
+    ///   * `None`              — use the normal `ttl` / carry-forward logic.
+    ///   * `Some(None)`        — explicitly clear the expiration on the new
+    ///                           entry (e.g. rolling back to a historical
+    ///                           version that had no TTL).
+    ///   * `Some(Some(when))`  — set `expires_at = when` exactly (preserves
+    ///                           absolute timestamps from historical versions
+    ///                           without lossy now-relative TTL conversion).
+    #[allow(clippy::too_many_arguments)]
+    async fn put_secret_internal(
+        &self,
+        path: &str,
+        data: HashMap<String, String>,
+        metadata: Option<SecretMetadata>,
+        user: &secreton_auth::User,
+        ttl: Option<u64>,
+        expires_at_override: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    ) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
 
@@ -563,7 +589,11 @@ impl SecretService {
         // internal rollback) don't silently strip a previously-set
         // expiration.  This mirrors the carry-forward semantics already
         // applied to metadata/tags above.
-        if let Some(ttl_secs) = ttl {
+        if let Some(override_value) = expires_at_override {
+            // Caller explicitly specified the expiration (e.g. rollback
+            // restoring a historical version's absolute timestamp).
+            entry.expires_at = override_value;
+        } else if let Some(ttl_secs) = ttl {
             entry.expires_at =
                 Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64));
         } else if let Some(prev_expires_at) = existing_expires_at {
@@ -764,8 +794,22 @@ impl SecretService {
         let historical_data = self.get_secret(path, user, Some(version)).await?;
 
         // 2. Promotion: Put it as the new latest version.
-        // `put_secret` handles archiving the current one and incrementing the version.
-        let rolled_back = self.put_secret(path, historical_data.data, Some(historical_data.metadata), user, None).await?;
+        // `put_secret_internal` handles archiving the current one and
+        // incrementing the version.  We pass the historical version's
+        // `expires_at` as an explicit override so that rollback restores the
+        // historical expiration verbatim instead of inheriting the *current*
+        // version's `expires_at` via the carry-forward branch in
+        // `put_secret_internal` (which fires whenever `ttl` is None).
+        let rolled_back = self
+            .put_secret_internal(
+                path,
+                historical_data.data,
+                Some(historical_data.metadata),
+                user,
+                None,
+                Some(historical_data.expires_at),
+            )
+            .await?;
 
         // Log audit trail for rollback specifically
         let _ = self
