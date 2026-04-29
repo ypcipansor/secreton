@@ -806,7 +806,7 @@ pub async fn create_secret(
     // Create secret via secreton service
     let secret_data: secret::SecretData = state
         .secreton
-        .put_secret(&path, request.data, request.metadata, &user)
+        .put_secret(&path, request.data, request.metadata, &user, request.ttl)
         .await
         .map_err(|e: crate::services::secret::SecretError| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
@@ -858,7 +858,7 @@ pub async fn update_secret(
     // Update secret via secreton service
     let secret_data: secret::SecretData = state
         .secreton
-        .put_secret(&path, request.data, request.metadata, &user)
+        .put_secret(&path, request.data, request.metadata, &user, request.ttl)
         .await
         .map_err(|e| match e {
             secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),

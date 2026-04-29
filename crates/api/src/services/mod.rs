@@ -285,6 +285,9 @@ impl ApiServiceContainer {
             lifecycle_config,
         ));
 
+        // Inject lifecycle into secret service for end-to-end integration
+        let secreton = Arc::new(Arc::unwrap_or_clone(secreton).with_lifecycle(lifecycle.clone()));
+
         // Register in registry (optional if we use fields, but good for trait support)
         let mut registry = StandardServiceContainer::new();
         registry.register_service("storage".to_string(), storage.clone());

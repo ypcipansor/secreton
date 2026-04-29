@@ -88,6 +88,7 @@ pub enum SecretError {
 }
 
 /// Secret service for business logic operations
+#[derive(Clone)]
 pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
@@ -95,6 +96,7 @@ pub struct SecretService {
     _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
+    lifecycle: Option<Arc<crate::services::lifecycle::LifecycleService>>,
 
     /// Serializes concurrent structured policy upserts.
     ///
@@ -126,8 +128,15 @@ impl SecretService {
             _identity: identity,
             policy_service,
             performance,
+            lifecycle: None,
             policy_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
+    }
+
+    /// Set lifecycle service
+    pub fn with_lifecycle(mut self, lifecycle: Arc<crate::services::lifecycle::LifecycleService>) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
     }
 
     /// Helper to parse user ID to UUID
@@ -397,6 +406,7 @@ impl SecretService {
         data: HashMap<String, String>,
         metadata: Option<SecretMetadata>,
         user: &secreton_auth::User,
+        ttl: Option<u64>,
     ) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
@@ -536,6 +546,16 @@ impl SecretService {
             .store(&entry)
             .await
             .map_err(SecretError::Storage)?;
+
+        // Update lifecycle if TTL was provided
+        if let Some(ttl_secs) = ttl {
+            if let Some(lifecycle_svc) = &self.lifecycle {
+                let ttl_days = (ttl_secs / 86400).max(1) as u32;
+                if let Err(e) = lifecycle_svc.manager().set_expiration(path.to_string(), ttl_days).await {
+                    warn!("Failed to update lifecycle for {}: {}", path, e);
+                }
+            }
+        }
 
         // Update cache with plaintext data PREPENDED with version
         let mut cache_payload = entry.version.to_be_bytes().to_vec();
@@ -710,7 +730,7 @@ impl SecretService {
 
         // 2. Promotion: Put it as the new latest version.
         // `put_secret` handles archiving the current one and incrementing the version.
-        let rolled_back = self.put_secret(path, historical_data.data, Some(historical_data.metadata), user).await?;
+        let rolled_back = self.put_secret(path, historical_data.data, Some(historical_data.metadata), user, None).await?;
 
         // Log audit trail for rollback specifically
         let _ = self
