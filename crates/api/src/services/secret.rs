@@ -628,7 +628,25 @@ impl SecretService {
             entry.expires_at =
                 Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64));
         } else if let Some(prev_expires_at) = existing_expires_at {
-            entry.expires_at = prev_expires_at;
+            // Carry forward the existing entry's expiration, BUT only when it
+            // is still in the future.  If the previous version's `expires_at`
+            // is already in the past (e.g. the user is updating a secret
+            // whose TTL elapsed before the lifecycle sweep ran, or a
+            // TTL-unaware caller — gRPC, warp — is rotating an expired
+            // secret's value), blindly copying the stale timestamp would
+            // make the just-written entry immediately eligible for deletion
+            // on the next sweep tick, silently destroying the data the user
+            // just wrote.  Treat a past `expires_at` the same as no
+            // expiration: the new entry becomes non-expiring until the
+            // caller sets a fresh TTL.
+            match prev_expires_at {
+                Some(prev) if prev > chrono::Utc::now() => {
+                    entry.expires_at = Some(prev);
+                }
+                _ => {
+                    // Past or unset — leave entry.expires_at as None.
+                }
+            }
         }
 
         // Store encrypted data
