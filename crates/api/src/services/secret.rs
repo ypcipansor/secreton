@@ -87,7 +87,14 @@ pub enum SecretError {
     Internal(#[from] anyhow::Error),
 }
 
-/// Secret service for business logic operations
+/// Secret service for business logic operations.
+//
+// NOTE: intentionally NOT `#[derive(Clone)]`. `SecretService` is only ever
+// shared via `Arc<SecretService>` (see `ApiServiceContainer::new` and
+// `api_server::main`), so exposing `Clone` would expand the public API
+// surface with no caller — a one-way change that would later be breaking
+// to walk back. `with_lifecycle(mut self)` below works by move semantics
+// and does not require `Clone`.
 pub struct SecretService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
@@ -95,6 +102,7 @@ pub struct SecretService {
     _identity: Arc<dyn IdentityService + Send + Sync>,
     policy_service: Arc<PolicyService>,
     performance: Arc<SecretPerformanceOptimizer>,
+    lifecycle: Option<Arc<crate::services::lifecycle::LifecycleService>>,
 
     /// Serializes concurrent structured policy upserts.
     ///
@@ -126,8 +134,15 @@ impl SecretService {
             _identity: identity,
             policy_service,
             performance,
+            lifecycle: None,
             policy_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
+    }
+
+    /// Set lifecycle service
+    pub fn with_lifecycle(mut self, lifecycle: Arc<crate::services::lifecycle::LifecycleService>) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
     }
 
     /// Helper to parse user ID to UUID
@@ -318,6 +333,7 @@ impl SecretService {
                                     previous_version: None,
                                     created_at: encrypted_entry.created_at,
                                     updated_at: encrypted_entry.updated_at,
+                                    expires_at: encrypted_entry.expires_at,
                                 });
                             }
                             Err(_) => {
@@ -387,19 +403,107 @@ impl SecretService {
             previous_version: None,
             created_at: encrypted_entry.created_at,
             updated_at: encrypted_entry.updated_at,
+            expires_at: encrypted_entry.expires_at,
         })
     }
 
-    /// Create or update secret
+    /// Create or update secret.
+    ///
+    /// `ttl` semantics (in seconds):
+    ///   * `Some(n)` — set `expires_at = now + n`.
+    ///   * `None`    — **carry forward** the existing entry's `expires_at`
+    ///                 (or leave it unset for a brand-new entry).
+    ///
+    /// There is intentionally no value of `ttl` that *clears* a previously
+    /// set expiration through this public method: the carry-forward branch
+    /// is what allows TTL-unaware callers (gRPC, the warp adapter, internal
+    /// rollback) to update a secret's data without silently stripping its
+    /// expiration.  Callers that genuinely want to remove an expiration from
+    /// an existing secret should route through `put_secret_internal` with
+    /// `expires_at_override = Some(None)` — this is what the REST handlers
+    /// do when a request carries `clear_ttl: true` (see
+    /// `CreateSecretRequest::clear_ttl` in `crates/api/src/handlers/secret.rs`).
+    ///
+    /// API contract for handler authors: the REST `POST /secrets/{path}` and
+    /// `PUT /secrets/{path}` endpoints expose three TTL modes via the request
+    /// body:
+    ///   * `ttl: Some(n)`                     — set `expires_at = now + n`.
+    ///   * `ttl: None, clear_ttl: false/unset` — carry forward existing TTL.
+    ///   * `ttl: None, clear_ttl: true`        — clear TTL (non-expiring).
+    /// `ttl: Some(_)` together with `clear_ttl: true` is contradictory and
+    /// must be rejected by handlers with a 400.  TTL-unaware update paths
+    /// (gRPC, the warp adapter used by the CLI) cannot clear TTLs and will
+    /// always carry-forward — this is intentional, since silently stripping
+    /// expirations on those paths is a worse failure mode than "rotate
+    /// through the REST API to drop a TTL".
     pub async fn put_secret(
         &self,
         path: &str,
         data: HashMap<String, String>,
         metadata: Option<SecretMetadata>,
         user: &secreton_auth::User,
+        ttl: Option<u64>,
+    ) -> Result<SecretData, SecretError> {
+        self.put_secret_internal(path, data, metadata, user, ttl, None)
+            .await
+    }
+
+    /// Internal put_secret that allows callers (e.g. `rollback_secret`) to
+    /// supply an absolute `expires_at` value that takes precedence over both
+    /// the TTL and the carry-forward-from-existing logic.
+    ///
+    /// `expires_at_override` semantics:
+    ///   * `None`              — use the normal `ttl` / carry-forward logic.
+    ///   * `Some(None)`        — explicitly clear the expiration on the new
+    ///                           entry (e.g. rolling back to a historical
+    ///                           version that had no TTL).
+    ///   * `Some(Some(when))`  — set `expires_at = when` exactly (preserves
+    ///                           absolute timestamps from historical versions
+    ///                           without lossy now-relative TTL conversion).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn put_secret_internal(
+        &self,
+        path: &str,
+        data: HashMap<String, String>,
+        metadata: Option<SecretMetadata>,
+        user: &secreton_auth::User,
+        ttl: Option<u64>,
+        expires_at_override: Option<Option<chrono::DateTime<chrono::Utc>>>,
     ) -> Result<SecretData, SecretError> {
         let start_time = std::time::Instant::now();
         self.check_permission(user, path, "write").await?;
+
+        // Validate TTL upper bound before any unchecked numeric casts below
+        // (`as i64` for `chrono::Duration::seconds`, `as u32` for the
+        // lifecycle manager's `ttl_days`).  Without this guard, an
+        // attacker-controlled u64 above `i64::MAX` would silently wrap to a
+        // negative `Duration`, producing a `expires_at` in the past and
+        // marking the secret as immediately expired.  100 years is far
+        // above any realistic operational TTL while staying well within
+        // both `i64` seconds and `u32` days.
+        const MAX_TTL_SECONDS: u64 = 100 * 365 * 86_400;
+        if let Some(ttl_secs) = ttl {
+            // Reject `ttl == 0`, which would compute `expires_at = now + 0s`
+            // and mark the just-written entry as immediately expired — the
+            // next lifecycle sweep tick would then delete the data the user
+            // just stored, with no indication in the success response that
+            // anything is wrong.  An explicit error is far less surprising
+            // than silent data loss.  Callers that want a non-expiring
+            // secret should pass `ttl = None`.
+            if ttl_secs == 0 {
+                return Err(SecretError::InvalidOperation(
+                    "TTL of 0 seconds would create an immediately-expired secret. \
+                     Use a positive TTL, or omit `ttl` for a non-expiring secret."
+                        .to_string(),
+                ));
+            }
+            if ttl_secs > MAX_TTL_SECONDS {
+                return Err(SecretError::InvalidOperation(format!(
+                    "TTL of {} seconds exceeds the maximum of {} seconds (~100 years)",
+                    ttl_secs, MAX_TTL_SECONDS
+                )));
+            }
+        }
 
         // Validate path for reserved delimiter. We only block paths that end with ::v followed by digits
         // or paths that attempt to write directly into the sys/history/ namespace.
@@ -434,44 +538,53 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, _existing_owner, previous_version, existing_metadata, existing_tags, existing_created_at) =
-            if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
-                // Check ownership first
-                if existing.owner_id != owner_id {
-                    return Err(SecretError::PermissionDenied(format!(
-                        "Access restricted: User is not the owner of '{}'",
-                        path
-                    )));
-                }
+        let (
+            version,
+            _existing_owner,
+            previous_version,
+            existing_metadata,
+            existing_tags,
+            existing_created_at,
+            existing_expires_at,
+        ) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            // Check ownership first
+            if existing.owner_id != owner_id {
+                return Err(SecretError::PermissionDenied(format!(
+                    "Access restricted: User is not the owner of '{}'",
+                    path
+                )));
+            }
 
-                // Capture existing metadata, tags, and created_at before archiving
-                let prev_metadata = existing.metadata.clone();
-                let prev_tags = existing.tags.clone();
-                let prev_created_at = existing.created_at;
+            // Capture existing metadata, tags, created_at, and expires_at before archiving
+            let prev_metadata = existing.metadata.clone();
+            let prev_tags = existing.tags.clone();
+            let prev_created_at = existing.created_at;
+            let prev_expires_at = existing.expires_at;
 
-                // Archive the existing version
-                let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
-                let mut archive_entry = existing.clone();
-                archive_entry.path = archive_path;
-                // Ensure unique ID for the archived entry to avoid PK collisions
-                archive_entry.id = Uuid::new_v4();
+            // Archive the existing version
+            let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
+            let mut archive_entry = existing.clone();
+            archive_entry.path = archive_path;
+            // Ensure unique ID for the archived entry to avoid PK collisions
+            archive_entry.id = Uuid::new_v4();
 
-                // Store the archived version
-                if let Err(e) = self.storage.store(&archive_entry).await {
-                    return Err(SecretError::Storage(e));
-                }
+            // Store the archived version
+            if let Err(e) = self.storage.store(&archive_entry).await {
+                return Err(SecretError::Storage(e));
+            }
 
-                (
-                    existing.version + 1,
-                    Some(existing.owner_id),
-                    Some(existing.version),
-                    Some(prev_metadata),
-                    Some(prev_tags),
-                    Some(prev_created_at),
-                )
-            } else {
-                (1, None, None, None, None, None)
-            };
+            (
+                existing.version + 1,
+                Some(existing.owner_id),
+                Some(existing.version),
+                Some(prev_metadata),
+                Some(prev_tags),
+                Some(prev_created_at),
+                Some(prev_expires_at),
+            )
+        } else {
+            (1, None, None, None, None, None, None)
+        };
 
         // Create SecretEntry
         let mut entry = secreton_storage::SecretEntry::new(
@@ -531,11 +644,98 @@ impl SecretService {
             }
         }
 
+        // Apply TTL to the storage entry so that `is_expired()` and the
+        // lifecycle sweep work against the authoritative storage record.
+        // We use second precision here to match the API contract (TTL is
+        // expressed in seconds).
+        //
+        // When the caller does not supply a TTL (`ttl == None`), carry
+        // forward the existing entry's `expires_at` so that updates
+        // through APIs that don't expose a TTL parameter (gRPC, warp,
+        // internal rollback) don't silently strip a previously-set
+        // expiration.  This mirrors the carry-forward semantics already
+        // applied to metadata/tags above.
+        if let Some(override_value) = expires_at_override {
+            // Caller explicitly specified the expiration (e.g. rollback
+            // restoring a historical version's absolute timestamp).
+            entry.expires_at = override_value;
+        } else if let Some(ttl_secs) = ttl {
+            entry.expires_at =
+                Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64));
+        } else if let Some(prev_expires_at) = existing_expires_at {
+            // Carry forward the existing entry's expiration, BUT only when it
+            // is still in the future.  If the previous version's `expires_at`
+            // is already in the past (e.g. the user is updating a secret
+            // whose TTL elapsed before the lifecycle sweep ran, or a
+            // TTL-unaware caller — gRPC, warp — is rotating an expired
+            // secret's value), blindly copying the stale timestamp would
+            // make the just-written entry immediately eligible for deletion
+            // on the next sweep tick, silently destroying the data the user
+            // just wrote.  Treat a past `expires_at` the same as no
+            // expiration: the new entry becomes non-expiring until the
+            // caller sets a fresh TTL.
+            match prev_expires_at {
+                Some(prev) if prev > chrono::Utc::now() => {
+                    entry.expires_at = Some(prev);
+                }
+                _ => {
+                    // Past or unset — leave entry.expires_at as None.
+                }
+            }
+        }
+
         // Store encrypted data
         self.storage
             .store(&entry)
             .await
             .map_err(SecretError::Storage)?;
+
+        // Sync the in-memory lifecycle manager with the authoritative
+        // storage-level `entry.expires_at`.  We compute `ttl_days` from
+        // the *final* expiration on the entry (rather than only from the
+        // `ttl` parameter) so that carry-forward updates and rollbacks —
+        // which both leave `ttl == None` but still produce a meaningful
+        // `entry.expires_at` — keep the lifecycle dashboard / stats in
+        // sync.  An entry with no expiration is intentionally left
+        // un-tracked by the lifecycle manager.
+        //
+        // Round up to whole days so that sub-day TTLs (e.g. 1 hour) are
+        // not silently truncated to 0, and partial-day TTLs (e.g. 1.5
+        // days) are not rounded down.  The lifecycle manager tracks
+        // day-granular expirations; the authoritative second-precision
+        // expiration lives on `entry.expires_at` above.
+        //
+        // CAVEAT: `SecretLifecycleManagement` keeps its tracking state in
+        // an in-memory `HashMap`, so on every server restart this side of
+        // the world is wiped.  The storage-level `expires_at` is
+        // persistent (so the sweep keeps working correctly), but the
+        // lifecycle stats / `get_lifecycle` / `extend_ttl` API surface is
+        // ephemeral until those endpoints are rebuilt to read from
+        // storage directly.  See the lifecycle handler stubs in
+        // `crates/api/src/handlers/lifecycle.rs`.
+        if let Some(lifecycle_svc) = &self.lifecycle {
+            if let Some(expires_at) = entry.expires_at {
+                let now = chrono::Utc::now();
+                let remaining_secs = (expires_at - now).num_seconds().max(0) as u64;
+                let ttl_days = remaining_secs.div_ceil(86_400).max(1) as u32;
+                if let Err(e) = lifecycle_svc
+                    .manager()
+                    .set_expiration(path.to_string(), ttl_days)
+                    .await
+                {
+                    warn!("Failed to update lifecycle for {}: {}", path, e);
+                }
+            } else {
+                // The new entry has no expiration (either it never had one,
+                // or a rollback / explicit override cleared it).  Remove any
+                // stale lifecycle tracking entry for this path so that
+                // dashboard stats and `list_by_status` don't continue to
+                // report a now-non-expiring secret as Active/Expiring.
+                if let Err(e) = lifecycle_svc.manager().remove_expiration(path).await {
+                    warn!("Failed to clear lifecycle for {}: {}", path, e);
+                }
+            }
+        }
 
         // Update cache with plaintext data PREPENDED with version
         let mut cache_payload = entry.version.to_be_bytes().to_vec();
@@ -574,6 +774,7 @@ impl SecretService {
             previous_version,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
+            expires_at: entry.expires_at,
         })
     }
 
@@ -670,6 +871,17 @@ impl SecretService {
         // Invalidate cache
         let _ = self.performance.invalidate_cached(path).await;
 
+        // Drop any in-memory lifecycle tracking entry for the deleted path
+        // so that dashboard stats and `list_by_status` don't continue to
+        // report a deleted secret.  The lifecycle manager is best-effort
+        // (in-memory only) and may not contain an entry for this path,
+        // which is fine — `remove_expiration` is a no-op in that case.
+        if let Some(lifecycle_svc) = &self.lifecycle {
+            if let Err(e) = lifecycle_svc.manager().remove_expiration(path).await {
+                warn!("Failed to clear lifecycle for {}: {}", path, e);
+            }
+        }
+
         self.performance
             .record_access(path, AccessType::Delete, start_time.elapsed(), true)
             .await;
@@ -708,9 +920,44 @@ impl SecretService {
         // 1. Fetch the historical version
         let historical_data = self.get_secret(path, user, Some(version)).await?;
 
+        // Reject rollback when the historical version's `expires_at` is
+        // already in the past.  Without this guard we would faithfully
+        // restore the absolute timestamp (so rollback round-trips
+        // losslessly), but the lifecycle sweep — which reads the same
+        // authoritative `expires_at` — would then delete the entry on its
+        // next tick.  Users initiating a rollback rarely expect "restore
+        // and immediately delete" behaviour; failing loudly here lets
+        // them either re-set a TTL via a follow-up `put_secret` call or
+        // pick a different version.
+        if let Some(historical_expires_at) = historical_data.expires_at {
+            if historical_expires_at <= chrono::Utc::now() {
+                return Err(SecretError::InvalidOperation(format!(
+                    "Cannot rollback to version {}: its expires_at ({}) is in the past, \
+                     which would make the rolled-back secret immediately eligible for \
+                     lifecycle cleanup. Update the secret with a fresh TTL after rollback, \
+                     or rollback to a different version.",
+                    version, historical_expires_at
+                )));
+            }
+        }
+
         // 2. Promotion: Put it as the new latest version.
-        // `put_secret` handles archiving the current one and incrementing the version.
-        let rolled_back = self.put_secret(path, historical_data.data, Some(historical_data.metadata), user).await?;
+        // `put_secret_internal` handles archiving the current one and
+        // incrementing the version.  We pass the historical version's
+        // `expires_at` as an explicit override so that rollback restores the
+        // historical expiration verbatim instead of inheriting the *current*
+        // version's `expires_at` via the carry-forward branch in
+        // `put_secret_internal` (which fires whenever `ttl` is None).
+        let rolled_back = self
+            .put_secret_internal(
+                path,
+                historical_data.data,
+                Some(historical_data.metadata),
+                user,
+                None,
+                Some(historical_data.expires_at),
+            )
+            .await?;
 
         // Log audit trail for rollback specifically
         let _ = self
@@ -952,6 +1199,7 @@ impl SecretService {
                                     previous_version: None,
                                     created_at: entry.created_at,
                                     updated_at: entry.updated_at,
+                                    expires_at: entry.expires_at,
                                 });
                             }
                             Err(e) => {
@@ -2258,6 +2506,7 @@ pub struct SecretData {
     pub previous_version: Option<u32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Secret version info

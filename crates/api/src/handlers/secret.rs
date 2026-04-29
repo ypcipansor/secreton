@@ -453,6 +453,15 @@ pub struct CreateSecretRequest {
     pub data: HashMap<String, String>,
     pub metadata: Option<SecretMetadata>,
     pub ttl: Option<u64>,
+    /// Explicitly clear any existing `expires_at` on the stored secret,
+    /// making it non-expiring.  Must be combined with `ttl: None`; sending
+    /// `clear_ttl: true` with a `ttl: Some(_)` is a contradiction and is
+    /// rejected with a 400.  Provides a REST-level escape hatch from the
+    /// TTL carry-forward semantics documented on
+    /// `SecretService::put_secret`, so users do not need to delete and
+    /// recreate a secret just to drop its expiration.
+    #[serde(default)]
+    pub clear_ttl: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -778,7 +787,7 @@ pub async fn get_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: None, // Only set when the secret was created with a TTL
+        expires_at: secret_data.expires_at,
     };
 
     // Audit: SecretAccess (handled by service too, but handler logs redundant? removed redundancy)
@@ -803,16 +812,44 @@ pub async fn create_secret(
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
-    // Create secret via secreton service
-    let secret_data: secret::SecretData = state
-        .secreton
-        .put_secret(&path, request.data, request.metadata, &user)
-        .await
-        .map_err(|e: crate::services::secret::SecretError| match e {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
-        })?;
+    // Reject contradictory TTL flags.  `clear_ttl: true` means "drop any
+    // existing expiration" and only makes sense when `ttl` is unset.
+    if request.clear_ttl && request.ttl.is_some() {
+        return Err(crate::ApiError::BadRequest(
+            "`clear_ttl: true` cannot be combined with a non-null `ttl`; \
+             omit `ttl` to clear, or omit `clear_ttl` to set a fresh TTL"
+                .to_string(),
+        ));
+    }
+
+    // Dispatch on `clear_ttl`: when set, route through `put_secret_internal`
+    // with `expires_at_override = Some(None)` so the carry-forward branch is
+    // bypassed and the new entry has no `expires_at`.  Otherwise use the
+    // public `put_secret` path which honours the carry-forward semantics
+    // documented on `SecretService::put_secret`.
+    let secret_data: secret::SecretData = if request.clear_ttl {
+        state
+            .secreton
+            .put_secret_internal(
+                &path,
+                request.data,
+                request.metadata,
+                &user,
+                None,
+                Some(None),
+            )
+            .await
+    } else {
+        state
+            .secreton
+            .put_secret(&path, request.data, request.metadata, &user, request.ttl)
+            .await
+    }
+    .map_err(|e: crate::services::secret::SecretError| match e {
+        secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+        secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+        _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
+    })?;
 
     let response = SecretResponse {
         path: secret_data.path,
@@ -821,9 +858,7 @@ pub async fn create_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: request
-            .ttl
-            .map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
+        expires_at: secret_data.expires_at,
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -855,16 +890,42 @@ pub async fn update_secret(
         },
     };
 
-    // Update secret via secreton service
-    let secret_data: secret::SecretData = state
-        .secreton
-        .put_secret(&path, request.data, request.metadata, &user)
-        .await
-        .map_err(|e| match e {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e)),
-        })?;
+    // Reject contradictory TTL flags (mirrors `create_secret` validation).
+    if request.clear_ttl && request.ttl.is_some() {
+        return Err(crate::ApiError::BadRequest(
+            "`clear_ttl: true` cannot be combined with a non-null `ttl`; \
+             omit `ttl` to clear, or omit `clear_ttl` to set a fresh TTL"
+                .to_string(),
+        ));
+    }
+
+    // Dispatch on `clear_ttl`: when set, route through `put_secret_internal`
+    // with `expires_at_override = Some(None)` to bypass the carry-forward
+    // branch and produce a non-expiring new version.  Otherwise use the
+    // public `put_secret` path.
+    let secret_data: secret::SecretData = if request.clear_ttl {
+        state
+            .secreton
+            .put_secret_internal(
+                &path,
+                request.data,
+                request.metadata,
+                &user,
+                None,
+                Some(None),
+            )
+            .await
+    } else {
+        state
+            .secreton
+            .put_secret(&path, request.data, request.metadata, &user, request.ttl)
+            .await
+    }
+    .map_err(|e| match e {
+        secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
+        secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
+        _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e)),
+    })?;
 
     // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
     if secret_data.previous_version.is_none() && secret_data.version == 1 {
@@ -900,9 +961,7 @@ pub async fn update_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: request
-            .ttl
-            .map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
+        expires_at: secret_data.expires_at,
     };
 
     // Audit: SecretVersionChange
@@ -1019,7 +1078,7 @@ pub async fn rollback_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: None,
+        expires_at: secret_data.expires_at,
     };
 
     Ok(Json(ApiResponse::success(response)))

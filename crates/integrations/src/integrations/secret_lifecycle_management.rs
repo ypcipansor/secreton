@@ -18,14 +18,7 @@ pub enum LifecycleError {
 
 pub type Result<T> = std::result::Result<T, LifecycleError>;
 
-/// Secret _status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum SecretStatus {
-    Active,
-    Expiring,
-    Expired,
-    Archived,
-}
+pub use secreton_common::dto::lifecycle::{SecretStatus, SecretLifecycle, LifecycleStatistics};
 
 /// Hook type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,18 +37,6 @@ pub struct LifecycleConfig {
     pub grace_period_days: u32,
     pub auto_archive_enabled: bool,
     pub cleanup_enabled: bool,
-}
-
-/// Secret lifecycle
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretLifecycle {
-    pub secret_path: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub archived_at: Option<DateTime<Utc>>,
-    pub _status: SecretStatus,
-    pub ttl_days: u32,
-    pub grace_period_days: u32,
 }
 
 /// Expiration policy
@@ -127,7 +108,7 @@ impl SecretLifecycleManagement {
             created_at,
             expires_at,
             archived_at: None,
-            _status: SecretStatus::Active,
+            status: SecretStatus::Active,
             ttl_days,
             grace_period_days,
         };
@@ -146,7 +127,7 @@ impl SecretLifecycleManagement {
         lifecycles
             .values()
             .filter(|lc| {
-                lc._status == SecretStatus::Active
+                lc.status == SecretStatus::Active
                     && lc.expires_at <= threshold
                     && lc.expires_at > Utc::now()
             })
@@ -154,14 +135,14 @@ impl SecretLifecycleManagement {
             .collect()
     }
 
-    /// Expire _secret
+    /// Expire secret
     pub async fn expire_secret(&self, secret_path: &str) -> Result<()> {
         let mut lifecycles = self.lifecycles.write().await;
         let lifecycle = lifecycles
             .get_mut(secret_path)
             .ok_or_else(|| LifecycleError::LifecycleError("Lifecycle not found".to_string()))?;
 
-        lifecycle._status = SecretStatus::Expired;
+        lifecycle.status = SecretStatus::Expired;
         drop(lifecycles);
 
         // Trigger PostExpire hook
@@ -171,7 +152,7 @@ impl SecretLifecycleManagement {
         Ok(())
     }
 
-    /// Archive _secret
+    /// Archive secret
     pub async fn archive_secret(&self, secret_path: &str) -> Result<ArchiveRecord> {
         // Trigger PreArchive hook
         self.trigger_lifecycle_hook(HookType::PreArchive, secret_path)
@@ -182,7 +163,7 @@ impl SecretLifecycleManagement {
             .get_mut(secret_path)
             .ok_or_else(|| LifecycleError::LifecycleError("Lifecycle not found".to_string()))?;
 
-        lifecycle._status = SecretStatus::Archived;
+        lifecycle.status = SecretStatus::Archived;
         lifecycle.archived_at = Some(Utc::now());
         drop(lifecycles);
 
@@ -205,6 +186,21 @@ impl SecretLifecycleManagement {
         Ok(archive_record)
     }
 
+    /// Remove the lifecycle tracking entry for a secret.
+    ///
+    /// Called by callers (e.g. `SecretService::delete_secret_internal`,
+    /// or `put_secret_internal` when an update clears `expires_at`) to keep
+    /// the in-memory tracking state in sync with the authoritative storage
+    /// record.  Returning `Ok(false)` (rather than an error) when no entry
+    /// exists lets callers invoke this unconditionally without needing a
+    /// pre-check, since the lifecycle manager's state is ephemeral and may
+    /// legitimately not contain a path that storage knows about (e.g. after
+    /// a server restart).
+    pub async fn remove_expiration(&self, secret_path: &str) -> Result<bool> {
+        let mut lifecycles = self.lifecycles.write().await;
+        Ok(lifecycles.remove(secret_path).is_some())
+    }
+
     /// Extend TTL
     pub async fn extend_ttl(
         &self,
@@ -217,7 +213,7 @@ impl SecretLifecycleManagement {
             .ok_or_else(|| LifecycleError::LifecycleError("Lifecycle not found".to_string()))?;
 
         lifecycle.expires_at += Duration::days(additional_days as i64);
-        lifecycle._status = SecretStatus::Active;
+        lifecycle.status = SecretStatus::Active;
         lifecycle.ttl_days += additional_days;
 
         Ok(lifecycle.clone())
@@ -259,12 +255,12 @@ impl SecretLifecycleManagement {
         Ok(())
     }
 
-    /// List by _status
-    pub async fn list_by_status(&self, _status: SecretStatus) -> Vec<SecretLifecycle> {
+    /// List by status
+    pub async fn list_by_status(&self, status: SecretStatus) -> Vec<SecretLifecycle> {
         let lifecycles = self.lifecycles.read().await;
         lifecycles
             .values()
-            .filter(|lc| lc._status == _status)
+            .filter(|lc| lc.status == status)
             .cloned()
             .collect()
     }
@@ -284,7 +280,7 @@ impl SecretLifecycleManagement {
         let lifecycles = self.lifecycles.read().await;
         let to_cleanup: Vec<_> = lifecycles
             .values()
-            .filter(|lc| lc._status == SecretStatus::Expired && lc.expires_at < threshold)
+            .filter(|lc| lc.status == SecretStatus::Expired && lc.expires_at < threshold)
             .map(|lc| lc.secret_path.clone())
             .collect();
         drop(lifecycles);
@@ -334,15 +330,15 @@ impl SecretLifecycleManagement {
         let total_secrets = lifecycles.len();
         let active_secrets = lifecycles
             .values()
-            .filter(|lc| lc._status == SecretStatus::Active)
+            .filter(|lc| lc.status == SecretStatus::Active)
             .count();
         let expiring_secrets = lifecycles
             .values()
-            .filter(|lc| lc._status == SecretStatus::Expiring)
+            .filter(|lc| lc.status == SecretStatus::Expiring)
             .count();
         let expired_secrets = lifecycles
             .values()
-            .filter(|lc| lc._status == SecretStatus::Expired)
+            .filter(|lc| lc.status == SecretStatus::Expired)
             .count();
         let archived_secrets = archives.len();
 
@@ -354,16 +350,6 @@ impl SecretLifecycleManagement {
             archived_secrets,
         }
     }
-}
-
-/// Lifecycle statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LifecycleStatistics {
-    pub total_secrets: usize,
-    pub active_secrets: usize,
-    pub expiring_secrets: usize,
-    pub expired_secrets: usize,
-    pub archived_secrets: usize,
 }
 
 #[cfg(test)]
@@ -390,7 +376,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(lifecycle.ttl_days, 90);
-        assert_eq!(lifecycle._status, SecretStatus::Active);
+        assert_eq!(lifecycle.status, SecretStatus::Active);
     }
 
     #[tokio::test]
@@ -433,7 +419,7 @@ mod tests {
         lifecycle_mgmt.expire_secret("_secret/test").await.unwrap();
 
         let lifecycle = lifecycle_mgmt.get_lifecycle("_secret/test").await.unwrap();
-        assert_eq!(lifecycle._status, SecretStatus::Expired);
+        assert_eq!(lifecycle.status, SecretStatus::Expired);
     }
 
     #[tokio::test]
@@ -457,7 +443,7 @@ mod tests {
             .get_lifecycle("_secret/archive")
             .await
             .unwrap();
-        assert_eq!(lifecycle._status, SecretStatus::Archived);
+        assert_eq!(lifecycle.status, SecretStatus::Archived);
     }
 
     #[tokio::test]
@@ -475,6 +461,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(extended.ttl_days, 60);
-        assert_eq!(extended._status, SecretStatus::Active);
+        assert_eq!(extended.status, SecretStatus::Active);
     }
 }

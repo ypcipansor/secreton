@@ -20,6 +20,8 @@ struct SecretListItem {
 struct GetSecretResponse {
     data: serde_json::Value,
     version: u32,
+    #[serde(default)]
+    expires_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,7 +33,11 @@ struct SecretVersionInfo {
 #[derive(Clone, Debug)]
 enum SecretViewMode {
     List(Vec<String>),
-    View(serde_json::Value, u32), // data, version
+    View {
+        data: serde_json::Value,
+        version: u32,
+        expires_at: Option<String>,
+    },
     NotFound,
     Error(String),
 }
@@ -89,7 +95,11 @@ pub fn SecretsList() -> impl IntoView {
 
                 match api::get::<GetSecretResponse>(&secret_url).await {
                     Ok(secret) => {
-                         SecretViewMode::View(secret.data, secret.version)
+                         SecretViewMode::View {
+                            data: secret.data,
+                            version: secret.version,
+                            expires_at: secret.expires_at,
+                         }
                     },
                     Err(api::ApiError::NotFound(_)) => {
                         // If specific version requested and not found, it's an error (or deleted history)
@@ -234,7 +244,7 @@ pub fn SecretsList() -> impl IntoView {
     // Open Modal for Edit (Existing)
     let open_edit = move |_| {
         set_error_msg.set(None);
-        if let Some(SecretViewMode::View(data, _)) = secret_resource.get() {
+        if let Some(SecretViewMode::View { data, .. }) = secret_resource.get() {
              if let serde_json::Value::Object(map) = data {
                  let mut rows = Vec::new();
                  let mut id = 0;
@@ -304,7 +314,7 @@ pub fn SecretsList() -> impl IntoView {
 
             // Distinguish between create (POST) and update (PUT)
             // If target_path matches current_path AND we are in View mode, it's an edit.
-            let is_edit = target_path == current_path && matches!(secret_resource.get(), Some(SecretViewMode::View(_, _)));
+            let is_edit = target_path == current_path && matches!(secret_resource.get(), Some(SecretViewMode::View { .. }));
 
             let result = if is_edit {
                 api::put::<serde_json::Value, _>(&url, payload).await
@@ -381,7 +391,7 @@ pub fn SecretsList() -> impl IntoView {
                     </Button>
 
                     {move || {
-                        if let Some(SecretViewMode::View(_, _)) = secret_resource.get() {
+                        if let Some(SecretViewMode::View { .. }) = secret_resource.get() {
                             let handle_delete = handle_delete.clone();
                             let open_edit = open_edit.clone();
                             let load_history = load_history.clone();
@@ -459,7 +469,7 @@ pub fn SecretsList() -> impl IntoView {
                                      }.into_any()
                                 }
                             },
-                            SecretViewMode::View(data, version) => {
+                            SecretViewMode::View { data, version, expires_at } => {
                                 match data {
                                     serde_json::Value::Object(map) => {
                                         view! {
@@ -480,10 +490,29 @@ pub fn SecretsList() -> impl IntoView {
                                                         </div>
                                                     </div>
                                                 </Show>
-                                                <div class="flex justify-end text-xs text-gray-400 uppercase font-bold tracking-wider">
-                                                    {format!("Version: {}", version)}
-                                                        // TODO: Display detailed lifecycle status (Expiring, Archived)
-                                                        // and integration status (Synced to AWS/Azure) here.
+                                                <div class="flex justify-between items-center text-xs uppercase font-bold tracking-wider mb-2">
+                                                    <div class="flex gap-4">
+                                                        <span class="text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                                            {format!("Version: {}", version)}
+                                                        </span>
+                                                        // Integration status placeholder
+                                                        <span class="text-gray-400">"AWS: Not Synced"</span>
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-gray-500">"Expires: "</span>
+                                                        <span class="text-gray-700 font-mono lowercase">
+                                                            {move || expires_at.clone().unwrap_or_else(|| "Never".to_string())}
+                                                        </span>
+                                                        // NOTE: "Extend +30d" button removed until the
+                                                        // `/lifecycle/extend/*` backend route is mounted and
+                                                        // authenticated.  Re-add once the lifecycle handler
+                                                        // module is wired into the API router and updates the
+                                                        // storage-level `expires_at` (not just the in-memory
+                                                        // lifecycle manager).
+                                                        <span class="ml-2 text-gray-300 normal-case font-medium" title="Extend TTL is not yet available">
+                                                            "Extend (coming soon)"
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <div class="grid gap-4">
                                                     {map.iter().map(|(k, v)| {
@@ -605,7 +634,7 @@ pub fn SecretsList() -> impl IntoView {
                     set_error_msg.set(None);
                     set_show_modal.set(false);
                 }
-                title=if matches!(secret_resource.get(), Some(SecretViewMode::View(_, _))) {
+                title=if matches!(secret_resource.get(), Some(SecretViewMode::View { .. })) {
                     format!("Edit Secret: {}", path())
                 } else {
                     "Create New Secret".to_string()
@@ -620,7 +649,7 @@ pub fn SecretsList() -> impl IntoView {
                                      {move || error_msg.get().unwrap_or_default()}
                                  </div>
                              </Show>
-                             <Show when=move || !matches!(secret_resource.get(), Some(SecretViewMode::View(_, _)))>
+                             <Show when=move || !matches!(secret_resource.get(), Some(SecretViewMode::View { .. }))>
                                  <div class="bg-blue-50 p-3 rounded text-sm text-blue-800 mb-2">
                                     "Creating secret at: "
                                     <span class="font-mono font-bold">

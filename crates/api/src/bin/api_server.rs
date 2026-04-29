@@ -310,17 +310,23 @@ async fn main() -> anyhow::Result<()> {
         SecretPerformanceConfig::default(),
     ));
 
-    let secreton = Arc::new(
-        SecretService::new(
-            storage.clone(),
-            crypto.clone(),
-            audit.clone(),
-            identity.clone(),
-            policy_service.clone(),
-            performance.clone(),
-        )
-        .await?,
-    );
+    // Build `SecretService` as an owned value first so that `with_lifecycle`
+    // can inject the lifecycle back into the same instance before we wrap it
+    // in `Arc`. This mirrors the pattern in `ApiServiceContainer::new` and
+    // avoids the `Arc::unwrap_or_clone` footgun — if we constructed the
+    // `Arc` up front and then tried to inject lifecycle, the injection
+    // would silently operate on a clone whose `lifecycle` field stays
+    // `None` for every other `Arc` holder (including the one registered
+    // into the service container below).
+    let secreton_inner = SecretService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+        identity.clone(),
+        policy_service.clone(),
+        performance.clone(),
+    )
+    .await?;
 
     // Initialize Secret Lifecycle service.
     //
@@ -340,10 +346,15 @@ async fn main() -> anyhow::Result<()> {
         };
     let lifecycle = Arc::new(LifecycleService::new(
         storage.clone(),
-        secreton.clone(),
         audit.clone(),
         lifecycle_config,
     ));
+
+    // Inject lifecycle into the (still unique) secret service before sharing
+    // it via `Arc`, so every consumer sees the wired-up version and the
+    // in-memory lifecycle manager is kept in sync on put/delete.
+    let secreton = Arc::new(secreton_inner.with_lifecycle(lifecycle.clone()));
+
     lifecycle.spawn_worker().await;
 
     // Construct HTTP Routes
