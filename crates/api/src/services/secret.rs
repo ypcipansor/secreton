@@ -415,26 +415,27 @@ impl SecretService {
     ///                 (or leave it unset for a brand-new entry).
     ///
     /// There is intentionally no value of `ttl` that *clears* a previously
-    /// set expiration through this public API: the carry-forward branch is
-    /// what allows TTL-unaware callers (gRPC, the warp adapter, internal
+    /// set expiration through this public method: the carry-forward branch
+    /// is what allows TTL-unaware callers (gRPC, the warp adapter, internal
     /// rollback) to update a secret's data without silently stripping its
-    /// expiration. Callers that genuinely want to remove an expiration from
-    /// an existing secret must delete and recreate it, or use the internal
-    /// `put_secret_internal(..., expires_at_override = Some(None))` path.
+    /// expiration.  Callers that genuinely want to remove an expiration from
+    /// an existing secret should route through `put_secret_internal` with
+    /// `expires_at_override = Some(None)` — this is what the REST handlers
+    /// do when a request carries `clear_ttl: true` (see
+    /// `CreateSecretRequest::clear_ttl` in `crates/api/src/handlers/secret.rs`).
     ///
-    /// API-contract implication for handler authors: once a TTL has been
-    /// set on a secret via a REST `POST /secret/{path}` with `ttl`, there
-    /// is no REST-level request shape that makes the secret non-expiring
-    /// again — every subsequent update either sets a fresh TTL (`ttl:
-    /// Some(n)`) or preserves the existing one (`ttl: None`). This is
-    /// deliberate: without the carry-forward rule, any TTL-unaware update
-    /// path (gRPC, the warp adapter used by the CLI) would silently strip
-    /// the expiration, which is a far worse failure mode than "user must
-    /// delete and recreate to drop a TTL". If a future API revision wants
-    /// to expose explicit clearing (e.g. a sentinel `ttl: Some(0)` or a
-    /// separate `clear_ttl: true` flag), it should route through
-    /// `put_secret_internal` with `expires_at_override = Some(None)`
-    /// rather than extending the carry-forward branch of this method.
+    /// API contract for handler authors: the REST `POST /secrets/{path}` and
+    /// `PUT /secrets/{path}` endpoints expose three TTL modes via the request
+    /// body:
+    ///   * `ttl: Some(n)`                     — set `expires_at = now + n`.
+    ///   * `ttl: None, clear_ttl: false/unset` — carry forward existing TTL.
+    ///   * `ttl: None, clear_ttl: true`        — clear TTL (non-expiring).
+    /// `ttl: Some(_)` together with `clear_ttl: true` is contradictory and
+    /// must be rejected by handlers with a 400.  TTL-unaware update paths
+    /// (gRPC, the warp adapter used by the CLI) cannot clear TTLs and will
+    /// always carry-forward — this is intentional, since silently stripping
+    /// expirations on those paths is a worse failure mode than "rotate
+    /// through the REST API to drop a TTL".
     pub async fn put_secret(
         &self,
         path: &str,
@@ -460,7 +461,7 @@ impl SecretService {
     ///                           absolute timestamps from historical versions
     ///                           without lossy now-relative TTL conversion).
     #[allow(clippy::too_many_arguments)]
-    async fn put_secret_internal(
+    pub(crate) async fn put_secret_internal(
         &self,
         path: &str,
         data: HashMap<String, String>,
