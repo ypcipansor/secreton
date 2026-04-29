@@ -444,44 +444,53 @@ impl SecretService {
         let owner_id = Self::get_user_uuid(user);
 
         // Get existing secret to check for version and ownership atomically (avoid TOCTOU)
-        let (version, _existing_owner, previous_version, existing_metadata, existing_tags, existing_created_at) =
-            if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
-                // Check ownership first
-                if existing.owner_id != owner_id {
-                    return Err(SecretError::PermissionDenied(format!(
-                        "Access restricted: User is not the owner of '{}'",
-                        path
-                    )));
-                }
+        let (
+            version,
+            _existing_owner,
+            previous_version,
+            existing_metadata,
+            existing_tags,
+            existing_created_at,
+            existing_expires_at,
+        ) = if let Ok(Some(existing)) = self.storage.get_by_path(path).await {
+            // Check ownership first
+            if existing.owner_id != owner_id {
+                return Err(SecretError::PermissionDenied(format!(
+                    "Access restricted: User is not the owner of '{}'",
+                    path
+                )));
+            }
 
-                // Capture existing metadata, tags, and created_at before archiving
-                let prev_metadata = existing.metadata.clone();
-                let prev_tags = existing.tags.clone();
-                let prev_created_at = existing.created_at;
+            // Capture existing metadata, tags, created_at, and expires_at before archiving
+            let prev_metadata = existing.metadata.clone();
+            let prev_tags = existing.tags.clone();
+            let prev_created_at = existing.created_at;
+            let prev_expires_at = existing.expires_at;
 
-                // Archive the existing version
-                let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
-                let mut archive_entry = existing.clone();
-                archive_entry.path = archive_path;
-                // Ensure unique ID for the archived entry to avoid PK collisions
-                archive_entry.id = Uuid::new_v4();
+            // Archive the existing version
+            let archive_path = format!("sys/history/{}::v{}", existing.path, existing.version);
+            let mut archive_entry = existing.clone();
+            archive_entry.path = archive_path;
+            // Ensure unique ID for the archived entry to avoid PK collisions
+            archive_entry.id = Uuid::new_v4();
 
-                // Store the archived version
-                if let Err(e) = self.storage.store(&archive_entry).await {
-                    return Err(SecretError::Storage(e));
-                }
+            // Store the archived version
+            if let Err(e) = self.storage.store(&archive_entry).await {
+                return Err(SecretError::Storage(e));
+            }
 
-                (
-                    existing.version + 1,
-                    Some(existing.owner_id),
-                    Some(existing.version),
-                    Some(prev_metadata),
-                    Some(prev_tags),
-                    Some(prev_created_at),
-                )
-            } else {
-                (1, None, None, None, None, None)
-            };
+            (
+                existing.version + 1,
+                Some(existing.owner_id),
+                Some(existing.version),
+                Some(prev_metadata),
+                Some(prev_tags),
+                Some(prev_created_at),
+                Some(prev_expires_at),
+            )
+        } else {
+            (1, None, None, None, None, None, None)
+        };
 
         // Create SecretEntry
         let mut entry = secreton_storage::SecretEntry::new(
@@ -545,9 +554,18 @@ impl SecretService {
         // lifecycle sweep work against the authoritative storage record.
         // We use second precision here to match the API contract (TTL is
         // expressed in seconds).
+        //
+        // When the caller does not supply a TTL (`ttl == None`), carry
+        // forward the existing entry's `expires_at` so that updates
+        // through APIs that don't expose a TTL parameter (gRPC, warp,
+        // internal rollback) don't silently strip a previously-set
+        // expiration.  This mirrors the carry-forward semantics already
+        // applied to metadata/tags above.
         if let Some(ttl_secs) = ttl {
             entry.expires_at =
                 Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64));
+        } else if let Some(prev_expires_at) = existing_expires_at {
+            entry.expires_at = prev_expires_at;
         }
 
         // Store encrypted data
