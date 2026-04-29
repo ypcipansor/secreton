@@ -462,6 +462,20 @@ impl SecretService {
         // both `i64` seconds and `u32` days.
         const MAX_TTL_SECONDS: u64 = 100 * 365 * 86_400;
         if let Some(ttl_secs) = ttl {
+            // Reject `ttl == 0`, which would compute `expires_at = now + 0s`
+            // and mark the just-written entry as immediately expired — the
+            // next lifecycle sweep tick would then delete the data the user
+            // just stored, with no indication in the success response that
+            // anything is wrong.  An explicit error is far less surprising
+            // than silent data loss.  Callers that want a non-expiring
+            // secret should pass `ttl = None`.
+            if ttl_secs == 0 {
+                return Err(SecretError::InvalidOperation(
+                    "TTL of 0 seconds would create an immediately-expired secret. \
+                     Use a positive TTL, or omit `ttl` for a non-expiring secret."
+                        .to_string(),
+                ));
+            }
             if ttl_secs > MAX_TTL_SECONDS {
                 return Err(SecretError::InvalidOperation(format!(
                     "TTL of {} seconds exceeds the maximum of {} seconds (~100 years)",
