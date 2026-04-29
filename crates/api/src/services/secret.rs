@@ -327,6 +327,7 @@ impl SecretService {
                                     previous_version: None,
                                     created_at: encrypted_entry.created_at,
                                     updated_at: encrypted_entry.updated_at,
+                                    expires_at: encrypted_entry.expires_at,
                                 });
                             }
                             Err(_) => {
@@ -396,6 +397,7 @@ impl SecretService {
             previous_version: None,
             created_at: encrypted_entry.created_at,
             updated_at: encrypted_entry.updated_at,
+            expires_at: encrypted_entry.expires_at,
         })
     }
 
@@ -626,6 +628,7 @@ impl SecretService {
             previous_version,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
+            expires_at: entry.expires_at,
         })
     }
 
@@ -1004,6 +1007,7 @@ impl SecretService {
                                     previous_version: None,
                                     created_at: entry.created_at,
                                     updated_at: entry.updated_at,
+                                    expires_at: entry.expires_at,
                                 });
                             }
                             Err(e) => {
@@ -2310,6 +2314,7 @@ pub struct SecretData {
     pub previous_version: Option<u32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Secret version info

@@ -778,7 +778,7 @@ pub async fn get_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: None, // Only set when the secret was created with a TTL
+        expires_at: secret_data.expires_at,
     };
 
     // Audit: SecretAccess (handled by service too, but handler logs redundant? removed redundancy)
@@ -821,9 +821,7 @@ pub async fn create_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: request
-            .ttl
-            .map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
+        expires_at: secret_data.expires_at,
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -900,9 +898,7 @@ pub async fn update_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: request
-            .ttl
-            .map(|ttl| chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)),
+        expires_at: secret_data.expires_at,
     };
 
     // Audit: SecretVersionChange
@@ -1019,7 +1015,7 @@ pub async fn rollback_secret(
         version: secret_data.version,
         created_at: secret_data.created_at,
         updated_at: secret_data.updated_at,
-        expires_at: None,
+        expires_at: secret_data.expires_at,
     };
 
     Ok(Json(ApiResponse::success(response)))
