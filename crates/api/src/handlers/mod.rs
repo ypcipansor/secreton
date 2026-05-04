@@ -11,11 +11,11 @@ pub mod health;
 pub mod pki;
 pub mod secret;
 pub mod ssh;
+#[cfg(test)]
+pub mod ssh_tests;
 pub mod sys;
 pub mod totp_engine;
 pub mod transit;
-#[cfg(test)]
-pub mod ssh_tests;
 
 use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 

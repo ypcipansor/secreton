@@ -172,9 +172,10 @@ impl SecretEngine for TotpEngine {
 
         // Handle key creation
         if let Some(key_name) = path.strip_prefix("keys/") {
-            let key_val = data.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
-                SecretError::InvalidSecretData("Missing key data".to_string())
-            })?;
+            let key_val = data
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| SecretError::InvalidSecretData("Missing key data".to_string()))?;
 
             let period = data
                 .get("period")

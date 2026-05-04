@@ -342,7 +342,10 @@ mod tests {
         let (server, token) = server_with_routes().await;
         let response = server
             .get("/secrets/app/config")
-            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+            .add_header(
+                "Authorization",
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
             .await;
         response.assert_status_ok();
 
@@ -369,7 +372,10 @@ mod tests {
 
         let response = server
             .post("/secrets/app/admin")
-            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+            .add_header(
+                "Authorization",
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
             .json(&payload)
             .await;
         response.assert_status_ok();
@@ -394,7 +400,10 @@ mod tests {
 
         let response = server
             .post("/keys")
-            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+            .add_header(
+                "Authorization",
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -417,7 +426,10 @@ mod tests {
 
         let response = server
             .post("/hash")
-            .add_header("Authorization", axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+            .add_header(
+                "Authorization",
+                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
             .json(&request)
             .await;
         response.assert_status_ok();
@@ -700,9 +712,7 @@ pub enum UpdatePolicyRequest {
     },
     /// Raw-content update (admin-only).  Selected when the request body
     /// does not contain a `rules` key but does contain a `content` key.
-    Raw {
-        content: String,
-    },
+    Raw { content: String },
 }
 
 impl<'de> Deserialize<'de> for UpdatePolicyRequest {
@@ -735,8 +745,8 @@ impl<'de> Deserialize<'de> for UpdatePolicyRequest {
                 #[serde(default)]
                 content: Option<String>,
             }
-            let s = serde_json::from_value::<StructuredHelper>(v)
-                .map_err(serde::de::Error::custom)?;
+            let s =
+                serde_json::from_value::<StructuredHelper>(v).map_err(serde::de::Error::custom)?;
             Ok(UpdatePolicyRequest::Structured {
                 name: s.name,
                 rules: s.rules,
@@ -748,8 +758,7 @@ impl<'de> Deserialize<'de> for UpdatePolicyRequest {
             struct RawHelper {
                 content: String,
             }
-            let r =
-                serde_json::from_value::<RawHelper>(v).map_err(serde::de::Error::custom)?;
+            let r = serde_json::from_value::<RawHelper>(v).map_err(serde::de::Error::custom)?;
             Ok(UpdatePolicyRequest::Raw { content: r.content })
         } else {
             Err(serde::de::Error::custom(
@@ -1451,8 +1460,9 @@ pub async fn encrypt_data(
         "tag": encrypted_data.tag.as_ref().map(|t| BASE64_STANDARD.encode(t)),
         "key_version": key_version,
     });
-    let envelope_json = serde_json::to_vec(&compact_envelope)
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e)))?;
+    let envelope_json = serde_json::to_vec(&compact_envelope).map_err(|e| {
+        crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e))
+    })?;
     let ciphertext_b64 = BASE64_STANDARD.encode(&envelope_json);
 
     let response = EncryptResponse {
@@ -1498,11 +1508,14 @@ pub async fn decrypt_data(
             key_version: Option<u32>,
         }
         if let Ok(compact) = serde_json::from_slice::<CompactEnvelope>(&ciphertext_bytes) {
-            let nonce = BASE64_STANDARD.decode(&compact.nonce)
+            let nonce = BASE64_STANDARD
+                .decode(&compact.nonce)
                 .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 nonce: {}", e)))?;
-            let ct = BASE64_STANDARD.decode(&compact.ciphertext)
-                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
-            let tag = compact.tag
+            let ct = BASE64_STANDARD.decode(&compact.ciphertext).map_err(|e| {
+                crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e))
+            })?;
+            let tag = compact
+                .tag
                 .map(|t| BASE64_STANDARD.decode(&t))
                 .transpose()
                 .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 tag: {}", e)))?;
@@ -1520,8 +1533,9 @@ pub async fn decrypt_data(
             }
         } else {
             // Fall back to raw serde format (Vec<u8> as number arrays)
-            serde_json::from_slice(&ciphertext_bytes)
-                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e)))?
+            serde_json::from_slice(&ciphertext_bytes).map_err(|e| {
+                crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e))
+            })?
         }
     };
 
@@ -1533,7 +1547,12 @@ pub async fn decrypt_data(
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
         .secreton
-        .decrypt(&request.key_id, &encrypted_data, &user, effective_key_version)
+        .decrypt(
+            &request.key_id,
+            &encrypted_data,
+            &user,
+            effective_key_version,
+        )
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
@@ -1605,7 +1624,13 @@ pub async fn verify_signature(
     // Verify signature using secreton service
     let (is_valid, key_version) = state
         .secreton
-        .verify_data(&request.key_id, &data, signature_bytes, &user, request.key_version)
+        .verify_data(
+            &request.key_id,
+            &data,
+            signature_bytes,
+            &user,
+            request.key_version,
+        )
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
@@ -1812,13 +1837,18 @@ pub async fn get_policy(
     // evaluating RBAC), the fallback path would bypass fine-grained RBAC.
     // To guard against this, explicitly verify read permission on the
     // policy path.  This is a cheap in-memory RBAC evaluation.
-    if let Err(e) = state.secreton.check_policy_permission(&name, &user, "read").await {
+    if let Err(e) = state
+        .secreton
+        .check_policy_permission(&name, &user, "read")
+        .await
+    {
         if let secret::SecretError::PermissionDenied(msg) = e {
             return Err(crate::ApiError::Authorization(msg));
         }
         // Other errors (e.g. storage) — fail closed
         return Err(crate::ApiError::Internal(format!(
-            "Failed to verify policy permissions: {}", e
+            "Failed to verify policy permissions: {}",
+            e
         )));
     }
 
@@ -1846,7 +1876,10 @@ pub async fn get_policy(
             Ok(Json(ApiResponse::success(response)))
         }
         Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
-        Err(e) => Err(crate::ApiError::Internal(format!("Failed to retrieve policy content: {}", e))),
+        Err(e) => Err(crate::ApiError::Internal(format!(
+            "Failed to retrieve policy content: {}",
+            e
+        ))),
     }
 }
 
@@ -1929,116 +1962,129 @@ pub async fn update_policy(
             metadata: req_metadata,
             content: stray_content,
         } => {
-        // Reject an empty `rules` array accompanied by a non-null `content`:
-        // this is almost certainly a client mistake — sending an empty
-        // structured update would silently wipe rules AND drop the raw
-        // content the caller also supplied.  Fail fast instead of losing
-        // data.
-        let content_present = stray_content.is_some();
-        if rules.is_empty() && content_present {
-            return Err(crate::ApiError::BadRequest(
-                "Invalid request: 'rules' is empty and 'content' is also provided; \
+            // Reject an empty `rules` array accompanied by a non-null `content`:
+            // this is almost certainly a client mistake — sending an empty
+            // structured update would silently wipe rules AND drop the raw
+            // content the caller also supplied.  Fail fast instead of losing
+            // data.
+            let content_present = stray_content.is_some();
+            if rules.is_empty() && content_present {
+                return Err(crate::ApiError::BadRequest(
+                    "Invalid request: 'rules' is empty and 'content' is also provided; \
                  send either 'rules' with at least one rule or 'content' alone"
-                    .to_string(),
-            ));
-        }
-        // If both 'rules' and 'content' are present, 'rules' takes precedence.
-        // Log a warning so operators can spot unintentional data loss.
-        if content_present {
-            tracing::warn!(
-                "update_policy '{}': request contains both 'rules' and 'content'; \
+                        .to_string(),
+                ));
+            }
+            // If both 'rules' and 'content' are present, 'rules' takes precedence.
+            // Log a warning so operators can spot unintentional data loss.
+            if content_present {
+                tracing::warn!(
+                    "update_policy '{}': request contains both 'rules' and 'content'; \
                  only 'rules' will be processed (raw content is ignored)",
-                name
-            );
-        }
+                    name
+                );
+            }
 
-        // Now that the request is known-valid, remove any stale raw-content
-        // entry at `sys/policies/content/{name}` so that the two namespaces do
-        // not drift out of sync.  Without this cleanup, a policy that previously
-        // received a raw-content update followed by a structured update would
-        // leave an orphaned raw entry in storage — which would resurface in
-        // `list_policies` / `get_policy` fallback reads and could be misread
-        // after the structured policy is later deleted.
-        //
-        // Only admin/root users may touch raw content; for non-admin users this
-        // block is a no-op, which is safe because only admins can have created
-        // raw content in the first place.
-        if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
-            // Enforce fine-grained RBAC before touching raw content, consistent
-            // with the update_policy raw-content branch and `delete_policy`.
-            // The structured `update_policy` call below performs its own RBAC
-            // check on the same path with "update" action, but the raw-content
-            // cleanup is a logically distinct operation (delete on
-            // sys/policies/content/{name}) so we verify explicitly.  A permission
-            // failure here is a soft error — log and continue with the
-            // structured update, since an admin who cannot clean up stale raw
-            // content should still be able to update the structured policy.
-            match state.secreton.check_policy_permission(&name, &user, "delete").await {
-                Ok(()) => {
-                    if let Err(e) = state.admin.delete_policy_content(&name).await {
-                        // Don't fail the structured update on raw-content cleanup
-                        // failures — log and continue.  The structured policy is the
-                        // authoritative representation after this update.
-                        tracing::warn!(
-                            "update_policy '{}': failed to delete stale raw content during \
+            // Now that the request is known-valid, remove any stale raw-content
+            // entry at `sys/policies/content/{name}` so that the two namespaces do
+            // not drift out of sync.  Without this cleanup, a policy that previously
+            // received a raw-content update followed by a structured update would
+            // leave an orphaned raw entry in storage — which would resurface in
+            // `list_policies` / `get_policy` fallback reads and could be misread
+            // after the structured policy is later deleted.
+            //
+            // Only admin/root users may touch raw content; for non-admin users this
+            // block is a no-op, which is safe because only admins can have created
+            // raw content in the first place.
+            if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string())
+            {
+                // Enforce fine-grained RBAC before touching raw content, consistent
+                // with the update_policy raw-content branch and `delete_policy`.
+                // The structured `update_policy` call below performs its own RBAC
+                // check on the same path with "update" action, but the raw-content
+                // cleanup is a logically distinct operation (delete on
+                // sys/policies/content/{name}) so we verify explicitly.  A permission
+                // failure here is a soft error — log and continue with the
+                // structured update, since an admin who cannot clean up stale raw
+                // content should still be able to update the structured policy.
+                match state
+                    .secreton
+                    .check_policy_permission(&name, &user, "delete")
+                    .await
+                {
+                    Ok(()) => {
+                        if let Err(e) = state.admin.delete_policy_content(&name).await {
+                            // Don't fail the structured update on raw-content cleanup
+                            // failures — log and continue.  The structured policy is the
+                            // authoritative representation after this update.
+                            tracing::warn!(
+                                "update_policy '{}': failed to delete stale raw content during \
                              structured update: {}",
-                            name, e
+                                name,
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "update_policy '{}': skipping raw-content cleanup during structured \
+                         update because RBAC check failed: {}",
+                            name,
+                            e
                         );
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "update_policy '{}': skipping raw-content cleanup during structured \
-                         update because RBAC check failed: {}",
-                        name, e
-                    );
+            }
+
+            let metadata = if let Some(meta) = &req_metadata {
+                crate::services::secret::PolicyMetadata {
+                    description: meta.description.clone(),
+                    tags: meta
+                        .tags
+                        .iter()
+                        .map(|t| (t.clone(), "true".to_string()))
+                        .collect(),
+                    owner: meta.owner.clone(),
+                    created_by: user.username.clone(),
                 }
-            }
-        }
-
-        let metadata = if let Some(meta) = &req_metadata {
-            crate::services::secret::PolicyMetadata {
-                description: meta.description.clone(),
-                tags: meta.tags.iter().map(|t| (t.clone(), "true".to_string())).collect(),
-                owner: meta.owner.clone(),
-                created_by: user.username.clone(),
-            }
-        } else {
-            crate::services::secret::PolicyMetadata {
-                description: None,
-                tags: std::collections::HashMap::new(),
-                owner: Some(user.username.clone()),
-                created_by: user.username.clone(),
-            }
-        };
-
-        let policy = state
-            .secreton
-            .update_policy(&name, rules, metadata, &user)
-            .await
-            .map_err(|e| match e {
-                secret::SecretError::PolicyNotFound { .. } => {
-                    crate::ApiError::NotFound("Policy not found".to_string())
+            } else {
+                crate::services::secret::PolicyMetadata {
+                    description: None,
+                    tags: std::collections::HashMap::new(),
+                    owner: Some(user.username.clone()),
+                    created_by: user.username.clone(),
                 }
-                secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-                _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
-            })?;
+            };
 
-        let response = PolicyResponse {
-            name: policy.name,
-            rules: policy.rules,
-            metadata: PolicyMetadata {
-                description: policy.metadata.description,
-                tags: policy.metadata.tags.keys().cloned().collect(),
-                owner: policy.metadata.owner,
-            },
-            created_at: policy.created_at,
-            updated_at: policy.updated_at,
-            policy_type: "structured".to_string(),
-            content: None,
-        };
+            let policy = state
+                .secreton
+                .update_policy(&name, rules, metadata, &user)
+                .await
+                .map_err(|e| match e {
+                    secret::SecretError::PolicyNotFound { .. } => {
+                        crate::ApiError::NotFound("Policy not found".to_string())
+                    }
+                    secret::SecretError::PermissionDenied(msg) => {
+                        crate::ApiError::Authorization(msg)
+                    }
+                    _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
+                })?;
 
-        Ok(Json(ApiResponse::success(response)))
+            let response = PolicyResponse {
+                name: policy.name,
+                rules: policy.rules,
+                metadata: PolicyMetadata {
+                    description: policy.metadata.description,
+                    tags: policy.metadata.tags.keys().cloned().collect(),
+                    owner: policy.metadata.owner,
+                },
+                created_at: policy.created_at,
+                updated_at: policy.updated_at,
+                policy_type: "structured".to_string(),
+                content: None,
+            };
+
+            Ok(Json(ApiResponse::success(response)))
         }
         UpdatePolicyRequest::Raw { content } => {
             // Only admin/root may update raw policy content
@@ -2118,30 +2164,34 @@ pub async fn delete_policy(
     // Only admin/root users may manage raw policy content — mirrors the
     // role gates in `get_policy` and `update_policy`.  Non-admin users
     // skip this step; the structured deletion below is sufficient for them.
-    let raw_deleted = if user.roles.contains(&"admin".to_string())
-        || user.roles.contains(&"root".to_string())
-    {
-        // Enforce fine-grained RBAC in addition to the role check, consistent
-        // with the update_policy raw-content path.
-        if let Err(e) = state.secreton.check_policy_permission(&name, &user, "delete").await {
-            if let secret::SecretError::PermissionDenied(msg) = e {
-                return Err(crate::ApiError::Authorization(msg));
+    let raw_deleted =
+        if user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string()) {
+            // Enforce fine-grained RBAC in addition to the role check, consistent
+            // with the update_policy raw-content path.
+            if let Err(e) = state
+                .secreton
+                .check_policy_permission(&name, &user, "delete")
+                .await
+            {
+                if let secret::SecretError::PermissionDenied(msg) = e {
+                    return Err(crate::ApiError::Authorization(msg));
+                }
+                return Err(crate::ApiError::Internal(format!(
+                    "Failed to verify policy permissions: {}",
+                    e
+                )));
             }
-            return Err(crate::ApiError::Internal(format!(
-                "Failed to verify policy permissions: {}", e
-            )));
-        }
 
-        state
-            .admin
-            .delete_policy_content(&name)
-            .await
-            .map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
-            })?
-    } else {
-        false
-    };
+            state
+                .admin
+                .delete_policy_content(&name)
+                .await
+                .map_err(|e| {
+                    crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
+                })?
+        } else {
+            false
+        };
 
     // Delete structured policy via secreton service.
     // Track whether the structured policy existed so we can decide whether
@@ -2153,7 +2203,10 @@ pub async fn delete_policy(
             return Err(crate::ApiError::Authorization(msg));
         }
         Err(e) => {
-            return Err(crate::ApiError::Internal(format!("Failed to delete policy: {}", e)));
+            return Err(crate::ApiError::Internal(format!(
+                "Failed to delete policy: {}",
+                e
+            )));
         }
     };
 
@@ -2218,11 +2271,7 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
             256,
             vec!["encrypt".to_string(), "decrypt".to_string()],
         ),
-        "x25519" => (
-            "X25519".to_string(),
-            256,
-            vec!["key-agreement".to_string()],
-        ),
+        "x25519" => ("X25519".to_string(), 256, vec!["key-agreement".to_string()]),
         "aes256-gcm" => (
             "AES-GCM".to_string(),
             256,

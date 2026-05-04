@@ -7,9 +7,9 @@
 //! - Credit card number tokenization
 //! - SSN/PII data transformation
 
-use crate::error::{CryptoResult, CryptoError};
-use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use crate::error::{CryptoError, CryptoResult};
 use aes::Aes256;
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::NoPadding};
 use cbc::{Decryptor, Encryptor};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -107,29 +107,26 @@ impl TransformEngine {
     }
 
     /// Transform data according to configured rules
-    pub async fn transform(
-        &self,
-        transform_name: &str,
-        data: &str,
-    ) -> CryptoResult<String> {
+    pub async fn transform(&self, transform_name: &str, data: &str) -> CryptoResult<String> {
         // Handle special cases that don't need configuration lookups
         if transform_name.starts_with("cc_") || transform_name.starts_with("credit_card_") {
-             return self.tokenize_credit_card(data, transform_name).await;
+            return self.tokenize_credit_card(data, transform_name).await;
         }
         if transform_name.starts_with("ssn_") || transform_name.starts_with("ssn_test") {
-             return self.tokenize_ssn(data, transform_name).await;
+            return self.tokenize_ssn(data, transform_name).await;
         }
 
-        let config = self
-            .config
-            .get(transform_name)
-            .ok_or_else(|| CryptoError::InvalidParameter(format!("Transform '{}' not found", transform_name)))?;
+        let config = self.config.get(transform_name).ok_or_else(|| {
+            CryptoError::InvalidParameter(format!("Transform '{}' not found", transform_name))
+        })?;
 
         match &config.transform_type {
             TransformType::Fpe => self.format_preserving_encrypt(data, config).await,
             TransformType::Tokenization => self.tokenize(data, transform_name, config).await,
             TransformType::Masking => self.mask_data(data, config).await,
-            TransformType::CreditCardTokenization => self.tokenize_credit_card(data, transform_name).await,
+            TransformType::CreditCardTokenization => {
+                self.tokenize_credit_card(data, transform_name).await
+            }
             TransformType::SsnTokenization => self.tokenize_ssn(data, transform_name).await,
         }
     }
@@ -142,27 +139,37 @@ impl TransformEngine {
     ) -> CryptoResult<String> {
         // Handle special cases
         if transform_name.starts_with("cc_") || transform_name.starts_with("credit_card_") {
-             return self.detokenize(transformed_data, transform_name).await;
+            return self.detokenize(transformed_data, transform_name).await;
         }
         if transform_name.starts_with("ssn_") || transform_name.starts_with("ssn_test") {
-             return self.detokenize(transformed_data, transform_name).await;
+            return self.detokenize(transformed_data, transform_name).await;
         }
 
-        let config = self
-            .config
-            .get(transform_name)
-            .ok_or_else(|| CryptoError::InvalidParameter(format!("Transform '{}' not found", transform_name)))?;
+        let config = self.config.get(transform_name).ok_or_else(|| {
+            CryptoError::InvalidParameter(format!("Transform '{}' not found", transform_name))
+        })?;
 
         if !config.reversible {
-            return Err(CryptoError::InvalidParameter("Transform is not reversible".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Transform is not reversible".to_string(),
+            ));
         }
 
         match &config.transform_type {
-            TransformType::Fpe => self.format_preserving_decrypt(transformed_data, config).await,
+            TransformType::Fpe => {
+                self.format_preserving_decrypt(transformed_data, config)
+                    .await
+            }
             TransformType::Tokenization => self.detokenize(transformed_data, transform_name).await,
-            TransformType::Masking => Err(CryptoError::InvalidParameter("Masking is not reversible".to_string())),
-            TransformType::CreditCardTokenization => self.detokenize(transformed_data, transform_name).await,
-            TransformType::SsnTokenization => self.detokenize(transformed_data, transform_name).await,
+            TransformType::Masking => Err(CryptoError::InvalidParameter(
+                "Masking is not reversible".to_string(),
+            )),
+            TransformType::CreditCardTokenization => {
+                self.detokenize(transformed_data, transform_name).await
+            }
+            TransformType::SsnTokenization => {
+                self.detokenize(transformed_data, transform_name).await
+            }
         }
     }
 
@@ -176,11 +183,16 @@ impl TransformEngine {
             return Ok(String::new());
         }
 
-        let allowed_chars = config.allowed_chars.as_deref().unwrap_or("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let allowed_chars = config
+            .allowed_chars
+            .as_deref()
+            .unwrap_or("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         let allowed_chars: Vec<char> = allowed_chars.chars().collect();
 
         if allowed_chars.is_empty() {
-            return Err(CryptoError::InvalidParameter("No allowed characters specified for FPE".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "No allowed characters specified for FPE".to_string(),
+            ));
         }
 
         // Convert input to numerical representation
@@ -189,7 +201,10 @@ impl TransformEngine {
             if let Some(pos) = allowed_chars.iter().position(|&c| c == ch) {
                 input_nums.push(pos);
             } else {
-                return Err(CryptoError::InvalidParameter(format!("Character '{}' not in allowed character set", ch)));
+                return Err(CryptoError::InvalidParameter(format!(
+                    "Character '{}' not in allowed character set",
+                    ch
+                )));
             }
         }
 
@@ -238,7 +253,10 @@ impl TransformEngine {
             return Ok(String::new());
         }
 
-        let allowed_chars = config.allowed_chars.as_deref().unwrap_or("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let allowed_chars = config
+            .allowed_chars
+            .as_deref()
+            .unwrap_or("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         let allowed_chars: Vec<char> = allowed_chars.chars().collect();
 
         // Convert input to numerical representation
@@ -247,7 +265,10 @@ impl TransformEngine {
             if let Some(pos) = allowed_chars.iter().position(|&c| c == ch) {
                 input_nums.push(pos);
             } else {
-                return Err(CryptoError::InvalidParameter(format!("Character '{}' not in allowed character set", ch)));
+                return Err(CryptoError::InvalidParameter(format!(
+                    "Character '{}' not in allowed character set",
+                    ch
+                )));
             }
         }
 
@@ -312,7 +333,10 @@ impl TransformEngine {
             let random_part: String = (0..4)
                 .map(|_| {
                     let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-                    chars.chars().nth(rand::random::<usize>() % chars.len()).unwrap()
+                    chars
+                        .chars()
+                        .nth(rand::random::<usize>() % chars.len())
+                        .unwrap()
                 })
                 .collect();
             token_format.replace("XXXX", &random_part)
@@ -321,8 +345,12 @@ impl TransformEngine {
         };
 
         // Store mappings
-        mapping.original_to_token.insert(data.to_string(), token.clone());
-        mapping.token_to_original.insert(token.clone(), data.to_string());
+        mapping
+            .original_to_token
+            .insert(data.to_string(), token.clone());
+        mapping
+            .token_to_original
+            .insert(token.clone(), data.to_string());
 
         Ok(token)
     }
@@ -331,9 +359,12 @@ impl TransformEngine {
     async fn detokenize(&self, token: &str, transform_name: &str) -> CryptoResult<String> {
         let mappings = self.token_mappings.read().await;
 
-        let mapping = mappings
-            .get(transform_name)
-            .ok_or_else(|| CryptoError::InvalidParameter(format!("No mappings found for transform '{}'", transform_name)))?;
+        let mapping = mappings.get(transform_name).ok_or_else(|| {
+            CryptoError::InvalidParameter(format!(
+                "No mappings found for transform '{}'",
+                transform_name
+            ))
+        })?;
 
         mapping
             .token_to_original
@@ -357,7 +388,9 @@ impl TransformEngine {
             // Custom pattern with # representing visible characters
             let visible_count = pattern.chars().filter(|&c| c == '#').count();
             if data.len() < visible_count {
-                return Err(CryptoError::InvalidParameter("Data too short for masking pattern".to_string()));
+                return Err(CryptoError::InvalidParameter(
+                    "Data too short for masking pattern".to_string(),
+                ));
             }
 
             let mut result = String::new();
@@ -383,7 +416,9 @@ impl TransformEngine {
     async fn tokenize_credit_card(&self, data: &str, transform_name: &str) -> CryptoResult<String> {
         // Basic credit card validation (should be more comprehensive in production)
         if data.len() != 16 && data.len() != 19 {
-            return Err(CryptoError::InvalidParameter("Invalid credit card number length".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Invalid credit card number length".to_string(),
+            ));
         }
 
         let config = TransformConfig {
@@ -403,7 +438,9 @@ impl TransformEngine {
         });
 
         if !ssn_regex.is_match(data) {
-            return Err(CryptoError::InvalidParameter("Invalid SSN format (use 000-00-0000)".to_string()));
+            return Err(CryptoError::InvalidParameter(
+                "Invalid SSN format (use 000-00-0000)".to_string(),
+            ));
         }
 
         let config = TransformConfig {
@@ -470,11 +507,17 @@ mod tests {
         config.transform_type = TransformType::Fpe;
         config.allowed_chars = Some("0123456789".to_string());
 
-        engine.configure_transform("test_fpe".to_string(), config).await.unwrap();
+        engine
+            .configure_transform("test_fpe".to_string(), config)
+            .await
+            .unwrap();
 
         let original = "12345";
         let encrypted = engine.transform("test_fpe", original).await.unwrap();
-        let decrypted = engine.reverse_transform("test_fpe", &encrypted).await.unwrap();
+        let decrypted = engine
+            .reverse_transform("test_fpe", &encrypted)
+            .await
+            .unwrap();
 
         assert_eq!(original, decrypted);
         assert_ne!(original, encrypted);
@@ -485,7 +528,10 @@ mod tests {
         let mut engine = TransformEngine::new();
         let config = TransformConfig::default();
 
-        engine.configure_transform("test_token".to_string(), config).await.unwrap();
+        engine
+            .configure_transform("test_token".to_string(), config)
+            .await
+            .unwrap();
 
         let original = "sensitive_data_123";
         let token1 = engine.transform("test_token", original).await.unwrap();
@@ -494,7 +540,10 @@ mod tests {
         // Should return same token for same input
         assert_eq!(token1, token2);
 
-        let recovered = engine.reverse_transform("test_token", &token1).await.unwrap();
+        let recovered = engine
+            .reverse_transform("test_token", &token1)
+            .await
+            .unwrap();
         assert_eq!(original, recovered);
     }
 
@@ -505,7 +554,10 @@ mod tests {
         config.transform_type = TransformType::Masking;
         config.masking_pattern = Some("###-##-####".to_string());
 
-        engine.configure_transform("test_mask".to_string(), config).await.unwrap();
+        engine
+            .configure_transform("test_mask".to_string(), config)
+            .await
+            .unwrap();
 
         let original = "123456789";
         let masked = engine.transform("test_mask", original).await.unwrap();

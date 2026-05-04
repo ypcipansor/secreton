@@ -252,7 +252,9 @@ impl AuthenticationService {
                 if let Some(config_data) = entry.metadata.get("config_data") {
                     match serde_json::from_str::<serde_json::Value>(config_data) {
                         Ok(config) => {
-                            if let Some(timeout) = config.get("session_timeout").and_then(|v| v.as_u64()) {
+                            if let Some(timeout) =
+                                config.get("session_timeout").and_then(|v| v.as_u64())
+                            {
                                 // Apply the same validation range (60-86400 seconds)
                                 // that the admin service enforces during updates.
                                 if timeout >= 60 && timeout <= 86400 {
@@ -315,20 +317,35 @@ impl AuthenticationService {
                 if let Some(config_data) = entry.metadata.get("config_data") {
                     match serde_json::from_str::<serde_json::Value>(config_data) {
                         Ok(config) => {
-                            if let Some(v) = config.get("password_policy_min_length").and_then(|v| v.as_u64()) {
+                            if let Some(v) = config
+                                .get("password_policy_min_length")
+                                .and_then(|v| v.as_u64())
+                            {
                                 // Clamp to usize::MAX to avoid silent truncation on 32-bit platforms.
                                 policy.min_length = usize::try_from(v).unwrap_or(usize::MAX);
                             }
-                            if let Some(v) = config.get("password_policy_require_uppercase").and_then(|v| v.as_bool()) {
+                            if let Some(v) = config
+                                .get("password_policy_require_uppercase")
+                                .and_then(|v| v.as_bool())
+                            {
                                 policy.require_uppercase = v;
                             }
-                            if let Some(v) = config.get("password_policy_require_lowercase").and_then(|v| v.as_bool()) {
+                            if let Some(v) = config
+                                .get("password_policy_require_lowercase")
+                                .and_then(|v| v.as_bool())
+                            {
                                 policy.require_lowercase = v;
                             }
-                            if let Some(v) = config.get("password_policy_require_numbers").and_then(|v| v.as_bool()) {
+                            if let Some(v) = config
+                                .get("password_policy_require_numbers")
+                                .and_then(|v| v.as_bool())
+                            {
                                 policy.require_numbers = v;
                             }
-                            if let Some(v) = config.get("password_policy_require_special").and_then(|v| v.as_bool()) {
+                            if let Some(v) = config
+                                .get("password_policy_require_special")
+                                .and_then(|v| v.as_bool())
+                            {
                                 policy.require_special = v;
                             }
                         }
@@ -507,7 +524,8 @@ impl AuthenticationService {
                 tracing::error!(
                     "enforce_mfa: failed to parse user_id '{}' as UUID for user '{}'; \
                      denying access to prevent nil-UUID TOFU bypass",
-                    user_id, username
+                    user_id,
+                    username
                 );
                 AuthError::Internal(anyhow::anyhow!(
                     "Cannot enforce MFA: invalid user ID format"
@@ -523,16 +541,15 @@ impl AuthenticationService {
                     tracing::warn!(
                         "MFA service error for user '{}': {}; \
                          treating as MFA-required (fail-safe)",
-                        username, e
+                        username,
+                        e
                     );
                     true
                 }
             };
 
             if mfa_configured {
-                let code = mfa_code.ok_or_else(|| {
-                    AuthError::MfaRequired
-                })?;
+                let code = mfa_code.ok_or_else(|| AuthError::MfaRequired)?;
 
                 use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
                 let validation_request = MfaValidationRequest {
@@ -645,7 +662,8 @@ impl AuthenticationService {
             Err(e) => {
                 tracing::warn!(
                     "Failed to load user '{}' from storage during login: {}",
-                    req.username, e
+                    req.username,
+                    e
                 );
                 return Err(secreton_errors::SecretonError::Internal {
                     message: "An internal error occurred during authentication".to_string(),
@@ -786,7 +804,8 @@ impl AuthenticationService {
         // Enforce MFA for privileged users (admin/root) or if globally enabled.
         // Delegates to the shared `enforce_mfa()` helper so that `login()` and
         // `authenticate()` use identical enforcement logic.
-        let is_privileged = user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string());
+        let is_privileged =
+            user.roles.contains(&"admin".to_string()) || user.roles.contains(&"root".to_string());
 
         // Guard against empty user IDs for privileged users — mirrors the
         // check in `authenticate()` at lines 1624-1632.  An empty user ID
@@ -802,39 +821,41 @@ impl AuthenticationService {
             .into());
         }
 
-        let mfa_verified = match self.enforce_mfa(
-            &req.username,
-            &user.id,
-            is_privileged,
-            global_mfa_enabled,
-            req.mfa_code.clone(),
-        )
-        .await
+        let mfa_verified = match self
+            .enforce_mfa(
+                &req.username,
+                &user.id,
+                is_privileged,
+                global_mfa_enabled,
+                req.mfa_code.clone(),
+            )
+            .await
         {
             Ok(verified) => verified,
             Err(mfa_err) => {
-            // Increment failed_login_attempts on MFA failure so that the
-            // lockout mechanism also covers MFA brute-force attempts.
-            // Without this, an attacker who knows the password could try
-            // unlimited MFA codes without ever triggering account lockout.
-            //
-            // Only count `InvalidMfaCode` — an actual wrong code — toward
-            // lockout.  `MfaRequired` (first step of a two-step login) and
-            // `MfaNotConfigured` (user hasn't enrolled yet) are NOT attack
-            // indicators and should not accumulate lockout attempts:
-            //   - MfaRequired fires on every first-step login attempt in a
-            //     two-step flow; counting it would lock out legitimate users
-            //     after a few page refreshes.
-            //   - MfaNotConfigured fires every time a user who hasn't
-            //     enrolled tries to log in; counting it would permanently
-            //     lock them out before they can ever enroll.
-            if matches!(mfa_err, AuthError::InvalidMfaCode) {
-                user.failed_login_attempts += 1;
+                // Increment failed_login_attempts on MFA failure so that the
+                // lockout mechanism also covers MFA brute-force attempts.
+                // Without this, an attacker who knows the password could try
+                // unlimited MFA codes without ever triggering account lockout.
+                //
+                // Only count `InvalidMfaCode` — an actual wrong code — toward
+                // lockout.  `MfaRequired` (first step of a two-step login) and
+                // `MfaNotConfigured` (user hasn't enrolled yet) are NOT attack
+                // indicators and should not accumulate lockout attempts:
+                //   - MfaRequired fires on every first-step login attempt in a
+                //     two-step flow; counting it would lock out legitimate users
+                //     after a few page refreshes.
+                //   - MfaNotConfigured fires every time a user who hasn't
+                //     enrolled tries to log in; counting it would permanently
+                //     lock them out before they can ever enroll.
+                if matches!(mfa_err, AuthError::InvalidMfaCode) {
+                    user.failed_login_attempts += 1;
 
-                if !user.is_privileged() && user.failed_login_attempts >= 5 {
-                    user.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
-                    if let Some(audit) = &self.audit {
-                        let _ = audit
+                    if !user.is_privileged() && user.failed_login_attempts >= 5 {
+                        user.locked_until =
+                            Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                        if let Some(audit) = &self.audit {
+                            let _ = audit
                             .log_event(
                                 crate::services::audit::SecurityEventType::AuthenticationFailure {
                                     user: req.username.clone(),
@@ -844,38 +865,38 @@ impl AuthenticationService {
                                 },
                             )
                             .await;
+                        }
                     }
-                }
 
-                // Persist the updated counter
-                if let Ok(user_data) = serde_json::to_vec(&user) {
-                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                        if let Some(mut entry) = user_entry {
-                            entry.encrypted_data = encrypted;
-                            let _ = self.storage.store(&entry).await;
+                    // Persist the updated counter
+                    if let Ok(user_data) = serde_json::to_vec(&user) {
+                        if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                            if let Some(mut entry) = user_entry {
+                                entry.encrypted_data = encrypted;
+                                let _ = self.storage.store(&entry).await;
+                            }
                         }
                     }
                 }
-            }
 
-            return Err(match mfa_err {
-                AuthError::MfaRequired => secreton_errors::SecretonError::MfaRequired,
-                AuthError::MfaNotConfigured(ref user) => {
-                    secreton_errors::SecretonError::MfaNotConfigured {
-                        user: user.clone(),
+                return Err(match mfa_err {
+                    AuthError::MfaRequired => secreton_errors::SecretonError::MfaRequired,
+                    AuthError::MfaNotConfigured(ref user) => {
+                        secreton_errors::SecretonError::MfaNotConfigured { user: user.clone() }
                     }
+                    AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
+                        message: "Authentication failed".to_string(),
+                    },
+                    AuthError::Internal(ref inner) => {
+                        secreton_errors::SecretonError::Configuration {
+                            message: inner.to_string(),
+                        }
+                    }
+                    other => secreton_errors::SecretonError::Authentication {
+                        message: other.to_string(),
+                    },
                 }
-                AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
-                    message: "Authentication failed".to_string(),
-                },
-                AuthError::Internal(ref inner) => secreton_errors::SecretonError::Configuration {
-                    message: inner.to_string(),
-                },
-                other => secreton_errors::SecretonError::Authentication {
-                    message: other.to_string(),
-                },
-            }
-            .into());
+                .into());
             }
         };
 
@@ -916,17 +937,14 @@ impl AuthenticationService {
         // Create and store session
         let now = chrono::Utc::now();
         let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(
-                session_timeout_secs,
-            ))
-            .unwrap_or(chrono::Duration::hours(1));
+            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
         // Create token pair with session binding, using the dynamic timeout so
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
-        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
-            session_timeout_secs,
-        ))
-        .unwrap_or(chrono::Duration::hours(1));
+        let session_duration =
+            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
         // Set mfa_required on the token when TOFU was used (user
         // authenticated without MFA but MFA was required — either because
@@ -1259,7 +1277,8 @@ impl AuthenticationService {
             // call re-inserts the same entry (idempotent) and additionally
             // persists the revocation to shared storage for cross-instance
             // propagation.
-            self.revoke_token(refresh_token.to_string(), refresh_expiry).await;
+            self.revoke_token(refresh_token.to_string(), refresh_expiry)
+                .await;
 
             // Best-effort: find and delete the old session whose refresh_token
             // matches the one being exchanged.  This is a scan over the
@@ -1287,7 +1306,9 @@ impl AuthenticationService {
                         Err(decrypt_err) => {
                             // Only fall back to raw bytes if they look like
                             // valid JSON (legacy plaintext session).
-                            if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data).is_ok() {
+                            if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data)
+                                .is_ok()
+                            {
                                 tracing::warn!(
                                     "Session '{}': decryption failed, using legacy plaintext fallback",
                                     entry.path
@@ -1297,7 +1318,8 @@ impl AuthenticationService {
                                 tracing::warn!(
                                     "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
                                      skipping corrupt entry",
-                                    entry.path, decrypt_err
+                                    entry.path,
+                                    decrypt_err
                                 );
                                 continue; // skip corrupt entries
                             }
@@ -1306,7 +1328,8 @@ impl AuthenticationService {
                     if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
                         if session.refresh_token.as_deref() == Some(refresh_token) {
                             // Revoke the old access token
-                            self.revoke_token(session.token.clone(), session.expires_at).await;
+                            self.revoke_token(session.token.clone(), session.expires_at)
+                                .await;
                             // Delete the old session record
                             let _ = self.storage.delete_by_path(&entry.path).await;
                             break;
@@ -1323,15 +1346,12 @@ impl AuthenticationService {
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
         let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(
-                session_timeout_secs,
-            ))
-            .unwrap_or(chrono::Duration::hours(1));
+            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
-        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
-            session_timeout_secs,
-        ))
-        .unwrap_or(chrono::Duration::hours(1));
+        let session_duration =
+            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
         // Load user from storage to get current roles/policies instead of
         // using empty slices which would strip all authorization claims.
@@ -1344,19 +1364,38 @@ impl AuthenticationService {
             .get_by_path(&user_path)
             .await
             .map_err(|e| {
-                tracing::warn!("Failed to load user '{}' during token refresh: {}", claims.username, e);
+                tracing::warn!(
+                    "Failed to load user '{}' during token refresh: {}",
+                    claims.username,
+                    e
+                );
                 AuthError::Storage(e)
             })?
             .ok_or_else(|| {
-                tracing::warn!("User '{}' not found in storage during token refresh", claims.username);
+                tracing::warn!(
+                    "User '{}' not found in storage during token refresh",
+                    claims.username
+                );
                 AuthError::UserNotFound
             })?;
-        let decrypted = self.crypto.decrypt(&user_entry.encrypted_data).await.map_err(|e| {
-            tracing::warn!("Failed to decrypt user '{}' during token refresh: {}", claims.username, e);
-            AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
-        })?;
+        let decrypted = self
+            .crypto
+            .decrypt(&user_entry.encrypted_data)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    "Failed to decrypt user '{}' during token refresh: {}",
+                    claims.username,
+                    e
+                );
+                AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
+            })?;
         let stored_user: User = serde_json::from_slice(&decrypted).map_err(|e| {
-            tracing::warn!("Failed to deserialize user '{}' during token refresh: {}", claims.username, e);
+            tracing::warn!(
+                "Failed to deserialize user '{}' during token refresh: {}",
+                claims.username,
+                e
+            );
             AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
         })?;
 
@@ -1403,7 +1442,8 @@ impl AuthenticationService {
                     tracing::error!(
                         "refresh_token: failed to parse user_id '{}' as UUID for user '{}'; \
                          denying refresh to prevent nil-UUID TOFU bypass",
-                        stored_user.id, claims.username
+                        stored_user.id,
+                        claims.username
                     );
                     AuthError::Internal(anyhow::anyhow!(
                         "Cannot check MFA status: invalid user ID format"
@@ -1421,7 +1461,8 @@ impl AuthenticationService {
                         tracing::warn!(
                             "MFA service error during token refresh for user '{}': {}; \
                              denying refresh (fail-safe)",
-                            claims.username, e
+                            claims.username,
+                            e
                         );
                         return Err(AuthError::Internal(anyhow::anyhow!(
                             "Cannot verify MFA status during token refresh; please try again later"
@@ -1725,7 +1766,8 @@ impl AuthenticationService {
                         tracing::warn!(
                             "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
                              skipping corrupt entry",
-                            entry.path, decrypt_err
+                            entry.path,
+                            decrypt_err
                         );
                         continue;
                     }
@@ -1774,7 +1816,8 @@ impl AuthenticationService {
                         tracing::warn!(
                             "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
                              cannot verify ownership",
-                            session_id, decrypt_err
+                            session_id,
+                            decrypt_err
                         );
                         return Err(AuthError::Internal(anyhow::anyhow!(
                             "Cannot verify session ownership: failed to decrypt session data"
@@ -1792,7 +1835,8 @@ impl AuthenticationService {
                 tracing::warn!(
                     "Failed to deserialize session '{}' during revocation \
                      (ownership check cannot be performed): {}",
-                    session_id, e
+                    session_id,
+                    e
                 );
                 AuthError::Internal(anyhow::anyhow!(
                     "Cannot verify session ownership: failed to read session data"
@@ -1879,15 +1923,12 @@ impl AuthenticationService {
         let session_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now();
         let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(
-                session_timeout_secs,
-            ))
-            .unwrap_or(chrono::Duration::hours(1));
+            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
-        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
-            session_timeout_secs,
-        ))
-        .unwrap_or(chrono::Duration::hours(1));
+        let session_duration =
+            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
 
         let token = self
             .token_service
@@ -1976,19 +2017,29 @@ impl AuthenticationService {
         // that existed when the user was re-read up to 3 times, and avoids
         // the extra storage + decryption overhead.
         let user_path = format!("{}{}", USER_STORAGE_PREFIX, credentials.username);
-        let (mut pre_auth_user, mut pre_auth_entry) = match self.storage.get_by_path(&user_path).await {
+        let (mut pre_auth_user, mut pre_auth_entry) = match self
+            .storage
+            .get_by_path(&user_path)
+            .await
+        {
             Ok(Some(entry)) => {
-                let decrypted = self.crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
-                    tracing::warn!(
-                        "Failed to decrypt user '{}' during authenticate: {}",
-                        credentials.username, e
-                    );
-                    AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
-                })?;
+                let decrypted = self
+                    .crypto
+                    .decrypt(&entry.encrypted_data)
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Failed to decrypt user '{}' during authenticate: {}",
+                            credentials.username,
+                            e
+                        );
+                        AuthError::Internal(anyhow::anyhow!("Failed to decrypt user data: {}", e))
+                    })?;
                 let u: User = serde_json::from_slice(&decrypted).map_err(|e| {
                     tracing::warn!(
                         "Failed to deserialize user '{}' during authenticate: {}",
-                        credentials.username, e
+                        credentials.username,
+                        e
                     );
                     AuthError::Internal(anyhow::anyhow!("Failed to deserialize user data: {}", e))
                 })?;
@@ -1998,7 +2049,8 @@ impl AuthenticationService {
             Err(e) => {
                 tracing::warn!(
                     "Failed to load user '{}' from storage during authenticate: {}",
-                    credentials.username, e
+                    credentials.username,
+                    e
                 );
                 return Err(AuthError::Storage(e));
             }
@@ -2056,8 +2108,7 @@ impl AuthenticationService {
                 // Max attempts check (e.g. 5), but exempt privileged
                 // users from auto-lockout (DoS protection).
                 if !u.is_privileged() && u.failed_login_attempts >= 5 {
-                    u.locked_until =
-                        Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                    u.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
                     if let Some(audit) = &self.audit {
                         let _ = audit
                             .log_event(
@@ -2133,8 +2184,8 @@ impl AuthenticationService {
         // This MUST happen BEFORE resetting failed_login_attempts so that
         // failed MFA attempts still count toward the lockout threshold,
         // preventing unlimited MFA brute-force.
-        let is_privileged = user_roles.contains(&"admin".to_string())
-            || user_roles.contains(&"root".to_string());
+        let is_privileged =
+            user_roles.contains(&"admin".to_string()) || user_roles.contains(&"root".to_string());
 
         // Prefer the user ID loaded from storage (which is always a valid
         // UUID) over `user_info.id` (which may be `None` for external auth
@@ -2157,28 +2208,29 @@ impl AuthenticationService {
             )));
         }
 
-        let mfa_verified = match self.enforce_mfa(
-            &credentials.username,
-            effective_user_id,
-            is_privileged,
-            global_mfa_enabled,
-            credentials.mfa_code,
-        )
-        .await
+        let mfa_verified = match self
+            .enforce_mfa(
+                &credentials.username,
+                effective_user_id,
+                is_privileged,
+                global_mfa_enabled,
+                credentials.mfa_code,
+            )
+            .await
         {
             Ok(verified) => verified,
             Err(mfa_err) => {
-            // Only count `InvalidMfaCode` toward lockout — see the
-            // matching comment in `login()` for the full rationale.
-            if matches!(mfa_err, AuthError::InvalidMfaCode) {
-                if let Some((mut u, entry)) = stored_user_entry {
-                    u.failed_login_attempts += 1;
+                // Only count `InvalidMfaCode` toward lockout — see the
+                // matching comment in `login()` for the full rationale.
+                if matches!(mfa_err, AuthError::InvalidMfaCode) {
+                    if let Some((mut u, entry)) = stored_user_entry {
+                        u.failed_login_attempts += 1;
 
-                    if !u.is_privileged() && u.failed_login_attempts >= 5 {
-                        u.locked_until =
-                            Some(chrono::Utc::now() + chrono::Duration::minutes(15));
-                        if let Some(audit) = &self.audit {
-                            let _ = audit
+                        if !u.is_privileged() && u.failed_login_attempts >= 5 {
+                            u.locked_until =
+                                Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                            if let Some(audit) = &self.audit {
+                                let _ = audit
                                 .log_event(
                                     crate::services::audit::SecurityEventType::AuthenticationFailure {
                                         user: credentials.username.clone(),
@@ -2188,21 +2240,21 @@ impl AuthenticationService {
                                     },
                                 )
                                 .await;
+                            }
                         }
-                    }
 
-                    // Persist the updated counter
-                    if let Ok(user_data) = serde_json::to_vec(&u) {
-                        if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                            let mut updated_entry = entry;
-                            updated_entry.encrypted_data = encrypted;
-                            let _ = self.storage.store(&updated_entry).await;
+                        // Persist the updated counter
+                        if let Ok(user_data) = serde_json::to_vec(&u) {
+                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
+                                let mut updated_entry = entry;
+                                updated_entry.encrypted_data = encrypted;
+                                let _ = self.storage.store(&updated_entry).await;
+                            }
                         }
                     }
                 }
-            }
 
-            return Err(mfa_err);
+                return Err(mfa_err);
             }
         };
 
@@ -2228,10 +2280,9 @@ impl AuthenticationService {
 
         // Store session
         let now = chrono::Utc::now();
-        let session_duration = chrono::Duration::from_std(std::time::Duration::from_secs(
-            session_timeout_secs,
-        ))
-        .unwrap_or(chrono::Duration::hours(1));
+        let session_duration =
+            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
         let expires_at = now + session_duration;
 
         // Generate tokens with session binding, using the dynamic timeout so
@@ -2296,10 +2347,7 @@ impl AuthenticationService {
             .map_err(AuthError::Storage)?;
 
         let mut result_metadata = std::collections::HashMap::new();
-        result_metadata.insert(
-            "expires_in".to_string(),
-            token_pair.expires_in.to_string(),
-        );
+        result_metadata.insert("expires_in".to_string(), token_pair.expires_in.to_string());
 
         Ok(secreton_core::AuthResult {
             success: true,

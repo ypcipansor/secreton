@@ -1,22 +1,25 @@
-use leptos::prelude::*;
-use leptos_router::{components::{Router, Routes, Route, ParentRoute, Outlet}, path};
-use leptos_router::hooks::use_navigate;
 use crate::auth::{provide_auth, use_auth};
-use crate::pages::login::Login;
+use crate::components::Layout;
+use crate::pages::audit::AuditLog;
+use crate::pages::backups::BackupsPage;
 use crate::pages::dashboard::Dashboard;
-use crate::pages::secrets::SecretsList;
 use crate::pages::database::DatabaseSecrets;
+use crate::pages::login::Login;
+use crate::pages::not_found::NotFound;
 use crate::pages::pki::PkiPage;
 use crate::pages::policies::PoliciesList;
-use crate::pages::users::UsersList;
-use crate::pages::audit::AuditLog;
-use crate::pages::not_found::NotFound;
-use crate::pages::transit::TransitPage;
+use crate::pages::secrets::SecretsList;
+use crate::pages::settings::SettingsPage;
 use crate::pages::ssh::SshPage;
 use crate::pages::totp::TotpPage;
-use crate::pages::backups::BackupsPage;
-use crate::pages::settings::SettingsPage;
-use crate::components::Layout;
+use crate::pages::transit::TransitPage;
+use crate::pages::users::UsersList;
+use leptos::prelude::*;
+use leptos_router::hooks::use_navigate;
+use leptos_router::{
+    components::{Outlet, ParentRoute, Route, Router, Routes},
+    path,
+};
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -52,13 +55,9 @@ pub fn App() -> impl IntoView {
 fn ProtectedRoute() -> impl IntoView {
     let auth_state = use_auth();
 
-    let is_authenticated = move || {
-        auth_state.with(|s| s.token.is_some())
-    };
+    let is_authenticated = move || auth_state.with(|s| s.token.is_some());
 
-    let is_loading = move || {
-        auth_state.with(|s| s.loading)
-    };
+    let is_loading = move || auth_state.with(|s| s.loading);
 
     view! {
         <Show
@@ -85,5 +84,5 @@ fn Redirect(path: &'static str) -> impl IntoView {
     request_animation_frame(move || {
         navigate(path, Default::default());
     });
-    view! { }
+    view! {}
 }

@@ -130,7 +130,8 @@ impl SecretEngine for TransitEngine {
 
     async fn init(&mut self, config: &EngineConfig) -> SecretResult<()> {
         if let Some(transit_config) = config.config.get("transit")
-            && let Ok(transit_config) = serde_json::from_value(transit_config.clone()) {
+            && let Ok(transit_config) = serde_json::from_value(transit_config.clone())
+        {
             self.config = transit_config;
         }
 

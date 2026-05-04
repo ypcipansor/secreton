@@ -1,7 +1,7 @@
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api;
 use crate::components::card::Card;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -22,17 +22,21 @@ pub struct UserResponse {
 
 #[component]
 pub fn UsersList() -> impl IntoView {
-    let users_resource = LocalResource::new(
-        move || async move {
-            api::get::<Vec<UserResponse>>("/admin/users").await
-        },
-    );
+    let users_resource =
+        LocalResource::new(
+            move || async move { api::get::<Vec<UserResponse>>("/admin/users").await },
+        );
 
     let (delete_error, set_delete_error) = signal(None::<String>);
 
     let handle_delete = move |username: String| {
-        let Some(window) = web_sys::window() else { return };
-        if !window.confirm_with_message(&format!("Delete user {}?", username)).unwrap_or(false) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if !window
+            .confirm_with_message(&format!("Delete user {}?", username))
+            .unwrap_or(false)
+        {
             return;
         }
         set_delete_error.set(None);
@@ -43,7 +47,8 @@ pub fn UsersList() -> impl IntoView {
                     users_resource.refetch();
                 }
                 Err(e) => {
-                    set_delete_error.set(Some(format!("Failed to delete user {}: {}", username, e)));
+                    set_delete_error
+                        .set(Some(format!("Failed to delete user {}: {}", username, e)));
                 }
             }
         });

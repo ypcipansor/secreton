@@ -5,7 +5,7 @@ use crate::error::*;
 use crate::model::DatabaseConfig;
 use async_trait::async_trait;
 use mysql_async::prelude::*;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{Rng, distributions::Alphanumeric};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -27,10 +27,10 @@ impl MysqlBackend {
             // MysqlAsync opts sets pool limits via pool_opts method
             // PoolConstraints is usually in mysql_async
             let min = std::cmp::min(5, max_open as usize);
-            let constraints = mysql_async::PoolConstraints::new(min, max_open as usize).unwrap_or_default();
-            builder = builder.pool_opts(
-                mysql_async::PoolOpts::default().with_constraints(constraints)
-            );
+            let constraints =
+                mysql_async::PoolConstraints::new(min, max_open as usize).unwrap_or_default();
+            builder =
+                builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
         }
 
         let pool = mysql_async::Pool::new(builder);
@@ -154,7 +154,9 @@ impl DatabaseBackend for MysqlBackend {
         for statement in statements {
             if let Err(e) = conn.query_drop(&statement).await {
                 // Attempt cleanup if role execution fails
-                let _ = conn.query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+                let _ = conn
+                    .query_drop(&format!("DROP USER IF EXISTS '{}'@'%'", username))
+                    .await;
 
                 return Err(SecretError::BackendOperationFailed(format!(
                     "Failed to execute role SQL statement '{}': {}",
@@ -190,7 +192,9 @@ impl DatabaseBackend for MysqlBackend {
 
         // Sanitize username
         if !username.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            return Err(SecretError::InvalidOperation("Invalid username format".to_string()));
+            return Err(SecretError::InvalidOperation(
+                "Invalid username format".to_string(),
+            ));
         }
 
         let drop_user_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);

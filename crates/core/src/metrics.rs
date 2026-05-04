@@ -214,10 +214,7 @@ impl MetricsCollector for InMemoryMetricsCollector {
 
     fn record_histogram(&self, name: &str, value: f64, _tags: Option<&HashMap<String, String>>) {
         let mut histograms = self.histograms.write().unwrap();
-        histograms
-            .entry(name.to_string())
-            .or_default()
-            .push(value);
+        histograms.entry(name.to_string()).or_default().push(value);
     }
 
     fn record_timer(&self, name: &str, duration_ms: f64, tags: Option<&HashMap<String, String>>) {

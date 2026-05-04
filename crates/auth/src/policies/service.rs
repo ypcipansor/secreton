@@ -141,17 +141,13 @@ impl PolicyService {
     /// Get role ID by name
     pub async fn get_role_id_by_name(&self, name: &str) -> Option<Uuid> {
         let roles = self.roles.read().await;
-        roles.values()
-            .find(|r| r.name == name)
-            .map(|r| r.id)
+        roles.values().find(|r| r.name == name).map(|r| r.id)
     }
 
     /// Get policy ID by name
     pub async fn get_policy_id_by_name(&self, name: &str) -> Option<Uuid> {
         let policies = self.policies.read().await;
-        policies.values()
-            .find(|p| p.name == name)
-            .map(|p| p.id)
+        policies.values().find(|p| p.name == name).map(|p| p.id)
     }
 
     /// Create a new role
@@ -193,7 +189,6 @@ impl PolicyService {
                 role_id: role_id.to_string(),
             })
     }
-
 
     /// Update role
     pub async fn update_role(&self, role_id: &Uuid, mut updates: Role) -> PolicyResult<Role> {

@@ -1,13 +1,12 @@
-
 use crate::policies::sentinel::SentinelPolicy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
 #[cfg(feature = "wasmi")]
-use crate::policies::wasm::{evaluate_wasm_policy, DUMMY_WASM_ALLOW};
+use crate::policies::wasm::{DUMMY_WASM_ALLOW, evaluate_wasm_policy};
 #[cfg(feature = "wasmi")]
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 
 // Define policy types locally
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,75 +156,75 @@ pub async fn evaluate_with_sentinel(
         let is_wasm = pol.policy_code.starts_with("wasm:") || pol.policy_code == "wasm";
 
         if is_wasm {
-             // Decode base64 or load dummy
-             #[cfg(feature = "wasmi")]
-             {
-                 let wasm_bytes = if pol.policy_code == "wasm" {
-                     // Use dummy/default WASM for testing placeholder
-                     tracing::info!(
-                         user = %user,
-                         path = %path,
-                         policy = %pol.name,
-                         "WASM policy placeholder encountered. Using DUMMY_WASM_ALLOW."
-                     );
-                     DUMMY_WASM_ALLOW.to_vec()
-                 } else {
-                     // Extract base64 code if prefix is present
-                     let b64_code = if pol.policy_code.starts_with("wasm:") {
-                         &pol.policy_code[5..]
-                     } else {
-                         &pol.policy_code
-                     };
+            // Decode base64 or load dummy
+            #[cfg(feature = "wasmi")]
+            {
+                let wasm_bytes = if pol.policy_code == "wasm" {
+                    // Use dummy/default WASM for testing placeholder
+                    tracing::info!(
+                        user = %user,
+                        path = %path,
+                        policy = %pol.name,
+                        "WASM policy placeholder encountered. Using DUMMY_WASM_ALLOW."
+                    );
+                    DUMMY_WASM_ALLOW.to_vec()
+                } else {
+                    // Extract base64 code if prefix is present
+                    let b64_code = if pol.policy_code.starts_with("wasm:") {
+                        &pol.policy_code[5..]
+                    } else {
+                        &pol.policy_code
+                    };
 
-                     match general_purpose::STANDARD.decode(b64_code) {
-                         Ok(b) => b,
-                         Err(e) => {
-                             tracing::error!("Failed to decode WASM policy: {}", e);
-                             return false;
-                         }
-                     }
-                 };
+                    match general_purpose::STANDARD.decode(b64_code) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            tracing::error!("Failed to decode WASM policy: {}", e);
+                            return false;
+                        }
+                    }
+                };
 
-                 let input = WasmInput {
-                     user,
-                     path,
-                     action,
-                     context: _context,
-                 };
-                 let input_json = match serde_json::to_string(&input) {
-                     Ok(s) => s,
-                     Err(e) => {
-                         tracing::error!("Failed to serialize WASM input: {}", e);
-                         return false;
-                     }
-                 };
+                let input = WasmInput {
+                    user,
+                    path,
+                    action,
+                    context: _context,
+                };
+                let input_json = match serde_json::to_string(&input) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("Failed to serialize WASM input: {}", e);
+                        return false;
+                    }
+                };
 
-                 match evaluate_wasm_policy(&wasm_bytes, &input_json) {
-                     Ok(allowed) => {
-                         tracing::info!(
-                            user = %user,
-                             path = %path,
-                             policy = %pol.name,
-                             result = if allowed { "allowed" } else { "denied" },
-                             "WASM policy evaluation completed"
-                         );
-                         if !allowed {
-                             return false;
-                         }
-                     },
-                     Err(e) => {
-                         tracing::error!("WASM policy execution failed: {}", e);
-                         return false; // Fail safe
-                     }
-                 }
-             }
-             #[cfg(not(feature = "wasmi"))]
-             {
-                 tracing::warn!("WASM support not enabled (feature 'wasmi' required)");
-                 return false;
-             }
+                match evaluate_wasm_policy(&wasm_bytes, &input_json) {
+                    Ok(allowed) => {
+                        tracing::info!(
+                           user = %user,
+                            path = %path,
+                            policy = %pol.name,
+                            result = if allowed { "allowed" } else { "denied" },
+                            "WASM policy evaluation completed"
+                        );
+                        if !allowed {
+                            return false;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("WASM policy execution failed: {}", e);
+                        return false; // Fail safe
+                    }
+                }
+            }
+            #[cfg(not(feature = "wasmi"))]
+            {
+                tracing::warn!("WASM support not enabled (feature 'wasmi' required)");
+                return false;
+            }
         } else if pol.policy_code == "egp" || pol.policy_code == "rgp" {
-             // Legacy/Test placeholder logic
+            // Legacy/Test placeholder logic
             let allowed = pol.policy_code.contains("allow");
             // Add audit logging
             tracing::info!(
@@ -240,7 +239,7 @@ pub async fn evaluate_with_sentinel(
                 return false;
             }
         } else {
-             // Existing logic for other policies?
+            // Existing logic for other policies?
         }
     }
     true
@@ -452,7 +451,8 @@ mod tests {
             "secret/foo",
             "read",
             &PolicyContext::default(),
-        ).await;
+        )
+        .await;
         assert!(result);
     }
 
@@ -479,22 +479,39 @@ mod tests {
         };
 
         // Case 1: Only v1 (deny)
-        assert!(!evaluate_with_sentinel(
-            &[policy_v1.clone()],
-            "user", "path", "read", &PolicyContext::default()
-        ).await);
+        assert!(
+            !evaluate_with_sentinel(
+                &[policy_v1.clone()],
+                "user",
+                "path",
+                "read",
+                &PolicyContext::default()
+            )
+            .await
+        );
 
         // Case 2: v1 (deny) and v2 (allow). Should pick v2.
-        assert!(evaluate_with_sentinel(
-            &[policy_v1.clone(), policy_v2.clone()],
-            "user", "path", "read", &PolicyContext::default()
-        ).await);
+        assert!(
+            evaluate_with_sentinel(
+                &[policy_v1.clone(), policy_v2.clone()],
+                "user",
+                "path",
+                "read",
+                &PolicyContext::default()
+            )
+            .await
+        );
 
         // Case 3: v2 (allow) and v1 (deny). Should pick v2.
-        assert!(evaluate_with_sentinel(
-            &[policy_v2.clone(), policy_v1.clone()],
-            "user", "path", "read", &PolicyContext::default()
-        ).await);
+        assert!(
+            evaluate_with_sentinel(
+                &[policy_v2.clone(), policy_v1.clone()],
+                "user",
+                "path",
+                "read",
+                &PolicyContext::default()
+            )
+            .await
+        );
     }
 }
-

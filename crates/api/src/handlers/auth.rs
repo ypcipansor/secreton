@@ -784,9 +784,7 @@ pub async fn login(
             //     the audit entry.
             if !matches!(
                 e,
-                AuthError::MfaRequired
-                    | AuthError::InvalidMfaCode
-                    | AuthError::MfaNotConfigured(_)
+                AuthError::MfaRequired | AuthError::InvalidMfaCode | AuthError::MfaNotConfigured(_)
             ) {
                 let _ = state
                     .audit
@@ -820,33 +818,47 @@ pub async fn login(
                     Err(crate::ApiError(secreton_errors::SecretonError::MfaRequired))
                 }
                 AuthError::Internal(ref inner) => {
-                    tracing::error!("Internal error during login for '{}': {}", request.username, inner);
-                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                    tracing::error!(
+                        "Internal error during login for '{}': {}",
+                        request.username,
+                        inner
+                    );
+                    Err(crate::ApiError::Internal(
+                        "An internal error occurred during authentication".to_string(),
+                    ))
                 }
                 AuthError::Storage(ref inner) => {
-                    tracing::error!("Storage error during login for '{}': {}", request.username, inner);
-                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                    tracing::error!(
+                        "Storage error during login for '{}': {}",
+                        request.username,
+                        inner
+                    );
+                    Err(crate::ApiError::Internal(
+                        "An internal error occurred during authentication".to_string(),
+                    ))
                 }
                 AuthError::Crypto(ref inner) => {
-                    tracing::error!("Crypto error during login for '{}': {}", request.username, inner);
-                    Err(crate::ApiError::Internal("An internal error occurred during authentication".to_string()))
+                    tracing::error!(
+                        "Crypto error during login for '{}': {}",
+                        request.username,
+                        inner
+                    );
+                    Err(crate::ApiError::Internal(
+                        "An internal error occurred during authentication".to_string(),
+                    ))
                 }
                 // InvalidMfaCode only fires after successful password
                 // verification, so returning "Invalid MFA code" would
                 // confirm that the credentials are valid.  Use a generic
                 // message consistent with MfaNotConfigured handling above.
-                AuthError::InvalidMfaCode => {
-                    Err(crate::ApiError::Authentication(
-                        "Authentication failed".to_string(),
-                    ))
-                }
+                AuthError::InvalidMfaCode => Err(crate::ApiError::Authentication(
+                    "Authentication failed".to_string(),
+                )),
                 // UserNotFound / UserAlreadyExists — return a generic
                 // message to prevent user enumeration.
-                AuthError::UserNotFound | AuthError::UserAlreadyExists => {
-                    Err(crate::ApiError::Authentication(
-                        "Authentication failed".to_string(),
-                    ))
-                }
+                AuthError::UserNotFound | AuthError::UserAlreadyExists => Err(
+                    crate::ApiError::Authentication("Authentication failed".to_string()),
+                ),
                 _ => Err(crate::ApiError::Authentication(
                     "Authentication failed".to_string(),
                 )),

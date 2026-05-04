@@ -98,9 +98,11 @@ impl PkiPersistentService {
             zeroize::Zeroize::zeroize(&mut decrypted_data);
             let ca_data = parse_result?;
 
-            let cert_pem = ca_data.certificate
+            let cert_pem = ca_data
+                .certificate
                 .ok_or_else(|| anyhow!("Missing certificate in storage"))?;
-            let key_pem = ca_data.private_key
+            let key_pem = ca_data
+                .private_key
                 .ok_or_else(|| anyhow!("Missing private key in storage"))?;
 
             Some(PkiConfig {
@@ -143,7 +145,8 @@ impl PkiPersistentService {
         organization: &str,
     ) -> std::result::Result<CertificateResponse, PkiServiceError> {
         // Ensure initialized to load any existing CA from storage before checking/generating
-        self.ensure_initialized().await
+        self.ensure_initialized()
+            .await
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         // Acquire write lock immediately to prevent race conditions (TOCTOU)
@@ -164,9 +167,9 @@ impl PkiPersistentService {
             .map_err(|e| PkiServiceError::Internal(format!("Failed to generate Root CA: {}", e)))?;
 
         // Parse the generated certificate to extract real metadata
-        let ca_info = engine_lock
-            .parse_ca_cert_from_pem(&cert_pem)
-            .map_err(|e| PkiServiceError::Internal(format!("Failed to parse generated Root CA: {}", e)))?;
+        let ca_info = engine_lock.parse_ca_cert_from_pem(&cert_pem).map_err(|e| {
+            PkiServiceError::Internal(format!("Failed to parse generated Root CA: {}", e))
+        })?;
 
         // Serialize directly via a short-lived struct instead of an intermediate
         // serde_json::Value, so the CA private key is never held in a
@@ -220,7 +223,10 @@ impl PkiPersistentService {
         // This blocks other readers/writers which is what we want for correctness here.
         if let Err(e) = self.storage.store(&entry).await {
             zeroize::Zeroize::zeroize(&mut key_pem);
-            return Err(PkiServiceError::Internal(format!("Failed to persist Root CA: {}", e)));
+            return Err(PkiServiceError::Internal(format!(
+                "Failed to persist Root CA: {}",
+                e
+            )));
         }
 
         // Build the engine config by cloning both values.  The originals are
@@ -256,7 +262,8 @@ impl PkiPersistentService {
 
     /// Get the current CA Certificate (PEM)
     pub async fn get_ca_pem(&self) -> std::result::Result<Option<String>, PkiServiceError> {
-        self.ensure_initialized().await
+        self.ensure_initialized()
+            .await
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
         let engine = self.engine.read().await;
 
@@ -277,7 +284,8 @@ impl PkiPersistentService {
         &self,
         req: CertificateRequest,
     ) -> std::result::Result<CertificateResponse, PkiServiceError> {
-        self.ensure_initialized().await
+        self.ensure_initialized()
+            .await
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let engine = self.engine.read().await;
@@ -289,10 +297,9 @@ impl PkiPersistentService {
             ));
         }
 
-        let response = engine
-            .generate_certificate(&req)
-            .await
-            .map_err(|e| PkiServiceError::Internal(format!("Failed to issue certificate: {}", e)))?;
+        let response = engine.generate_certificate(&req).await.map_err(|e| {
+            PkiServiceError::Internal(format!("Failed to issue certificate: {}", e))
+        })?;
 
         // Persist the issued certificate
         // Path: sys/pki/certs/{serial_number}
@@ -310,9 +317,12 @@ impl PkiPersistentService {
             "expires_at": response.expiration.to_rfc3339(),
         });
 
-        let cert_bytes = serde_json::to_vec(&cert_data)
-            .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
-        let encrypted_data = self.crypto.encrypt_data(&cert_bytes).await
+        let cert_bytes =
+            serde_json::to_vec(&cert_data).map_err(|e| PkiServiceError::Internal(e.to_string()))?;
+        let encrypted_data = self
+            .crypto
+            .encrypt_data(&cert_bytes)
+            .await
             .map_err(|e| PkiServiceError::Internal(e.to_string()))?;
 
         let entry = SecretEntry::new(

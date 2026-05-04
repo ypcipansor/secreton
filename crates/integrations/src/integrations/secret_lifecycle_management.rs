@@ -18,7 +18,7 @@ pub enum LifecycleError {
 
 pub type Result<T> = std::result::Result<T, LifecycleError>;
 
-pub use secreton_common::dto::lifecycle::{SecretStatus, SecretLifecycle, LifecycleStatistics};
+pub use secreton_common::dto::lifecycle::{LifecycleStatistics, SecretLifecycle, SecretStatus};
 
 /// Hook type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

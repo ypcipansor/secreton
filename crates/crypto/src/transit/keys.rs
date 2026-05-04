@@ -415,7 +415,9 @@ impl TransitKey {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
                 let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
-                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                    CryptoError::InvalidCiphertext(
+                        "Invalid nonce length (expected 12 bytes)".to_string(),
+                    )
                 })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 
@@ -457,7 +459,9 @@ impl TransitKey {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
                 let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
-                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                    CryptoError::InvalidCiphertext(
+                        "Invalid nonce length (expected 12 bytes)".to_string(),
+                    )
                 })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 
@@ -500,7 +504,9 @@ impl TransitKey {
                 })?;
 
                 let nonce_array: [u8; 24] = nonce_bytes.as_slice().try_into().map_err(|_| {
-                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 24 bytes)".to_string())
+                    CryptoError::InvalidCiphertext(
+                        "Invalid nonce length (expected 24 bytes)".to_string(),
+                    )
                 })?;
                 let nonce = chacha20poly1305::XNonce::from(nonce_array);
 
@@ -548,7 +554,9 @@ impl TransitKey {
                     CryptoError::InvalidCiphertext("Invalid nonce encoding".to_string())
                 })?;
                 let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
-                    CryptoError::InvalidCiphertext("Invalid nonce length (expected 12 bytes)".to_string())
+                    CryptoError::InvalidCiphertext(
+                        "Invalid nonce length (expected 12 bytes)".to_string(),
+                    )
                 })?;
                 let nonce = ChaChaNonce::from(nonce_array);
 

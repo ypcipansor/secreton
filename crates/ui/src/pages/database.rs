@@ -1,8 +1,8 @@
+use crate::api::{delete, get, post};
+use crate::components::{Button, ButtonVariant, Card, Input};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
-use crate::components::{Button, Card, Input, ButtonVariant};
-use crate::api::{get, post, delete};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigRequest {
@@ -53,7 +53,8 @@ pub fn DatabaseSecrets() -> impl IntoView {
     let (active_tab, set_active_tab) = signal("config".to_string());
 
     // Config State
-    let (config_url, set_config_url) = signal("postgresql://postgres:postgres@localhost:5432/postgres".to_string());
+    let (config_url, set_config_url) =
+        signal("postgresql://postgres:postgres@localhost:5432/postgres".to_string());
     let (config_plugin, set_config_plugin) = signal("database".to_string());
     let (config_loading, set_config_loading) = signal(false);
     let (config_msg, set_config_msg) = signal(Option::<String>::None);
@@ -66,25 +67,17 @@ pub fn DatabaseSecrets() -> impl IntoView {
 
     // Roles List Resource
     let roles_trigger = Trigger::new();
-    let roles_resource = LocalResource::new(
-        move || {
-            roles_trigger.track();
-            async move {
-                get::<ListRolesResponse>("/database/roles").await
-            }
-        }
-    );
+    let roles_resource = LocalResource::new(move || {
+        roles_trigger.track();
+        async move { get::<ListRolesResponse>("/database/roles").await }
+    });
 
     // Leases List Resource
     let leases_trigger = Trigger::new();
-    let leases_resource = LocalResource::new(
-        move || {
-            leases_trigger.track();
-            async move {
-                get::<Vec<Lease>>("/database/leases").await
-            }
-        }
-    );
+    let leases_resource = LocalResource::new(move || {
+        leases_trigger.track();
+        async move { get::<Vec<Lease>>("/database/leases").await }
+    });
 
     // Creds State
     let (selected_role, set_selected_role) = signal("".to_string());
@@ -132,7 +125,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
                 Ok(res) => {
                     set_role_msg.set(Some(format!("Success: {}", res.message)));
                     roles_trigger.notify();
-                },
+                }
                 Err(e) => set_role_msg.set(Some(format!("Error: {}", e))),
             }
             set_role_loading.set(false);
@@ -141,7 +134,9 @@ pub fn DatabaseSecrets() -> impl IntoView {
 
     let generate_creds = move |_| {
         let role = selected_role.get();
-        if role.is_empty() { return; }
+        if role.is_empty() {
+            return;
+        }
 
         set_creds_loading.set(true);
         set_creds_error.set(None);
@@ -152,7 +147,7 @@ pub fn DatabaseSecrets() -> impl IntoView {
                 Ok(res) => {
                     set_creds_result.set(Some(res));
                     leases_trigger.notify(); // Refresh leases list
-                },
+                }
                 Err(e) => set_creds_error.set(Some(format!("Error: {}", e))),
             }
             set_creds_loading.set(false);
@@ -177,7 +172,10 @@ pub fn DatabaseSecrets() -> impl IntoView {
         let base = "px-4 py-2 font-medium text-sm rounded-t-lg focus:outline-none";
         move || {
             if active_tab.get() == tab_name {
-                format!("{} bg-white text-blue-600 border-t border-l border-r border-gray-200", base)
+                format!(
+                    "{} bg-white text-blue-600 border-t border-l border-r border-gray-200",
+                    base
+                )
             } else {
                 format!("{} text-gray-500 hover:text-gray-700 bg-gray-50", base)
             }

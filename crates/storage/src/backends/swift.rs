@@ -1,15 +1,15 @@
 //! Swift storage backend for Secreton
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 use crate::{
-    StorageBackend, StorageError, SecretEntry, StorageResult,
-    StorageTransaction, HealthStatus, StorageStats, QueryParams
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use secreton_common::models::oauth_state::OAuthState;
 
@@ -58,14 +58,20 @@ impl SwiftStorage {
             }
         });
 
-        let res = self.client.post(&format!("{}/auth/tokens", self.config.auth_url))
+        let res = self
+            .client
+            .post(&format!("{}/auth/tokens", self.config.auth_url))
             .json(&auth_body)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
         if !res.status().is_success() {
-            return Err(StorageError::ConnectionFailed { message: format!("Auth failed: {}", res.status()) });
+            return Err(StorageError::ConnectionFailed {
+                message: format!("Auth failed: {}", res.status()),
+            });
         }
 
         if let Some(token) = res.headers().get("X-Subject-Token") {
@@ -83,7 +89,11 @@ impl SwiftStorage {
         // We'll set a placeholder storage_url based on account if missing catalog parsing.
 
         let mut s = self.storage_url.write().await;
-        *s = Some(format!("{}/v1/AUTH_{}", self.config.auth_url.replace("/auth/tokens", ""), self.config.account.as_deref().unwrap_or("default")));
+        *s = Some(format!(
+            "{}/v1/AUTH_{}",
+            self.config.auth_url.replace("/auth/tokens", ""),
+            self.config.account.as_deref().unwrap_or("default")
+        ));
 
         Ok(())
     }
@@ -101,8 +111,22 @@ impl SwiftStorage {
         // Auth
         self.authenticate().await?;
 
-        let t = self.token.read().await.clone().ok_or(StorageError::ConnectionFailed { message: "No token after auth".to_string() })?;
-        let u = self.storage_url.read().await.clone().ok_or(StorageError::ConnectionFailed { message: "No URL after auth".to_string() })?;
+        let t = self
+            .token
+            .read()
+            .await
+            .clone()
+            .ok_or(StorageError::ConnectionFailed {
+                message: "No token after auth".to_string(),
+            })?;
+        let u = self
+            .storage_url
+            .read()
+            .await
+            .clone()
+            .ok_or(StorageError::ConnectionFailed {
+                message: "No URL after auth".to_string(),
+            })?;
         Ok((t, u))
     }
 }
@@ -112,14 +136,20 @@ impl StorageBackend for SwiftStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let (token, base_url) = self.get_token().await?;
         let url = format!("{}/{}/{}", base_url, self.config.container, entry.path);
-        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
 
-        let res = self.client.put(&url)
+        let res = self
+            .client
+            .put(&url)
             .header("X-Auth-Token", token)
             .body(data)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
         if res.status() == reqwest::StatusCode::UNAUTHORIZED {
             // Retry auth once?
@@ -127,7 +157,9 @@ impl StorageBackend for SwiftStorage {
         }
 
         if !res.status().is_success() {
-            return Err(StorageError::QueryFailed { message: res.status().to_string() });
+            return Err(StorageError::QueryFailed {
+                message: res.status().to_string(),
+            });
         }
         Ok(())
     }
@@ -140,17 +172,35 @@ impl StorageBackend for SwiftStorage {
         let (token, base_url) = self.get_token().await?;
         let url = format!("{}/{}/{}", base_url, self.config.container, path);
 
-        let res = self.client.get(&url)
+        let res = self
+            .client
+            .get(&url)
             .header("X-Auth-Token", token)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
-        if res.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
-        if !res.status().is_success() { return Err(StorageError::QueryFailed { message: res.status().to_string() }); }
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !res.status().is_success() {
+            return Err(StorageError::QueryFailed {
+                message: res.status().to_string(),
+            });
+        }
 
-        let bytes = res.bytes().await.map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
-        let entry = serde_json::from_slice(&bytes).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
+        let entry =
+            serde_json::from_slice(&bytes).map_err(|e| StorageError::SerializationError {
+                message: e.to_string(),
+            })?;
         Ok(Some(entry))
     }
 
@@ -166,11 +216,15 @@ impl StorageBackend for SwiftStorage {
         let (token, base_url) = self.get_token().await?;
         let url = format!("{}/{}/{}", base_url, self.config.container, path);
 
-        let res = self.client.delete(&url)
+        let res = self
+            .client
+            .delete(&url)
             .header("X-Auth-Token", token)
             .send()
             .await
-            .map_err(|e| StorageError::ConnectionFailed { message: e.to_string() })?;
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
         Ok(res.status().is_success())
     }
 
@@ -191,11 +245,26 @@ impl StorageBackend for SwiftStorage {
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {
-        Ok(HealthStatus { is_healthy: true, response_time_ms: 0.0, connections_active: 0, connections_idle: 0, last_error: None, uptime_seconds: 0 })
+        Ok(HealthStatus {
+            is_healthy: true,
+            response_time_ms: 0.0,
+            connections_active: 0,
+            connections_idle: 0,
+            last_error: None,
+            uptime_seconds: 0,
+        })
     }
 
     async fn get_stats(&self) -> StorageResult<StorageStats> {
-        Ok(StorageStats { total_entries: 0, total_size_bytes: 0, average_entry_size: 0.0, entries_by_security_level: std::collections::HashMap::new(), entries_created_today: 0, entries_updated_today: 0, expired_entries: 0 })
+        Ok(StorageStats {
+            total_entries: 0,
+            total_size_bytes: 0,
+            average_entry_size: 0.0,
+            entries_by_security_level: std::collections::HashMap::new(),
+            entries_created_today: 0,
+            entries_updated_today: 0,
+            expired_entries: 0,
+        })
     }
 
     async fn migrate(&self) -> StorageResult<()> {
@@ -203,11 +272,17 @@ impl StorageBackend for SwiftStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "Swift".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Swift".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "Swift".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Swift".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {

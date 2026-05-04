@@ -7,8 +7,8 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
-use secreton_common::models::oauth_state::OAuthState;
 use chrono::Utc;
+use secreton_common::models::oauth_state::OAuthState;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -376,11 +376,17 @@ impl StorageBackend for FileBackend {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "File".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "File".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "File".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "File".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
