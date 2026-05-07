@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tracing;
+
+use reqwest;
 
 #[derive(Debug, Error)]
 pub enum LifecycleError {
@@ -77,6 +80,7 @@ pub struct SecretLifecycleManagement {
     policies: Arc<RwLock<HashMap<String, ExpirationPolicy>>>,
     hooks: Arc<RwLock<HashMap<String, LifecycleHook>>>,
     archives: Arc<RwLock<HashMap<String, ArchiveRecord>>>,
+    client: reqwest::Client,
 }
 
 impl SecretLifecycleManagement {
@@ -87,6 +91,7 @@ impl SecretLifecycleManagement {
             policies: Arc::new(RwLock::new(HashMap::new())),
             hooks: Arc::new(RwLock::new(HashMap::new())),
             archives: Arc::new(RwLock::new(HashMap::new())),
+            client: reqwest::Client::new(),
         }
     }
 
@@ -233,8 +238,7 @@ impl SecretLifecycleManagement {
             .collect();
 
         for hook in relevant_hooks {
-            // Mock: HTTP POST to webhook
-            self.mock_call_webhook(&hook.action_url, secret_path)
+            self.call_webhook(&hook.action_url, secret_path)
                 .await?;
         }
 
@@ -317,9 +321,28 @@ impl SecretLifecycleManagement {
         format!("sha256:{}", uuid::Uuid::new_v4())
     }
 
-    async fn mock_call_webhook(&self, _url: &str, _secret_path: &str) -> Result<()> {
-        // Mock HTTP POST to webhook
-        Ok(())
+    async fn call_webhook(&self, url: &str, secret_path: &str) -> Result<()> {
+        let payload = serde_json::json!({
+            "secret_path": secret_path,
+            "timestamp": Utc::now(),
+            "event": "lifecycle_event"
+        });
+
+        match self.client.post(url).json(&payload).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("Successfully triggered webhook for {}: {}", secret_path, url);
+                Ok(())
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                tracing::error!("Webhook failed for {} with status {}: {}", secret_path, status, url);
+                Err(LifecycleError::HookError(format!("Webhook returned status {}", status)))
+            }
+            Err(e) => {
+                tracing::error!("Failed to send webhook for {}: {} - {}", secret_path, url, e);
+                Err(LifecycleError::HookError(e.to_string()))
+            }
+        }
     }
 
     /// Get statistics
