@@ -1133,25 +1133,28 @@ impl SecretService {
         &self,
         prefix: Option<&str>,
         user: &secreton_auth::User,
+        limit: Option<u32>,
+        offset: Option<u32>,
     ) -> Result<Vec<SecretData>, SecretError> {
         // Parse user_id as UUID for ownership check
         let user_uuid = Uuid::parse_str(&user.id).unwrap_or_default();
 
         // Strict isolation: always filter by owner ID.
         //
-        // Cap the scan with an explicit upper bound. Before the PostgreSQL
-        // backend's default `LIMIT 100` was removed (in the lifecycle PR),
-        // this scan was implicitly bounded; without an explicit limit it
-        // would now decrypt and parse every secret owned by the user on
-        // every list call. 10k secrets per user is well above typical
-        // usage while still bounding worst-case memory and crypto work.
-        //
-        // TODO: Add pagination support to the secret-listing API and
-        // pass the caller's page size through here.
-        const SECRET_LIST_MAX_ENTRIES: u32 = 10_000;
+        // Cap the scan with an explicit upper bound. 10k secrets per user is
+        // well above typical usage while still bounding worst-case memory and crypto work.
+        const DEFAULT_LIMIT: u32 = 100;
+        const MAX_LIMIT: u32 = 10_000;
+
+        let final_limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+
         let mut query = secreton_storage::QueryParams::new()
             .with_owner(user_uuid)
-            .with_limit(SECRET_LIST_MAX_ENTRIES);
+            .with_limit(final_limit);
+
+        if let Some(o) = offset {
+            query.offset = Some(o);
+        }
 
         if let Some(p) = prefix {
             query = query.with_path_prefix(p.to_string());
@@ -3228,20 +3231,20 @@ mod list_secrets_tests {
 
         // Test user1 accessing list (should only see their own)
         let user1 = create_mock_user(&user1_uuid.to_string(), vec!["user".to_string()]);
-        let secrets_user1 = service.list_secrets(None, &user1).await.unwrap();
+        let secrets_user1 = service.list_secrets(None, &user1, None, None).await.unwrap();
         assert_eq!(secrets_user1.len(), 1);
         assert_eq!(secrets_user1[0].path, "app/user1/secret1");
 
         // Test user2 accessing list
         let user2 = create_mock_user(&user2_uuid.to_string(), vec!["user".to_string()]);
-        let secrets_user2 = service.list_secrets(None, &user2).await.unwrap();
+        let secrets_user2 = service.list_secrets(None, &user2, None, None).await.unwrap();
         assert_eq!(secrets_user2.len(), 1);
         assert_eq!(secrets_user2[0].path, "app/user2/secret1");
 
         // Test admin accessing list (should see ZERO, because strict isolation is enforced)
         let admin_uuid = Uuid::new_v4();
         let admin = create_mock_user(&admin_uuid.to_string(), vec!["admin".to_string()]);
-        let secrets_admin = service.list_secrets(None, &admin).await.unwrap();
+        let secrets_admin = service.list_secrets(None, &admin, None, None).await.unwrap();
 
         // Expectation changed from 2 to 0 to reflect strict Zero Trust isolation
         assert_eq!(secrets_admin.len(), 0);

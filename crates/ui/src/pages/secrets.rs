@@ -59,6 +59,10 @@ pub fn SecretsList() -> impl IntoView {
         params.with(|p| p.get("path").unwrap_or_default())
     };
 
+    // Pagination state
+    let (limit, _set_limit) = signal::<u32>(100);
+    let (offset, set_offset) = signal::<u32>(0);
+
     // View specific version state
     let (view_version, set_view_version) = signal::<Option<u32>>(None);
 
@@ -72,12 +76,14 @@ pub fn SecretsList() -> impl IntoView {
         move || {
             let current_path = path();
             let version_opt = view_version.get();
+            let l = limit.get();
+            let o = offset.get();
 
             async move {
                 // If root, always list
                 if current_path.is_empty() {
-                    let url = "/secret/secrets";
-                    match api::get::<Vec<SecretListItem>>(url).await {
+                    let url = format!("/secret/secrets?limit={}&offset={}", l, o);
+                    match api::get::<Vec<SecretListItem>>(&url).await {
                         Ok(res) => {
                             let keys = res.into_iter().map(|item| item.path).collect();
                             return SecretViewMode::List(keys);
