@@ -272,7 +272,8 @@ impl SecretPerformanceOptimizer {
         if let Some(entry) = cache.get_mut(key) {
             // Check if expired
             if let Some(expires_at) = entry.expires_at
-                && Utc::now() > expires_at {
+                && Utc::now() > expires_at
+            {
                 cache.remove(key);
                 return Ok(None);
             }

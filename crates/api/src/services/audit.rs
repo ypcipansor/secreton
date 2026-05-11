@@ -590,10 +590,7 @@ impl AuditFilters {
 
 impl AuditLogger {
     /// Get audit entries based on filters
-    pub async fn get_entries(
-        &self,
-        filters: AuditFilters,
-    ) -> Result<Vec<RichAuditEntry>> {
+    pub async fn get_entries(&self, filters: AuditFilters) -> Result<Vec<RichAuditEntry>> {
         // Optimize query by using a more specific prefix if time range allows
         use chrono::Datelike;
         let prefix = if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
@@ -658,7 +655,10 @@ impl AuditLogger {
         // so there is nothing to flush, but we still want to query historical data.
         if self.enabled {
             if let Err(e) = self.service.flush().await {
-                tracing::warn!("Audit flush failed before query, recent events may be missing: {}", e);
+                tracing::warn!(
+                    "Audit flush failed before query, recent events may be missing: {}",
+                    e
+                );
             }
         }
 
@@ -684,19 +684,29 @@ impl AuditLogger {
                 if let Ok(event) = serde_json::from_str::<AuditEvent>(log_data) {
                     // Apply filters
                     if let Some(user) = &filters.user {
-                        if &event.user != user { continue; }
+                        if &event.user != user {
+                            continue;
+                        }
                     }
                     if let Some(action) = &filters.action {
-                        if &event.operation != action { continue; }
+                        if &event.operation != action {
+                            continue;
+                        }
                     }
                     if let Some(path) = &filters.path {
-                        if &event.resource != path { continue; }
+                        if &event.resource != path {
+                            continue;
+                        }
                     }
                     if let Some(start) = filters.start_date {
-                        if event.timestamp < start { continue; }
+                        if event.timestamp < start {
+                            continue;
+                        }
                     }
                     if let Some(end) = filters.end_date {
-                        if event.timestamp > end { continue; }
+                        if event.timestamp > end {
+                            continue;
+                        }
                     }
 
                     let id = Uuid::parse_str(&event.id).unwrap_or_default();
@@ -707,7 +717,8 @@ impl AuditLogger {
                     let resource_type = event.resource.clone();
                     let ip_address = event.client_ip.clone();
                     let success = matches!(event.status, AuditStatus::Success);
-                    let details: HashMap<String, serde_json::Value> = event.metadata
+                    let details: HashMap<String, serde_json::Value> = event
+                        .metadata
                         .into_iter()
                         .map(|(k, v)| (k, serde_json::Value::String(v)))
                         .collect();
@@ -778,7 +789,9 @@ impl AuditLogger {
                 Ok(json)
             }
             ExportFormat::CSV => {
-                let mut csv = String::from("timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n");
+                let mut csv = String::from(
+                    "timestamp,user,action,resource,resource_id,ip_address,user_agent,success\n",
+                );
                 for rich in &entries {
                     let e = &rich.entry;
                     csv.push_str(&format!(
@@ -787,9 +800,18 @@ impl AuditLogger {
                         rich.original_user.replace('"', "\"\""),
                         e.action.replace('"', "\"\""),
                         e.resource_type.replace('"', "\"\""),
-                        e.resource_id.as_deref().unwrap_or_default().replace('"', "\"\""),
-                        e.ip_address.as_deref().unwrap_or_default().replace('"', "\"\""),
-                        e.user_agent.as_deref().unwrap_or_default().replace('"', "\"\""),
+                        e.resource_id
+                            .as_deref()
+                            .unwrap_or_default()
+                            .replace('"', "\"\""),
+                        e.ip_address
+                            .as_deref()
+                            .unwrap_or_default()
+                            .replace('"', "\"\""),
+                        e.user_agent
+                            .as_deref()
+                            .unwrap_or_default()
+                            .replace('"', "\"\""),
                         e.success
                     ));
                 }

@@ -1,20 +1,20 @@
 //! PKI engine implementation
 
-use der::Decode;
-use der::EncodePem;
-use x509_cert::Certificate;
 use crate::error::PkiError;
 use crate::model::{
     CertificateRequest, CertificateResponse, PkiConfig, RevocationReason, SshKeyRequest,
     SshKeyResponse,
 };
 use chrono::{DateTime, Duration, Utc};
+use der::Decode;
+use der::EncodePem;
 use rcgen::string::Ia5String;
-use rcgen::{CertificateParams, DistinguishedName, DnType, SanType, Issuer}; // Import Issuer trait
+use rcgen::{CertificateParams, DistinguishedName, DnType, Issuer, SanType}; // Import Issuer trait
 use ssh_key::{Algorithm, PrivateKey};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use x509_cert::Certificate;
 
 /// Revoked certificate entry
 #[derive(Debug, Clone)]
@@ -103,8 +103,10 @@ impl PkiEngine {
             not_before_chrono.timestamp(),
         )
         .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
-        params.not_after = ::time::OffsetDateTime::from_unix_timestamp(not_after_chrono.timestamp())
-            .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
+        params.not_after = ::time::OffsetDateTime::from_unix_timestamp(
+            not_after_chrono.timestamp(),
+        )
+        .map_err(|e| PkiError::CertificateGeneration(format!("Invalid timestamp: {}", e)))?;
 
         // Add subject alternative names
         for dns_name in &request.alt_names {
@@ -135,19 +137,25 @@ impl PkiEngine {
         params.serial_number = Some(serial_number_u64.into());
 
         // Determine signing method (Self-signed or CA-signed)
-        let cert = if let (Some(ca_cert_pem), Some(ca_key_pem)) = (&self.config.ca_cert, &self.config.ca_key) {
+        let cert = if let (Some(ca_cert_pem), Some(ca_key_pem)) =
+            (&self.config.ca_cert, &self.config.ca_key)
+        {
             // Load CA KeyPair
-            let ca_key_pair = rcgen::KeyPair::from_pem(ca_key_pem)
-                .map_err(|e| PkiError::CertificateGeneration(format!("Failed to load CA key: {}", e)))?;
+            let ca_key_pair = rcgen::KeyPair::from_pem(ca_key_pem).map_err(|e| {
+                PkiError::CertificateGeneration(format!("Failed to load CA key: {}", e))
+            })?;
 
             // For proper X.509 chain validity, we need to extract the Subject DN from the CA cert
             // and use it as the Issuer DN for the child certificate.
 
             // Parse the CA certificate to get its Subject
             let (_rem, ca_x509) = x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes())
-                .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse CA PEM: {}", e)))?;
-            let ca_x509 = ca_x509.parse_x509()
-                .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse CA X509: {}", e)))?;
+                .map_err(|e| {
+                    PkiError::CertificateParsing(format!("Failed to parse CA PEM: {}", e))
+                })?;
+            let ca_x509 = ca_x509.parse_x509().map_err(|e| {
+                PkiError::CertificateParsing(format!("Failed to parse CA X509: {}", e))
+            })?;
 
             // Reconstruct a partial CertificateParams for the CA to act as the issuer context
             // rcgen needs the issuer's DistinguishedName to set the child's Issuer field correctly.
@@ -167,7 +175,7 @@ impl PkiEngine {
                         "2.5.4.6" => ca_dn.push(DnType::CountryName, val),
                         "2.5.4.8" => ca_dn.push(DnType::StateOrProvinceName, val),
                         "2.5.4.7" => ca_dn.push(DnType::LocalityName, val),
-                        _ => {}, // Skip unknown OIDs
+                        _ => {} // Skip unknown OIDs
                     }
                 }
             }
@@ -175,8 +183,9 @@ impl PkiEngine {
 
             // Create a temporary CA Certificate struct to use as the issuer context
             // We use the loaded CA key pair so the public key matches the signer
-            let ca_cert_struct = ca_params.self_signed(&ca_key_pair)
-                 .map_err(|e| PkiError::CertificateGeneration(format!("Failed to reconstruct CA context: {}", e)))?;
+            let ca_cert_struct = ca_params.self_signed(&ca_key_pair).map_err(|e| {
+                PkiError::CertificateGeneration(format!("Failed to reconstruct CA context: {}", e))
+            })?;
 
             // Sign the child certificate using the CA context
             // params.signed_by takes (&subject_key, &issuer_cert, &issuer_key) in rcgen 0.14+
@@ -545,10 +554,13 @@ impl PkiEngine {
             // This is the most pragmatic path forward given I cannot query `cargo tree` or read docs interactively.
 
             // Revert logic to sign with CA KeyPair directly (self_signed with CA key)
-            params.self_signed(&ca_key_pair)
-                .map_err(|e| PkiError::CertificateGeneration(format!("Failed to sign certificate: {}", e)))?
+            params.self_signed(&ca_key_pair).map_err(|e| {
+                PkiError::CertificateGeneration(format!("Failed to sign certificate: {}", e))
+            })?
         } else {
-            return Err(PkiError::InvalidCaConfiguration("CA not configured. Cannot issue certificates.".to_string()));
+            return Err(PkiError::InvalidCaConfiguration(
+                "CA not configured. Cannot issue certificates.".to_string(),
+            ));
         };
 
         // Convert to PEM format
@@ -757,7 +769,10 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse PEM: {}", e)))?;
 
         if label != "CERTIFICATE" {
-             return Err(PkiError::CertificateParsing(format!("Invalid PEM label: {}", label)));
+            return Err(PkiError::CertificateParsing(format!(
+                "Invalid PEM label: {}",
+                label
+            )));
         }
 
         let cert = Certificate::from_der(&cert_bytes)
@@ -774,23 +789,35 @@ impl PkiEngine {
             _ => format!("Unknown ({})", algorithm_oid),
         };
 
-
         // Extract validity
-        let valid_from = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
-        let valid_until = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+        let valid_from = cert
+            .tbs_certificate
+            .validity
+            .not_before
+            .to_unix_duration()
+            .as_secs() as i64;
+        let valid_until = cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs() as i64;
 
         // Extract Subject and Issuer
         let subject = Self::extract_dn(&cert.tbs_certificate.subject);
         let issuer = Self::extract_dn(&cert.tbs_certificate.issuer);
 
         // Extract public key PEM
-        let public_key_pem = spki.to_pem(der::pem::LineEnding::LF)
-             .map_err(|e| PkiError::CertificateParsing(format!("Failed to encode public key: {}", e)))?;
+        let public_key_pem = spki.to_pem(der::pem::LineEnding::LF).map_err(|e| {
+            PkiError::CertificateParsing(format!("Failed to encode public key: {}", e))
+        })?;
 
         // Calculate key bits based on algorithm
         let key_bits = match key_type.as_str() {
             "RSA" => {
-                if let Ok(rsa_pub) = pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes()) {
+                if let Ok(rsa_pub) =
+                    pkcs1::RsaPublicKey::from_der(spki.subject_public_key.raw_bytes())
+                {
                     rsa_pub.modulus.as_bytes().len() * 8
                 } else {
                     // Try parsing as SPKI if raw bytes fails or if it's SPKI inside?
@@ -798,7 +825,7 @@ impl PkiEngine {
                     // For RSA, it is RSAPublicKey (PKCS#1).
                     0
                 }
-            },
+            }
             "ECDSA" => {
                 // Check curve from parameters
                 // For now, simple mapping if possible, else 0
@@ -808,7 +835,7 @@ impl PkiEngine {
                             "1.2.840.10045.3.1.7" => 256, // P-256
                             "1.3.132.0.34" => 384,        // P-384
                             "1.3.132.0.35" => 521,        // P-521
-                            _ => 0
+                            _ => 0,
                         }
                     } else {
                         0
@@ -816,7 +843,7 @@ impl PkiEngine {
                 } else {
                     0
                 }
-            },
+            }
             _ => 0,
         };
 
@@ -828,15 +855,21 @@ impl PkiEngine {
             signature_algorithm: cert.signature_algorithm.oid.to_string(),
             subject,
             issuer,
-            valid_from: chrono::DateTime::from_timestamp(valid_from, 0)
-                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_from timestamp".to_string()))?,
-            valid_until: chrono::DateTime::from_timestamp(valid_until, 0)
-                 .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_until timestamp".to_string()))?,
+            valid_from: chrono::DateTime::from_timestamp(valid_from, 0).ok_or_else(|| {
+                PkiError::CertificateParsing("Invalid valid_from timestamp".to_string())
+            })?,
+            valid_until: chrono::DateTime::from_timestamp(valid_until, 0).ok_or_else(|| {
+                PkiError::CertificateParsing("Invalid valid_until timestamp".to_string())
+            })?,
         })
     }
 
     /// Generate a new Root CA certificate
-    pub async fn generate_root_ca(&self, common_name: &str, organization: &str) -> Result<(String, String), PkiError> {
+    pub async fn generate_root_ca(
+        &self,
+        common_name: &str,
+        organization: &str,
+    ) -> Result<(String, String), PkiError> {
         // Create CA parameters
         let mut params = CertificateParams::new(vec![common_name.to_string()])
             .map_err(|e| PkiError::CertificateGeneration(e.to_string()))?;
@@ -885,7 +918,10 @@ impl PkiEngine {
             .map_err(|e| PkiError::CertificateParsing(format!("Failed to parse PEM: {}", e)))?;
 
         if label != "CERTIFICATE" {
-            return Err(PkiError::CertificateParsing(format!("Invalid PEM label: {}", label)));
+            return Err(PkiError::CertificateParsing(format!(
+                "Invalid PEM label: {}",
+                label
+            )));
         }
 
         let cert = Certificate::from_der(&cert_bytes)
@@ -895,13 +931,26 @@ impl PkiEngine {
         let serial_number = hex::encode(cert.tbs_certificate.serial_number.as_bytes());
 
         // Validity
-        let valid_from_secs = cert.tbs_certificate.validity.not_before.to_unix_duration().as_secs() as i64;
-        let valid_until_secs = cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+        let valid_from_secs = cert
+            .tbs_certificate
+            .validity
+            .not_before
+            .to_unix_duration()
+            .as_secs() as i64;
+        let valid_until_secs = cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs() as i64;
 
-        let valid_from = chrono::DateTime::from_timestamp(valid_from_secs, 0)
-            .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_from timestamp".to_string()))?;
-        let valid_until = chrono::DateTime::from_timestamp(valid_until_secs, 0)
-            .ok_or_else(|| PkiError::CertificateParsing("Invalid valid_until timestamp".to_string()))?;
+        let valid_from = chrono::DateTime::from_timestamp(valid_from_secs, 0).ok_or_else(|| {
+            PkiError::CertificateParsing("Invalid valid_from timestamp".to_string())
+        })?;
+        let valid_until =
+            chrono::DateTime::from_timestamp(valid_until_secs, 0).ok_or_else(|| {
+                PkiError::CertificateParsing("Invalid valid_until timestamp".to_string())
+            })?;
 
         Ok(CertificateMetadata {
             serial_number,
@@ -913,7 +962,9 @@ impl PkiEngine {
     /// Generate default CA info for development/testing
     async fn generate_default_ca_info(&self) -> Result<crate::model::CaInfo, PkiError> {
         // reuse the new generate_root_ca logic but return CaInfo
-        let (cert_pem, _key_pem) = self.generate_root_ca("Secreton CA", "Secreton Security").await?;
+        let (cert_pem, _key_pem) = self
+            .generate_root_ca("Secreton CA", "Secreton Security")
+            .await?;
         self.parse_ca_cert(&cert_pem)
     }
 

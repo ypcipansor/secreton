@@ -1,12 +1,6 @@
 //! SSH Secrets Engine API endpoints
 
-use axum::{
-    Router,
-    extract::Extension,
-    http::StatusCode,
-    response::Json,
-    routing::post,
-};
+use axum::{Router, extract::Extension, http::StatusCode, response::Json, routing::post};
 use secreton_secrets::{SecretEngine, SshConfig, SshEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

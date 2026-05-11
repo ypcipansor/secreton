@@ -164,7 +164,11 @@ mod tests {
             SecurityLevel::Secret,
             Uuid::new_v4(),
         );
-        services.storage.store(&entry).await.expect("Failed to store seeded user");
+        services
+            .storage
+            .store(&entry)
+            .await
+            .expect("Failed to store seeded user");
 
         let token = admin_token(&services).await;
         let server = test_server(services);
@@ -453,11 +457,7 @@ pub async fn list_users(
 ) -> ApiResult<Json<ApiResponse<Vec<UserResponse>>>> {
     require_admin(&user)?;
     let users: Vec<crate::services::admin::UserInfo> =
-        state
-            .admin
-            .list_users()
-            .await
-            .map_err(map_admin_error)?;
+        state.admin.list_users().await.map_err(map_admin_error)?;
 
     let user_responses: Vec<UserResponse> = users
         .into_iter()
@@ -486,8 +486,11 @@ pub async fn create_user(
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
 
-    let user: crate::services::admin::UserInfo =
-        state.admin.create_user(request).await.map_err(map_admin_error)?;
+    let user: crate::services::admin::UserInfo = state
+        .admin
+        .create_user(request)
+        .await
+        .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -512,12 +515,11 @@ pub async fn get_user(
     Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     require_admin(&user)?;
-    let user: crate::services::admin::UserInfo =
-        state
-            .admin
-            .get_user(&username)
-            .await
-            .map_err(map_admin_error)?;
+    let user: crate::services::admin::UserInfo = state
+        .admin
+        .get_user(&username)
+        .await
+        .map_err(map_admin_error)?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -615,11 +617,7 @@ pub async fn get_config(
 ) -> ApiResult<Json<ApiResponse<SystemConfig>>> {
     require_admin(&user)?;
 
-    let dynamic_config = state
-        .admin
-        .get_config()
-        .await
-        .map_err(map_admin_error)?;
+    let dynamic_config = state.admin.get_config().await.map_err(map_admin_error)?;
 
     // Default password policy values — keep in sync with
     // `AdminService::get_password_policy` in services/admin.rs.
@@ -643,28 +641,35 @@ pub async fn get_config(
             timeout: state.config.http.timeout,
         },
         security: SecurityConfigInfo {
-            mfa_enabled: dynamic_config.get("enable_mfa")
+            mfa_enabled: dynamic_config
+                .get("enable_mfa")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(state.config.auth.mfa.enabled),
             password_policy: PasswordPolicyInfo {
-                min_length: dynamic_config.get("password_policy_min_length")
+                min_length: dynamic_config
+                    .get("password_policy_min_length")
                     .and_then(|v| v.as_u64())
                     .map(|v| v.min(255) as u8)
                     .unwrap_or(DEFAULT_MIN_LENGTH),
-                require_uppercase: dynamic_config.get("password_policy_require_uppercase")
+                require_uppercase: dynamic_config
+                    .get("password_policy_require_uppercase")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(DEFAULT_REQUIRE_UPPERCASE),
-                require_lowercase: dynamic_config.get("password_policy_require_lowercase")
+                require_lowercase: dynamic_config
+                    .get("password_policy_require_lowercase")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(DEFAULT_REQUIRE_LOWERCASE),
-                require_numbers: dynamic_config.get("password_policy_require_numbers")
+                require_numbers: dynamic_config
+                    .get("password_policy_require_numbers")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(DEFAULT_REQUIRE_NUMBERS),
-                require_special: dynamic_config.get("password_policy_require_special")
+                require_special: dynamic_config
+                    .get("password_policy_require_special")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(DEFAULT_REQUIRE_SPECIAL),
             },
-            session_timeout: dynamic_config.get("session_timeout")
+            session_timeout: dynamic_config
+                .get("session_timeout")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(state.config.auth.session.timeout),
         },
@@ -728,8 +733,7 @@ pub async fn get_system_metrics(
             .total_disk_bytes
             .saturating_sub(m.performance.disk_usage_bytes),
         usage_percent: if m.performance.total_disk_bytes > 0 {
-            (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64)
-                * 100.0
+            (m.performance.disk_usage_bytes as f64 / m.performance.total_disk_bytes as f64) * 100.0
         } else {
             0.0
         },
@@ -892,7 +896,11 @@ pub async fn run_garbage_collection(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    let result = state.admin.run_garbage_collection().await.map_err(map_admin_error)?;
+    let result = state
+        .admin
+        .run_garbage_collection()
+        .await
+        .map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": if result.success { "Garbage collection completed" } else { "Garbage collection failed" },
@@ -906,7 +914,8 @@ pub async fn run_garbage_collection(
         Ok(Json(ApiResponse::success(data)))
     } else {
         Err(crate::ApiError::Internal(
-            serde_json::to_string(&data).unwrap_or_else(|_| "Garbage collection failed".to_string()),
+            serde_json::to_string(&data)
+                .unwrap_or_else(|_| "Garbage collection failed".to_string()),
         ))
     }
 }
@@ -933,7 +942,11 @@ pub async fn compact_database(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    let result = state.admin.compact_database().await.map_err(map_admin_error)?;
+    let result = state
+        .admin
+        .compact_database()
+        .await
+        .map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": if result.success { "Database compaction completed" } else { "Database compaction failed" },
@@ -947,7 +960,8 @@ pub async fn compact_database(
         Ok(Json(ApiResponse::success(data)))
     } else {
         Err(crate::ApiError::Internal(
-            serde_json::to_string(&data).unwrap_or_else(|_| "Database compaction failed".to_string()),
+            serde_json::to_string(&data)
+                .unwrap_or_else(|_| "Database compaction failed".to_string()),
         ))
     }
 }
@@ -1035,28 +1049,26 @@ fn map_admin_error(e: crate::services::admin::AdminError) -> secreton_errors::Se
                 service: "admin".to_string(),
             }
         }
-        crate::services::admin::AdminError::Auth(auth_err) => {
-            match auth_err {
-                crate::services::auth::AuthError::UserAlreadyExists => {
-                    secreton_errors::SecretonError::AlreadyExists {
-                        resource: "user".to_string(),
-                    }
+        crate::services::admin::AdminError::Auth(auth_err) => match auth_err {
+            crate::services::auth::AuthError::UserAlreadyExists => {
+                secreton_errors::SecretonError::AlreadyExists {
+                    resource: "user".to_string(),
                 }
-                crate::services::auth::AuthError::UserNotFound => {
-                    secreton_errors::SecretonError::NotFound {
-                        resource: "user".to_string(),
-                    }
-                }
-                crate::services::auth::AuthError::PermissionDenied => {
-                    secreton_errors::SecretonError::Authorization {
-                        message: "Permission denied".to_string(),
-                    }
-                }
-                other => secreton_errors::SecretonError::Internal {
-                    message: other.to_string(),
-                },
             }
-        }
+            crate::services::auth::AuthError::UserNotFound => {
+                secreton_errors::SecretonError::NotFound {
+                    resource: "user".to_string(),
+                }
+            }
+            crate::services::auth::AuthError::PermissionDenied => {
+                secreton_errors::SecretonError::Authorization {
+                    message: "Permission denied".to_string(),
+                }
+            }
+            other => secreton_errors::SecretonError::Internal {
+                message: other.to_string(),
+            },
+        },
         other => secreton_errors::SecretonError::Internal {
             message: other.to_string(),
         },
@@ -1089,7 +1101,11 @@ pub async fn get_user_roles(
     Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
     require_admin(&user)?;
-    let roles = state.admin.get_user_roles(&username).await.map_err(map_admin_error)?;
+    let roles = state
+        .admin
+        .get_user_roles(&username)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(roles)))
 }
@@ -1129,7 +1145,11 @@ pub async fn get_user_permissions(
     Path(username): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<String>>>> {
     require_admin(&user)?;
-    let permissions = state.admin.get_user_permissions(&username).await.map_err(map_admin_error)?;
+    let permissions = state
+        .admin
+        .get_user_permissions(&username)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }
@@ -1164,7 +1184,11 @@ pub async fn create_role(
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
 
-    let role = state.admin.create_role(request).await.map_err(map_admin_error)?;
+    let role = state
+        .admin
+        .create_role(request)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1183,7 +1207,11 @@ pub async fn get_role(
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
-    let role = state.admin.get_role(&role_name).await.map_err(map_admin_error)?;
+    let role = state
+        .admin
+        .get_role(&role_name)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1204,7 +1232,11 @@ pub async fn update_role(
 ) -> ApiResult<Json<ApiResponse<RoleResponse>>> {
     require_admin(&user)?;
 
-    let role = state.admin.update_role(&role_name, request).await.map_err(map_admin_error)?;
+    let role = state
+        .admin
+        .update_role(&role_name, request)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(RoleResponse {
         name: role.name,
@@ -1223,7 +1255,11 @@ pub async fn delete_role(
     Path(role_name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    state.admin.delete_role(&role_name).await.map_err(map_admin_error)?;
+    state
+        .admin
+        .delete_role(&role_name)
+        .await
+        .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(
         serde_json::json!({"status": "deleted", "role": role_name}),
@@ -1243,7 +1279,9 @@ pub async fn update_config(
         .await
         .map_err(map_admin_error)?;
 
-    Ok(Json(ApiResponse::success(serde_json::to_value(result).map_err(|e| crate::ApiError::Internal(e.to_string()))?)))
+    Ok(Json(ApiResponse::success(
+        serde_json::to_value(result).map_err(|e| crate::ApiError::Internal(e.to_string()))?,
+    )))
 }
 
 pub async fn reload_config(
@@ -1270,7 +1308,11 @@ pub async fn vacuum_database(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
-    let result = state.admin.vacuum_database().await.map_err(map_admin_error)?;
+    let result = state
+        .admin
+        .vacuum_database()
+        .await
+        .map_err(map_admin_error)?;
 
     let data = serde_json::json!({
         "message": if result.success { "Database vacuum completed" } else { "Database vacuum failed" },

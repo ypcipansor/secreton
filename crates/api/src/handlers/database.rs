@@ -86,7 +86,10 @@ async fn set_config(
         ));
     }
 
-    state.database.set_config(payload).await
+    state
+        .database
+        .set_config(payload)
+        .await
         .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
@@ -106,8 +109,7 @@ async fn list_roles(
         ));
     }
 
-    let roles = state.database.list_roles().await
-        .map_err(map_db_err)?;
+    let roles = state.database.list_roles().await.map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "roles": roles
@@ -129,7 +131,10 @@ async fn add_role(
 
     validate_name(&name)?;
 
-    state.database.add_role(&name, payload).await
+    state
+        .database
+        .add_role(&name, payload)
+        .await
         .map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
@@ -153,11 +158,14 @@ async fn generate_credentials(
 
     validate_name(&role)?;
 
-    let creds = state.database.generate_credentials(&role).await
+    let creds = state
+        .database
+        .generate_credentials(&role)
+        .await
         .map_err(map_db_err)?;
 
-    let value = serde_json::to_value(creds)
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+    let value =
+        serde_json::to_value(creds).map_err(|e| crate::ApiError::Internal(e.to_string()))?;
     Ok(Json(ApiResponse::success(value)))
 }
 
@@ -172,8 +180,7 @@ async fn list_leases(
         ));
     }
 
-    let leases = state.database.list_leases().await
-        .map_err(map_db_err)?;
+    let leases = state.database.list_leases().await.map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(leases)))
 }
@@ -192,8 +199,7 @@ async fn revoke_lease(
 
     validate_lease_id(&id)?;
 
-    state.database.revoke_lease(&id).await
-        .map_err(map_db_err)?;
+    state.database.revoke_lease(&id).await.map_err(map_db_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "Lease revoked"

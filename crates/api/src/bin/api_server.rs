@@ -291,7 +291,15 @@ async fn main() -> anyhow::Result<()> {
             .with_mfa(mfa.clone()),
     );
 
-    let audit = Arc::new(AuditLogger::new(storage.clone(), api_config.audit.retention_days, api_config.audit.max_batch_size, api_config.audit.enabled).await?);
+    let audit = Arc::new(
+        AuditLogger::new(
+            storage.clone(),
+            api_config.audit.retention_days,
+            api_config.audit.max_batch_size,
+            api_config.audit.enabled,
+        )
+        .await?,
+    );
 
     // Initialize Seal Service
     let seal = Arc::new(SealService::new(
@@ -400,9 +408,9 @@ async fn main() -> anyhow::Result<()> {
     // handlers::database + services::database::DatabaseService.  We pass a
     // mock storage so the old engine does no real work; its background TTL
     // task will find zero leases and idle harmlessly.
-    let database_state = secreton_api::database::DatabaseApiState::new(
-        Arc::new(secreton_storage::MockStorageBackend::new()),
-    )
+    let database_state = secreton_api::database::DatabaseApiState::new(Arc::new(
+        secreton_storage::MockStorageBackend::new(),
+    ))
     .await;
 
     let admin = Arc::new(
@@ -443,8 +451,7 @@ async fn main() -> anyhow::Result<()> {
     // by name from the container behave consistently with the
     // `ApiServiceContainer` code path (which also registers it under
     // "lifecycle").
-    container
-        .register_service::<Arc<LifecycleService>>("lifecycle".to_string(), lifecycle.clone());
+    container.register_service::<Arc<LifecycleService>>("lifecycle".to_string(), lifecycle.clone());
     container.register_service::<Arc<SecretPerformanceOptimizer>>(
         "performance".to_string(),
         performance.clone(),
@@ -463,27 +470,24 @@ async fn main() -> anyhow::Result<()> {
         warn!("Failed to start telemetry collection: {}", e);
     }
 
-    container.register_service::<Arc<TelemetryCollector>>(
-        "telemetry".to_string(),
-        telemetry.clone(),
-    );
+    container
+        .register_service::<Arc<TelemetryCollector>>("telemetry".to_string(), telemetry.clone());
 
     // Register new engine services
-    let database_service = Arc::new(
-        secreton_api::services::database::DatabaseService::new(storage.clone(), crypto.clone()),
-    );
+    let database_service = Arc::new(secreton_api::services::database::DatabaseService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     container.register_service::<Arc<secreton_api::services::database::DatabaseService>>(
         "database".to_string(),
         database_service.clone(),
     );
-    container.register_service::<Arc<PkiPersistentService>>(
-        "pki".to_string(),
-        pki_service.clone(),
-    );
+    container.register_service::<Arc<PkiPersistentService>>("pki".to_string(), pki_service.clone());
 
-    let ssh_service = Arc::new(
-        secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone()),
-    );
+    let ssh_service = Arc::new(secreton_api::services::ssh::SshPersistentService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     if let Err(e) = ssh_service.ensure_initialized().await {
         tracing::error!("Failed to initialize SSH service from storage: {}", e);
         return Err(anyhow::anyhow!("SSH initialization failed: {}", e));
@@ -492,12 +496,11 @@ async fn main() -> anyhow::Result<()> {
         "ssh".to_string(),
         ssh_service.clone(),
     );
-    let totp_engine_service = Arc::new(
-        secreton_api::services::totp_engine::TotpEngineService::new(
+    let totp_engine_service =
+        Arc::new(secreton_api::services::totp_engine::TotpEngineService::new(
             storage.clone(),
             crypto.clone(),
-        ),
-    );
+        ));
     container.register_service::<Arc<secreton_api::services::totp_engine::TotpEngineService>>(
         "totp_engine".to_string(),
         totp_engine_service.clone(),
@@ -578,8 +581,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Spawn Warp Server (Legacy/Core) with graceful shutdown.
     let mut warp_shutdown_rx = shutdown_tx.subscribe();
-    let (_warp_addr, warp_server) = warp::serve(warp_routes)
-        .bind_with_graceful_shutdown((host_ip, http_port), async move {
+    let (_warp_addr, warp_server) =
+        warp::serve(warp_routes).bind_with_graceful_shutdown((host_ip, http_port), async move {
             let _ = warp_shutdown_rx.recv().await;
         });
 
