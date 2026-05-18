@@ -71,7 +71,7 @@ impl SecretonAgent {
 
         let template_manager = Arc::new(TemplateManager::new(
             (*auth_handler).clone(),
-            config.templates.clone()
+            config.templates.clone(),
         ));
 
         Ok(Self {
@@ -175,8 +175,10 @@ impl SecretonAgent {
 
         tokio::spawn(async move {
             if let Err(e) = auth_handler.start_renewal_service(shutdown_rx).await {
-                 tracing::error!("Auth renewal service error: {}", e);
-                 return Err(SecretonError::Internal { message: format!("Auth renewal failed: {}", e) });
+                tracing::error!("Auth renewal service error: {}", e);
+                return Err(SecretonError::Internal {
+                    message: format!("Auth renewal failed: {}", e),
+                });
             }
             Ok(())
         })
@@ -197,8 +199,10 @@ impl SecretonAgent {
 
         tokio::spawn(async move {
             if let Err(e) = template_manager.start(shutdown_rx).await {
-                 tracing::error!("Template manager error: {}", e);
-                 return Err(SecretonError::Internal { message: format!("Template manager failed: {}", e) });
+                tracing::error!("Template manager error: {}", e);
+                return Err(SecretonError::Internal {
+                    message: format!("Template manager failed: {}", e),
+                });
             }
             Ok(())
         })

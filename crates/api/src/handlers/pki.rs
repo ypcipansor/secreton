@@ -46,12 +46,13 @@ async fn get_ca_pem(
     State(state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<String>>> {
-    let pem = state.pki.get_ca_pem().await
-        .map_err(map_pki_err)?;
+    let pem = state.pki.get_ca_pem().await.map_err(map_pki_err)?;
 
     match pem {
         Some(p) => Ok(AxumJson(ApiResponse::success(p))),
-        None => Err(crate::ApiError::NotFound("Root CA not configured".to_string())),
+        None => Err(crate::ApiError::NotFound(
+            "Root CA not configured".to_string(),
+        )),
     }
 }
 
@@ -67,7 +68,10 @@ async fn generate_root_ca(
         ));
     }
 
-    let mut response = state.pki.generate_root_ca(&payload.common_name, &payload.organization).await
+    let mut response = state
+        .pki
+        .generate_root_ca(&payload.common_name, &payload.organization)
+        .await
         .map_err(map_pki_err)?;
 
     // Do not return private key in API response for security.
@@ -90,7 +94,10 @@ async fn issue_certificate(
         ));
     }
 
-    let response = state.pki.issue_certificate(payload).await
+    let response = state
+        .pki
+        .issue_certificate(payload)
+        .await
         .map_err(map_pki_err)?;
 
     Ok(AxumJson(ApiResponse::success(response)))

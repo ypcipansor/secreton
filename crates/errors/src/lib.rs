@@ -557,7 +557,9 @@ impl SecretonError {
             | SecretonError::Encryption { .. }
             | SecretonError::Decryption { .. } => "cryptography",
 
-            SecretonError::RateLimitExceeded { .. } | SecretonError::QuotaExceeded { .. } => "limits",
+            SecretonError::RateLimitExceeded { .. } | SecretonError::QuotaExceeded { .. } => {
+                "limits"
+            }
 
             SecretonError::Configuration { .. } => "configuration",
 

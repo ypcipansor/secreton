@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use secreton_errors::SecretonError;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// TOTP configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

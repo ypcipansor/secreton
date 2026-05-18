@@ -11,7 +11,11 @@ pub fn Input(
     #[prop(optional, into)] disabled: Signal<bool>,
     #[prop(optional)] on_input: Option<Box<dyn Fn(String) + Send + Sync>>,
 ) -> impl IntoView {
-    let type_val = if type_.is_empty() { "text".to_string() } else { type_ };
+    let type_val = if type_.is_empty() {
+        "text".to_string()
+    } else {
+        type_
+    };
 
     let on_input_handler = move |ev: leptos::ev::Event| {
         let val = event_target_value(&ev);

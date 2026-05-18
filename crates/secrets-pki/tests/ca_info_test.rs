@@ -1,12 +1,16 @@
-use secreton_secrets_pki::{PkiEngine, PkiConfig};
 use rcgen::{CertificateParams, KeyPair};
+use secreton_secrets_pki::{PkiConfig, PkiEngine};
 
 #[tokio::test]
 async fn test_get_ca_info_real_parsing() {
     // 1. Generate a CA certificate
     let mut params = CertificateParams::new(vec![]).unwrap();
-    params.distinguished_name.push(rcgen::DnType::CommonName, "Test CA");
-    params.distinguished_name.push(rcgen::DnType::OrganizationName, "Test Org");
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "Test CA");
+    params
+        .distinguished_name
+        .push(rcgen::DnType::OrganizationName, "Test Org");
     params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     let key_pair = KeyPair::generate().unwrap();
     let cert = params.self_signed(&key_pair).unwrap();
@@ -36,6 +40,12 @@ async fn test_get_ca_info_real_parsing() {
 
     assert_eq!(ca_info.certificate, ca_pem);
 
-    assert_eq!(ca_info.subject.get("common_name").map(|s| s.as_str()), Some("Test CA"));
-    assert_eq!(ca_info.subject.get("organization").map(|s| s.as_str()), Some("Test Org"));
+    assert_eq!(
+        ca_info.subject.get("common_name").map(|s| s.as_str()),
+        Some("Test CA")
+    );
+    assert_eq!(
+        ca_info.subject.get("organization").map(|s| s.as_str()),
+        Some("Test Org")
+    );
 }

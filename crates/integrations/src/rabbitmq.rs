@@ -249,10 +249,7 @@ impl RabbitMqOperations {
             "password".to_string(),
             serde_json::Value::String(req.password),
         );
-        creds_data.insert(
-            "vhost".to_string(),
-            serde_json::Value::String(req.vhost),
-        );
+        creds_data.insert("vhost".to_string(), serde_json::Value::String(req.vhost));
         creds_data.insert(
             "connection_uri".to_string(),
             serde_json::Value::String(connection_uri),

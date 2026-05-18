@@ -125,8 +125,7 @@ impl TelemetryCollector {
         let start_time = self.start_time;
 
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
 
             loop {
                 interval.tick().await;
@@ -445,8 +444,8 @@ async fn collect_system_metrics() -> SystemResourceMetrics {
 
     SystemResourceMetrics {
         active_connections: 0, // Would be collected from connection pool
-        uptime_seconds: 0,    // Cannot compute here; use TelemetryCollector::uptime_seconds()
-        load_average_1m: 0.0, // Would be collected from system
+        uptime_seconds: 0,     // Cannot compute here; use TelemetryCollector::uptime_seconds()
+        load_average_1m: 0.0,  // Would be collected from system
         load_average_5m: 0.0,
         load_average_15m: 0.0,
     }

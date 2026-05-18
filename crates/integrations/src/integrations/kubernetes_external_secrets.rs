@@ -290,7 +290,10 @@ impl KubernetesExternalSecrets {
         1
     }
 
-    async fn mock_fetch_from_secreton(&self, _secreton_path: &str) -> Result<HashMap<String, String>> {
+    async fn mock_fetch_from_secreton(
+        &self,
+        _secreton_path: &str,
+    ) -> Result<HashMap<String, String>> {
         // Mock Secret fetch
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
