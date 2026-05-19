@@ -13,7 +13,7 @@ use secreton_config::Config;
 #[command(
     name = "secreton-cli",
     about = "Command line interface for Secreton system",
-    version = "1.0.0",
+    version = env!("CARGO_PKG_VERSION"),
     author = "Secreton Team"
 )]
 struct Cli {

@@ -461,7 +461,7 @@ impl EndToEndObservabilityPipeline {
             response_time_ms,
             error_rate,
             last_check: Utc::now(),
-            details: HashMap::from([("version".to_string(), "1.0.0".to_string())]),
+            details: HashMap::from([("version".to_string(), "0.1.0".to_string())]),
         }
     }
 

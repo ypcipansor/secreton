@@ -21,14 +21,14 @@
 //! ## Usage
 //!
 //! ```rust
-//! use secreton_config_unified::{Config, CoreConfig};
+//! use secreton_config::{Config, CoreConfig};
 //!
-//! // Load configuration with layered sources
-//! let config = CoreConfig::load()?;
+//! // Create a default configuration
+//! let config = CoreConfig::default();
 //!
 //! // Access specific configuration sections
 //! let server_config = &config.server;
-//! let auth_config = &config.auth;
+//! let security_config = &config.security;
 //! ```
 
 use secreton_common::password::PasswordPolicy;
