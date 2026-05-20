@@ -71,7 +71,7 @@ impl SecretonSdk for JsSdkClient {
             success: true,
             data: Some(HashMap::from([
                 ("status".to_string(), "healthy".to_string()),
-                ("version".to_string(), "1.0.0".to_string()),
+                ("version".to_string(), "0.1.0".to_string()),
             ])),
             error: None,
             metadata: HashMap::new(),

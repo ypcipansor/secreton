@@ -796,7 +796,7 @@ mod multi_component_integration_tests {
         });
 
         let response = server
-            .post("/secrets/services/user-service/v1.0.0")
+            .post("/secrets/services/user-service/v0.1.0")
             .json(&service_secrets)
             .await;
         response.assert_status_ok();
@@ -826,7 +826,7 @@ mod multi_component_integration_tests {
         response.assert_status_ok();
 
         // 4. Simulate service operation
-        let response = server.get("/secrets/services/user-service/v1.0.0").await;
+        let response = server.get("/secrets/services/user-service/v0.1.0").await;
         response.assert_status_ok();
 
         // 5. Rotate service key for security
@@ -843,7 +843,7 @@ mod multi_component_integration_tests {
         assert!(audit_entries.len() >= 5, "Should have complete audit trail for service deployment");
 
         // 7. Service decommissioning simulation
-        let response = server.delete("/secrets/services/user-service/v1.0.0").await;
+        let response = server.delete("/secrets/services/user-service/v0.1.0").await;
         response.assert_status_ok();
 
         let response = server.delete("/keys/user-service-key-v1").await;

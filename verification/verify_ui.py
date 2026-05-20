@@ -24,7 +24,7 @@ def run(playwright):
         route.fulfill(
             status=200,
             content_type="application/json",
-            body='{"success": true, "data": {"status": "healthy", "version": "1.0.0"}}'
+            body='{"success": true, "data": {"status": "healthy", "version": "0.1.0"}}'
         )
 
     def handle_secrets(route):

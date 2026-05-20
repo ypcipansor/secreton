@@ -142,7 +142,7 @@ impl AdvancedBackupRecovery {
 
         let backup_metadata = BackupMetadata {
             version: 1,
-            secreton_version: "1.0.0".to_string(),
+            secreton_version: "0.1.0".to_string(),
             secrets_snapshot: secrets.clone(),
             encryption_key_id: if encryption_enabled {
                 Some("_key-12345".to_string())
@@ -174,7 +174,7 @@ impl AdvancedBackupRecovery {
             created_at: Utc::now(),
             metadata: HashMap::from([
                 ("secrets_count".to_string(), secrets.len().to_string()),
-                ("secreton_version".to_string(), "1.0.0".to_string()),
+                ("secreton_version".to_string(), "0.1.0".to_string()),
             ]),
             checksum,
             _status: BackupStatus::Completed,

@@ -109,7 +109,7 @@ impl SealStatus {
             threshold: _config.secret_threshold,
             progress,
             nonce: None,
-            version: "1.0.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }

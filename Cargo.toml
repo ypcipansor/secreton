@@ -38,7 +38,7 @@ homepage = "https://github.com/analisaperlengkapan/secreton"
 description = "Advanced Security System with Quantum-Safe Cryptography"
 keywords = ["security", "secreton", "cryptography", "zero-trust", "quantum-safe"]
 categories = ["cryptography", "authentication", "security-tools"]
-rust-version = "1.90"
+rust-version = "1.95"
 
 [workspace.dependencies]
 # Core crate dependencies
@@ -325,7 +325,7 @@ mysql_async = { version = "0.36", default-features = false, features = ["default
 wasmi = "0.51.1"  # Alternative WASM interpreter (lighter)
 
 # HTTP frameworks
-warp = "0.4"  # Alternative HTTP framework
+warp = "0.3"  # Alternative HTTP framework
 
 # PQC (Post-Quantum Cryptography) - NIST standardized algorithms
 # Pure Rust implementations, actively maintained

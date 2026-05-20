@@ -693,21 +693,21 @@ mod configuration_tests {
 
         // Test deployment rollback scenarios
 
-        // 1. Deploy version 1.0.0
+        // 1. Deploy version 0.1.0
         let v1_payload = json!({
             "data": {
-                "version": "1.0.0",
+                "version": "0.1.0",
                 "features": ["basic_auth", "secret_storage"],
                 "deployment_time": "2024-01-01T00:00:00Z"
             },
             "metadata": {
-                "description": "Version 1.0.0 deployment configuration",
-                "tags": ["deployment", "v1.0.0"]
+                "description": "Version 0.1.0 deployment configuration",
+                "tags": ["deployment", "v0.1.0"]
             }
         });
 
         let response = server
-            .post("/secrets/deployment/v1.0.0")
+            .post("/secrets/deployment/v0.1.0")
             .json(&v1_payload)
             .await;
         response.assert_status_ok();
@@ -731,33 +731,33 @@ mod configuration_tests {
             .await;
         response.assert_status_ok();
 
-        // 3. Simulate rollback to version 1.0.0
+        // 3. Simulate rollback to version 0.1.0
         let rollback_payload = json!({
             "data": {
-                "rollback_to": "1.0.0",
+                "rollback_to": "0.1.0",
                 "reason": "Critical bug in encryption feature",
                 "rollback_time": "2024-01-03T00:00:00Z"
             },
             "metadata": {
-                "description": "Rollback to version 1.0.0",
-                "tags": ["deployment", "rollback", "v1.0.0"]
+                "description": "Rollback to version 0.1.0",
+                "tags": ["deployment", "rollback", "v0.1.0"]
             }
         });
 
         let response = server
-            .post("/secrets/deployment/rollback_v1.0.0")
+            .post("/secrets/deployment/rollback_v0.1.0")
             .json(&rollback_payload)
             .await;
         response.assert_status_ok();
 
         // 4. Verify rollback
-        let response = server.get("/secrets/deployment/v1.0.0").await;
+        let response = server.get("/secrets/deployment/v0.1.0").await;
         response.assert_status_ok();
 
         let response = server.get("/secrets/deployment/v1.1.0").await;
         response.assert_status_ok();
 
-        let response = server.get("/secrets/deployment/rollback_v1.0.0").await;
+        let response = server.get("/secrets/deployment/rollback_v0.1.0").await;
         response.assert_status_ok();
 
         Ok(())

@@ -436,7 +436,7 @@ mod tests {
         let plugin = Plugin {
             plugin_id: String::new(),
             name: "test-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test Author".to_string(),
             description: "Test plugin".to_string(),
             entry_point: "main".to_string(),
@@ -457,7 +457,7 @@ mod tests {
         let plugin = Plugin {
             plugin_id: String::new(),
             name: "test-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test Author".to_string(),
             description: "Test plugin".to_string(),
             entry_point: "main".to_string(),
@@ -481,7 +481,7 @@ mod tests {
         let plugin = Plugin {
             plugin_id: String::new(),
             name: "test-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test Author".to_string(),
             description: "Test plugin".to_string(),
             entry_point: "main".to_string(),
@@ -519,7 +519,7 @@ mod tests {
         let base_plugin = Plugin {
             plugin_id: String::new(),
             name: "base-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test".to_string(),
             description: "Base".to_string(),
             entry_point: "main".to_string(),
@@ -535,14 +535,14 @@ mod tests {
         let dependent_plugin = Plugin {
             plugin_id: String::new(),
             name: "dependent-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test".to_string(),
             description: "Dependent".to_string(),
             entry_point: "main".to_string(),
             hooks: vec![],
             dependencies: vec![PluginDependency {
                 plugin_name: "base-plugin".to_string(),
-                version_requirement: "1.0.0".to_string(),
+                version_requirement: "0.1.0".to_string(),
                 optional: false,
             }],
             state: PluginState::Loaded,
@@ -560,7 +560,7 @@ mod tests {
         let plugin = Plugin {
             plugin_id: String::new(),
             name: "test-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test".to_string(),
             description: "Test".to_string(),
             entry_point: "main".to_string(),
@@ -598,7 +598,7 @@ mod tests {
         let plugin = Plugin {
             plugin_id: String::new(),
             name: "test-plugin".to_string(),
-            version: "1.0.0".to_string(),
+            version: "0.1.0".to_string(),
             author: "Test".to_string(),
             description: "Test".to_string(),
             entry_point: "main".to_string(),

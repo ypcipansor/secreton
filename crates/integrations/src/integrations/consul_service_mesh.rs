@@ -353,7 +353,7 @@ mod tests {
 
     fn create_test_service_registration() -> ServiceRegistration {
         let mut meta = HashMap::new();
-        meta.insert("version".to_string(), "1.0.0".to_string());
+        meta.insert("version".to_string(), "0.1.0".to_string());
 
         ServiceRegistration {
             service_id: "web-1".to_string(),

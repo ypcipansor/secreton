@@ -121,7 +121,7 @@ impl SecureStorage {
     ///
     /// This function will panic if the master key is empty.
     #[deprecated(
-        since = "0.2.0",
+        since = "0.1.0",
         note = "Use `SecureStorage::new_with_keystore` for key rotation support"
     )]
     pub fn new(master_key: &[u8]) -> Result<Self> {

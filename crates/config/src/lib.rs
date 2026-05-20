@@ -21,14 +21,14 @@
 //! ## Usage
 //!
 //! ```rust
-//! use secreton_config_unified::{Config, CoreConfig};
+//! use secreton_config::{Config, CoreConfig};
 //!
-//! // Load configuration with layered sources
-//! let config = CoreConfig::load()?;
+//! // Create a configuration (usually loaded via CoreConfig::load())
+//! let config = CoreConfig::default();
 //!
 //! // Access specific configuration sections
 //! let server_config = &config.server;
-//! let auth_config = &config.auth;
+//! let security_config = &config.security;
 //! ```
 
 use secreton_common::password::PasswordPolicy;
@@ -105,18 +105,23 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoreConfig {
     /// Server configuration
+    #[serde(default)]
     pub server: ServerConfig,
 
     /// Storage configuration
+    #[serde(default)]
     pub storage: StorageConfig,
 
     /// Security configuration
+    #[serde(default)]
     pub security: SecurityConfig,
 
     /// Logging configuration
+    #[serde(default)]
     pub logging: LoggingConfig,
 
     /// Metrics configuration
+    #[serde(default)]
     pub metrics: MetricsConfig,
 }
 

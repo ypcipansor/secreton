@@ -27,7 +27,7 @@ async-trait.workspace = true
 futures.workspace = true
 
 # HTTP frameworks
-warp = { workspace = true, features = ["server"] }
+warp = { workspace = true }
 hyper.workspace = true
 tower = { workspace = true, features = ["make"] }
 tower-http = { workspace = true, features = ["cors", "trace", "timeout", "compression-full", "fs"] }
