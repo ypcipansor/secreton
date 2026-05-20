@@ -161,7 +161,7 @@ impl SnapshotService {
                 policies: HashMap::new(),
                 _config: HashMap::new(),
                 audit_logs: None,
-                version: "0.1.0".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
             })),
         }
     }
