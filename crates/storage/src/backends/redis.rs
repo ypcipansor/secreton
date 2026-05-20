@@ -1,4 +1,4 @@
-//! Modern Redis storage backend implementation using redis v0.1.0-alpha.1
+//! Modern Redis storage backend implementation
 
 use crate::{
     HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
