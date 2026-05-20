@@ -23,7 +23,7 @@
 //! ```rust
 //! use secreton_config::{Config, CoreConfig};
 //!
-//! // Create a default configuration
+//! // Create a configuration (usually loaded via CoreConfig::load())
 //! let config = CoreConfig::default();
 //!
 //! // Access specific configuration sections
@@ -105,18 +105,23 @@ pub trait Config: for<'de> Deserialize<'de> + Serialize + Clone + Default {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoreConfig {
     /// Server configuration
+    #[serde(default)]
     pub server: ServerConfig,
 
     /// Storage configuration
+    #[serde(default)]
     pub storage: StorageConfig,
 
     /// Security configuration
+    #[serde(default)]
     pub security: SecurityConfig,
 
     /// Logging configuration
+    #[serde(default)]
     pub logging: LoggingConfig,
 
     /// Metrics configuration
+    #[serde(default)]
     pub metrics: MetricsConfig,
 }
 
