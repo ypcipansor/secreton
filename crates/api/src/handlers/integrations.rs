@@ -1,17 +1,83 @@
 use axum::{
     extract::{Path, State},
-    routing::post,
+    routing::{get, post, put, delete},
     Json, Router,
 };
 use serde::Deserialize;
 use crate::handlers::AppState;
 use crate::{ApiResponse, ApiResult, ApiError};
+use crate::extractors::AuthenticatedUser;
+use crate::services::integrations::IntegrationConfig;
 use secreton_integrations::integrations::aws_secrets_manager::SyncOperation;
 
 pub fn create_routes() -> Router<AppState> {
     Router::new()
-        .route("/aws/sync-to/{*path}", post(sync_to_aws))
-        .route("/aws/sync-from/{*path}", post(sync_from_aws))
+        .route("/", get(list_integrations).post(create_integration))
+        .route("/{id}", get(get_integration).put(update_integration).delete(delete_integration))
+        .route("/aws/sync-to/:config_id/{*path}", post(sync_to_aws))
+        .route("/aws/sync-from/:config_id/{*path}", post(sync_from_aws))
+}
+
+async fn list_integrations(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> ApiResult<Json<ApiResponse<Vec<IntegrationConfig>>>> {
+    if !user.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::Authorization("Only admins can access integrations".to_string()));
+    }
+    let configs = state.integrations.list_integrations().await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(configs)))
+}
+
+async fn get_integration(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ApiResponse<IntegrationConfig>>> {
+    if !user.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::Authorization("Only admins can access integrations".to_string()));
+    }
+    let config = state.integrations.get_integration(&id).await.map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("Integration {} not found", id)))?;
+    Ok(Json(ApiResponse::success(config)))
+}
+
+async fn create_integration(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(config): Json<IntegrationConfig>,
+) -> ApiResult<Json<ApiResponse<()>>> {
+    if !user.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::Authorization("Only admins can manage integrations".to_string()));
+    }
+    state.integrations.save_integration(config).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(())))
+}
+
+async fn update_integration(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<String>,
+    Json(mut config): Json<IntegrationConfig>,
+) -> ApiResult<Json<ApiResponse<()>>> {
+    if !user.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::Authorization("Only admins can manage integrations".to_string()));
+    }
+    config.id = id;
+    state.integrations.save_integration(config).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(())))
+}
+
+async fn delete_integration(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ApiResponse<()>>> {
+    if !user.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::Authorization("Only admins can manage integrations".to_string()));
+    }
+    state.integrations.delete_integration(&id).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(())))
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,44 +85,31 @@ pub struct SyncToAwsRequest {
     pub aws_secret_name: String,
 }
 
-/// Sync a secret from Secreton to AWS Secrets Manager
-///
-/// NOTE: This handler is not yet wired into the router. Before mounting it,
-/// it MUST be updated to enforce authentication/authorization (the surrounding
-/// router applies global auth middleware, but per-handler permission checks
-/// against the target secret are still required).
 async fn sync_to_aws(
-    State(_state): State<AppState>,
-    Path(path): Path<String>,
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path((config_id, path)): Path<(String, String)>,
     Json(payload): Json<SyncToAwsRequest>,
 ) -> ApiResult<Json<ApiResponse<SyncOperation>>> {
-    tracing::info!("Syncing secret {} to AWS as {}", path, payload.aws_secret_name);
-
-    // TODO: verify the caller owns/has-write access to `path`, then fetch the
-    // secret data and call into the AWS Secrets Manager integration.  The
-    // previous gating used `config.auth.mfa.sms.is_none()` as a proxy for
-    // "enterprise features enabled" which is semantically incorrect (MFA SMS
-    // configuration is unrelated to AWS integration).  Until proper config
-    // plumbing exists, this endpoint is unconditionally unimplemented.
-    // SECURITY: reject until per-request auth + per-secret authorization
-    // are added.  See CONTRIBUTING.md "Secure Coding Checklist".
-    Err(ApiError::Unauthorized(
-        "AWS Secrets Manager integration requires authentication wiring before use".to_string(),
-    ))
+    let secret = state.secreton.get_secret(&path, &user, None).await?;
+    let manager = state.integrations.get_aws_manager(&config_id).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let data = serde_json::to_vec(&secret.data).map_err(|e| ApiError::Internal(e.to_string()))?;
+    let op = manager.sync_to_aws(&path, &payload.aws_secret_name, &data).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(op)))
 }
 
-/// Sync a secret from AWS Secrets Manager to Secreton
-///
-/// NOTE: Not yet wired into the router. See `sync_to_aws` for the
-/// authentication/authorization requirements that must be added before
-/// mounting these routes.
 async fn sync_from_aws(
-    State(_state): State<AppState>,
-    Path(_path): Path<String>,
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path((config_id, path)): Path<(String, String)>,
 ) -> ApiResult<Json<ApiResponse<SyncOperation>>> {
-    // SECURITY: reject until per-request auth + per-secret authorization
-    // are added.  See CONTRIBUTING.md "Secure Coding Checklist".
-    Err(ApiError::Unauthorized(
-        "AWS Secrets Manager integration requires authentication wiring before use".to_string(),
-    ))
+    let manager = state.integrations.get_aws_manager(&config_id).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let aws_secret_name = path.split('/').last().unwrap_or(&path);
+    let (data, op) = manager.sync_from_aws(aws_secret_name).await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let secret_data: std::collections::HashMap<String, String> = serde_json::from_slice(&data)
+        .map_err(|_| ApiError::BadRequest("AWS secret is not a valid JSON object".to_string()))?;
+    state.secreton.put_secret(&path, secret_data, None, &user, None).await?;
+    Ok(Json(ApiResponse::success(op)))
 }

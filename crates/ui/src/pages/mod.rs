@@ -12,3 +12,4 @@ pub mod ssh;
 pub mod totp;
 pub mod backups;
 pub mod settings;
+pub mod integrations;

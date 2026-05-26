@@ -7,7 +7,9 @@ pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod database;
+pub mod integrations;
 pub mod health;
+pub mod lifecycle;
 pub mod pki;
 pub mod secret;
 pub mod ssh;
@@ -93,9 +95,11 @@ pub struct AppState {
     pub ssh: Arc<crate::services::ssh::SshPersistentService>,
     pub transit: Arc<secreton_crypto::transit::TransitEngine>,
     pub totp_engine: Arc<crate::services::totp_engine::TotpEngineService>,
+    pub integrations: Arc<crate::services::integrations::IntegrationsService>,
     pub performance: Arc<SecretPerformanceOptimizer>,
     pub mfa: Arc<CombinedMfaService>,
     pub telemetry: Arc<secreton_core::telemetry::TelemetryCollector>,
+    pub lifecycle: Arc<crate::services::lifecycle::LifecycleService>,
     pub config: Arc<ApiConfig>,
 }
 
@@ -115,9 +119,11 @@ impl From<Arc<ApiServiceContainer>> for AppState {
             transit: container.transit.clone(),
             ssh: container.ssh.clone(),
             totp_engine: container.totp_engine.clone(),
+            integrations: container.integrations.clone(),
             performance: container.performance.clone(),
             mfa: container.mfa.clone(),
             telemetry: container.telemetry.clone(),
+            lifecycle: container.lifecycle.clone(),
             config: Arc::new(container.config.clone()),
         }
     }
@@ -138,6 +144,8 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
         .nest("/ssh", ssh::create_routes())
         .nest("/totp", totp_engine::create_routes())
         .nest("/transit", transit::create_routes())
+        .nest("/lifecycle", lifecycle::create_routes())
+        .nest("/integrations", integrations::create_routes())
         .route("/health", get(health::health_check))
         .route("/version", get(get_version))
         .route("/metrics", get(get_metrics));
