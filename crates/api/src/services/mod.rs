@@ -283,6 +283,7 @@ impl ApiServiceContainer {
             };
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
+            crypto.clone(),
             audit.clone(),
             lifecycle_config,
         ));

@@ -192,6 +192,10 @@ pub fn Dashboard() -> impl IntoView {
                         <span class="block text-2xl mb-2">"👁️"</span>
                         <span class="font-medium text-gray-900 group-hover:text-blue-600">"View Audit Logs"</span>
                      </a>
+                     <a href="/integrations" class="block p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-md transition-all group">
+                        <span class="block text-2xl mb-2">"🔗"</span>
+                        <span class="font-medium text-gray-900 group-hover:text-blue-600">"Integrations"</span>
+                     </a>
                 </div>
             </div>
         </div>

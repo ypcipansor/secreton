@@ -346,6 +346,7 @@ async fn main() -> anyhow::Result<()> {
         };
     let lifecycle = Arc::new(LifecycleService::new(
         storage.clone(),
+        crypto.clone(),
         audit.clone(),
         lifecycle_config,
     ));

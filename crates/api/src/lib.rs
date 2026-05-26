@@ -1360,6 +1360,8 @@ pub fn create_api_router(state: ApiState) -> Result<axum::Router, SecretonError>
         totp_engine: resolve(&state.secreton, "totp_engine")?,
         mfa: resolve(&state.secreton, "mfa")?,
         telemetry: resolve(&state.secreton, "telemetry")?,
+        lifecycle: resolve(&state.secreton, "lifecycle")?,
+        integrations: resolve(&state.secreton, "integrations")?,
         config: state.config.clone(),
     };
 

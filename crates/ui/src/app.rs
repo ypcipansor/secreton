@@ -16,6 +16,7 @@ use crate::pages::ssh::SshPage;
 use crate::pages::totp::TotpPage;
 use crate::pages::backups::BackupsPage;
 use crate::pages::settings::SettingsPage;
+use crate::pages::integrations::IntegrationsPage;
 use crate::components::Layout;
 
 #[component]
@@ -41,6 +42,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("audit") view=AuditLog />
                         <Route path=path!("backups") view=BackupsPage />
                         <Route path=path!("settings") view=SettingsPage />
+                        <Route path=path!("integrations") view=IntegrationsPage />
                     </ParentRoute>
                 </Routes>
             </div>
