@@ -1,6 +1,6 @@
-use leptos::prelude::*;
 use crate::api;
 use crate::components::Card;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -54,11 +54,8 @@ pub fn SettingsPage() -> impl IntoView {
     let (success_msg, set_success_msg) = signal(Option::<String>::None);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
-    let config_resource = LocalResource::new(
-        move || async move {
-            api::get::<SystemConfig>("/admin/config").await
-        },
-    );
+    let config_resource =
+        LocalResource::new(move || async move { api::get::<SystemConfig>("/admin/config").await });
 
     // Form signals
     let (mfa_enabled, set_mfa_enabled) = signal(false);
@@ -83,42 +80,43 @@ pub fn SettingsPage() -> impl IntoView {
         }
     });
 
-    let save_config = Action::new_local(move |_: &()| {
-        async move {
-            let updates = serde_json::json!({
-                "enable_mfa": mfa_enabled.get(),
-                "password_policy_min_length": min_length.get(),
-                "password_policy_require_uppercase": req_upper.get(),
-                "password_policy_require_lowercase": req_lower.get(),
-                "password_policy_require_numbers": req_numbers.get(),
-                "password_policy_require_special": req_special.get(),
-                "session_timeout": session_timeout.get(),
-            });
+    let save_config = Action::new_local(move |_: &()| async move {
+        let updates = serde_json::json!({
+            "enable_mfa": mfa_enabled.get(),
+            "password_policy_min_length": min_length.get(),
+            "password_policy_require_uppercase": req_upper.get(),
+            "password_policy_require_lowercase": req_lower.get(),
+            "password_policy_require_numbers": req_numbers.get(),
+            "password_policy_require_special": req_special.get(),
+            "session_timeout": session_timeout.get(),
+        });
 
-            match api::put::<serde_json::Value, _>("/admin/config", updates).await {
-                Ok(_) => {
-                    set_success_msg.set(Some("Configuration updated successfully".to_string()));
-                    set_error_msg.set(None);
-                },
-                Err(e) => {
-                    set_error_msg.set(Some(format!("Failed to update configuration: {:?}", e)));
-                    set_success_msg.set(None);
-                }
+        match api::put::<serde_json::Value, _>("/admin/config", updates).await {
+            Ok(_) => {
+                set_success_msg.set(Some("Configuration updated successfully".to_string()));
+                set_error_msg.set(None);
+            }
+            Err(e) => {
+                set_error_msg.set(Some(format!("Failed to update configuration: {:?}", e)));
+                set_success_msg.set(None);
             }
         }
     });
 
-    let clear_cache = Action::new_local(move |_: &()| {
-        async move {
-            match api::post::<serde_json::Value, _>("/admin/maintenance/cache/clear", serde_json::json!({})).await {
-                Ok(_) => {
-                    set_success_msg.set(Some("Performance cache cleared".to_string()));
-                    set_error_msg.set(None);
-                },
-                Err(e) => {
-                    set_error_msg.set(Some(format!("Failed to clear cache: {:?}", e)));
-                    set_success_msg.set(None);
-                }
+    let clear_cache = Action::new_local(move |_: &()| async move {
+        match api::post::<serde_json::Value, _>(
+            "/admin/maintenance/cache/clear",
+            serde_json::json!({}),
+        )
+        .await
+        {
+            Ok(_) => {
+                set_success_msg.set(Some("Performance cache cleared".to_string()));
+                set_error_msg.set(None);
+            }
+            Err(e) => {
+                set_error_msg.set(Some(format!("Failed to clear cache: {:?}", e)));
+                set_success_msg.set(None);
             }
         }
     });

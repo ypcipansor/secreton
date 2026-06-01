@@ -1,6 +1,6 @@
-use leptos::prelude::*;
-use leptos_router::hooks::{use_navigate, use_location};
 use crate::auth::use_auth;
+use leptos::prelude::*;
+use leptos_router::hooks::{use_location, use_navigate};
 
 #[component]
 fn Link(
@@ -48,7 +48,12 @@ pub fn Layout(children: Children) -> impl IntoView {
     let auth_state = use_auth();
 
     let user_name = move || {
-        auth_state.with(|s| s.user.as_ref().map(|u| u.username.clone()).unwrap_or_default())
+        auth_state.with(|s| {
+            s.user
+                .as_ref()
+                .map(|u| u.username.clone())
+                .unwrap_or_default()
+        })
     };
 
     let logout_handler = move |_| {

@@ -3,8 +3,8 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
-use secreton_common::models::oauth_state::OAuthState;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use secreton_common::models::oauth_state::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -484,11 +484,17 @@ impl StorageBackend for ConsulStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "Consul".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Consul".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "Consul".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Consul".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {

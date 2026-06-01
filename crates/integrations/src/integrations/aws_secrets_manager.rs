@@ -280,7 +280,8 @@ impl AWSSecretsManager {
             }
             _ => {
                 // Secret is newer or AWS doesn't exist, sync to AWS
-                self.sync_to_aws(secreton_path, secret_name, secreton_data).await
+                self.sync_to_aws(secreton_path, secret_name, secreton_data)
+                    .await
             }
         }
     }

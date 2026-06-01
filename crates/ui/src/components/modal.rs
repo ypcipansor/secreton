@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use crate::components::button::{Button, ButtonVariant};
+use leptos::prelude::*;
 
 #[component]
 pub fn Modal(

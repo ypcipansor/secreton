@@ -124,28 +124,29 @@ async fn test_database_api_endpoints() {
     container.register_service("mfa".to_string(), mfa.clone());
 
     // Register new engine services required by create_api_router
-    let database_svc = Arc::new(
-        secreton_api::services::database::DatabaseService::new(storage.clone(), crypto.clone()),
-    );
+    let database_svc = Arc::new(secreton_api::services::database::DatabaseService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     container.register_service("database".to_string(), database_svc);
-    let pki_svc = Arc::new(
-        secreton_api::services::pki::PkiPersistentService::new(storage.clone(), crypto.clone()),
-    );
+    let pki_svc = Arc::new(secreton_api::services::pki::PkiPersistentService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     container.register_service("pki".to_string(), pki_svc);
-    let totp_engine_svc = Arc::new(
-        secreton_api::services::totp_engine::TotpEngineService::new(
-            storage.clone(),
-            crypto.clone(),
-        ),
-    );
+    let totp_engine_svc = Arc::new(secreton_api::services::totp_engine::TotpEngineService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     container.register_service("totp_engine".to_string(), totp_engine_svc);
 
     // Register transit, ssh, and telemetry services required by create_api_router
     let transit = Arc::new(secreton_crypto::transit::TransitEngine::new());
     container.register_service("transit".to_string(), transit);
-    let ssh_svc = Arc::new(
-        secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone()),
-    );
+    let ssh_svc = Arc::new(secreton_api::services::ssh::SshPersistentService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
     container.register_service("ssh".to_string(), ssh_svc);
     let telemetry = Arc::new(secreton_core::telemetry::TelemetryCollector::new(
         secreton_core::telemetry::TelemetryConfig::default(),

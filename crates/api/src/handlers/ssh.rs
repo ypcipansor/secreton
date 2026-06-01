@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
 use crate::services::audit::SecurityEventType;
-use crate::services::ssh::{SshServiceError, SSH_MAX_LEASE_TTL};
+use crate::services::ssh::{SSH_MAX_LEASE_TTL, SshServiceError};
 use crate::{ApiResponse, ApiResult};
 
 /// Map a [`SshServiceError`] to the appropriate [`crate::ApiError`] variant
@@ -54,12 +54,15 @@ async fn get_ca_public_key(
     State(state): State<AppState>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
-    let pub_key = state.ssh.get_ca_public_key().await
-        .map_err(map_ssh_err)?;
+    let pub_key = state.ssh.get_ca_public_key().await.map_err(map_ssh_err)?;
 
     match pub_key {
-        Some(pk) => Ok(AxumJson(ApiResponse::success(CaResponse { public_key: pk }))),
-        None => Err(crate::ApiError::NotFound("SSH CA not configured".to_string())),
+        Some(pk) => Ok(AxumJson(ApiResponse::success(CaResponse {
+            public_key: pk,
+        }))),
+        None => Err(crate::ApiError::NotFound(
+            "SSH CA not configured".to_string(),
+        )),
     }
 }
 
@@ -74,15 +77,19 @@ async fn generate_ca(
         ));
     }
 
-    let pub_key = state.ssh.generate_ca().await
-        .map_err(map_ssh_err)?;
+    let pub_key = state.ssh.generate_ca().await.map_err(map_ssh_err)?;
 
     // Audit log the CA generation
-    state.audit.log_event(SecurityEventType::SshCaGeneration {
-        user: user.username.clone(),
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::SshCaGeneration {
+            user: user.username.clone(),
+        })
+        .await;
 
-    Ok(AxumJson(ApiResponse::success(CaResponse { public_key: pub_key })))
+    Ok(AxumJson(ApiResponse::success(CaResponse {
+        public_key: pub_key,
+    })))
 }
 
 async fn sign_key(
@@ -100,7 +107,10 @@ async fn sign_key(
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
     // certificates and potential u64 overflow in the engine's timestamp math.
     let min_ttl: u64 = 1; // Prevent immediately-expired certificates
-    let ttl = payload.ttl.unwrap_or(3600).clamp(min_ttl, SSH_MAX_LEASE_TTL);
+    let ttl = payload
+        .ttl
+        .unwrap_or(3600)
+        .clamp(min_ttl, SSH_MAX_LEASE_TTL);
 
     // Security: Only allow users to sign for their own username by default.
     // If specific principals are requested, verify they are allowed.
@@ -128,11 +138,14 @@ async fn sign_key(
         .map_err(map_ssh_err)?;
 
     // Audit log the key signing operation
-    state.audit.log_event(SecurityEventType::SshKeySign {
-        user: user.username.clone(),
-        principals,
-        ttl: effective_ttl,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::SshKeySign {
+            user: user.username.clone(),
+            principals,
+            ttl: effective_ttl,
+        })
+        .await;
 
     Ok(AxumJson(ApiResponse::success(SignedKeyResponse {
         signed_key,

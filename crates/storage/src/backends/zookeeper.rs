@@ -2,14 +2,14 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zookeeper_client::{Client};
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
+use zookeeper_client::Client;
 
 use crate::{
-    StorageBackend, StorageError, SecretEntry, StorageResult,
-    StorageTransaction, HealthStatus, StorageStats, QueryParams
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use secreton_common::models::oauth_state::OAuthState;
 
@@ -30,11 +30,11 @@ pub struct ZooKeeperStorage {
 impl ZooKeeperStorage {
     pub async fn new(config: ZooKeeperConfig) -> StorageResult<Self> {
         let connection_string = config.hosts.join(",");
-        let client = Client::connect(&connection_string)
-            .await
-            .map_err(|e| StorageError::ConnectionFailed {
+        let client = Client::connect(&connection_string).await.map_err(|e| {
+            StorageError::ConnectionFailed {
                 message: format!("Failed to connect to ZooKeeper: {}", e),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             config,
@@ -43,7 +43,11 @@ impl ZooKeeperStorage {
     }
 
     fn path(&self, suffix: &str) -> String {
-        format!("{}/{}", self.config.base_path.trim_end_matches('/'), suffix.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            self.config.base_path.trim_end_matches('/'),
+            suffix.trim_start_matches('/')
+        )
     }
 
     fn path_key(&self, path: &str) -> String {
@@ -54,7 +58,9 @@ impl ZooKeeperStorage {
 #[async_trait]
 impl StorageBackend for ZooKeeperStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        let data = serde_json::to_vec(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
         let path = self.path_key(&entry.path);
 
         // Use check_stat instead of check_exists/exists
@@ -62,13 +68,24 @@ impl StorageBackend for ZooKeeperStorage {
 
         match exists_result {
             Ok(Some(_)) => {
-                self.client.set_data(&path, &data, None).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
-            },
+                self.client
+                    .set_data(&path, &data, None)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: e.to_string(),
+                    })?;
+            }
             Ok(None) | Err(zookeeper_client::Error::NoNode) => {
                 // Creation temporarily disabled due to API mismatch
-                return Err(StorageError::QueryFailed { message: "ZooKeeper create not fully implemented (API mismatch)".to_string() });
-            },
-            Err(e) => return Err(StorageError::ConnectionFailed { message: e.to_string() }),
+                return Err(StorageError::QueryFailed {
+                    message: "ZooKeeper create not fully implemented (API mismatch)".to_string(),
+                });
+            }
+            Err(e) => {
+                return Err(StorageError::ConnectionFailed {
+                    message: e.to_string(),
+                });
+            }
         }
 
         Ok(())
@@ -82,11 +99,17 @@ impl StorageBackend for ZooKeeperStorage {
         let zk_path = self.path_key(path);
         match self.client.get_data(&zk_path).await {
             Ok((data, _stat)) => {
-                let entry: SecretEntry = serde_json::from_slice(&data).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+                let entry: SecretEntry = serde_json::from_slice(&data).map_err(|e| {
+                    StorageError::SerializationError {
+                        message: e.to_string(),
+                    }
+                })?;
                 Ok(Some(entry))
-            },
+            }
             Err(zookeeper_client::Error::NoNode) => Ok(None),
-            Err(e) => Err(StorageError::QueryFailed { message: e.to_string() }),
+            Err(e) => Err(StorageError::QueryFailed {
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -103,7 +126,9 @@ impl StorageBackend for ZooKeeperStorage {
         match self.client.delete(&zk_path, None).await {
             Ok(_) => Ok(true),
             Err(zookeeper_client::Error::NoNode) => Ok(false),
-            Err(e) => Err(StorageError::QueryFailed { message: e.to_string() }),
+            Err(e) => Err(StorageError::QueryFailed {
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -151,11 +176,17 @@ impl StorageBackend for ZooKeeperStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "ZooKeeper".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "ZooKeeper".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "ZooKeeper".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "ZooKeeper".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {

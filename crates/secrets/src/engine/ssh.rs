@@ -6,10 +6,10 @@ use crate::service::*;
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
+use ssh_key::rand_core::{OsRng, RngCore};
+use ssh_key::{Algorithm, LineEnding, PrivateKey, PublicKey};
 use std::collections::HashMap;
 use uuid::Uuid;
-use ssh_key::{PrivateKey, PublicKey, Algorithm, LineEnding};
-use ssh_key::rand_core::{OsRng, RngCore};
 
 /// ssh secret engine
 pub struct SshEngine {
@@ -52,11 +52,13 @@ impl SshEngine {
         let public_key = private_key.public_key();
 
         // Encode keys
-        let priv_pem = private_key.to_openssh(LineEnding::LF)
+        let priv_pem = private_key
+            .to_openssh(LineEnding::LF)
             .map_err(|e| SecretError::CryptoError(e.to_string()))?
             .to_string();
 
-        let pub_str = public_key.to_openssh()
+        let pub_str = public_key
+            .to_openssh()
             .map_err(|e| SecretError::CryptoError(e.to_string()))?;
 
         // Update config
@@ -78,8 +80,9 @@ impl SshEngine {
         ttl: u64,
     ) -> SecretResult<(String, u64)> {
         // Load CA Key
-        let ca_priv_pem = self.config.ca_private_key.as_ref()
-            .ok_or_else(|| SecretError::InvalidConfiguration("CA private key not configured".to_string()))?;
+        let ca_priv_pem = self.config.ca_private_key.as_ref().ok_or_else(|| {
+            SecretError::InvalidConfiguration("CA private key not configured".to_string())
+        })?;
 
         let ca_key = PrivateKey::from_openssh(ca_priv_pem)
             .map_err(|e| SecretError::CryptoError(format!("Invalid CA key: {}", e)))?;
@@ -106,22 +109,30 @@ impl SshEngine {
             user_pub_key,
             now,
             expire,
-        ).map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
+        )
+        .map_err(|e| SecretError::CryptoError(format!("Failed to create builder: {}", e)))?;
 
         let serial = {
             let mut buf = [0u8; 8];
             OsRng.fill_bytes(&mut buf);
             u64::from_be_bytes(buf)
         };
-        cert_builder.serial(serial).map_err(|e| SecretError::CryptoError(e.to_string()))?;
-        cert_builder.cert_type(ssh_key::certificate::CertType::User).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        cert_builder
+            .serial(serial)
+            .map_err(|e| SecretError::CryptoError(e.to_string()))?;
+        cert_builder
+            .cert_type(ssh_key::certificate::CertType::User)
+            .map_err(|e| SecretError::CryptoError(e.to_string()))?;
 
         for p in valid_principals {
-            cert_builder.valid_principal(p).map_err(|e| SecretError::CryptoError(e.to_string()))?;
+            cert_builder
+                .valid_principal(p)
+                .map_err(|e| SecretError::CryptoError(e.to_string()))?;
         }
 
         // Sign
-        let cert = cert_builder.sign(&ca_key)
+        let cert = cert_builder
+            .sign(&ca_key)
             .map_err(|e| SecretError::CryptoError(format!("Signing failed: {}", e)))?;
 
         Ok((cert.to_string(), effective_ttl))
@@ -146,11 +157,13 @@ impl SecretEngine for SshEngine {
 
         match path {
             "config/ca" => {
-                if let (Some(pub_key), Some(_priv_key)) = (&self.config.ca_public_key, &self.config.ca_private_key) {
-                     let mut data = HashMap::new();
-                     data.insert("public_key".to_string(), Value::String(pub_key.clone()));
-                     // Do not return private key on read usually, unless explicitly requested or for backup
-                     Ok(Some(Secret {
+                if let (Some(pub_key), Some(_priv_key)) =
+                    (&self.config.ca_public_key, &self.config.ca_private_key)
+                {
+                    let mut data = HashMap::new();
+                    data.insert("public_key".to_string(), Value::String(pub_key.clone()));
+                    // Do not return private key on read usually, unless explicitly requested or for backup
+                    Ok(Some(Secret {
                         id: Uuid::new_v4(),
                         path: path.to_string(),
                         data,
@@ -162,7 +175,7 @@ impl SecretEngine for SshEngine {
                     Ok(None)
                 }
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -192,24 +205,27 @@ impl SecretEngine for SshEngine {
             }
             "sign" => {
                 // Sign Key
-                let public_key = data.get("public_key")
-                    .and_then(|v| v.as_str())
-                    .ok_or(SecretError::InvalidSecretData("Missing 'public_key'".to_string()))?;
+                let public_key = data.get("public_key").and_then(|v| v.as_str()).ok_or(
+                    SecretError::InvalidSecretData("Missing 'public_key'".to_string()),
+                )?;
 
                 let principals_val = data.get("valid_principals");
                 let principals: Vec<String> = if let Some(v) = principals_val {
                     if let Some(arr) = v.as_array() {
-                        arr.iter().filter_map(|s| s.as_str().map(|s| s.to_string())).collect()
+                        arr.iter()
+                            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                            .collect()
                     } else if let Some(s) = v.as_str() {
                         vec![s.to_string()]
                     } else {
-                         vec![]
+                        vec![]
                     }
                 } else {
                     vec![]
                 };
 
-                let ttl = data.get("ttl")
+                let ttl = data
+                    .get("ttl")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(self.config.default_lease_ttl);
 
@@ -217,13 +233,14 @@ impl SecretEngine for SshEngine {
                 // same effective value so the metadata stays consistent.
                 let effective_ttl = ttl.min(self.config.max_lease_ttl);
 
-                let (signed_cert, effective_ttl) = self.sign_key(public_key, principals, effective_ttl)?;
+                let (signed_cert, effective_ttl) =
+                    self.sign_key(public_key, principals, effective_ttl)?;
 
                 let mut resp_data = HashMap::new();
                 resp_data.insert("signed_key".to_string(), Value::String(signed_cert));
 
                 Ok(Secret {
-                     id: Uuid::new_v4(),
+                    id: Uuid::new_v4(),
                     path: path.to_string(),
                     data: resp_data,
                     metadata: SecretMetadata {

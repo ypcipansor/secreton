@@ -38,7 +38,8 @@ use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
 // MFA Services
 use secreton_auth::mfa::{
     CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
-    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig, SmsProvider,
+    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
+    SmsProvider,
 };
 
 /// Service container holding all application services
@@ -111,7 +112,15 @@ impl ApiServiceContainer {
         ));
 
         // Initialize audit logger
-        let audit = Arc::new(AuditLogger::new(storage.clone(), config_clone.audit.retention_days, config_clone.audit.max_batch_size, config_clone.audit.enabled).await?);
+        let audit = Arc::new(
+            AuditLogger::new(
+                storage.clone(),
+                config_clone.audit.retention_days,
+                config_clone.audit.max_batch_size,
+                config_clone.audit.enabled,
+            )
+            .await?,
+        );
 
         // Initialize MFA Services first (needed for Auth)
         let mfa_config = &config.auth.mfa;

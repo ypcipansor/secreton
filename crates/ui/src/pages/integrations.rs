@@ -1,8 +1,8 @@
-use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
 use crate::api::fetch_api;
+use leptos::prelude::*;
 use secreton_common::dto::lifecycle::LifecycleStatistics;
-use secreton_integrations::integrations::secret_lifecycle_management::{LifecycleHook, HookType};
+use secreton_integrations::integrations::secret_lifecycle_management::{HookType, LifecycleHook};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum IntegrationType {

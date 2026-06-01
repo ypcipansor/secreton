@@ -21,7 +21,7 @@ pub enum LifecycleError {
 
 pub type Result<T> = std::result::Result<T, LifecycleError>;
 
-pub use secreton_common::dto::lifecycle::{SecretStatus, SecretLifecycle, LifecycleStatistics};
+pub use secreton_common::dto::lifecycle::{LifecycleStatistics, SecretLifecycle, SecretStatus};
 
 /// Hook type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -238,8 +238,7 @@ impl SecretLifecycleManagement {
             .collect();
 
         for hook in relevant_hooks {
-            self.call_webhook(&hook.action_url, secret_path)
-                .await?;
+            self.call_webhook(&hook.action_url, secret_path).await?;
         }
 
         Ok(())
@@ -330,16 +329,33 @@ impl SecretLifecycleManagement {
 
         match self.client.post(url).json(&payload).send().await {
             Ok(resp) if resp.status().is_success() => {
-                tracing::info!("Successfully triggered webhook for {}: {}", secret_path, url);
+                tracing::info!(
+                    "Successfully triggered webhook for {}: {}",
+                    secret_path,
+                    url
+                );
                 Ok(())
             }
             Ok(resp) => {
                 let status = resp.status();
-                tracing::error!("Webhook failed for {} with status {}: {}", secret_path, status, url);
-                Err(LifecycleError::HookError(format!("Webhook returned status {}", status)))
+                tracing::error!(
+                    "Webhook failed for {} with status {}: {}",
+                    secret_path,
+                    status,
+                    url
+                );
+                Err(LifecycleError::HookError(format!(
+                    "Webhook returned status {}",
+                    status
+                )))
             }
             Err(e) => {
-                tracing::error!("Failed to send webhook for {}: {} - {}", secret_path, url, e);
+                tracing::error!(
+                    "Failed to send webhook for {}: {} - {}",
+                    secret_path,
+                    url,
+                    e
+                );
                 Err(LifecycleError::HookError(e.to_string()))
             }
         }

@@ -95,8 +95,9 @@ impl DatabaseEngine {
     /// Falls back to plaintext if no cipher is configured.
     fn encrypt_data(&self, data: &[u8]) -> SecretResult<(Vec<u8>, EncryptionMetadata)> {
         if let (Some(cipher), Some(key)) = (&self.cipher, &self.encryption_key) {
-            let enc_result = cipher.encrypt(data, key)
-                .map_err(|e| SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e)))?;
+            let enc_result = cipher.encrypt(data, key).map_err(|e| {
+                SecretError::EncryptionFailed(format!("Encryption failed: {:?}", e))
+            })?;
             let algorithm_str = format!("{}", enc_result.algorithm);
             Ok((
                 enc_result.ciphertext,
@@ -146,9 +147,12 @@ impl DatabaseEngine {
                                     Err(())
                                 }
                             })
-                            .map_err(|_| SecretError::DecryptionFailed(
-                                format!("Unknown encryption algorithm: '{}'", other)
-                            ))?
+                            .map_err(|_| {
+                                SecretError::DecryptionFailed(format!(
+                                    "Unknown encryption algorithm: '{}'",
+                                    other
+                                ))
+                            })?
                     }
                 };
                 let enc_data = secreton_crypto::encryption::EncryptedData {
@@ -160,10 +164,13 @@ impl DatabaseEngine {
                     // field is None. The decrypt() impl reads the tag from the ciphertext.
                     tag: entry.encryption_metadata.auth_tag.clone(),
                 };
-                cipher.decrypt(&enc_data, key)
-                    .map_err(|e| SecretError::DecryptionFailed(format!("Decryption failed: {:?}", e)))
+                cipher.decrypt(&enc_data, key).map_err(|e| {
+                    SecretError::DecryptionFailed(format!("Decryption failed: {:?}", e))
+                })
             } else {
-                Err(SecretError::DecryptionFailed("No crypto provider configured to decrypt data".to_string()))
+                Err(SecretError::DecryptionFailed(
+                    "No crypto provider configured to decrypt data".to_string(),
+                ))
             }
         } else {
             Ok(entry.encrypted_data.clone())
@@ -177,7 +184,9 @@ impl DatabaseEngine {
     /// depend on the connection).
     pub async fn check_backend_connectivity(&self) -> SecretResult<()> {
         let lease_count = {
-            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            let leases = self.leases.lock().map_err(|_| {
+                SecretError::BackendOperationFailed("Failed to lock leases".to_string())
+            })?;
             leases.len()
         };
 
@@ -195,9 +204,15 @@ impl DatabaseEngine {
                     "Database connectivity check failed: {}", e
                 ))
             })?;
-            tracing::info!("Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.", lease_count);
+            tracing::info!(
+                "Database backend connected successfully. {} leases are considered valid pending background TTL enforcement.",
+                lease_count
+            );
         } else {
-            tracing::warn!("Database backend not initialized during lease validation. {} leases loaded without backend validation.", lease_count);
+            tracing::warn!(
+                "Database backend not initialized during lease validation. {} leases loaded without backend validation.",
+                lease_count
+            );
         }
 
         Ok(())
@@ -208,11 +223,9 @@ impl DatabaseEngine {
         // Load roles
         let roles_path = "sys/database/roles/";
         let params = secreton_storage::QueryParams::new().with_path_prefix(roles_path.to_string());
-        let entries = self
-            .storage
-            .list(&params)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list roles: {}", e)))?;
+        let entries = self.storage.list(&params).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to list roles: {}", e))
+        })?;
 
         for entry in entries {
             let role_name = entry
@@ -223,8 +236,9 @@ impl DatabaseEngine {
 
             let data = self.decrypt_entry(&entry)?;
 
-            let role: DatabaseRole = serde_json::from_slice(&data)
-                .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e)))?;
+            let role: DatabaseRole = serde_json::from_slice(&data).map_err(|e| {
+                SecretError::InvalidSecretData(format!("Failed to deserialize role: {}", e))
+            })?;
 
             self.roles.insert(role_name, role);
         }
@@ -232,13 +246,13 @@ impl DatabaseEngine {
         // Load leases
         let leases_path = "sys/database/leases/";
         let params = secreton_storage::QueryParams::new().with_path_prefix(leases_path.to_string());
-        let entries = self
-            .storage
-            .list(&params)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e)))?;
+        let entries = self.storage.list(&params).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to list leases: {}", e))
+        })?;
 
-        let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+        let mut leases = self.leases.lock().map_err(|_| {
+            SecretError::BackendOperationFailed("Failed to lock leases".to_string())
+        })?;
         for entry in entries {
             let lease_id = entry
                 .path
@@ -248,8 +262,9 @@ impl DatabaseEngine {
 
             let data = self.decrypt_entry(&entry)?;
 
-            let lease: LeaseInfo = serde_json::from_slice(&data)
-                .map_err(|e| SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e)))?;
+            let lease: LeaseInfo = serde_json::from_slice(&data).map_err(|e| {
+                SecretError::InvalidSecretData(format!("Failed to deserialize lease: {}", e))
+            })?;
 
             leases.insert(lease_id, lease);
         }
@@ -276,18 +291,16 @@ impl DatabaseEngine {
         // Delete any existing entry first to ensure idempotent upsert
         let _ = self.storage.delete_by_path(&path).await;
 
-        self.storage
-            .store(&entry)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to store role: {}", e)))
+        self.storage.store(&entry).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to store role: {}", e))
+        })
     }
 
     async fn delete_role_storage(&self, name: &str) -> SecretResult<()> {
         let path = format!("sys/database/roles/{}", name);
-        self.storage
-            .delete_by_path(&path)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to delete role: {}", e)))?;
+        self.storage.delete_by_path(&path).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to delete role: {}", e))
+        })?;
         Ok(())
     }
 
@@ -310,18 +323,16 @@ impl DatabaseEngine {
         // Delete any existing entry first to ensure idempotent upsert
         let _ = self.storage.delete_by_path(&path).await;
 
-        self.storage
-            .store(&entry)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to store lease: {}", e)))
+        self.storage.store(&entry).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to store lease: {}", e))
+        })
     }
 
     async fn delete_lease_storage(&self, id: &str) -> SecretResult<()> {
         let path = format!("sys/database/leases/{}", id);
-        self.storage
-            .delete_by_path(&path)
-            .await
-            .map_err(|e| SecretError::BackendOperationFailed(format!("Failed to delete lease: {}", e)))?;
+        self.storage.delete_by_path(&path).await.map_err(|e| {
+            SecretError::BackendOperationFailed(format!("Failed to delete lease: {}", e))
+        })?;
         Ok(())
     }
 
@@ -345,7 +356,9 @@ impl DatabaseEngine {
         if let Some(backend) = &self.backend {
             backend.generate_credentials(role_name, &role.sql).await
         } else {
-            Err(SecretError::InvalidConfiguration("Database backend not initialized".to_string()))
+            Err(SecretError::InvalidConfiguration(
+                "Database backend not initialized".to_string(),
+            ))
         }
     }
 
@@ -379,22 +392,20 @@ impl DatabaseEngine {
 
         match db_type {
             DatabaseType::PostgreSQL => {
-                let backend = crate::backend::database::postgres::PostgresBackend::new(
-                    self.config.clone(),
-                )?;
+                let backend =
+                    crate::backend::database::postgres::PostgresBackend::new(self.config.clone())?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
             }
             DatabaseType::MySQL => {
-                let backend = crate::backend::database::mysql::MysqlBackend::new(
-                    self.config.clone(),
-                )?;
+                let backend =
+                    crate::backend::database::mysql::MysqlBackend::new(self.config.clone())?;
                 self.backend = Some(Box::new(backend));
                 Ok(())
             }
-            DatabaseType::MongoDB => {
-                Err(SecretError::NotImplemented("MongoDB backend not fully implemented".to_string()))
-            }
+            DatabaseType::MongoDB => Err(SecretError::NotImplemented(
+                "MongoDB backend not fully implemented".to_string(),
+            )),
         }
     }
 
@@ -405,7 +416,9 @@ impl DatabaseEngine {
             return Ok(vec![]);
         }
 
-        let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+        let leases = self.leases.lock().map_err(|_| {
+            SecretError::BackendOperationFailed("Failed to lock leases".to_string())
+        })?;
         let now = chrono::Utc::now();
 
         Ok(leases.iter().filter_map(|(id, info)| {
@@ -440,7 +453,9 @@ impl DatabaseEngine {
     pub async fn revoke_lease(&self, lease_id: &str) -> SecretResult<()> {
         // Need to find username first
         let username = {
-            let leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+            let leases = self.leases.lock().map_err(|_| {
+                SecretError::BackendOperationFailed("Failed to lock leases".to_string())
+            })?;
             leases.get(lease_id).map(|l| l.username.clone())
         };
 
@@ -453,14 +468,21 @@ impl DatabaseEngine {
                 self.delete_lease_storage(lease_id).await?;
 
                 // Remove from map
-                let mut leases = self.leases.lock().map_err(|_| SecretError::BackendOperationFailed("Failed to lock leases".to_string()))?;
+                let mut leases = self.leases.lock().map_err(|_| {
+                    SecretError::BackendOperationFailed("Failed to lock leases".to_string())
+                })?;
                 leases.remove(lease_id);
                 Ok(())
             } else {
-                Err(SecretError::InvalidConfiguration("Backend not initialized".to_string()))
+                Err(SecretError::InvalidConfiguration(
+                    "Backend not initialized".to_string(),
+                ))
             }
         } else {
-            Err(SecretError::SecretNotFound(format!("Lease '{}' not found", lease_id)))
+            Err(SecretError::SecretNotFound(format!(
+                "Lease '{}' not found",
+                lease_id
+            )))
         }
     }
 
@@ -484,38 +506,43 @@ impl SecretEngine for DatabaseEngine {
 
         if config.enabled && db_config_value.is_none() {
             return Err(SecretError::InvalidConfiguration(
-                "Database configuration missing for enabled engine".to_string()
+                "Database configuration missing for enabled engine".to_string(),
             ));
         }
 
         if let Some(db_config) = db_config_value {
-             match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
-                 Ok(cfg) => {
-                     // Validate connection URL before mutating state to avoid
-                     // leaving the engine in a partially-updated state on error.
-                     self.detect_database_type(&cfg.connection_url)?;
+            match serde_json::from_value::<DatabaseConfig>(db_config.clone()) {
+                Ok(cfg) => {
+                    // Validate connection URL before mutating state to avoid
+                    // leaving the engine in a partially-updated state on error.
+                    self.detect_database_type(&cfg.connection_url)?;
 
-                     let old_config = std::mem::replace(&mut self.config, cfg);
+                    let old_config = std::mem::replace(&mut self.config, cfg);
 
-                     // Initialize backend only if enabled to avoid wasteful resource allocation
-                     if config.enabled {
-                         let old_backend = self.backend.take();
-                         if let Err(e) = self.init_backend() {
-                             // Rollback on failure
-                             self.config = old_config;
-                             self.backend = old_backend;
-                             return Err(e);
-                         }
-                         if let Err(e) = self.check_backend_connectivity().await {
-                             // Rollback on failure
-                             self.config = old_config;
-                             self.backend = old_backend;
-                             return Err(e);
-                         }
-                     }
-                 },
-                 Err(e) => return Err(SecretError::InvalidConfiguration(format!("Invalid database configuration: {}", e)))
-             }
+                    // Initialize backend only if enabled to avoid wasteful resource allocation
+                    if config.enabled {
+                        let old_backend = self.backend.take();
+                        if let Err(e) = self.init_backend() {
+                            // Rollback on failure
+                            self.config = old_config;
+                            self.backend = old_backend;
+                            return Err(e);
+                        }
+                        if let Err(e) = self.check_backend_connectivity().await {
+                            // Rollback on failure
+                            self.config = old_config;
+                            self.backend = old_backend;
+                            return Err(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(SecretError::InvalidConfiguration(format!(
+                        "Invalid database configuration: {}",
+                        e
+                    )));
+                }
+            }
         }
 
         self.enabled = config.enabled;
@@ -536,13 +563,16 @@ impl SecretEngine for DatabaseEngine {
             let lease_id = uuid::Uuid::new_v4().to_string();
 
             // Extract username for tracking
-            let username = data.get("username")
+            let username = data
+                .get("username")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string();
 
             // Determine lease duration from role config
-            let lease_duration = self.roles.get(role_name)
+            let lease_duration = self
+                .roles
+                .get(role_name)
                 .map(|r| r.default_ttl)
                 .unwrap_or(3600); // Default to 1 hour if role config missing
 
@@ -557,11 +587,11 @@ impl SecretEngine for DatabaseEngine {
 
             // Persist lease first
             if let Err(e) = self.save_lease(&lease_id, &lease_info).await {
-                 // Revoke credentials if persistence fails
-                 if let Some(backend) = &self.backend {
-                     let _ = backend.revoke_credentials(&username).await;
-                 }
-                 return Err(e);
+                // Revoke credentials if persistence fails
+                if let Some(backend) = &self.backend {
+                    let _ = backend.revoke_credentials(&username).await;
+                }
+                return Err(e);
             }
 
             // Update memory
@@ -584,7 +614,9 @@ impl SecretEngine for DatabaseEngine {
                 if let Some(backend) = &self.backend {
                     let _ = backend.revoke_credentials(&username).await;
                 }
-                return Err(SecretError::BackendOperationFailed("Failed to lock leases registry (poisoned). Credentials revoked.".to_string()));
+                return Err(SecretError::BackendOperationFailed(
+                    "Failed to lock leases registry (poisoned). Credentials revoked.".to_string(),
+                ));
             }
 
             let secret = Secret {
@@ -704,8 +736,12 @@ impl SecretEngine for DatabaseEngine {
             // Return list of role names
             Ok(self.roles.keys().cloned().collect())
         } else if path == "leases" || path == "leases/" {
-             // Return list of lease IDs
-             Ok(self.list_leases().iter().map(|l| l.lease_id.clone()).collect())
+            // Return list of lease IDs
+            Ok(self
+                .list_leases()
+                .iter()
+                .map(|l| l.lease_id.clone())
+                .collect())
         } else {
             Ok(vec![])
         }
@@ -723,7 +759,10 @@ impl SecretEngine for DatabaseEngine {
                     Ok(_) => self.enabled = true,
                     Err(e) => {
                         // Log error and keep enabled = false
-                        tracing::error!("Failed to initialize database backend during enable: {}", e);
+                        tracing::error!(
+                            "Failed to initialize database backend during enable: {}",
+                            e
+                        );
                         self.enabled = false;
                     }
                 }
@@ -763,8 +802,14 @@ mod tests {
             _role_sql: &str,
         ) -> SecretResult<HashMap<String, Value>> {
             let mut data = HashMap::new();
-            data.insert("username".to_string(), Value::String("test_user".to_string()));
-            data.insert("password".to_string(), Value::String("test_pass".to_string()));
+            data.insert(
+                "username".to_string(),
+                Value::String("test_user".to_string()),
+            );
+            data.insert(
+                "password".to_string(),
+                Value::String("test_pass".to_string()),
+            );
             Ok(data)
         }
 
@@ -806,7 +851,10 @@ mod tests {
         // Create a role
         let mut role_data = HashMap::new();
         role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
-        role_data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(7200)));
+        role_data.insert(
+            "default_ttl".to_string(),
+            Value::Number(serde_json::Number::from(7200)),
+        );
         engine.write("roles/test_role", role_data).await?;
 
         // Generate credentials (creates lease)
@@ -839,8 +887,7 @@ mod tests {
         let storage = Arc::new(secreton_storage::MockStorageBackend::new());
         let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
         let key = Zeroizing::new(vec![0xABu8; 32]);
-        let engine = DatabaseEngine::new(test_config(), storage)
-            .with_crypto(cipher, key);
+        let engine = DatabaseEngine::new(test_config(), storage).with_crypto(cipher, key);
 
         let plaintext = b"sensitive role data";
         let (ciphertext, metadata) = engine.encrypt_data(plaintext).unwrap();
@@ -929,8 +976,7 @@ mod tests {
         let storage = Arc::new(secreton_storage::MockStorageBackend::new());
         let cipher = Arc::new(secreton_crypto::encryption::Aes256GcmCipher);
         let key = Zeroizing::new(vec![0xABu8; 32]);
-        let engine = DatabaseEngine::new(test_config(), storage)
-            .with_crypto(cipher, key);
+        let engine = DatabaseEngine::new(test_config(), storage).with_crypto(cipher, key);
 
         let entry = SecretEntry::new(
             "test/path".to_string(),
@@ -1038,12 +1084,14 @@ mod tests {
         // Write a role (this encrypts and persists)
         let mut role_data = HashMap::new();
         role_data.insert("sql".to_string(), Value::String("CREATE ROLE".to_string()));
-        role_data.insert("default_ttl".to_string(), Value::Number(serde_json::Number::from(900)));
+        role_data.insert(
+            "default_ttl".to_string(),
+            Value::Number(serde_json::Number::from(900)),
+        );
         engine.write("roles/encrypted_role", role_data).await?;
 
         // Create a fresh engine with the same key and load state
-        let mut engine2 = DatabaseEngine::new(test_config(), storage)
-            .with_crypto(cipher, key);
+        let mut engine2 = DatabaseEngine::new(test_config(), storage).with_crypto(cipher, key);
         engine2.load_state().await?;
 
         // Verify the role was loaded correctly
@@ -1090,13 +1138,16 @@ mod tests {
         // Add a lease so the connectivity check actually runs
         {
             let mut leases = engine.leases.lock().unwrap();
-            leases.insert("lease-1".to_string(), LeaseInfo {
-                lease_id: "lease-1".to_string(),
-                username: "user1".to_string(),
-                role: "role1".to_string(),
-                created_at: chrono::Utc::now().to_rfc3339(),
-                lease_duration: 3600,
-            });
+            leases.insert(
+                "lease-1".to_string(),
+                LeaseInfo {
+                    lease_id: "lease-1".to_string(),
+                    username: "user1".to_string(),
+                    role: "role1".to_string(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    lease_duration: 3600,
+                },
+            );
         }
 
         engine.check_backend_connectivity().await?;

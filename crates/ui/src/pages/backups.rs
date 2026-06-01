@@ -1,7 +1,7 @@
-use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
 use crate::api;
 use crate::components::{Button, Card};
+use leptos::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -30,39 +30,35 @@ pub fn BackupsPage() -> impl IntoView {
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
     let (success_msg, set_success_msg) = signal(Option::<String>::None);
 
-    let fetch_backups = Action::new_local(move |_: &()| {
-        async move {
-            set_loading.set(true);
-            match api::get::<Vec<BackupInfo>>("/admin/backups").await {
-                Ok(res) => {
-                    set_backups.set(res);
-                    set_error_msg.set(None);
-                },
-                Err(e) => set_error_msg.set(Some(format!("Failed to fetch backups: {:?}", e))),
+    let fetch_backups = Action::new_local(move |_: &()| async move {
+        set_loading.set(true);
+        match api::get::<Vec<BackupInfo>>("/admin/backups").await {
+            Ok(res) => {
+                set_backups.set(res);
+                set_error_msg.set(None);
             }
-            set_loading.set(false);
+            Err(e) => set_error_msg.set(Some(format!("Failed to fetch backups: {:?}", e))),
         }
+        set_loading.set(false);
     });
 
     Effect::new(move |_| {
         fetch_backups.dispatch(());
     });
 
-    let create_backup = Action::new_local(move |_: &()| {
-        async move {
-            set_loading.set(true);
-            match api::post::<BackupInfo, _>("/admin/backups", serde_json::json!({})).await {
-                Ok(_) => {
-                    set_error_msg.set(None);
-                    set_success_msg.set(Some("Backup created successfully".to_string()));
-                    set_loading.set(false);
-                    fetch_backups.dispatch(());
-                },
-                Err(e) => {
-                    set_success_msg.set(None);
-                    set_error_msg.set(Some(format!("Failed to create backup: {:?}", e)));
-                    set_loading.set(false);
-                },
+    let create_backup = Action::new_local(move |_: &()| async move {
+        set_loading.set(true);
+        match api::post::<BackupInfo, _>("/admin/backups", serde_json::json!({})).await {
+            Ok(_) => {
+                set_error_msg.set(None);
+                set_success_msg.set(Some("Backup created successfully".to_string()));
+                set_loading.set(false);
+                fetch_backups.dispatch(());
+            }
+            Err(e) => {
+                set_success_msg.set(None);
+                set_error_msg.set(Some(format!("Failed to create backup: {:?}", e)));
+                set_loading.set(false);
             }
         }
     });
@@ -70,8 +66,18 @@ pub fn BackupsPage() -> impl IntoView {
     let restore_backup = Action::new_local(move |id: &String| {
         let id = id.clone();
         async move {
-            let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Restore system from backup {}? This will overwrite current data.", id)).ok()).unwrap_or(false);
-            if !confirm { return; }
+            let confirm = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(&format!(
+                        "Restore system from backup {}? This will overwrite current data.",
+                        id
+                    ))
+                    .ok()
+                })
+                .unwrap_or(false);
+            if !confirm {
+                return;
+            }
 
             set_loading.set(true);
             let url = format!("/admin/backups/{}/restore", id);
@@ -84,11 +90,11 @@ pub fn BackupsPage() -> impl IntoView {
                         set_success_msg.set(None);
                         set_error_msg.set(Some("Restore failed".to_string()));
                     }
-                },
+                }
                 Err(e) => {
                     set_success_msg.set(None);
                     set_error_msg.set(Some(format!("Restore failed: {:?}", e)));
-                },
+                }
             }
             set_loading.set(false);
         }
@@ -97,8 +103,15 @@ pub fn BackupsPage() -> impl IntoView {
     let delete_backup = Action::new_local(move |id: &String| {
         let id = id.clone();
         async move {
-            let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Delete backup {}?", id)).ok()).unwrap_or(false);
-            if !confirm { return; }
+            let confirm = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(&format!("Delete backup {}?", id))
+                        .ok()
+                })
+                .unwrap_or(false);
+            if !confirm {
+                return;
+            }
 
             set_loading.set(true);
             let url = format!("/admin/backups/{}", id);
@@ -108,12 +121,12 @@ pub fn BackupsPage() -> impl IntoView {
                     set_success_msg.set(Some("Backup deleted successfully".to_string()));
                     set_loading.set(false);
                     fetch_backups.dispatch(());
-                },
+                }
                 Err(e) => {
                     set_success_msg.set(None);
                     set_error_msg.set(Some(format!("Failed to delete backup: {:?}", e)));
                     set_loading.set(false);
-                },
+                }
             }
         }
     });

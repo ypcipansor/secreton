@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use axum_test::TestServer;
-use serde_json::json;
 use secreton_api::config::ApiConfig;
+use secreton_api::handlers::{AppState, create_router};
 use secreton_api::services::ApiServiceContainer;
-use secreton_api::handlers::{create_router, AppState};
+use serde_json::json;
+use std::sync::Arc;
 
 async fn setup_test_server() -> TestServer {
     // Set root key for crypto service auto-unseal.
@@ -26,7 +26,9 @@ async fn setup_test_server() -> TestServer {
     config.auth.jwt.issuer = "secreton".to_string();
     config.auth.jwt.audience = "secreton-api".to_string();
 
-    let services = ApiServiceContainer::new(&config).await.expect("Failed to create services");
+    let services = ApiServiceContainer::new(&config)
+        .await
+        .expect("Failed to create services");
     let app_state: AppState = Arc::new(services).into();
 
     let app = create_router(&config, app_state);
@@ -42,7 +44,10 @@ async fn test_database_engine_lifecycle() {
         "verify_connection": false
     });
 
-    let res = server.post("/api/v1/database/config").json(&config_payload).await;
+    let res = server
+        .post("/api/v1/database/config")
+        .json(&config_payload)
+        .await;
     // We expect 401 Unauthorized because we didn't provide a token, but the route should exist (not 404)
     assert_ne!(res.status_code(), 404);
 }
@@ -55,7 +60,10 @@ async fn test_pki_engine_lifecycle() {
         "common_name": "Test Root CA",
         "organization": "Test Org"
     });
-    let res = server.post("/api/v1/pki/root/generate").json(&ca_payload).await;
+    let res = server
+        .post("/api/v1/pki/root/generate")
+        .json(&ca_payload)
+        .await;
     assert_ne!(res.status_code(), 404);
 }
 

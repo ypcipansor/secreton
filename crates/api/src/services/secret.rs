@@ -140,7 +140,10 @@ impl SecretService {
     }
 
     /// Set lifecycle service
-    pub fn with_lifecycle(mut self, lifecycle: Arc<crate::services::lifecycle::LifecycleService>) -> Self {
+    pub fn with_lifecycle(
+        mut self,
+        lifecycle: Arc<crate::services::lifecycle::LifecycleService>,
+    ) -> Self {
         self.lifecycle = Some(lifecycle);
         self
     }
@@ -319,10 +322,16 @@ impl SecretService {
                                     .await;
 
                                 let metadata = SecretMetadata {
-                                    description: encrypted_entry.metadata.get("description").cloned(),
+                                    description: encrypted_entry
+                                        .metadata
+                                        .get("description")
+                                        .cloned(),
                                     tags: encrypted_entry.tags.clone(),
                                     owner: encrypted_entry.metadata.get("owner").cloned(),
-                                    classification: encrypted_entry.metadata.get("classification").cloned(),
+                                    classification: encrypted_entry
+                                        .metadata
+                                        .get("classification")
+                                        .cloned(),
                                 };
 
                                 return Ok(SecretData {
@@ -614,7 +623,9 @@ impl SecretService {
         // silently erase previously stored values.
         if let Some(meta) = &metadata {
             if let Some(desc) = &meta.description {
-                entry.metadata.insert("description".to_string(), desc.clone());
+                entry
+                    .metadata
+                    .insert("description".to_string(), desc.clone());
             } else {
                 entry.metadata.remove("description");
             }
@@ -624,7 +635,9 @@ impl SecretService {
                 entry.metadata.remove("owner");
             }
             if let Some(class) = &meta.classification {
-                entry.metadata.insert("classification".to_string(), class.clone());
+                entry
+                    .metadata
+                    .insert("classification".to_string(), class.clone());
             } else {
                 entry.metadata.remove("classification");
             }
@@ -1013,14 +1026,26 @@ impl SecretService {
             .await?;
 
         let path = format!("sys/policies/{}", name);
-        let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
+        let entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if let Some(entry) = entry {
-            let decrypted = self.crypto.decrypt(&entry.encrypted_data).await.map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
-            let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?;
+            let decrypted = self
+                .crypto
+                .decrypt(&entry.encrypted_data)
+                .await
+                .map_err(|e| SecretError::Internal(anyhow::anyhow!("Crypto error: {}", e)))?;
+            let policy: Policy = serde_json::from_slice(&decrypted).map_err(|e| {
+                SecretError::Internal(anyhow::anyhow!("Deserialization error: {}", e))
+            })?;
             Ok(policy)
         } else {
-            Err(SecretError::PolicyNotFound { name: name.to_string() })
+            Err(SecretError::PolicyNotFound {
+                name: name.to_string(),
+            })
         }
     }
 
@@ -1041,13 +1066,22 @@ impl SecretService {
         let _write_guard = self.policy_write_lock.lock().await;
 
         let path = format!("sys/policies/{}", name);
-        let entry = self.storage.get_by_path(&path).await.map_err(SecretError::Storage)?;
+        let entry = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if let Some(entry) = entry {
-            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            self.storage
+                .delete_by_id(entry.id)
+                .await
+                .map_err(SecretError::Storage)?;
             Ok(true)
         } else {
-            Err(SecretError::PolicyNotFound { name: name.to_string() })
+            Err(SecretError::PolicyNotFound {
+                name: name.to_string(),
+            })
         }
     }
 
@@ -1717,9 +1751,19 @@ impl SecretService {
         // (`AdminService::update_policy_content`), which correctly preserves
         // `created_at` from the existing entry.
         let policy_path = format!("sys/policies/{}", name);
-        let existing_entry = self.storage.get_by_path(&policy_path).await.map_err(SecretError::Storage)?;
-        let entry_id = existing_entry.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
-        let created_at = existing_entry.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let existing_entry = self
+            .storage
+            .get_by_path(&policy_path)
+            .await
+            .map_err(SecretError::Storage)?;
+        let entry_id = existing_entry
+            .as_ref()
+            .map(|e| e.id)
+            .unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing_entry
+            .as_ref()
+            .map(|e| e.created_at)
+            .unwrap_or_else(chrono::Utc::now);
         let version = existing_entry.as_ref().map(|e| e.version + 1).unwrap_or(1);
 
         let policy = Policy {
@@ -1755,9 +1799,15 @@ impl SecretService {
         // that treat `store()` as INSERT could silently create duplicate rows.
         // This mirrors the pattern in `AdminService::update_policy_content`.
         if existing_entry.is_some() {
-            self.storage.update(&entry).await.map_err(SecretError::Storage)?;
+            self.storage
+                .update(&entry)
+                .await
+                .map_err(SecretError::Storage)?;
         } else {
-            self.storage.store(&entry).await.map_err(SecretError::Storage)?;
+            self.storage
+                .store(&entry)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         Ok(policy)
@@ -1779,7 +1829,11 @@ impl SecretService {
             ..Default::default()
         };
 
-        let entries = self.storage.list(&query_params).await.map_err(SecretError::Storage)?;
+        let entries = self
+            .storage
+            .list(&query_params)
+            .await
+            .map_err(SecretError::Storage)?;
         let mut policies = Vec::new();
 
         // Structured policies live at `sys/policies/{name}` and raw-content
@@ -1813,7 +1867,9 @@ impl SecretService {
                             }
                             policies.push(policy);
                         }
-                        Err(e) => tracing::warn!("Failed to deserialize policy at {}: {}", entry.path, e),
+                        Err(e) => {
+                            tracing::warn!("Failed to deserialize policy at {}: {}", entry.path, e)
+                        }
                     }
                 }
                 Err(e) => tracing::warn!("Failed to decrypt policy at {}: {}", entry.path, e),
@@ -1880,7 +1936,12 @@ impl SecretService {
                         name: current_key.name.clone(),
                         key_type: current_key.key_type.clone(),
                         version,
-                        status: if version == current_key.version { "active" } else { "historical" }.to_string(),
+                        status: if version == current_key.version {
+                            "active"
+                        } else {
+                            "historical"
+                        }
+                        .to_string(),
                         created_at: entry.created_at,
                     });
                 }
@@ -1914,7 +1975,12 @@ impl SecretService {
                         name: current_key.name.clone(),
                         key_type: current_key.key_type.clone(),
                         version: 1,
-                        status: if current_key.version == 1 { "active" } else { "historical" }.to_string(),
+                        status: if current_key.version == 1 {
+                            "active"
+                        } else {
+                            "historical"
+                        }
+                        .to_string(),
                         created_at: entry.created_at,
                     });
                 }
@@ -1941,9 +2007,15 @@ impl SecretService {
         //    mid-way, metadata still references the key and a retry can clean up.
         //    Deleting metadata first would leave orphaned key material with no
         //    metadata pointing to it.
-        let metadata_entry = self.storage.get_by_path(&key_path).await.map_err(SecretError::Storage)?;
+        let metadata_entry = self
+            .storage
+            .get_by_path(&key_path)
+            .await
+            .map_err(SecretError::Storage)?;
         if metadata_entry.is_none() {
-             return Err(SecretError::KeyNotFound { key_id: key_id.to_string() });
+            return Err(SecretError::KeyNotFound {
+                key_id: key_id.to_string(),
+            });
         }
 
         // 2. Delete all versioned key material.
@@ -1958,7 +2030,11 @@ impl SecretService {
         let query = secreton_storage::QueryParams::new()
             .with_path_prefix(key_data_prefix.clone())
             .with_limit(KEY_VERSION_DELETE_MAX_ENTRIES);
-        let entries = self.storage.list(&query).await.map_err(SecretError::Storage)?;
+        let entries = self
+            .storage
+            .list(&query)
+            .await
+            .map_err(SecretError::Storage)?;
 
         for entry in entries {
             // Only delete entries whose suffix after the prefix is a pure version number
@@ -1974,7 +2050,10 @@ impl SecretService {
                         continue;
                     }
 
-                    self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+                    self.storage
+                        .delete_by_id(entry.id)
+                        .await
+                        .map_err(SecretError::Storage)?;
                 }
             }
         }
@@ -2003,13 +2082,19 @@ impl SecretService {
         }
         if safe_to_delete_legacy {
             if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
-                self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+                self.storage
+                    .delete_by_id(entry.id)
+                    .await
+                    .map_err(SecretError::Storage)?;
             }
         }
 
         // 4. Delete metadata last — all key material is already removed.
         if let Some(entry) = metadata_entry {
-            self.storage.delete_by_id(entry.id).await.map_err(SecretError::Storage)?;
+            self.storage
+                .delete_by_id(entry.id)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         // Log audit trail
@@ -2101,21 +2186,27 @@ impl SecretService {
 
         // Retrieve key from storage - try versioned path first, then legacy
         let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
-        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+        let mut key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
-            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+            key_entry = self
+                .storage
+                .get_by_path(&legacy_path)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, version),
-            })?;
+            key_id: format!("{} (v{})", key_name, version),
+        })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
-        let key_data = self
-            .decrypt_key_material(&key_entry.encrypted_data)
-            .await?;
+        let key_data = self.decrypt_key_material(&key_entry.encrypted_data).await?;
 
         // Encrypt data using crypto engine.
         // `self.crypto.encrypt` returns an `EncryptedData` that already contains
@@ -2135,7 +2226,8 @@ impl SecretService {
                     "Key type 'xchacha20-poly1305' encryption is only supported via the transit engine.".to_string(),
                 ));
             }
-            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1" | "ed25519" => {
+            "rsa-2048" | "rsa-4096" | "ecdsa-p256" | "ecdsa-p384" | "ecdsa-secp256k1"
+            | "ed25519" => {
                 return Err(SecretError::InvalidOperation(format!(
                     "Key type '{}' does not support encryption. Use sign/verify instead.",
                     key_info.key_type
@@ -2206,21 +2298,27 @@ impl SecretService {
 
         // Retrieve key from storage - try versioned path first, then legacy
         let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
-        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+        let mut key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
-            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+            key_entry = self
+                .storage
+                .get_by_path(&legacy_path)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, version),
-            })?;
+            key_id: format!("{} (v{})", key_name, version),
+        })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
-        let key_data = self
-            .decrypt_key_material(&key_entry.encrypted_data)
-            .await?;
+        let key_data = self.decrypt_key_material(&key_entry.encrypted_data).await?;
 
         // Decrypt the user data using the key.
         // `decrypt_full` is deprecated and always returns an error.
@@ -2271,7 +2369,8 @@ impl SecretService {
             "ed25519" => secreton_crypto::AlgorithmId::Ed25519,
             "ecdsa-secp256k1" => {
                 return Err(SecretError::InvalidOperation(
-                    "Key type 'ecdsa-secp256k1' signing is only supported via the transit engine.".to_string(),
+                    "Key type 'ecdsa-secp256k1' signing is only supported via the transit engine."
+                        .to_string(),
                 ));
             }
             "aes256-gcm" | "chacha20-poly1305" | "xchacha20-poly1305" => {
@@ -2298,21 +2397,27 @@ impl SecretService {
 
         // Retrieve key from storage - try versioned path first, then legacy
         let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
-        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+        let mut key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
-            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+            key_entry = self
+                .storage
+                .get_by_path(&legacy_path)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, version),
-            })?;
+            key_id: format!("{} (v{})", key_name, version),
+        })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
-        let key_data = self
-            .decrypt_key_material(&key_entry.encrypted_data)
-            .await?;
+        let key_data = self.decrypt_key_material(&key_entry.encrypted_data).await?;
 
         // Sign data using crypto engine
         let signature = self
@@ -2424,21 +2529,27 @@ impl SecretService {
 
         // Retrieve key from storage - try versioned path first, then legacy
         let key_data_path = format!("key_data/{}/{}_v{}", user.id, key_name, version);
-        let mut key_entry = self.storage.get_by_path(&key_data_path).await.map_err(SecretError::Storage)?;
+        let mut key_entry = self
+            .storage
+            .get_by_path(&key_data_path)
+            .await
+            .map_err(SecretError::Storage)?;
 
         if key_entry.is_none() && version == 1 {
             let legacy_path = format!("key_data/{}/{}", user.id, key_name);
-            key_entry = self.storage.get_by_path(&legacy_path).await.map_err(SecretError::Storage)?;
+            key_entry = self
+                .storage
+                .get_by_path(&legacy_path)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         let key_entry = key_entry.ok_or_else(|| SecretError::KeyNotFound {
-                key_id: format!("{} (v{})", key_name, version),
-            })?;
+            key_id: format!("{} (v{})", key_name, version),
+        })?;
 
         // Decrypt the stored key data (with legacy fallback for unencrypted entries)
-        let key_data = self
-            .decrypt_key_material(&key_entry.encrypted_data)
-            .await?;
+        let key_data = self.decrypt_key_material(&key_entry.encrypted_data).await?;
 
         // Verify signature
         let is_valid = self
@@ -2648,7 +2759,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2672,7 +2787,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2721,7 +2840,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2743,7 +2866,10 @@ mod tests {
         let mut data = HashMap::new();
         data.insert("username".to_string(), "admin".to_string());
         let user = mock_user();
-        let secret = service.put_secret("app/admin", data, None, &user).await.unwrap();
+        let secret = service
+            .put_secret("app/admin", data, None, &user)
+            .await
+            .unwrap();
         assert_eq!(secret.path, "app/admin");
         assert!(secret.data.contains_key("username"));
     }
@@ -2755,7 +2881,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2829,7 +2959,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2883,7 +3017,11 @@ mod tests {
 
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2970,7 +3108,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -2992,13 +3134,19 @@ mod tests {
         // 1. Create Secret (v1)
         let mut data1 = HashMap::new();
         data1.insert("k".to_string(), "v1".to_string());
-        let s1 = service.put_secret("app/ver", data1, None, &user).await.unwrap();
+        let s1 = service
+            .put_secret("app/ver", data1, None, &user)
+            .await
+            .unwrap();
         assert_eq!(s1.version, 1);
 
         // 2. Update Secret (v2)
         let mut data2 = HashMap::new();
         data2.insert("k".to_string(), "v2".to_string());
-        let s2 = service.put_secret("app/ver", data2, None, &user).await.unwrap();
+        let s2 = service
+            .put_secret("app/ver", data2, None, &user)
+            .await
+            .unwrap();
         assert_eq!(s2.version, 2);
 
         // 3. Get Current (v2)
@@ -3028,7 +3176,11 @@ mod tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -3050,7 +3202,10 @@ mod tests {
         // 1. Create Secret (v1)
         let mut data = HashMap::new();
         data.insert("k".to_string(), "v1".to_string());
-        service.put_secret("app/race", data, None, &user).await.unwrap();
+        service
+            .put_secret("app/race", data, None, &user)
+            .await
+            .unwrap();
 
         // 2. Pollute cache with "future" version (v2)
         // We need to construct the cache payload: [v2_bytes] + [json_data]
@@ -3186,7 +3341,11 @@ mod list_secrets_tests {
         }
         let storage = Arc::new(MockStorageBackend::new());
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(AuditLogger::new(storage.clone(), 2555, 1000, true).await.unwrap());
+        let audit = Arc::new(
+            AuditLogger::new(storage.clone(), 2555, 1000, true)
+                .await
+                .unwrap(),
+        );
         let identity = Arc::new(secreton_auth::InMemoryIdentityService::new());
         let policy_service = Arc::new(secreton_auth::PolicyService::new());
         let performance = Arc::new(SecretPerformanceOptimizer::default());
@@ -3231,20 +3390,29 @@ mod list_secrets_tests {
 
         // Test user1 accessing list (should only see their own)
         let user1 = create_mock_user(&user1_uuid.to_string(), vec!["user".to_string()]);
-        let secrets_user1 = service.list_secrets(None, &user1, None, None).await.unwrap();
+        let secrets_user1 = service
+            .list_secrets(None, &user1, None, None)
+            .await
+            .unwrap();
         assert_eq!(secrets_user1.len(), 1);
         assert_eq!(secrets_user1[0].path, "app/user1/secret1");
 
         // Test user2 accessing list
         let user2 = create_mock_user(&user2_uuid.to_string(), vec!["user".to_string()]);
-        let secrets_user2 = service.list_secrets(None, &user2, None, None).await.unwrap();
+        let secrets_user2 = service
+            .list_secrets(None, &user2, None, None)
+            .await
+            .unwrap();
         assert_eq!(secrets_user2.len(), 1);
         assert_eq!(secrets_user2[0].path, "app/user2/secret1");
 
         // Test admin accessing list (should see ZERO, because strict isolation is enforced)
         let admin_uuid = Uuid::new_v4();
         let admin = create_mock_user(&admin_uuid.to_string(), vec!["admin".to_string()]);
-        let secrets_admin = service.list_secrets(None, &admin, None, None).await.unwrap();
+        let secrets_admin = service
+            .list_secrets(None, &admin, None, None)
+            .await
+            .unwrap();
 
         // Expectation changed from 2 to 0 to reflect strict Zero Trust isolation
         assert_eq!(secrets_admin.len(), 0);

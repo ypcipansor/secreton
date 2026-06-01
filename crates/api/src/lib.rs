@@ -1152,10 +1152,9 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::CONFLICT,
                 format!("Resource already exists: {}", resource),
             ),
-            SecretonError::Conflict { message } => (
-                axum::http::StatusCode::CONFLICT,
-                message.clone(),
-            ),
+            SecretonError::Conflict { message } => {
+                (axum::http::StatusCode::CONFLICT, message.clone())
+            }
             SecretonError::MfaRequired => (
                 axum::http::StatusCode::UNAUTHORIZED,
                 "MFA required".to_string(),

@@ -1,14 +1,14 @@
-use leptos::prelude::*;
-use leptos_router::hooks::{use_params_map, use_navigate};
-use leptos_router::components::A;
-use leptos::task::spawn_local;
 use crate::api;
+use crate::components::Card;
+use crate::components::Modal;
 use crate::components::button::{Button, ButtonVariant};
 use crate::components::input::Input;
-use crate::components::Modal;
-use crate::components::Card;
-use std::collections::HashMap;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use leptos_router::components::A;
+use leptos_router::hooks::{use_navigate, use_params_map};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SecretListItem {
@@ -55,9 +55,7 @@ pub fn SecretsList() -> impl IntoView {
     let navigate = use_navigate();
 
     // Derived path from router
-    let path = move || {
-        params.with(|p| p.get("path").unwrap_or_default())
-    };
+    let path = move || params.with(|p| p.get("path").unwrap_or_default());
 
     // Pagination state
     let (limit, _set_limit) = signal::<u32>(100);
@@ -72,72 +70,72 @@ pub fn SecretsList() -> impl IntoView {
         set_view_version.set(None);
     });
 
-    let secret_resource = LocalResource::new(
-        move || {
-            let current_path = path();
-            let version_opt = view_version.get();
-            let l = limit.get();
-            let o = offset.get();
+    let secret_resource = LocalResource::new(move || {
+        let current_path = path();
+        let version_opt = view_version.get();
+        let l = limit.get();
+        let o = offset.get();
 
-            async move {
-                // If root, always list
-                if current_path.is_empty() {
-                    let url = format!("/secret/secrets?limit={}&offset={}", l, o);
-                    match api::get::<Vec<SecretListItem>>(&url).await {
-                        Ok(res) => {
-                            let keys = res.into_iter().map(|item| item.path).collect();
-                            return SecretViewMode::List(keys);
-                        },
-                        Err(e) => return SecretViewMode::Error(e.to_string()),
+        async move {
+            // If root, always list
+            if current_path.is_empty() {
+                let url = format!("/secret/secrets?limit={}&offset={}", l, o);
+                match api::get::<Vec<SecretListItem>>(&url).await {
+                    Ok(res) => {
+                        let keys = res.into_iter().map(|item| item.path).collect();
+                        return SecretViewMode::List(keys);
                     }
-                }
-
-                // Try to get as secret first
-                let secret_url = if let Some(v) = version_opt {
-                    format!("/secret/secrets/{}?version={}", current_path, v)
-                } else {
-                    format!("/secret/secrets/{}", current_path)
-                };
-
-                match api::get::<GetSecretResponse>(&secret_url).await {
-                    Ok(secret) => {
-                         SecretViewMode::View {
-                            data: secret.data,
-                            version: secret.version,
-                            expires_at: secret.expires_at,
-                         }
-                    },
-                    Err(api::ApiError::NotFound(_)) => {
-                        // If specific version requested and not found, it's an error (or deleted history)
-                        if version_opt.is_some() {
-                            return SecretViewMode::Error("Version not found".to_string());
-                        }
-
-                        // Only if 404 and no version specified, try to list as folder
-                        // Note: Backend expects prefix to end with / for folders if we want robust filtering,
-                        // but let's see how the backend handles 'app' vs 'app/'
-                        // We'll append / to be safe for directory listing
-                        let list_path = if current_path.ends_with('/') { current_path.clone() } else { format!("{}/", current_path) };
-                        // Construct query param manually since api::get doesn't support query params helper yet
-                        let list_url = format!("/secret/secrets?filter={}", list_path);
-
-                        match api::get::<Vec<SecretListItem>>(&list_url).await {
-                            Ok(res) => {
-                                if res.is_empty() {
-                                    SecretViewMode::NotFound
-                                } else {
-                                    let keys = res.into_iter().map(|item| item.path).collect();
-                                    SecretViewMode::List(keys)
-                                }
-                            },
-                            Err(e) => SecretViewMode::Error(format!("Error listing folder: {}", e)),
-                        }
-                    },
-                    Err(e) => SecretViewMode::Error(e.to_string()),
+                    Err(e) => return SecretViewMode::Error(e.to_string()),
                 }
             }
-        },
-    );
+
+            // Try to get as secret first
+            let secret_url = if let Some(v) = version_opt {
+                format!("/secret/secrets/{}?version={}", current_path, v)
+            } else {
+                format!("/secret/secrets/{}", current_path)
+            };
+
+            match api::get::<GetSecretResponse>(&secret_url).await {
+                Ok(secret) => SecretViewMode::View {
+                    data: secret.data,
+                    version: secret.version,
+                    expires_at: secret.expires_at,
+                },
+                Err(api::ApiError::NotFound(_)) => {
+                    // If specific version requested and not found, it's an error (or deleted history)
+                    if version_opt.is_some() {
+                        return SecretViewMode::Error("Version not found".to_string());
+                    }
+
+                    // Only if 404 and no version specified, try to list as folder
+                    // Note: Backend expects prefix to end with / for folders if we want robust filtering,
+                    // but let's see how the backend handles 'app' vs 'app/'
+                    // We'll append / to be safe for directory listing
+                    let list_path = if current_path.ends_with('/') {
+                        current_path.clone()
+                    } else {
+                        format!("{}/", current_path)
+                    };
+                    // Construct query param manually since api::get doesn't support query params helper yet
+                    let list_url = format!("/secret/secrets?filter={}", list_path);
+
+                    match api::get::<Vec<SecretListItem>>(&list_url).await {
+                        Ok(res) => {
+                            if res.is_empty() {
+                                SecretViewMode::NotFound
+                            } else {
+                                let keys = res.into_iter().map(|item| item.path).collect();
+                                SecretViewMode::List(keys)
+                            }
+                        }
+                        Err(e) => SecretViewMode::Error(format!("Error listing folder: {}", e)),
+                    }
+                }
+                Err(e) => SecretViewMode::Error(e.to_string()),
+            }
+        }
+    });
 
     // Modal State
     let (show_modal, set_show_modal) = signal(false);
@@ -153,7 +151,11 @@ pub fn SecretsList() -> impl IntoView {
     // Helper to add a row
     let add_row = move || {
         set_kv_rows.update(|rows| {
-            rows.push(KvRow { id: next_id.get(), key: "".to_string(), value: "".to_string() });
+            rows.push(KvRow {
+                id: next_id.get(),
+                key: "".to_string(),
+                value: "".to_string(),
+            });
         });
         set_next_id.update(|n| *n += 1);
     };
@@ -199,7 +201,10 @@ pub fn SecretsList() -> impl IntoView {
         // If the requested version is the latest version, clear the view_version
         // so it's treated as the current (editable) version.
         // The history list is sorted descending, so first is latest.
-        let is_latest = history_versions.get().first().map_or(false, |latest| latest.version == v);
+        let is_latest = history_versions
+            .get()
+            .first()
+            .map_or(false, |latest| latest.version == v);
 
         if is_latest {
             set_view_version.set(None);
@@ -215,7 +220,9 @@ pub fn SecretsList() -> impl IntoView {
         spawn_local(async move {
             let current_path = path();
             let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Rollback secret at {} to version {}? This will create a new version with the historical data.", current_path, v)).ok()).unwrap_or(false);
-            if !confirm { return; }
+            if !confirm {
+                return;
+            }
 
             // Call the specialized rollback endpoint
             let rollback_url = format!("/secret/secret-rollback/{}?version={}", current_path, v);
@@ -242,7 +249,11 @@ pub fn SecretsList() -> impl IntoView {
     let open_create = move |_| {
         set_error_msg.set(None);
         set_new_secret_path.set("".to_string());
-        set_kv_rows.set(vec![KvRow { id: 0, key: "".to_string(), value: "".to_string() }]);
+        set_kv_rows.set(vec![KvRow {
+            id: 0,
+            key: "".to_string(),
+            value: "".to_string(),
+        }]);
         set_next_id.set(1);
         set_show_modal.set(true);
     };
@@ -251,19 +262,27 @@ pub fn SecretsList() -> impl IntoView {
     let open_edit = move |_| {
         set_error_msg.set(None);
         if let Some(SecretViewMode::View { data, .. }) = secret_resource.get() {
-             if let serde_json::Value::Object(map) = data {
-                 let mut rows = Vec::new();
-                 let mut id = 0;
-                 for (k, v) in map {
-                     let val_str = if v.is_string() { v.as_str().unwrap().to_string() } else { v.to_string() };
-                     rows.push(KvRow { id, key: k.clone(), value: val_str });
-                     id += 1;
-                 }
-                 set_kv_rows.set(rows);
-                 set_next_id.set(id);
-                 set_new_secret_path.set("".to_string()); // Not used for edit
-                 set_show_modal.set(true);
-             }
+            if let serde_json::Value::Object(map) = data {
+                let mut rows = Vec::new();
+                let mut id = 0;
+                for (k, v) in map {
+                    let val_str = if v.is_string() {
+                        v.as_str().unwrap().to_string()
+                    } else {
+                        v.to_string()
+                    };
+                    rows.push(KvRow {
+                        id,
+                        key: k.clone(),
+                        value: val_str,
+                    });
+                    id += 1;
+                }
+                set_kv_rows.set(rows);
+                set_next_id.set(id);
+                set_new_secret_path.set("".to_string()); // Not used for edit
+                set_show_modal.set(true);
+            }
         }
     };
 
@@ -273,26 +292,36 @@ pub fn SecretsList() -> impl IntoView {
         let navigate = navigate_save.clone();
 
         // Validate new secret name if creating
-        if (current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound))) && new_secret_path.get().is_empty() {
+        if (current_path.is_empty()
+            || matches!(
+                secret_resource.get(),
+                Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)
+            ))
+            && new_secret_path.get().is_empty()
+        {
             set_error_msg.set(Some("Secret name cannot be empty".to_string()));
             return;
         }
 
         spawn_local(async move {
             // If we are creating new, use input path. If editing, use current path.
-            let target_path = if current_path.is_empty() || matches!(secret_resource.get(), Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)) {
+            let target_path = if current_path.is_empty()
+                || matches!(
+                    secret_resource.get(),
+                    Some(SecretViewMode::List(_)) | Some(SecretViewMode::NotFound)
+                ) {
                 // If we are in a subfolder (List mode), we append the new secret name to current path
                 if !current_path.is_empty() {
-                     // Basic join logic
-                     let suffix = new_secret_path.get();
-                     if suffix.is_empty() {
-                         return;
-                     }
-                     if current_path.ends_with('/') {
-                         format!("{}{}", current_path, suffix)
-                     } else {
-                         format!("{}/{}", current_path, suffix)
-                     }
+                    // Basic join logic
+                    let suffix = new_secret_path.get();
+                    if suffix.is_empty() {
+                        return;
+                    }
+                    if current_path.ends_with('/') {
+                        format!("{}{}", current_path, suffix)
+                    } else {
+                        format!("{}/{}", current_path, suffix)
+                    }
                 } else {
                     new_secret_path.get()
                 }
@@ -320,7 +349,8 @@ pub fn SecretsList() -> impl IntoView {
 
             // Distinguish between create (POST) and update (PUT)
             // If target_path matches current_path AND we are in View mode, it's an edit.
-            let is_edit = target_path == current_path && matches!(secret_resource.get(), Some(SecretViewMode::View { .. }));
+            let is_edit = target_path == current_path
+                && matches!(secret_resource.get(), Some(SecretViewMode::View { .. }));
 
             let result = if is_edit {
                 api::put::<serde_json::Value, _>(&url, payload).await
@@ -336,7 +366,7 @@ pub fn SecretsList() -> impl IntoView {
 
                     // If we created a new secret, navigate to it
                     if target_path != current_path {
-                         navigate(&format!("/secrets/{}", target_path), Default::default());
+                        navigate(&format!("/secrets/{}", target_path), Default::default());
                     }
                 }
                 Err(e) => {
@@ -349,10 +379,19 @@ pub fn SecretsList() -> impl IntoView {
     let navigate_delete = navigate.clone();
     let handle_delete = move || {
         let current_path = path();
-        if current_path.is_empty() { return; }
+        if current_path.is_empty() {
+            return;
+        }
 
-        let confirm = web_sys::window().and_then(|w| w.confirm_with_message(&format!("Delete secret at {}?", current_path)).ok()).unwrap_or(false);
-        if !confirm { return; }
+        let confirm = web_sys::window()
+            .and_then(|w| {
+                w.confirm_with_message(&format!("Delete secret at {}?", current_path))
+                    .ok()
+            })
+            .unwrap_or(false);
+        if !confirm {
+            return;
+        }
 
         let navigate = navigate_delete.clone();
         spawn_local(async move {
@@ -362,10 +401,10 @@ pub fn SecretsList() -> impl IntoView {
             // Navigate up one level
             let parts: Vec<&str> = current_path.split('/').collect();
             if parts.len() > 1 {
-                 let parent = parts[0..parts.len()-1].join("/");
-                 navigate(&format!("/secrets/{}", parent), Default::default());
+                let parent = parts[0..parts.len() - 1].join("/");
+                navigate(&format!("/secrets/{}", parent), Default::default());
             } else {
-                 navigate("/secrets", Default::default());
+                navigate("/secrets", Default::default());
             }
         });
     };

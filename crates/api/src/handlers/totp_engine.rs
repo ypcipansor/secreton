@@ -53,7 +53,10 @@ async fn list_keys(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
-    let keys = state.totp_engine.list_keys(&user.id).await
+    let keys = state
+        .totp_engine
+        .list_keys(&user.id)
+        .await
         .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
@@ -69,13 +72,16 @@ async fn create_key(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     validate_name(&name)?;
 
-    state.totp_engine.create_key(
-        &user.id,
-        &name,
-        &payload.secret,
-        payload.issuer,
-        payload.account_name,
-    ).await
+    state
+        .totp_engine
+        .create_key(
+            &user.id,
+            &name,
+            &payload.secret,
+            payload.issuer,
+            payload.account_name,
+        )
+        .await
         .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
@@ -90,7 +96,10 @@ async fn generate_code(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     validate_name(&name)?;
 
-    let code = state.totp_engine.generate_code(&user.id, &name).await
+    let code = state
+        .totp_engine
+        .generate_code(&user.id, &name)
+        .await
         .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
@@ -105,7 +114,10 @@ async fn delete_key(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     validate_name(&name)?;
 
-    state.totp_engine.delete_key(&user.id, &name).await
+    state
+        .totp_engine
+        .delete_key(&user.id, &name)
+        .await
         .map_err(map_totp_err)?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({

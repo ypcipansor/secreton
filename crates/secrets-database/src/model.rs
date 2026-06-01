@@ -62,7 +62,10 @@ pub struct DatabaseConfig {
     pub max_open_connections: Option<u32>,
     pub max_idle_connections: Option<u32>,
     pub connection_timeout: Option<u64>,
-    #[serde(default = "default_verify_connection", deserialize_with = "deserialize_verify_connection")]
+    #[serde(
+        default = "default_verify_connection",
+        deserialize_with = "deserialize_verify_connection"
+    )]
     pub verify_connection: bool,
 }
 

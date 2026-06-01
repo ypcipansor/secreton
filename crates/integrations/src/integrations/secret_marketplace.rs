@@ -270,7 +270,8 @@ impl SecretMarketplace {
 
         // Check expiry
         if let Some(expires_at) = shared.expires_at
-            && Utc::now() > expires_at {
+            && Utc::now() > expires_at
+        {
             return Err(MarketplaceError::PermissionDenied(
                 "Share expired".to_string(),
             ));
