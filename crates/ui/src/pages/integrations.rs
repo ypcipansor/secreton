@@ -273,13 +273,13 @@ pub fn IntegrationsPage() -> impl IntoView {
                                             view! { <tr><td colspan="5" class="px-6 py-10 text-center text-sm text-gray-500 italic">"No Kubernetes secrets managed"</td></tr> }.into_any()
                                         } else {
                                             items.into_iter().map(|s| {
-                                                let name = s._name.clone();
+                                                let name = s.name.clone();
                                                 let ns = s.namespace.clone();
                                                 view! {
                                                     <tr>
                                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{name.clone()}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ns.clone()}</td>
-                                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{s._secreton_path}</td>
+                                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{s.secreton_path}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{s.version}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                             <button
@@ -331,7 +331,7 @@ pub fn IntegrationsPage() -> impl IntoView {
                                             view! { <tr><td colspan="4" class="px-6 py-10 text-center text-sm text-gray-500 italic">"No active pod injections"</td></tr> }.into_any()
                                         } else {
                                             items.into_iter().map(|i| {
-                                                let status_cls = match i._status {
+                                                let status_cls = match i.status {
                                                     InjectionStatus::Injected => "bg-green-100 text-green-800",
                                                     InjectionStatus::Pending => "bg-yellow-100 text-yellow-800",
                                                     InjectionStatus::Failed => "bg-red-100 text-red-800",
@@ -344,7 +344,7 @@ pub fn IntegrationsPage() -> impl IntoView {
                                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{i.mount_path}</td>
                                                         <td class="px-6 py-4 whitespace-nowrap">
                                                             <span class=format!("px-2 inline-flex text-xs leading-5 font-semibold rounded-full {}", status_cls)>
-                                                                {format!("{:?}", i._status)}
+                                                                {format!("{:?}", i.status)}
                                                             </span>
                                                         </td>
                                                     </tr>

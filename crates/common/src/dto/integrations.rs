@@ -37,11 +37,11 @@ pub struct LifecycleHook {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct K8sSecret {
-    #[serde(alias = "name")]
-    pub _name: String,
+    #[serde(alias = "_name")]
+    pub name: String,
     pub namespace: String,
-    #[serde(alias = "secreton_path")]
-    pub _secreton_path: String,
+    #[serde(alias = "_secreton_path")]
+    pub secreton_path: String,
     pub version: u64,
 }
 
@@ -58,6 +58,6 @@ pub struct PodInjection {
     pub pod_name: String,
     pub namespace: String,
     pub mount_path: String,
-    #[serde(alias = "status")]
-    pub _status: InjectionStatus,
+    #[serde(alias = "_status")]
+    pub status: InjectionStatus,
 }
