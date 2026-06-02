@@ -24,7 +24,7 @@ async-trait.workspace = true
 
 # Cryptography
 zeroize.workspace = true
-ring.workspace = true
+ring = { workspace = true, optional = true }
 sha2.workspace = true
 base64.workspace = true
 hex.workspace = true
@@ -32,7 +32,11 @@ regex.workspace = true
 url.workspace = true
 serde_json.workspace = true
 futures.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, optional = true }
 
 # HTTP types
-axum = { workspace = true, features = ["macros", "json"] }
+axum = { workspace = true, features = ["macros", "json"], optional = true }
+
+[features]
+default = ["backend"]
+backend = ["ring", "tokio", "axum"]

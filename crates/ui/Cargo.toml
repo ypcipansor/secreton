@@ -23,6 +23,7 @@ leptos_icons = "0.3"
 icondata = "0.3"
 web-sys = { workspace = true, features = ["Window", "Navigator", "Clipboard"] }
 base64 = "0.22"
+secreton-common = { path = "../common", default-features = false }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
