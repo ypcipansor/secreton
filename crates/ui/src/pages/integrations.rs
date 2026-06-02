@@ -43,18 +43,8 @@ pub fn IntegrationsPage() -> impl IntoView {
                 Ok(res) => set_integrations.set(res),
                 Err(e) => web_sys::console::error_1(&format!("Failed to load integrations: {}", e).into()),
             }
-
-            // Load K8s Secrets
-            match api::get::<Vec<K8sSecret>>("/kubernetes/secrets").await {
-                Ok(res) => set_k8s_secrets.set(res),
-                Err(e) => web_sys::console::error_1(&format!("Failed to load K8s secrets: {}", e).into()),
-            }
-
-            // Load K8s Injections
-            match api::get::<Vec<PodInjection>>("/kubernetes/injections").await {
-                Ok(res) => set_k8s_injections.set(res),
-                Err(e) => web_sys::console::error_1(&format!("Failed to load K8s injections: {}", e).into()),
-            }
+            set_k8s_secrets.set(vec![]);
+            set_k8s_injections.set(vec![]);
 
             set_loading.set(false);
         });
@@ -152,7 +142,6 @@ pub fn IntegrationsPage() -> impl IntoView {
                                                 set_new_integration_type.set(match val.as_str() {
                                                     "aws" => IntegrationType::AwsSecretsManager,
                                                     "azure" => IntegrationType::AzureKeyVault,
-                                                    "k8s" => IntegrationType::Kubernetes,
                                                     _ => IntegrationType::AwsSecretsManager,
                                                 });
                                             }
@@ -160,7 +149,6 @@ pub fn IntegrationsPage() -> impl IntoView {
                                         >
                                             <option value="aws">"AWS Secrets Manager"</option>
                                             <option value="azure">"Azure Key Vault"</option>
-                                            <option value="k8s">"Kubernetes Operator"</option>
                                         </select>
                                     </div>
                                 </div>
@@ -231,8 +219,10 @@ pub fn IntegrationsPage() -> impl IntoView {
                                                                 on:click=move |_| {
                                                                     let id = id.clone();
                                                                     spawn_local(async move {
-                                                                        let _ = api::delete::<()>(&format!("/integrations/{}", id)).await;
-                                                                        load_data();
+                                                                        match api::delete::<()>(&format!("/integrations/{}", id)).await {
+                                                                            Ok(_) => load_data(),
+                                                                            Err(e) => set_error.set(Some(format!("Failed to delete integration: {}", e))),
+                                                                        }
                                                                     });
                                                                 }
                                                                 class="text-red-600 hover:text-red-900"
@@ -255,17 +245,12 @@ pub fn IntegrationsPage() -> impl IntoView {
                             <h2 class="text-xl font-semibold text-gray-800">"Kubernetes Managed Secrets"</h2>
                             <div class="space-x-2">
                                 <button
-                                    on:click=move |_| {
-                                        spawn_local(async move {
-                                            let _ = api::post::<Vec<String>, ()>("/kubernetes/rotate", ()).await;
-                                            load_data();
-                                        });
-                                    }
-                                    class="text-sm bg-orange-50 text-orange-600 hover:bg-orange-100 px-3 py-1 rounded transition-colors"
+                                    disabled=true
+                                    class="text-sm bg-gray-100 text-gray-400 px-3 py-1 rounded cursor-not-allowed"
                                 >
                                     "Rotate All"
                                 </button>
-                                <button class="text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded transition-colors">
+                                <button disabled=true class="text-sm bg-gray-100 text-gray-400 px-3 py-1 rounded cursor-not-allowed">
                                     "+ New K8s Secret"
                                 </button>
                             </div>

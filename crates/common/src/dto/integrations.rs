@@ -27,17 +27,20 @@ pub enum HookType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LifecycleHook {
+    #[serde(alias = "hook_id")]
     pub id: String,
     pub hook_type: HookType,
     pub action_url: String,
     pub enabled: bool,
-    pub created_at: String,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct K8sSecret {
+    #[serde(alias = "name")]
     pub _name: String,
     pub namespace: String,
+    #[serde(alias = "secreton_path")]
     pub _secreton_path: String,
     pub version: u64,
 }
@@ -55,5 +58,6 @@ pub struct PodInjection {
     pub pod_name: String,
     pub namespace: String,
     pub mount_path: String,
+    #[serde(alias = "status")]
     pub _status: InjectionStatus,
 }
