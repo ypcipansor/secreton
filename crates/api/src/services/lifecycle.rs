@@ -12,7 +12,9 @@ use crate::services::crypto::CryptoService;
 use secreton_integrations::integrations::secret_lifecycle_management::{
     HookType, LifecycleConfig, LifecycleHook, SecretLifecycleManagement,
 };
-use secreton_storage::{EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend};
+use secreton_storage::{
+    EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+};
 
 /// Reserved path prefixes that must NOT be swept by the lifecycle worker.
 const RESERVED_PATH_PREFIXES: &[&str] = &[
@@ -165,10 +167,19 @@ impl LifecycleService {
         let data = serde_json::to_vec(&hook)?;
         let encrypted_data = self.crypto.encrypt_data(&data).await?;
 
-        let mut entry = SecretEntry::new(path, encrypted_data, EncryptionMetadata::default(), SecurityLevel::Secret, uuid::Uuid::nil());
+        let mut entry = SecretEntry::new(
+            path,
+            encrypted_data,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            uuid::Uuid::nil(),
+        );
         entry.id = uuid::Uuid::new_v4();
         self.storage.store(&entry).await?;
-        self.manager.register_hook(hook).await.map_err(|e| anyhow::anyhow!(e))?;
+        self.manager
+            .register_hook(hook)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
     }
 
@@ -177,11 +188,20 @@ impl LifecycleService {
         if let Some(existing) = self.storage.get_by_path(&path).await? {
             let data = serde_json::to_vec(&hook)?;
             let encrypted_data = self.crypto.encrypt_data(&data).await?;
-            let mut entry = SecretEntry::new(path, encrypted_data, EncryptionMetadata::default(), SecurityLevel::Secret, uuid::Uuid::nil());
+            let mut entry = SecretEntry::new(
+                path,
+                encrypted_data,
+                EncryptionMetadata::default(),
+                SecurityLevel::Secret,
+                uuid::Uuid::nil(),
+            );
             entry.id = existing.id;
             entry.version = existing.version + 1;
             self.storage.update(&entry).await?;
-            self.manager.register_hook(hook).await.map_err(|e| anyhow::anyhow!(e))?;
+            self.manager
+                .register_hook(hook)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
             Ok(())
         } else {
             Err(anyhow::anyhow!("Hook not found"))
@@ -213,7 +233,10 @@ impl LifecycleService {
             limit: Some(SWEEP_MAX_ENTRIES),
             sort_by: Some("expires_at".to_string()),
             sort_order: Some("asc".to_string()),
-            excluded_path_prefixes: RESERVED_PATH_PREFIXES.iter().map(|p| (*p).to_string()).collect(),
+            excluded_path_prefixes: RESERVED_PATH_PREFIXES
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect(),
             ..Default::default()
         };
 
@@ -227,13 +250,18 @@ impl LifecycleService {
 
             if let Some(fresh) = self.storage.get_by_id(entry.id).await? {
                 if fresh.is_expired() {
-                    let _ = self.manager.trigger_lifecycle_hook(HookType::PostExpire, &fresh.path).await;
+                    let _ = self
+                        .manager
+                        .trigger_lifecycle_hook(HookType::PostExpire, &fresh.path)
+                        .await;
                     if self.storage.delete_by_id(fresh.id).await? {
                         deleted += 1;
-                        self.audit.log_event(SecurityEventType::SecretDeletion {
-                            secret_path: fresh.path.clone(),
-                            user: LIFECYCLE_AUDIT_ACTOR.to_string(),
-                        }).await;
+                        self.audit
+                            .log_event(SecurityEventType::SecretDeletion {
+                                secret_path: fresh.path.clone(),
+                                user: LIFECYCLE_AUDIT_ACTOR.to_string(),
+                            })
+                            .await;
                         self.cleanup_history_for(&fresh.path).await;
                         let _ = self.manager.remove_expiration(&fresh.path).await;
                     }
@@ -297,9 +325,23 @@ mod tests {
 
     async fn make_service(enabled: bool, cleanup_enabled: bool) -> Arc<LifecycleService> {
         let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MockStorageBackend::new());
-        let crypto = Arc::new(crate::services::crypto::CryptoService::new(storage.clone()).await.unwrap());
-        let audit = Arc::new(crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false).await.unwrap());
-        let cfg = LifecycleConfig { enabled, default_ttl_days: 90, grace_period_days: 7, auto_archive_enabled: false, cleanup_enabled };
+        let crypto = Arc::new(
+            crate::services::crypto::CryptoService::new(storage.clone())
+                .await
+                .unwrap(),
+        );
+        let audit = Arc::new(
+            crate::services::audit::AuditLogger::new(storage.clone(), 30, 100, false)
+                .await
+                .unwrap(),
+        );
+        let cfg = LifecycleConfig {
+            enabled,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled,
+        };
         Arc::new(LifecycleService::new(storage, crypto, audit, cfg))
     }
 

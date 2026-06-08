@@ -74,7 +74,9 @@ impl DatabaseApiState {
                     // application-specific info string, preventing cross-protocol attacks.
                     let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, env_key.as_bytes());
                     let mut key_bytes = zeroize::Zeroizing::new(vec![0u8; 32]);
-                    if let Err(e) = hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes) {
+                    if let Err(e) =
+                        hk.expand(b"secreton-database-engine-encryption-key", &mut key_bytes)
+                    {
                         tracing::error!(
                             "HKDF key derivation failed: {}. Database engine will operate WITHOUT encryption.",
                             e
@@ -137,7 +139,10 @@ impl DatabaseApiState {
                     match engine_read.collect_expired_lease_ids() {
                         Ok(ids) => ids,
                         Err(e) => {
-                            tracing::error!("Background TTL enforcement: failed to collect expired leases: {}", e);
+                            tracing::error!(
+                                "Background TTL enforcement: failed to collect expired leases: {}",
+                                e
+                            );
                             continue;
                         }
                     }
@@ -153,14 +158,23 @@ impl DatabaseApiState {
                         engine_read.revoke_lease(lease_id).await
                     }; // read lock released here before logging
                     match result {
-                        Ok(_) => tracing::info!("Background TTL: revoked expired lease {}", lease_id),
+                        Ok(_) => {
+                            tracing::info!("Background TTL: revoked expired lease {}", lease_id)
+                        }
                         Err(e) => {
                             // SecretNotFound is expected when a concurrent API call already
                             // revoked the lease between collect and revoke (benign TOCTOU race).
                             if matches!(&e, secreton_secrets::SecretError::SecretNotFound(_)) {
-                                tracing::debug!("Background TTL: lease {} already revoked by another caller", lease_id);
+                                tracing::debug!(
+                                    "Background TTL: lease {} already revoked by another caller",
+                                    lease_id
+                                );
                             } else {
-                                tracing::error!("Background TTL: failed to revoke lease {}: {}", lease_id, e);
+                                tracing::error!(
+                                    "Background TTL: failed to revoke lease {}: {}",
+                                    lease_id,
+                                    e
+                                );
                             }
                         }
                     }

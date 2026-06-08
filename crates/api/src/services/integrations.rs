@@ -1,14 +1,20 @@
 //! Integrations service for managing external cloud secret providers.
 
-use anyhow::Result;
-use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use tracing::warn;
 use crate::services::audit::AuditLogger;
 use crate::services::crypto::CryptoService;
-use secreton_storage::{StorageBackend, SecretEntry, QueryParams, EncryptionMetadata, SecurityLevel};
-use secreton_integrations::integrations::aws_secrets_manager::{AWSSecretsManager, AWSSecretsConfig};
-use secreton_integrations::integrations::azure_secrets_backend::{AzureSecretsBackend, AzureSecretsConfig, SyncConfig};
+use anyhow::Result;
+use secreton_integrations::integrations::aws_secrets_manager::{
+    AWSSecretsConfig, AWSSecretsManager,
+};
+use secreton_integrations::integrations::azure_secrets_backend::{
+    AzureSecretsBackend, AzureSecretsConfig, SyncConfig,
+};
+use secreton_storage::{
+    EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tracing::warn;
 
 /// Integration type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -123,7 +129,9 @@ impl IntegrationsService {
 
     /// Create AWS Secrets Manager client from config
     pub async fn get_aws_manager(&self, config_id: &str) -> Result<AWSSecretsManager> {
-        let config_entry = self.get_integration(config_id).await?
+        let config_entry = self
+            .get_integration(config_id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Integration {} not found", config_id))?;
 
         let aws_config: AWSSecretsConfig = serde_json::from_value(config_entry.config)?;

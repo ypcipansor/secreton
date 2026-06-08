@@ -7,17 +7,19 @@ pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod database;
-pub mod integrations;
 pub mod health;
+pub mod integrations;
 pub mod lifecycle;
 pub mod pki;
 pub mod secret;
+#[cfg(test)]
+pub mod security_tests;
 pub mod ssh;
+#[cfg(test)]
+pub mod ssh_tests;
 pub mod sys;
 pub mod totp_engine;
 pub mod transit;
-#[cfg(test)]
-pub mod ssh_tests;
 
 use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 
@@ -163,6 +165,8 @@ pub fn create_router(_config: &ApiConfig, services: AppState) -> Router {
                     std::time::Duration::from_secs(30),
                 ))
                 .layer(create_cors_layer())
+                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)) // 1MB limit
+                .layer(middleware::from_fn(crate::middleware::security_headers))
                 .layer(middleware::from_fn(RateLimitMiddleware::limit))
                 .layer(middleware::from_fn_with_state(
                     app_state.clone(),

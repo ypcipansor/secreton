@@ -1077,6 +1077,29 @@ impl From<SecretonError> for ApiError {
     }
 }
 
+impl From<crate::services::secret::SecretError> for ApiError {
+    fn from(err: crate::services::secret::SecretError) -> Self {
+        match err {
+            crate::services::secret::SecretError::SecretNotFound { path } => {
+                ApiError(SecretonError::NotFound {
+                    resource: format!("Secret: {}", path),
+                })
+            }
+            crate::services::secret::SecretError::PermissionDenied(_) => {
+                ApiError(SecretonError::Authorization {
+                    message: "Permission denied".to_string(),
+                })
+            }
+            crate::services::secret::SecretError::InvalidOperation(msg) => {
+                ApiError(SecretonError::Validation { message: msg })
+            }
+            _ => ApiError(SecretonError::Internal {
+                message: "Internal secret error".to_string(),
+            }),
+        }
+    }
+}
+
 impl ApiError {
     #[allow(non_snake_case)]
     pub fn Authentication(message: String) -> Self {
@@ -1130,14 +1153,20 @@ impl axum::response::IntoResponse for ApiError {
             SecretonError::Validation { message } => {
                 (axum::http::StatusCode::BAD_REQUEST, message.clone())
             }
-            SecretonError::Internal { message } => (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message.clone(),
-            ),
-            SecretonError::Configuration { message } => (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Configuration error: {}", message),
-            ),
+            SecretonError::Internal { message } => {
+                tracing::error!("Internal error: {}", message);
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal server error occurred".to_string(),
+                )
+            }
+            SecretonError::Configuration { message } => {
+                tracing::error!("Configuration error: {}", message);
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal server error occurred".to_string(),
+                )
+            }
             SecretonError::Network { message } => {
                 (axum::http::StatusCode::BAD_GATEWAY, message.clone())
             }
@@ -1152,10 +1181,9 @@ impl axum::response::IntoResponse for ApiError {
                 axum::http::StatusCode::CONFLICT,
                 format!("Resource already exists: {}", resource),
             ),
-            SecretonError::Conflict { message } => (
-                axum::http::StatusCode::CONFLICT,
-                message.clone(),
-            ),
+            SecretonError::Conflict { message } => {
+                (axum::http::StatusCode::CONFLICT, message.clone())
+            }
             SecretonError::MfaRequired => (
                 axum::http::StatusCode::UNAUTHORIZED,
                 "MFA required".to_string(),

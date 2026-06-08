@@ -155,17 +155,24 @@ impl CombinedMfaService {
         account_name: String,
     ) -> AuthMethodResult<TotpEnrollment> {
         // Enroll in TOTP service
-        let enrollment = self.totp_service.enroll(entity_id, account_name).await
-            .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
+        let enrollment = self
+            .totp_service
+            .enroll(entity_id, account_name)
+            .await
+            .map_err(|e| SecretonError::Internal {
+                message: e.to_string(),
+            })?;
 
         // Update central enrollment
         let mut enrollments = self.enrollments.write().await;
-        let user_enrollment = enrollments.entry(entity_id).or_insert_with(|| MfaEnrollment {
-            entity_id,
-            methods: Vec::new(),
-            required_methods: Vec::new(),
-            enrolled_at: Utc::now(),
-        });
+        let user_enrollment = enrollments
+            .entry(entity_id)
+            .or_insert_with(|| MfaEnrollment {
+                entity_id,
+                methods: Vec::new(),
+                required_methods: Vec::new(),
+                enrolled_at: Utc::now(),
+            });
 
         if !user_enrollment.methods.contains(&MfaMethod::Totp) {
             user_enrollment.methods.push(MfaMethod::Totp);
@@ -175,17 +182,22 @@ impl CombinedMfaService {
     }
 
     /// Regenerate recovery codes
-    pub async fn regenerate_recovery_codes(&self, entity_id: Uuid) -> AuthMethodResult<Vec<String>> {
+    pub async fn regenerate_recovery_codes(
+        &self,
+        entity_id: Uuid,
+    ) -> AuthMethodResult<Vec<String>> {
         let response = self.recovery_service.generate_codes(entity_id).await?;
 
         // Update central enrollment
         let mut enrollments = self.enrollments.write().await;
-        let user_enrollment = enrollments.entry(entity_id).or_insert_with(|| MfaEnrollment {
-            entity_id,
-            methods: Vec::new(),
-            required_methods: Vec::new(),
-            enrolled_at: Utc::now(),
-        });
+        let user_enrollment = enrollments
+            .entry(entity_id)
+            .or_insert_with(|| MfaEnrollment {
+                entity_id,
+                methods: Vec::new(),
+                required_methods: Vec::new(),
+                enrolled_at: Utc::now(),
+            });
 
         if !user_enrollment.methods.contains(&MfaMethod::Recovery) {
             user_enrollment.methods.push(MfaMethod::Recovery);
@@ -213,28 +225,39 @@ impl CombinedMfaService {
         let mut enrollments = self.enrollments.write().await;
         if let Some(enrollment) = enrollments.get_mut(&entity_id) {
             enrollment.methods.retain(|m| *m != MfaMethod::Totp);
-            enrollment.required_methods.retain(|m| *m != MfaMethod::Totp);
+            enrollment
+                .required_methods
+                .retain(|m| *m != MfaMethod::Totp);
         }
         drop(enrollments);
 
-        self.totp_service.remove_enrollment(entity_id).await
-            .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
+        self.totp_service
+            .remove_enrollment(entity_id)
+            .await
+            .map_err(|e| SecretonError::Internal {
+                message: e.to_string(),
+            })?;
         Ok(())
     }
 
     /// Enable SMS for an entity (initiate enrollment)
-    pub async fn enable_sms_impl(&self, entity_id: Uuid, phone_number: String) -> AuthMethodResult<()> {
+    pub async fn enable_sms_impl(
+        &self,
+        entity_id: Uuid,
+        phone_number: String,
+    ) -> AuthMethodResult<()> {
         self.sms_service.enroll(entity_id, phone_number).await?;
         self.sms_service.send_code(entity_id).await?;
         Ok(())
     }
 
     /// Verify and finalize SMS enrollment
-    pub async fn verify_and_enable_sms(&self, entity_id: Uuid, code: String) -> AuthMethodResult<bool> {
-        let request = SmsValidationRequest {
-            entity_id,
-            code,
-        };
+    pub async fn verify_and_enable_sms(
+        &self,
+        entity_id: Uuid,
+        code: String,
+    ) -> AuthMethodResult<bool> {
+        let request = SmsValidationRequest { entity_id, code };
         let is_valid = self.sms_service.validate(request).await?;
 
         if is_valid {
@@ -262,11 +285,12 @@ impl CombinedMfaService {
     }
 
     /// Verify and finalize Email enrollment
-    pub async fn verify_and_enable_email(&self, entity_id: Uuid, code: String) -> AuthMethodResult<bool> {
-        let request = EmailValidationRequest {
-            entity_id,
-            code,
-        };
+    pub async fn verify_and_enable_email(
+        &self,
+        entity_id: Uuid,
+        code: String,
+    ) -> AuthMethodResult<bool> {
+        let request = EmailValidationRequest { entity_id, code };
         let is_valid = self.email_service.validate(request).await?;
 
         if is_valid {
@@ -303,15 +327,20 @@ impl CombinedMfaService {
         &self,
         response: crate::mfa::webauthn::RegistrationResponse,
     ) -> AuthMethodResult<crate::mfa::webauthn::WebAuthnCredential> {
-        let credential = self.webauthn_service.complete_registration(response).await?;
+        let credential = self
+            .webauthn_service
+            .complete_registration(response)
+            .await?;
 
         let mut enrollments = self.enrollments.write().await;
-        let entry = enrollments.entry(credential.entity_id).or_insert(MfaEnrollment {
-            entity_id: credential.entity_id,
-            methods: Vec::new(),
-            required_methods: Vec::new(),
-            enrolled_at: Utc::now(),
-        });
+        let entry = enrollments
+            .entry(credential.entity_id)
+            .or_insert(MfaEnrollment {
+                entity_id: credential.entity_id,
+                methods: Vec::new(),
+                required_methods: Vec::new(),
+                enrolled_at: Utc::now(),
+            });
 
         if !entry.methods.contains(&MfaMethod::WebAuthn) {
             entry.methods.push(MfaMethod::WebAuthn);
@@ -428,7 +457,8 @@ impl MfaService for CombinedMfaService {
     async fn validate(&self, request: MfaValidationRequest) -> AuthMethodResult<bool> {
         // Try in-memory cache first for performance
         let enrollments = self.enrollments.read().await;
-        let has_memory_enrollment = enrollments.get(&request.entity_id)
+        let has_memory_enrollment = enrollments
+            .get(&request.entity_id)
             .map(|e| e.methods.contains(&request.method))
             .unwrap_or(false);
         drop(enrollments);
@@ -638,7 +668,8 @@ impl MfaService for CombinedMfaService {
         user_name: &str,
         display_name: &str,
     ) -> AuthMethodResult<crate::mfa::webauthn::RegistrationChallenge> {
-        self.start_webauthn_registration_impl(entity_id, user_name, display_name).await
+        self.start_webauthn_registration_impl(entity_id, user_name, display_name)
+            .await
     }
 
     async fn complete_webauthn_registration(

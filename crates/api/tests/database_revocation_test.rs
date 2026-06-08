@@ -9,9 +9,9 @@ use secreton_api::totp::TotpApiState;
 use secreton_common::{ServiceContainer, StandardServiceContainer};
 use secreton_secrets_database::{DatabaseConfig, DatabaseRole};
 use secreton_storage::StorageBackend;
+use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
-use serde_json::json;
 
 #[tokio::test]
 async fn test_database_lease_revocation_flow() {
@@ -84,18 +84,25 @@ async fn test_database_lease_revocation_flow() {
     );
 
     let mfa = Arc::new(secreton_auth::mfa::CombinedMfaService::new(
-        Arc::new(secreton_auth::mfa::InMemoryTotpService::new("test".to_string())),
-        Arc::new(secreton_auth::mfa::InMemorySmsService::new(Default::default())),
-        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(Default::default())),
+        Arc::new(secreton_auth::mfa::InMemoryTotpService::new(
+            "test".to_string(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemorySmsService::new(
+            Default::default(),
+        )),
+        Arc::new(secreton_auth::mfa::InMemoryEmailService::new(
+            Default::default(),
+        )),
         Arc::new(secreton_auth::mfa::InMemoryHardwareService::new()),
         Arc::new(secreton_auth::mfa::DefaultPushService::new_mock()),
         Arc::new(secreton_auth::mfa::DefaultWebAuthnService::new_default()),
         Arc::new(secreton_auth::mfa::DefaultRecoveryCodeService::new()),
     ));
 
-    let database_svc = Arc::new(
-        secreton_api::services::database::DatabaseService::new(storage.clone(), crypto.clone()),
-    );
+    let database_svc = Arc::new(secreton_api::services::database::DatabaseService::new(
+        storage.clone(),
+        crypto.clone(),
+    ));
 
     let mut container = StandardServiceContainer::default();
     container.register_service("storage".to_string(), storage.clone());
@@ -108,11 +115,37 @@ async fn test_database_lease_revocation_flow() {
     container.register_service("policy".to_string(), policy.clone());
     container.register_service("mfa".to_string(), mfa.clone());
     container.register_service("database".to_string(), database_svc.clone());
-    container.register_service("pki".to_string(), Arc::new(secreton_api::services::pki::PkiPersistentService::new(storage.clone(), crypto.clone())));
-    container.register_service("totp_engine".to_string(), Arc::new(secreton_api::services::totp_engine::TotpEngineService::new(storage.clone(), crypto.clone())));
-    container.register_service("transit".to_string(), Arc::new(secreton_crypto::transit::TransitEngine::new()));
-    container.register_service("ssh".to_string(), Arc::new(secreton_api::services::ssh::SshPersistentService::new(storage.clone(), crypto.clone())));
-    container.register_service("telemetry".to_string(), Arc::new(secreton_core::telemetry::TelemetryCollector::new(Default::default())));
+    container.register_service(
+        "pki".to_string(),
+        Arc::new(secreton_api::services::pki::PkiPersistentService::new(
+            storage.clone(),
+            crypto.clone(),
+        )),
+    );
+    container.register_service(
+        "totp_engine".to_string(),
+        Arc::new(secreton_api::services::totp_engine::TotpEngineService::new(
+            storage.clone(),
+            crypto.clone(),
+        )),
+    );
+    container.register_service(
+        "transit".to_string(),
+        Arc::new(secreton_crypto::transit::TransitEngine::new()),
+    );
+    container.register_service(
+        "ssh".to_string(),
+        Arc::new(secreton_api::services::ssh::SshPersistentService::new(
+            storage.clone(),
+            crypto.clone(),
+        )),
+    );
+    container.register_service(
+        "telemetry".to_string(),
+        Arc::new(secreton_core::telemetry::TelemetryCollector::new(
+            Default::default(),
+        )),
+    );
 
     let state = ApiState {
         kv: KVApiState::default(),
@@ -161,7 +194,8 @@ async fn test_database_lease_revocation_flow() {
         ..Default::default()
     };
 
-    let res = server.post("/api/v1/database/config")
+    let res = server
+        .post("/api/v1/database/config")
         .add_header("Authorization", format!("Bearer {}", token))
         .json(&db_config)
         .await;
@@ -173,7 +207,8 @@ async fn test_database_lease_revocation_flow() {
         default_ttl: 3600,
         max_ttl: 86400,
     };
-    let res = server.post("/api/v1/database/roles/test-role")
+    let res = server
+        .post("/api/v1/database/roles/test-role")
         .add_header("Authorization", format!("Bearer {}", token))
         .json(&role)
         .await;
@@ -200,7 +235,8 @@ async fn test_database_lease_revocation_flow() {
     storage.store(&lease_entry).await.unwrap();
 
     // Verify lease exists
-    let res = server.get("/api/v1/database/leases")
+    let res = server
+        .get("/api/v1/database/leases")
         .add_header("Authorization", format!("Bearer {}", token))
         .await;
     res.assert_status_ok();
@@ -213,7 +249,8 @@ async fn test_database_lease_revocation_flow() {
     // However, DatabaseEngine::revoke_credentials calls get_pg_pool, which tries to parse config.
     // If it fails to connect, it will return error.
 
-    let res = server.delete(&format!("/api/v1/database/leases/{}", lease_id))
+    let res = server
+        .delete(&format!("/api/v1/database/leases/{}", lease_id))
         .add_header("Authorization", format!("Bearer {}", token))
         .await;
 

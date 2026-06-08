@@ -42,25 +42,34 @@ impl TemplateManager {
     }
 
     /// Start the template rendering loop
-    pub async fn start(&self, mut shutdown_rx: tokio::sync::broadcast::Receiver<()>) -> Result<(), SecretonError> {
+    pub async fn start(
+        &self,
+        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<(), SecretonError> {
         if self.templates.is_empty() {
             info!("No templates configured, skipping template manager start");
             return Ok(());
         }
 
-        info!("Starting template manager for {} templates", self.templates.len());
+        info!(
+            "Starting template manager for {} templates",
+            self.templates.len()
+        );
 
         // Initial render
         self.render_all().await;
 
         // Calculate minimum interval from templates, default to 60s
-        let interval_secs = self.templates.iter()
+        let interval_secs = self
+            .templates
+            .iter()
             .map(|t| t.refresh_interval_seconds)
             .min()
             .unwrap_or(60)
             .max(1); // Ensure at least 1 second
 
-        let mut interval_timer = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+        let mut interval_timer =
+            tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
 
         loop {
             tokio::select! {
@@ -89,7 +98,8 @@ impl TemplateManager {
     /// Render a single template
     async fn render_template(&self, config: &TemplateConfig) -> Result<(), SecretonError> {
         // 1. Read source template
-        let source_content = tokio::fs::read_to_string(&config.source).await
+        let source_content = tokio::fs::read_to_string(&config.source)
+            .await
             .map_err(SecretonError::Io)?;
 
         // 2. Identify secrets to fetch
@@ -107,11 +117,11 @@ impl TemplateManager {
                 Ok(secret_data) => {
                     // Assuming standard Vault/Secreton structure: {"data": {"data": {...}}}
                     if let Some(inner_data) = secret_data.get("data").and_then(|d| d.get("data")) {
-                         secrets_map.insert(path.clone(), inner_data.clone());
+                        secrets_map.insert(path.clone(), inner_data.clone());
                     } else if let Some(inner_data) = secret_data.get("data") {
-                         secrets_map.insert(path.clone(), inner_data.clone());
+                        secrets_map.insert(path.clone(), inner_data.clone());
                     } else {
-                         secrets_map.insert(path.clone(), secret_data);
+                        secrets_map.insert(path.clone(), secret_data);
                     }
                 }
                 Err(e) => {
@@ -123,7 +133,10 @@ impl TemplateManager {
         // Add environment variables to context
         let env_vars: HashMap<String, String> = std::env::vars().collect();
         data_context.insert("env".to_string(), serde_json::to_value(env_vars).unwrap());
-        data_context.insert("secrets".to_string(), serde_json::to_value(&secrets_map).unwrap());
+        data_context.insert(
+            "secrets".to_string(),
+            serde_json::to_value(&secrets_map).unwrap(),
+        );
 
         // 4. Render
         // We register a custom helper that looks up in our pre-fetched map
@@ -138,26 +151,35 @@ impl TemplateManager {
         // Let's rely on the pre-filled `secrets` object in the context.
         // Transform the map keys to be handlebars friendly if possible, or just use bracket notation.
 
-        let rendered = renderer.render_template(&source_content, &data_context)
-            .map_err(|e| SecretonError::Template { message: format!("Template render error: {}", e) })?;
+        let rendered = renderer
+            .render_template(&source_content, &data_context)
+            .map_err(|e| SecretonError::Template {
+                message: format!("Template render error: {}", e),
+            })?;
 
         // 5. Write to destination
         let dest_path = Path::new(&config.destination);
 
         // Check if content changed
         let changed = if dest_path.exists() {
-             let current = tokio::fs::read_to_string(dest_path).await.unwrap_or_default();
-             current != rendered
+            let current = tokio::fs::read_to_string(dest_path)
+                .await
+                .unwrap_or_default();
+            current != rendered
         } else {
             true
         };
 
         if changed {
             if let Some(parent) = dest_path.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(SecretonError::Io)?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(SecretonError::Io)?;
             }
 
-            tokio::fs::write(dest_path, rendered).await.map_err(SecretonError::Io)?;
+            tokio::fs::write(dest_path, rendered)
+                .await
+                .map_err(SecretonError::Io)?;
             info!("Updated configuration file: {}", config.destination);
 
             // 6. Execute command
@@ -172,7 +194,10 @@ impl TemplateManager {
                     .map_err(SecretonError::Io)?;
 
                 if !output.status.success() {
-                    warn!("Command failed: {}", String::from_utf8_lossy(&output.stderr));
+                    warn!(
+                        "Command failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
                 }
             }
         }
@@ -194,9 +219,9 @@ impl TemplateManager {
         // This is a heuristic.
         let re = regex::Regex::new(r#"secrets\.\[['"]([^'"]+)['"]\]"#).unwrap();
         for cap in re.captures_iter(content) {
-             if let Some(path) = cap.get(1) {
-                 paths.push(path.as_str().to_string());
-             }
+            if let Some(path) = cap.get(1) {
+                paths.push(path.as_str().to_string());
+            }
         }
 
         paths

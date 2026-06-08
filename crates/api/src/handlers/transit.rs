@@ -53,7 +53,7 @@ pub struct CreateKeyRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EncryptRequest {
-    pub plaintext: String, // Base64 encoded
+    pub plaintext: String,       // Base64 encoded
     pub context: Option<String>, // Base64 encoded
     pub key_version: Option<u32>,
 }
@@ -172,7 +172,10 @@ pub async fn get_key(
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<secreton_crypto::transit::KeyInfo>>> {
     validate_name(&name)?;
-    let info = state.transit.get_key_info(&name).await
+    let info = state
+        .transit
+        .get_key_info(&name)
+        .await
         .map_err(map_crypto_err)?;
     Ok(Json(ApiResponse::success(info)))
 }
@@ -215,16 +218,25 @@ pub async fn create_key(
         ..KeyOptions::default()
     };
 
-    state.transit.create_key(name.clone(), key_type.clone(), Some(options)).await
-        .map_err(|e| { warn!("Failed to create key {}: {:?}", name, e); map_crypto_err(e) })?;
+    state
+        .transit
+        .create_key(name.clone(), key_type.clone(), Some(options))
+        .await
+        .map_err(|e| {
+            warn!("Failed to create key {}: {:?}", name, e);
+            map_crypto_err(e)
+        })?;
     info!("Created transit key: {}", name);
 
-    state.audit.log_event(SecurityEventType::KeyGeneration {
-        key_type: format!("{:?}", key_type),
-        key_id: name,
-        algorithm: format!("{:?}", key_type),
-        user: user.username,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::KeyGeneration {
+            key_type: format!("{:?}", key_type),
+            key_id: name,
+            algorithm: format!("{:?}", key_type),
+            user: user.username,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(())))
 }
@@ -243,16 +255,21 @@ pub async fn rotate_key(
     }
 
     validate_name(&name)?;
-    let new_version = state.transit.rotate_key(&name).await
-        .map_err(|e| { warn!("Failed to rotate key {}: {:?}", name, e); map_crypto_err(e) })?;
+    let new_version = state.transit.rotate_key(&name).await.map_err(|e| {
+        warn!("Failed to rotate key {}: {:?}", name, e);
+        map_crypto_err(e)
+    })?;
     info!("Rotated transit key: {} to version {}", name, new_version);
 
-    state.audit.log_event(SecurityEventType::KeyRotation {
-        old_key_id: name.clone(),
-        new_key_id: name,
-        algorithm: format!("v{}", new_version),
-        user: user.username,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::KeyRotation {
+            old_key_id: name.clone(),
+            new_key_id: name,
+            algorithm: format!("v{}", new_version),
+            user: user.username,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(new_version)))
 }
@@ -271,14 +288,19 @@ pub async fn delete_key(
     }
 
     validate_name(&name)?;
-    state.transit.delete_key(&name).await
-        .map_err(|e| { warn!("Failed to delete key {}: {:?}", name, e); map_crypto_err(e) })?;
+    state.transit.delete_key(&name).await.map_err(|e| {
+        warn!("Failed to delete key {}: {:?}", name, e);
+        map_crypto_err(e)
+    })?;
     info!("Deleted transit key: {}", name);
 
-    state.audit.log_event(SecurityEventType::KeyDeletion {
-        key_id: name,
-        user: user.username,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::KeyDeletion {
+            key_id: name,
+            user: user.username,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(())))
 }
@@ -291,23 +313,35 @@ pub async fn encrypt(
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
     validate_name(&name)?;
-    let plaintext = BASE64_STANDARD.decode(&request.plaintext)
+    let plaintext = BASE64_STANDARD
+        .decode(&request.plaintext)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 plaintext: {}", e)))?;
 
     let data_size = plaintext.len() as u64;
 
-    let context = request.context.map(|c| BASE64_STANDARD.decode(&c))
+    let context = request
+        .context
+        .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
 
-    let ciphertext = state.transit.encrypt(&name, &plaintext, context.as_deref(), request.key_version).await
-        .map_err(|e| { warn!("Failed to encrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
+    let ciphertext = state
+        .transit
+        .encrypt(&name, &plaintext, context.as_deref(), request.key_version)
+        .await
+        .map_err(|e| {
+            warn!("Failed to encrypt with key {}: {:?}", name, e);
+            map_crypto_err(e)
+        })?;
 
-    state.audit.log_event(SecurityEventType::EncryptionOperation {
-        key_id: name,
-        user: user.username,
-        data_size,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::EncryptionOperation {
+            key_id: name,
+            user: user.username,
+            data_size,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(EncryptResponse { ciphertext })))
 }
@@ -320,21 +354,32 @@ pub async fn decrypt(
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
     validate_name(&name)?;
-    let context = request.context.map(|c| BASE64_STANDARD.decode(&c))
+    let context = request
+        .context
+        .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
 
-    let plaintext = state.transit.decrypt(&name, &request.ciphertext, context.as_deref()).await
-        .map_err(|e| { warn!("Failed to decrypt with key {}: {:?}", name, e); map_crypto_err(e) })?;
+    let plaintext = state
+        .transit
+        .decrypt(&name, &request.ciphertext, context.as_deref())
+        .await
+        .map_err(|e| {
+            warn!("Failed to decrypt with key {}: {:?}", name, e);
+            map_crypto_err(e)
+        })?;
 
-    state.audit.log_event(SecurityEventType::DecryptionOperation {
-        key_id: name,
-        user: user.username,
-        data_size: request.ciphertext.len() as u64,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::DecryptionOperation {
+            key_id: name,
+            user: user.username,
+            data_size: request.ciphertext.len() as u64,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(DecryptResponse {
-        plaintext: BASE64_STANDARD.encode(plaintext)
+        plaintext: BASE64_STANDARD.encode(plaintext),
     })))
 }
 
@@ -346,19 +391,29 @@ pub async fn sign(
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
     validate_name(&name)?;
-    let input = BASE64_STANDARD.decode(&request.input)
+    let input = BASE64_STANDARD
+        .decode(&request.input)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
     let data_size = input.len() as u64;
 
-    let signature = state.transit.sign(&name, &input, request.algorithm, request.key_version).await
-        .map_err(|e| { warn!("Failed to sign with key {}: {:?}", name, e); map_crypto_err(e) })?;
+    let signature = state
+        .transit
+        .sign(&name, &input, request.algorithm, request.key_version)
+        .await
+        .map_err(|e| {
+            warn!("Failed to sign with key {}: {:?}", name, e);
+            map_crypto_err(e)
+        })?;
 
-    state.audit.log_event(SecurityEventType::SigningOperation {
-        key_id: name,
-        user: user.username,
-        data_size,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::SigningOperation {
+            key_id: name,
+            user: user.username,
+            data_size,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(SignResponse { signature })))
 }
@@ -371,20 +426,30 @@ pub async fn verify(
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
     validate_name(&name)?;
-    let input = BASE64_STANDARD.decode(&request.input)
+    let input = BASE64_STANDARD
+        .decode(&request.input)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
     let data_size = input.len() as u64;
 
-    let valid = state.transit.verify(&name, &input, &request.signature, request.algorithm).await
-        .map_err(|e| { warn!("Failed to verify with key {}: {:?}", name, e); map_crypto_err(e) })?;
+    let valid = state
+        .transit
+        .verify(&name, &input, &request.signature, request.algorithm)
+        .await
+        .map_err(|e| {
+            warn!("Failed to verify with key {}: {:?}", name, e);
+            map_crypto_err(e)
+        })?;
 
-    state.audit.log_event(SecurityEventType::VerificationOperation {
-        key_id: name,
-        user: user.username,
-        data_size,
-        valid,
-    }).await;
+    state
+        .audit
+        .log_event(SecurityEventType::VerificationOperation {
+            key_id: name,
+            user: user.username,
+            data_size,
+            valid,
+        })
+        .await;
 
     Ok(Json(ApiResponse::success(VerifyResponse { valid })))
 }
@@ -395,10 +460,14 @@ pub async fn hash(
     AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
-    let input = BASE64_STANDARD.decode(&request.input)
+    let input = BASE64_STANDARD
+        .decode(&request.input)
         .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
 
-    let hash = state.transit.hash(&input, request.algorithm).await
+    let hash = state
+        .transit
+        .hash(&input, request.algorithm)
+        .await
         .map_err(map_crypto_err)?;
 
     Ok(Json(ApiResponse::success(HashResponse { hash })))
@@ -410,11 +479,14 @@ pub async fn random(
     AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<RandomRequest>,
 ) -> ApiResult<Json<ApiResponse<RandomResponse>>> {
-    let data = state.transit.random(request.bytes).await
+    let data = state
+        .transit
+        .random(request.bytes)
+        .await
         .map_err(map_crypto_err)?;
 
     Ok(Json(ApiResponse::success(RandomResponse {
-        data: BASE64_STANDARD.encode(data)
+        data: BASE64_STANDARD.encode(data),
     })))
 }
 
@@ -476,8 +548,7 @@ mod tests {
             .expect("Failed to generate token");
 
         let app = create_routes().with_state(services.into());
-        let server = TestServer::new(app.into_make_service())
-            .expect("failed to start test server");
+        let server = TestServer::new(app.into_make_service()).expect("failed to start test server");
         (server, token)
     }
 

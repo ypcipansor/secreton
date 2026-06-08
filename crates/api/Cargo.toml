@@ -63,6 +63,10 @@ utoipa-swagger-ui.workspace = true
 
 tonic = { workspace = true, features = ["transport", "codegen"] }
 
+# AWS SDK
+aws-config = "1.0"
+aws-sdk-secretsmanager = "1.0"
+
 # Internal crates
 secreton-core = { path = "../core" }
 secreton-storage = { path = "../storage" }

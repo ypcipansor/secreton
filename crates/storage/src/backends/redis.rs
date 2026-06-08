@@ -5,9 +5,9 @@ use crate::{
     StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
-use secreton_common::models::oauth_state::OAuthState;
 use chrono::Utc;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
+use secreton_common::models::oauth_state::OAuthState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -194,13 +194,13 @@ impl StorageBackend for RedisBackend {
             if let Some(expires_at) = entry.expires_at {
                 let ttl = (expires_at - Utc::now()).num_seconds();
                 if ttl > 0 {
-                     conn.set_ex::<_, _, ()>(&path_key, entry.id.to_string(), ttl as u64)
+                    conn.set_ex::<_, _, ()>(&path_key, entry.id.to_string(), ttl as u64)
                         .await
                         .map_err(|e| StorageError::QueryFailed {
                             message: format!("Failed to store path mapping with TTL: {}", e),
                         })?;
                 } else {
-                     conn.del::<_, ()>(&path_key)
+                    conn.del::<_, ()>(&path_key)
                         .await
                         .map_err(|e| StorageError::QueryFailed {
                             message: format!("Failed to delete expired path mapping: {}", e),
@@ -327,11 +327,17 @@ impl StorageBackend for RedisBackend {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "Redis".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Redis".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "Redis".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "Redis".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {

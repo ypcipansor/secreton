@@ -557,7 +557,9 @@ impl SecretonError {
             | SecretonError::Encryption { .. }
             | SecretonError::Decryption { .. } => "cryptography",
 
-            SecretonError::RateLimitExceeded { .. } | SecretonError::QuotaExceeded { .. } => "limits",
+            SecretonError::RateLimitExceeded { .. } | SecretonError::QuotaExceeded { .. } => {
+                "limits"
+            }
 
             SecretonError::Configuration { .. } => "configuration",
 
@@ -618,11 +620,15 @@ impl SecretonError {
 impl IntoResponse for SecretonError {
     fn into_response(self) -> Response {
         let status_code = self.status_code();
-        let error_message = self.to_string();
+        let mut error_message = self.to_string();
 
         // Log the error appropriately
         if self.is_error() {
             tracing::error!("API Error [{}]: {}", status_code, error_message);
+            // Sanitize internal errors for client responses
+            if status_code == StatusCode::INTERNAL_SERVER_ERROR {
+                error_message = "An internal server error occurred".to_string();
+            }
         } else if self.is_warning() {
             tracing::warn!("API Warning [{}]: {}", status_code, error_message);
         } else {

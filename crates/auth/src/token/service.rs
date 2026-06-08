@@ -205,13 +205,15 @@ impl TokenService for CombinedTokenService {
             .filter(|token| {
                 // Filter by entity_id if specified
                 if let Some(entity_id) = request.entity_id
-                    && token.entity_id != Some(entity_id) {
+                    && token.entity_id != Some(entity_id)
+                {
                     return false;
                 }
 
                 // Filter by token_type if specified
                 if let Some(token_type) = &request.token_type
-                    && token.token_type != *token_type {
+                    && token.token_type != *token_type
+                {
                     return false;
                 }
 

@@ -98,7 +98,8 @@ impl CacheBackend for InMemoryCache {
         match data.get(key) {
             Some(entry) => {
                 if let Some(expires_at) = entry.expires_at
-                    && std::time::Instant::now() > expires_at {
+                    && std::time::Instant::now() > expires_at
+                {
                     stats.miss_count += 1;
                     return Ok(None);
                 }
@@ -254,7 +255,8 @@ where
             && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
                 &cached_data,
                 bincode::config::standard(),
-            ) {
+            )
+        {
             return Ok(Some(entry));
         }
 
@@ -263,7 +265,9 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) = bincode::serde::encode_to_vec(entry, bincode::config::standard()) {
+            && let Ok(serialized) =
+                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+        {
             let _ = self
                 .cache
                 .set(&cache_key, serialized, Some(self.default_ttl))
@@ -281,7 +285,8 @@ where
             && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
                 &cached_data,
                 bincode::config::standard(),
-            ) {
+            )
+        {
             return Ok(Some(entry));
         }
 
@@ -290,7 +295,9 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) = bincode::serde::encode_to_vec(entry, bincode::config::standard()) {
+            && let Ok(serialized) =
+                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+        {
             let _ = self
                 .cache
                 .set(&cache_key, serialized, Some(self.default_ttl))

@@ -79,10 +79,22 @@ pub struct CertificateResponse {
 impl std::fmt::Debug for CertificateResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CertificateResponse")
-            .field("certificate", &format!("{}...", &self.certificate.chars().take(40).collect::<String>()))
+            .field(
+                "certificate",
+                &format!(
+                    "{}...",
+                    &self.certificate.chars().take(40).collect::<String>()
+                ),
+            )
             .field("private_key", &"[REDACTED]")
             .field("serial_number", &self.serial_number)
-            .field("issuing_ca", &format!("{}...", &self.issuing_ca.chars().take(40).collect::<String>()))
+            .field(
+                "issuing_ca",
+                &format!(
+                    "{}...",
+                    &self.issuing_ca.chars().take(40).collect::<String>()
+                ),
+            )
             .field("ca_chain", &format!("[{} certs]", self.ca_chain.len()))
             .field("expiration", &self.expiration)
             .field("revocation_time", &self.revocation_time)
