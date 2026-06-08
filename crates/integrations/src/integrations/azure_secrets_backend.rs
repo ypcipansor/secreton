@@ -48,7 +48,7 @@ pub enum ContentType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AzureSecret {
     pub secret_name: String,
-    pub secret_id: String,  // Azure resource ID
+    pub secret_id: String,     // Azure resource ID
     pub secreton_path: String, // Secret path mapping
     pub value: String,
     pub content_type: ContentType,
@@ -189,8 +189,9 @@ impl AzureSecretsBackend {
                     }
                     ConflictResolution::PreferSecret => {
                         // Update Azure with Secret value
-                        let _secreton_value =
-                            self.mock_get_secreton_value(&azure_secret.secreton_path).await?;
+                        let _secreton_value = self
+                            .mock_get_secreton_value(&azure_secret.secreton_path)
+                            .await?;
                         // Would update Azure here
                         synced_count += 1;
                     }

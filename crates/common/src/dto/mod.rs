@@ -1,2 +1,2 @@
-pub mod lifecycle;
 pub mod integrations;
+pub mod lifecycle;

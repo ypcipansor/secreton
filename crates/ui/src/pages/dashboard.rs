@@ -1,6 +1,6 @@
-use leptos::prelude::*;
 use crate::api;
 use crate::components::card::Card;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -43,23 +43,17 @@ struct SecretMetrics {
 #[component]
 pub fn Dashboard() -> impl IntoView {
     // Parallel fetching of resources
-    let health_resource = LocalResource::new(
-        move || async move {
-            api::get::<HealthResponse>("/sys/health").await
-        },
-    );
+    let health_resource =
+        LocalResource::new(move || async move { api::get::<HealthResponse>("/sys/health").await });
 
-    let seal_resource = LocalResource::new(
-        move || async move {
-            api::get::<SealStatusResponse>("/sys/seal-status").await
-        },
-    );
+    let seal_resource = LocalResource::new(move || async move {
+        api::get::<SealStatusResponse>("/sys/seal-status").await
+    });
 
-    let metrics_resource = LocalResource::new(
-        move || async move {
-            api::get::<SystemMetrics>("/admin/metrics").await
-        },
-    );
+    let metrics_resource =
+        LocalResource::new(
+            move || async move { api::get::<SystemMetrics>("/admin/metrics").await },
+        );
 
     view! {
         <div class="space-y-6 animate-fade-in">

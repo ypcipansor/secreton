@@ -76,10 +76,7 @@ impl SecretonSdk for PythonSdkClient {
             success: true,
             data: Some(HashMap::from([
                 ("status".to_string(), "healthy".to_string()),
-                (
-                    "version".to_string(),
-                    env!("CARGO_PKG_VERSION").to_string(),
-                ),
+                ("version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
             ])),
             error: None,
             metadata: HashMap::new(),

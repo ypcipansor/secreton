@@ -170,7 +170,8 @@ impl HardwareService for InMemoryHardwareService {
         let enrollments = self.enrollments.read().await;
 
         if let Some(credential_ids) = entity_enrollments.get(&entity_id)
-            && let Some(first_credential_id) = credential_ids.first() {
+            && let Some(first_credential_id) = credential_ids.first()
+        {
             return Ok(enrollments.get(first_credential_id).cloned());
         }
 

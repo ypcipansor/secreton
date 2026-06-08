@@ -7,6 +7,7 @@ pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod database;
+pub mod integrations;
 pub mod lifecycle;
 pub mod pki;
 pub mod secret;
@@ -15,7 +16,6 @@ pub mod totp_engine;
 
 use anyhow::Result;
 use secreton_common::{InitResult, ServiceContainer, ServiceHealth, StandardServiceContainer};
-use secreton_config::Config;
 use secreton_core::telemetry::{TelemetryCollector, TelemetryConfig};
 use secreton_storage::{StorageBackend, StorageFactory};
 use std::sync::Arc;
@@ -38,7 +38,8 @@ use secreton_performance::{SecretPerformanceConfig, SecretPerformanceOptimizer};
 // MFA Services
 use secreton_auth::mfa::{
     CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
-    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig, SmsProvider,
+    EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
+    SmsProvider,
 };
 
 /// Service container holding all application services
@@ -71,13 +72,12 @@ pub struct ApiServiceContainer {
     pub telemetry: Arc<TelemetryCollector>,
     pub identity: Arc<dyn IdentityService + Send + Sync>,
     pub lifecycle: Arc<lifecycle::LifecycleService>,
+    pub integrations: Arc<integrations::IntegrationsService>,
 }
 
 impl ApiServiceContainer {
     /// Create new service container
     pub async fn new(config: &ApiConfig) -> Result<Self> {
-        let _registry = StandardServiceContainer::new();
-
         let mut config_clone = config.clone();
         if config_clone.audit.enabled {
             if config_clone.audit.retention_days == 0 {
@@ -111,7 +111,15 @@ impl ApiServiceContainer {
         ));
 
         // Initialize audit logger
-        let audit = Arc::new(AuditLogger::new(storage.clone(), config_clone.audit.retention_days, config_clone.audit.max_batch_size, config_clone.audit.enabled).await?);
+        let audit = Arc::new(
+            AuditLogger::new(
+                storage.clone(),
+                config_clone.audit.retention_days,
+                config_clone.audit.max_batch_size,
+                config_clone.audit.enabled,
+            )
+            .await?,
+        );
 
         // Initialize MFA Services first (needed for Auth)
         let mfa_config = &config.auth.mfa;
@@ -123,7 +131,6 @@ impl ApiServiceContainer {
         ));
 
         // Configure SMS Config
-        // Map from ApiConfig::SmsConfig to Auth::SmsConfig
         let sms_config = if let Some(sms) = &mfa_config.sms {
             SmsConfig {
                 provider: match sms.provider.to_lowercase().as_str() {
@@ -135,7 +142,7 @@ impl ApiServiceContainer {
                     },
                 },
                 api_key: sms.api_key.clone(),
-                api_secret: None, // Config doesn't have secret yet
+                api_secret: None,
                 from_number: sms.from_number.clone(),
                 message_template: "Your Secreton code is {code}".to_string(),
                 code_length: 6,
@@ -199,11 +206,6 @@ impl ApiServiceContainer {
         ));
 
         // Initialize secret service.
-        //
-        // The lifecycle service will be constructed below and injected into
-        // `secreton` via `with_lifecycle` before the `Arc` is shared with the
-        // rest of the system, so there is exactly one `SecretService`
-        // instance and it always has its lifecycle wiring populated.
         let secreton_inner = secret::SecretService::new(
             storage.clone(),
             crypto.clone(),
@@ -219,8 +221,6 @@ impl ApiServiceContainer {
             storage.clone(),
             crypto.clone(),
         ));
-        // TODO: Register other integration services (AWS Secrets Manager, Azure Key Vault)
-        // here as they are developed for end-to-end usage.
 
         // Initialize PKI service
         let pki = Arc::new(pki::PkiPersistentService::new(
@@ -238,6 +238,13 @@ impl ApiServiceContainer {
         let totp_engine = Arc::new(totp_engine::TotpEngineService::new(
             storage.clone(),
             crypto.clone(),
+        ));
+
+        // Initialize integrations service
+        let integrations = Arc::new(integrations::IntegrationsService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
         ));
 
         // Initialize admin service
@@ -261,18 +268,7 @@ impl ApiServiceContainer {
             tracing::warn!("Failed to start telemetry collection: {}", e);
         }
 
-        // Initialize Secret Lifecycle service. The background worker is
-        // deliberately NOT spawned here — it is spawned in `start_services()`
-        // to match the `ServiceContainer` trait pattern and to avoid running
-        // a background task in contexts (e.g. tests) that only construct the
-        // container without starting it.
-        // TODO: Source LifecycleConfig from ApiConfig once a dedicated section exists.
-        // Defaults are intentionally conservative: `enabled: false` and
-        // `cleanup_enabled: false` ensure that no destructive
-        // `storage.delete_expired` sweep runs on upgrade until an operator
-        // explicitly opts in via configuration. Flipping these on by default
-        // would risk silently deleting expired-but-still-referenced secrets
-        // on the first startup after this feature lands.
+        // Initialize Secret Lifecycle service.
         let lifecycle_config =
             secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
                 enabled: false,
@@ -288,14 +284,10 @@ impl ApiServiceContainer {
             lifecycle_config,
         ));
 
-        // Inject lifecycle into the (still unique) secret service before
-        // sharing it via `Arc`, so every consumer sees the wired-up version.
-        // Doing the injection on the unique value avoids the
-        // `Arc::unwrap_or_clone` footgun that would otherwise silently
-        // produce a stale clone whose `lifecycle` field is `None`.
+        // Inject lifecycle into secret service
         let secreton = Arc::new(secreton_inner.with_lifecycle(lifecycle.clone()));
 
-        // Register in registry (optional if we use fields, but good for trait support)
+        // Register in registry
         let mut registry = StandardServiceContainer::new();
         registry.register_service("storage".to_string(), storage.clone());
         registry.register_service("crypto".to_string(), crypto.clone());
@@ -315,6 +307,7 @@ impl ApiServiceContainer {
         registry.register_service("telemetry".to_string(), telemetry.clone());
         registry.register_service("identity".to_string(), identity.clone());
         registry.register_service("lifecycle".to_string(), lifecycle.clone());
+        registry.register_service("integrations".to_string(), integrations.clone());
 
         Ok(Self {
             config: config.clone(),
@@ -338,6 +331,7 @@ impl ApiServiceContainer {
             telemetry,
             identity,
             lifecycle,
+            integrations,
         })
     }
 
@@ -349,7 +343,6 @@ impl ApiServiceContainer {
 
     /// Initialize core services
     async fn initialize_services(&self) -> Result<()> {
-        // Initialize individual services if needed
         Ok(())
     }
 }
@@ -370,33 +363,19 @@ impl ServiceContainer for ApiServiceContainer {
     }
 
     async fn start_services(&self) -> InitResult<()> {
-        // Start services in dependency order.
-        // Spawning the lifecycle worker here (rather than in `new`) ensures
-        // that contexts which only construct the container without starting
-        // it (e.g. unit tests) don't pay the cost of a background task, and
-        // keeps start/stop symmetrical.
         self.lifecycle.spawn_worker().await;
         Ok(())
     }
 
     async fn stop_services(&self) -> InitResult<()> {
-        // Stop services in reverse dependency order
-
-        // Signal lifecycle worker to shut down cooperatively and wait for any
-        // in-flight processing (e.g. storage.delete_expired) to finish.
         self.lifecycle.shutdown_and_wait().await;
-
-        // Flush audit logs
         if let Err(e) = self.audit.flush().await {
             tracing::warn!("Failed to flush audit logs on shutdown: {}", e);
         }
-
         Ok(())
     }
 
     async fn health_check(&self) -> InitResult<ServiceHealth> {
-        // Check health of all registered services
-        // Implementation would check each service's health
         Ok(ServiceHealth::Healthy)
     }
 
@@ -410,18 +389,6 @@ impl ServiceContainer for ApiServiceContainer {
 }
 
 impl Drop for ApiServiceContainer {
-    /// Defense-in-depth: signal the lifecycle worker to stop on container
-    /// drop, even when callers (e.g. tests, ad-hoc `main` functions, future
-    /// embedders) never invoke `stop_services()`. `LifecycleService::Drop`
-    /// already issues the same signal once the last `Arc` is dropped, but
-    /// this container holds the only strong reference in many call paths,
-    /// so signaling here makes shutdown immediate instead of waiting on the
-    /// worker's next tick (up to one period away).
-    ///
-    /// We deliberately do NOT `await` worker completion here — `Drop` is
-    /// synchronous and blocking on a tokio task from inside `Drop` is
-    /// unsound. Callers that need to wait for in-flight sweeps (e.g. to
-    /// flush audit before exit) must call `stop_services()` explicitly.
     fn drop(&mut self) {
         self.lifecycle.shutdown();
     }

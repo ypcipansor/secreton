@@ -88,7 +88,9 @@ pub struct InMemorySmsService {
 impl Default for SmsConfig {
     fn default() -> Self {
         Self {
-            provider: SmsProvider::Custom { url: "http://localhost/sms".to_string() },
+            provider: SmsProvider::Custom {
+                url: "http://localhost/sms".to_string(),
+            },
             api_key: "".to_string(),
             api_secret: None,
             from_number: "".to_string(),
@@ -229,7 +231,9 @@ impl SmsService for InMemorySmsService {
         let mut pending_codes = self.pending_codes.write().await;
 
         if let Some(pending_code) = pending_codes.get(&request.entity_id)
-            && pending_code.code == request.code && pending_code.expiry > Utc::now() {
+            && pending_code.code == request.code
+            && pending_code.expiry > Utc::now()
+        {
             // Code is valid, remove it and update enrollment
             pending_codes.remove(&request.entity_id);
 

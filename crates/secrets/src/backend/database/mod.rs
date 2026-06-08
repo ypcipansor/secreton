@@ -1,7 +1,7 @@
 //! Database backend implementations
 
-use async_trait::async_trait;
 use crate::error::SecretResult;
+use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -17,7 +17,11 @@ pub use postgres::*;
 #[async_trait]
 pub trait DatabaseBackend: Send + Sync {
     /// Generate credentials for a specific role
-    async fn generate_credentials(&self, role_name: &str, role_sql: &str) -> SecretResult<HashMap<String, Value>>;
+    async fn generate_credentials(
+        &self,
+        role_name: &str,
+        role_sql: &str,
+    ) -> SecretResult<HashMap<String, Value>>;
 
     /// Test the connection to the database
     async fn test_connection(&self) -> SecretResult<()>;

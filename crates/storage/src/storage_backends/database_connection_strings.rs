@@ -398,7 +398,8 @@ mod tests {
             template_id: "valid".to_string(),
             name: "Valid".to_string(),
             database_type: DatabaseType::MySQL,
-            template_string: "mysql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}".to_string(),
+            template_string: "mysql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}"
+                .to_string(),
             default_port: 3306,
             ssl_enabled: false,
             connection_options: HashMap::new(),
@@ -415,7 +416,11 @@ mod tests {
         assert!(connection_result.is_ok());
 
         let connection = connection_result.unwrap();
-        assert!(connection.connection_string.contains("mysql://appuser:secret123@localhost:3306/myapp"));
+        assert!(
+            connection
+                .connection_string
+                .contains("mysql://appuser:secret123@localhost:3306/myapp")
+        );
 
         // Test invalid template (missing placeholders)
         let invalid_template = ConnectionTemplate {

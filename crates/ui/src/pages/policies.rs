@@ -1,10 +1,10 @@
-use leptos::prelude::*;
-use leptos::task::spawn_local;
 use crate::api;
 use crate::components::button::{Button, ButtonVariant};
 use crate::components::card::Card;
-use crate::components::modal::Modal;
 use crate::components::input::Input;
+use crate::components::modal::Modal;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,17 +54,14 @@ struct PolicyMetadata {
 #[component]
 pub fn PoliciesList() -> impl IntoView {
     // Fetch roles and policies
-    let roles_resource = LocalResource::new(
-        move || async move {
-            api::get::<Vec<RoleResponse>>("/admin/roles").await
-        },
-    );
+    let roles_resource =
+        LocalResource::new(
+            move || async move { api::get::<Vec<RoleResponse>>("/admin/roles").await },
+        );
 
-    let policies_resource = LocalResource::new(
-        move || async move {
-            api::get::<Vec<PolicyResponse>>("/secret/policies").await
-        },
-    );
+    let policies_resource = LocalResource::new(move || async move {
+        api::get::<Vec<PolicyResponse>>("/secret/policies").await
+    });
 
     // Modal state
     let (show_modal, set_show_modal) = signal(false);
@@ -74,7 +71,8 @@ pub fn PoliciesList() -> impl IntoView {
 
     let handle_create = move || {
         spawn_local(async move {
-            let perms: Vec<String> = role_perms.get()
+            let perms: Vec<String> = role_perms
+                .get()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
@@ -82,7 +80,11 @@ pub fn PoliciesList() -> impl IntoView {
 
             let req = CreateRoleRequest {
                 name: role_name.get(),
-                description: if role_desc.get().is_empty() { None } else { Some(role_desc.get()) },
+                description: if role_desc.get().is_empty() {
+                    None
+                } else {
+                    Some(role_desc.get())
+                },
                 permissions: perms,
             };
 
@@ -97,8 +99,13 @@ pub fn PoliciesList() -> impl IntoView {
     };
 
     let handle_delete = move |name: String| {
-         let Some(window) = web_sys::window() else { return };
-         if !window.confirm_with_message(&format!("Delete role {}?", name)).unwrap_or(false) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if !window
+            .confirm_with_message(&format!("Delete role {}?", name))
+            .unwrap_or(false)
+        {
             return;
         }
         spawn_local(async move {
@@ -109,16 +116,21 @@ pub fn PoliciesList() -> impl IntoView {
     };
 
     let handle_delete_policy = move |name: String| {
-        let Some(window) = web_sys::window() else { return };
-        if !window.confirm_with_message(&format!("Delete policy {}?", name)).unwrap_or(false) {
-           return;
-       }
-       spawn_local(async move {
-           let url = format!("/secret/policies/{}", name);
-           let _ = api::delete::<serde_json::Value>(&url).await;
-           policies_resource.refetch();
-       });
-   };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if !window
+            .confirm_with_message(&format!("Delete policy {}?", name))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        spawn_local(async move {
+            let url = format!("/secret/policies/{}", name);
+            let _ = api::delete::<serde_json::Value>(&url).await;
+            policies_resource.refetch();
+        });
+    };
 
     view! {
         <div class="space-y-12">

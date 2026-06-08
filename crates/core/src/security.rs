@@ -402,8 +402,7 @@ impl SecurityAssessment {
 
         let vuln_penalty = self.vulnerabilities.len() as f64 * 0.1;
 
-        (compliance_score * 0.6 + self.crypto_strength_score * 0.4 - vuln_penalty)
-            .clamp(0.0, 1.0)
+        (compliance_score * 0.6 + self.crypto_strength_score * 0.4 - vuln_penalty).clamp(0.0, 1.0)
     }
 }
 

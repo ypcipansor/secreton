@@ -85,8 +85,7 @@ impl StorageTransaction for MySQLTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(MySQLOperation::Store(entry.clone()));
+        self.operations.push(MySQLOperation::Store(entry.clone()));
         Ok(())
     }
 
@@ -96,8 +95,7 @@ impl StorageTransaction for MySQLTransaction {
                 message: "Transaction already committed".to_string(),
             });
         }
-        self.operations
-            .push(MySQLOperation::Update(entry.clone()));
+        self.operations.push(MySQLOperation::Update(entry.clone()));
         Ok(())
     }
 
@@ -156,19 +154,17 @@ impl StorageTransaction for MySQLTransaction {
                             }
                         })?;
 
-                    let metadata_json =
-                        serde_json::to_string(&entry.metadata).map_err(|e| {
-                            StorageError::SerializationError {
-                                message: format!("Failed to serialize metadata: {}", e),
-                            }
-                        })?;
+                    let metadata_json = serde_json::to_string(&entry.metadata).map_err(|e| {
+                        StorageError::SerializationError {
+                            message: format!("Failed to serialize metadata: {}", e),
+                        }
+                    })?;
 
-                    let tags_json =
-                        serde_json::to_string(&entry.tags).map_err(|e| {
-                            StorageError::SerializationError {
-                                message: format!("Failed to serialize tags: {}", e),
-                            }
-                        })?;
+                    let tags_json = serde_json::to_string(&entry.tags).map_err(|e| {
+                        StorageError::SerializationError {
+                            message: format!("Failed to serialize tags: {}", e),
+                        }
+                    })?;
 
                     let expires_at: Option<NaiveDateTime> =
                         entry.expires_at.map(|dt| dt.naive_utc());
@@ -294,10 +290,36 @@ impl MySQLStorage {
         // Prevent SQL keywords as table names
         let uppercase = name.to_uppercase();
         let sql_keywords = [
-            "SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TABLE", "DATABASE",
-            "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "USER", "GRANT", "REVOKE",
-            "FROM", "WHERE", "JOIN", "ORDER", "GROUP", "BY", "KEY", "LIMIT", "OFFSET", "HAVING",
-            "UNION", "VALUES", "SET",
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "DROP",
+            "CREATE",
+            "ALTER",
+            "TABLE",
+            "DATABASE",
+            "INDEX",
+            "VIEW",
+            "PROCEDURE",
+            "FUNCTION",
+            "TRIGGER",
+            "USER",
+            "GRANT",
+            "REVOKE",
+            "FROM",
+            "WHERE",
+            "JOIN",
+            "ORDER",
+            "GROUP",
+            "BY",
+            "KEY",
+            "LIMIT",
+            "OFFSET",
+            "HAVING",
+            "UNION",
+            "VALUES",
+            "SET",
         ];
 
         if sql_keywords.contains(&uppercase.as_str()) {
@@ -494,9 +516,7 @@ impl MySQLStorage {
             _ => "ASC",
         };
         if sort_column == "expires_at" && sort_dir == "ASC" {
-            query.push_str(
-                " ORDER BY COALESCE(expires_at, '9999-12-31 23:59:59') ASC",
-            );
+            query.push_str(" ORDER BY COALESCE(expires_at, '9999-12-31 23:59:59') ASC");
         } else {
             query.push_str(&format!(" ORDER BY {} {}", sort_column, sort_dir));
         }
@@ -521,7 +541,10 @@ impl MySQLStorage {
     /// Build MySQL query for deleting entries by multiple IDs
     fn build_delete_ids_query(table_name: &str, num_ids: usize) -> String {
         let placeholders = vec!["?"; num_ids].join(",");
-        format!("DELETE FROM `{}` WHERE id IN ({})", table_name, placeholders)
+        format!(
+            "DELETE FROM `{}` WHERE id IN ({})",
+            table_name, placeholders
+        )
     }
 }
 
@@ -739,13 +762,13 @@ impl StorageBackend for MySQLStorage {
 
         let (query, values) = MySQLStorage::build_list_query(&self.config.table_name, params);
 
-        let rows: Vec<mysql_async::Row> = conn
-            .exec(&query, values)
-            .await
-            .map_err(|e| StorageError::BackendError {
-                backend: "mysql".to_string(),
-                message: format!("Failed to list entries: {}", e),
-            })?;
+        let rows: Vec<mysql_async::Row> =
+            conn.exec(&query, values)
+                .await
+                .map_err(|e| StorageError::BackendError {
+                    backend: "mysql".to_string(),
+                    message: format!("Failed to list entries: {}", e),
+                })?;
 
         let mut entries = Vec::new();
         for row in rows {
@@ -834,11 +857,17 @@ impl StorageBackend for MySQLStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "MySQL".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "MySQL".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "MySQL".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "MySQL".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
@@ -1072,6 +1101,5 @@ mod tests {
     fn test_build_delete_ids_query() {
         let query = MySQLStorage::build_delete_ids_query("table", 2);
         assert!(query.contains("DELETE FROM `table` WHERE id IN (?,?)"));
-
     }
 }

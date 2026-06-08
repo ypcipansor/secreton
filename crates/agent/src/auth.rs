@@ -7,7 +7,7 @@ use secreton_errors::SecretonError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn, debug};
+use tracing::{debug, error, info, warn};
 
 /// Handles authentication with Secreton API
 #[derive(Clone)]
@@ -65,9 +65,13 @@ impl AuthHandler {
         }
 
         let config = self.config.as_ref().unwrap();
-        let url = format!("{}/api/v1/auth/token/renew-self", config.server_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/api/v1/auth/token/renew-self",
+            config.server_url.trim_end_matches('/')
+        );
 
-        match self.client
+        match self
+            .client
             .post(&url)
             .header("X-Vault-Token", token.unwrap())
             .send()
@@ -79,11 +83,13 @@ impl AuthHandler {
                     Ok(())
                 } else {
                     Err(SecretonError::Authentication {
-                        message: format!("Failed to renew token: {}", response.status())
+                        message: format!("Failed to renew token: {}", response.status()),
                     })
                 }
             }
-            Err(e) => Err(SecretonError::Network { message: e.to_string() })
+            Err(e) => Err(SecretonError::Network {
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -142,7 +148,8 @@ impl AuthHandler {
 
         let url = format!("{}/api/v1/auth/token/lookup-self", config.server_url);
 
-        match self.client
+        match self
+            .client
             .get(&url)
             .header("X-Vault-Token", token.unwrap()) // Using Vault-compatible header or Authorization
             .send()
@@ -166,17 +173,27 @@ impl AuthHandler {
 
     /// Fetch a secret from the API with retries
     pub async fn get_secret(&self, path: &str) -> Result<serde_json::Value, SecretonError> {
-        let token = self.get_token().await.ok_or_else(|| {
-            SecretonError::Authentication { message: "No authentication token available".to_string() }
-        })?;
+        let token = self
+            .get_token()
+            .await
+            .ok_or_else(|| SecretonError::Authentication {
+                message: "No authentication token available".to_string(),
+            })?;
 
-        let config = self.config.as_ref().ok_or_else(|| {
-            SecretonError::Configuration { message: "Vault configuration missing".to_string() }
-        })?;
+        let config = self
+            .config
+            .as_ref()
+            .ok_or_else(|| SecretonError::Configuration {
+                message: "Vault configuration missing".to_string(),
+            })?;
 
         // Handle path format (ensure it starts with /v1/)
         let api_path = if path.starts_with("secret/") {
-            format!("v1/{}/data/{}", "secret", path.strip_prefix("secret/").unwrap())
+            format!(
+                "v1/{}/data/{}",
+                "secret",
+                path.strip_prefix("secret/").unwrap()
+            )
         } else if !path.starts_with("v1/") {
             format!("v1/secret/data/{}", path)
         } else {
@@ -192,7 +209,8 @@ impl AuthHandler {
 
         loop {
             attempts += 1;
-            match self.client
+            match self
+                .client
                 .get(&url)
                 .header("X-Vault-Token", &token)
                 .send()
@@ -200,22 +218,34 @@ impl AuthHandler {
             {
                 Ok(response) => {
                     if response.status().is_success() {
-                        let body: serde_json::Value = response.json().await
-                            .map_err(|e| SecretonError::Network { message: format!("Response deserialization failed: {}", e) })?;
+                        let body: serde_json::Value =
+                            response.json().await.map_err(|e| SecretonError::Network {
+                                message: format!("Response deserialization failed: {}", e),
+                            })?;
                         return Ok(body);
                     } else if response.status().is_server_error() && attempts < max_attempts {
-                        warn!("Server error fetching secret (attempt {}/{}): {}", attempts, max_attempts, response.status());
+                        warn!(
+                            "Server error fetching secret (attempt {}/{}): {}",
+                            attempts,
+                            max_attempts,
+                            response.status()
+                        );
                     } else {
                         return Err(SecretonError::ServiceUnavailable {
-                            service: format!("API Error fetching {}: {}", path, response.status())
+                            service: format!("API Error fetching {}: {}", path, response.status()),
                         });
                     }
                 }
                 Err(e) => {
                     if attempts < max_attempts {
-                        warn!("Network error fetching secret (attempt {}/{}): {}", attempts, max_attempts, e);
+                        warn!(
+                            "Network error fetching secret (attempt {}/{}): {}",
+                            attempts, max_attempts, e
+                        );
                     } else {
-                        return Err(SecretonError::Network { message: e.to_string() });
+                        return Err(SecretonError::Network {
+                            message: e.to_string(),
+                        });
                     }
                 }
             }
@@ -227,6 +257,8 @@ impl AuthHandler {
             delay *= 2;
         }
 
-        Err(SecretonError::Network { message: "Max retry attempts exceeded".to_string() })
+        Err(SecretonError::Network {
+            message: "Max retry attempts exceeded".to_string(),
+        })
     }
 }

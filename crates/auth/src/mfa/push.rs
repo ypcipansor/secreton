@@ -347,7 +347,8 @@ impl PushService for DefaultPushService {
         if let Some(device_id) = device_id {
             let mut enrollments = self.enrollments.write().await;
             if let Some(devices) = enrollments.get_mut(&request.entity_id)
-                && let Some(device) = devices.get_mut(&device_id) {
+                && let Some(device) = devices.get_mut(&device_id)
+            {
                 device.last_used = Some(Utc::now());
             }
         }
