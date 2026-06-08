@@ -180,7 +180,7 @@ async fn main() -> Result<()> {
         if let Some(path) = get_token_path() {
             if path.exists() {
                 if let Ok(token) = tokio::fs::read_to_string(path).await {
-                     config.token = Some(token.trim().to_string());
+                    config.token = Some(token.trim().to_string());
                 }
             }
         }
@@ -235,7 +235,7 @@ async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
 
             let json_value: serde_json::Value = serde_json::to_value(toml_value)
-                 .map_err(|e| anyhow::anyhow!("Failed to convert config to JSON: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to convert config to JSON: {}", e))?;
 
             let url = format!("{}/api/v1/sys/config", config.server_url);
             let response = client
@@ -255,10 +255,7 @@ async fn config_command(cmd: ConfigCommand, config: &CliConfig) -> Result<()> {
         }
         ConfigCommand::Delete => {
             let url = format!("{}/api/v1/sys/config", config.server_url);
-            let response = client
-                .delete(&url)
-                .send()
-                .await?;
+            let response = client.delete(&url).send().await?;
 
             if response.status().is_success() {
                 println!("✅ Configuration deleted successfully.");
@@ -312,7 +309,12 @@ async fn user_command(cmd: UserCommand, config: &CliConfig) -> Result<()> {
     let client = create_client(config)?;
 
     match cmd {
-        UserCommand::Create { username, password, email, roles } => {
+        UserCommand::Create {
+            username,
+            password,
+            email,
+            roles,
+        } => {
             let password_val = if let Some(p) = password {
                 p
             } else {
@@ -377,13 +379,18 @@ async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()
                             println!("Key {}: {}", i + 1, key.as_str().unwrap_or(""));
                         }
                     }
-                    println!("\nInitial Root Token: {}", data.get("root_token").and_then(|t| t.as_str()).unwrap_or(""));
+                    println!(
+                        "\nInitial Root Token: {}",
+                        data.get("root_token")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                    );
                     println!("\nSecreton is initialized! The system is sealed.");
                     println!("You must provide the unseal keys to unseal the system.");
                 }
             } else {
-                 let err_text = response.text().await?;
-                 println!("Error initializing: {}", err_text);
+                let err_text = response.text().await?;
+                println!("Error initializing: {}", err_text);
             }
         }
         OperatorCommand::Unseal { key } => {
@@ -411,36 +418,40 @@ async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()
                 let body: serde_json::Value = response.json().await?;
                 if let Some(data) = body.get("data") {
                     println!("Sealed: {}", data.get("sealed").unwrap());
-                    println!("Progress: {}/{}", data.get("progress").unwrap(), data.get("t").unwrap());
+                    println!(
+                        "Progress: {}/{}",
+                        data.get("progress").unwrap(),
+                        data.get("t").unwrap()
+                    );
                 }
             } else {
-                 let err_text = response.text().await?;
-                 println!("Error unsealing: {}", err_text);
+                let err_text = response.text().await?;
+                println!("Error unsealing: {}", err_text);
             }
         }
         OperatorCommand::Seal => {
-             let url = format!("{}/api/v1/sys/seal", config.server_url);
-             let response = client.post(&url).send().await?;
-             if response.status().is_success() {
-                 println!("Success! System is now sealed.");
-             } else {
-                 println!("Error sealing system: {}", response.status());
-             }
+            let url = format!("{}/api/v1/sys/seal", config.server_url);
+            let response = client.post(&url).send().await?;
+            if response.status().is_success() {
+                println!("Success! System is now sealed.");
+            } else {
+                println!("Error sealing system: {}", response.status());
+            }
         }
         OperatorCommand::Status => {
-             let url = format!("{}/api/v1/sys/seal-status", config.server_url);
-             let response = client.get(&url).send().await?;
-             if response.status().is_success() {
-                 let body: serde_json::Value = response.json().await?;
-                 if let Some(data) = body.get("data") {
-                      println!("Sealed: {}", data.get("sealed").unwrap());
-                      println!("Threshold: {}", data.get("t").unwrap());
-                      println!("Shares: {}", data.get("n").unwrap());
-                      println!("Progress: {}", data.get("progress").unwrap());
-                 }
-             } else {
-                 println!("Error getting status: {}", response.status());
-             }
+            let url = format!("{}/api/v1/sys/seal-status", config.server_url);
+            let response = client.get(&url).send().await?;
+            if response.status().is_success() {
+                let body: serde_json::Value = response.json().await?;
+                if let Some(data) = body.get("data") {
+                    println!("Sealed: {}", data.get("sealed").unwrap());
+                    println!("Threshold: {}", data.get("t").unwrap());
+                    println!("Shares: {}", data.get("n").unwrap());
+                    println!("Progress: {}", data.get("progress").unwrap());
+                }
+            } else {
+                println!("Error getting status: {}", response.status());
+            }
         }
     }
     Ok(())

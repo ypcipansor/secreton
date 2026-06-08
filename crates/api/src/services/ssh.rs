@@ -10,9 +10,9 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::services::crypto::CryptoService;
-use secreton_secrets::{SecretError, SshConfig, SshEngine, SecretEngine};
-use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use chrono::Utc;
+use secreton_secrets::{SecretEngine, SecretError, SshConfig, SshEngine};
+use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 
 /// Maximum lease TTL for SSH certificates (30 days in seconds).
 ///
@@ -155,7 +155,8 @@ impl SshPersistentService {
                 info!("No SSH CA found in storage. SSH Engine running without CA.");
             }
 
-            self.initialized.store(true, std::sync::atomic::Ordering::Release);
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::Release);
         }
 
         Ok(())
@@ -168,7 +169,9 @@ impl SshPersistentService {
 
         // Guard: prevent overwriting an existing CA which would silently
         // invalidate all previously signed certificates.
-        let existing = engine_lock.read("config/ca").await
+        let existing = engine_lock
+            .read("config/ca")
+            .await
             .map_err(|e| SshServiceError::Internal(e.to_string()))?;
         if existing.is_some() {
             return Err(SshServiceError::Conflict(
@@ -190,7 +193,8 @@ impl SshPersistentService {
         });
         temp_engine.enable();
 
-        let (mut priv_pem, pub_str) = temp_engine.generate_ca()
+        let (mut priv_pem, pub_str) = temp_engine
+            .generate_ca()
             .map_err(|e| SshServiceError::Internal(format!("Failed to generate SSH CA: {}", e)))?;
 
         // Serialize directly via a short-lived struct instead of an intermediate
@@ -250,7 +254,10 @@ impl SshPersistentService {
             if let Some(ref mut pk) = temp_engine.config_mut().ca_private_key {
                 zeroize::Zeroize::zeroize(pk);
             }
-            return Err(SshServiceError::Internal(format!("Failed to persist SSH CA: {}", e)));
+            return Err(SshServiceError::Internal(format!(
+                "Failed to persist SSH CA: {}",
+                e
+            )));
         }
 
         // Storage succeeded — now atomically replace the real engine with the
@@ -266,11 +273,17 @@ impl SshPersistentService {
         let engine = self.engine.read().await;
 
         // SshEngine read "config/ca" returns CA public key
-        let res = engine.read("config/ca").await
+        let res = engine
+            .read("config/ca")
+            .await
             .map_err(|e| SshServiceError::Internal(e.to_string()))?;
 
         if let Some(secret) = res {
-            Ok(secret.data.get("public_key").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            Ok(secret
+                .data
+                .get("public_key")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()))
         } else {
             Ok(None)
         }
@@ -291,7 +304,8 @@ impl SshPersistentService {
         self.ensure_initialized().await?;
         let engine = self.engine.read().await;
 
-        let (signed_cert, effective_ttl) = engine.sign_key(public_key, valid_principals, ttl)
+        let (signed_cert, effective_ttl) = engine
+            .sign_key(public_key, valid_principals, ttl)
             .map_err(|e| match &e {
                 SecretError::InvalidSecretData(_) => {
                     SshServiceError::BadRequest(format!("Failed to sign key: {}", e))

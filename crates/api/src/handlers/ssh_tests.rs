@@ -1,12 +1,12 @@
+use crate::ApiResponse;
 use crate::config::ApiConfig;
+use crate::handlers::create_router;
 use crate::handlers::ssh::{CaResponse, SignKeyRequest, SignedKeyResponse};
 use crate::services::ApiServiceContainer;
-use crate::handlers::create_router;
-use crate::ApiResponse;
 use axum_test::TestServer;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-use std::collections::HashMap;
 
 async fn server_with_ssh() -> (TestServer, String) {
     // Set root key for crypto service auto-unseal.
@@ -62,8 +62,7 @@ async fn server_with_ssh() -> (TestServer, String) {
         .expect("Failed to generate token");
 
     let app = create_router(&config, services.into());
-    let server = TestServer::new(app.into_make_service())
-        .expect("failed to start test server");
+    let server = TestServer::new(app.into_make_service()).expect("failed to start test server");
     (server, token)
 }
 
@@ -116,6 +115,10 @@ async fn test_ssh_ca_lifecycle() {
     let body: ApiResponse<SignedKeyResponse> = resp.json();
     assert!(body.success);
     let sign_data = body.data.unwrap();
-    assert!(sign_data.signed_key.contains("ssh-ed25519-cert-v01@openssh.com"));
+    assert!(
+        sign_data
+            .signed_key
+            .contains("ssh-ed25519-cert-v01@openssh.com")
+    );
     assert_eq!(sign_data.ttl, 3600);
 }

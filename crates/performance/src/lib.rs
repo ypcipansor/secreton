@@ -190,7 +190,8 @@ impl MetricsAggregator {
 
         // Keep only last 1000 values to prevent unbounded growth
         if let Some(values) = metrics.get_mut(&metric_key)
-            && values.len() > 1000 {
+            && values.len() > 1000
+        {
             values.remove(0);
         }
     }

@@ -2,15 +2,15 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use std::collections::HashMap;
 use tiberius::{Client, Config};
 use tokio::net::TcpStream;
-use tokio_util::compat::{TokioAsyncWriteCompatExt, Compat};
-use std::collections::HashMap;
+use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
+use uuid::Uuid;
 
 use crate::{
-    StorageBackend, StorageError, SecretEntry, StorageResult,
-    StorageTransaction, HealthStatus, StorageStats, QueryParams
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
+    StorageStats, StorageTransaction,
 };
 use secreton_common::models::oauth_state::OAuthState;
 
@@ -30,8 +30,10 @@ impl MSSQLStorage {
     }
 
     async fn connect(&self) -> StorageResult<Client<Compat<TcpStream>>> {
-        let config = Config::from_ado_string(&self.config.connection_string).map_err(|e| StorageError::ConfigurationError {
-            message: e.to_string(),
+        let config = Config::from_ado_string(&self.config.connection_string).map_err(|e| {
+            StorageError::ConfigurationError {
+                message: e.to_string(),
+            }
         })?;
 
         // Workaround for private get_port():
@@ -42,15 +44,19 @@ impl MSSQLStorage {
         let host = config.get_addr();
         let addr = format!("{}:{}", host, port);
 
-        let tcp = TcpStream::connect(addr).await.map_err(|e| StorageError::ConnectionFailed {
-            message: e.to_string(),
-        })?;
+        let tcp = TcpStream::connect(addr)
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
         tcp.set_nodelay(true).ok();
 
-        let client = Client::connect(config, tcp.compat_write()).await.map_err(|e| StorageError::ConnectionFailed {
-            message: e.to_string(),
-        })?;
+        let client = Client::connect(config, tcp.compat_write())
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: e.to_string(),
+            })?;
 
         Ok(client)
     }
@@ -60,7 +66,9 @@ impl MSSQLStorage {
 impl StorageBackend for MSSQLStorage {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let mut client = self.connect().await?;
-        let data = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+        let data = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
 
         client.execute(
             "MERGE INTO secrets WITH (HOLDLOCK) AS target
@@ -76,12 +84,27 @@ impl StorageBackend for MSSQLStorage {
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
         let mut client = self.connect().await?;
-        let stream = client.query("SELECT data FROM secrets WHERE id = @P1", &[&id]).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
-        let row = stream.into_row().await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let stream = client
+            .query("SELECT data FROM secrets WHERE id = @P1", &[&id])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
+        let row = stream
+            .into_row()
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
 
         if let Some(row) = row {
-            let data: &str = row.get("data").ok_or(StorageError::SerializationError { message: "Missing data column".to_string() })?;
-            let entry: SecretEntry = serde_json::from_str(data).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+            let data: &str = row.get("data").ok_or(StorageError::SerializationError {
+                message: "Missing data column".to_string(),
+            })?;
+            let entry: SecretEntry =
+                serde_json::from_str(data).map_err(|e| StorageError::SerializationError {
+                    message: e.to_string(),
+                })?;
             Ok(Some(entry))
         } else {
             Ok(None)
@@ -90,12 +113,27 @@ impl StorageBackend for MSSQLStorage {
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let mut client = self.connect().await?;
-        let stream = client.query("SELECT data FROM secrets WHERE path = @P1", &[&path]).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
-        let row = stream.into_row().await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let stream = client
+            .query("SELECT data FROM secrets WHERE path = @P1", &[&path])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
+        let row = stream
+            .into_row()
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
 
         if let Some(row) = row {
-            let data: &str = row.get("data").ok_or(StorageError::SerializationError { message: "Missing data column".to_string() })?;
-            let entry: SecretEntry = serde_json::from_str(data).map_err(|e| StorageError::SerializationError { message: e.to_string() })?;
+            let data: &str = row.get("data").ok_or(StorageError::SerializationError {
+                message: "Missing data column".to_string(),
+            })?;
+            let entry: SecretEntry =
+                serde_json::from_str(data).map_err(|e| StorageError::SerializationError {
+                    message: e.to_string(),
+                })?;
             Ok(Some(entry))
         } else {
             Ok(None)
@@ -108,28 +146,50 @@ impl StorageBackend for MSSQLStorage {
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
         let mut client = self.connect().await?;
-        let res = client.execute("DELETE FROM secrets WHERE id = @P1", &[&id]).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let res = client
+            .execute("DELETE FROM secrets WHERE id = @P1", &[&id])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
         Ok(res.rows_affected().iter().sum::<u64>() > 0)
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
         let mut client = self.connect().await?;
-        let res = client.execute("DELETE FROM secrets WHERE path = @P1", &[&path]).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let res = client
+            .execute("DELETE FROM secrets WHERE path = @P1", &[&path])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
         Ok(res.rows_affected().iter().sum::<u64>() > 0)
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let mut client = self.connect().await?;
-        let stream = client.query("SELECT data FROM secrets", &[]).await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let stream = client
+            .query("SELECT data FROM secrets", &[])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
 
-        let rows = stream.into_first_result().await.map_err(|e| StorageError::QueryFailed { message: e.to_string() })?;
+        let rows = stream
+            .into_first_result()
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: e.to_string(),
+            })?;
         let mut entries = Vec::new();
 
         for row in rows {
             let data: &str = row.get("data").unwrap_or("{}");
             if let Ok(entry) = serde_json::from_str::<SecretEntry>(data) {
                 if let Some(prefix) = &params.path_prefix {
-                    if !entry.path.starts_with(prefix) { continue; }
+                    if !entry.path.starts_with(prefix) {
+                        continue;
+                    }
                 }
                 entries.push(entry);
             }
@@ -154,26 +214,24 @@ impl StorageBackend for MSSQLStorage {
     async fn health_check(&self) -> StorageResult<HealthStatus> {
         let start = std::time::Instant::now();
         match self.connect().await {
-            Ok(mut client) => {
-                match client.simple_query("SELECT 1").await {
-                    Ok(_) => Ok(HealthStatus {
-                        is_healthy: true,
-                        response_time_ms: start.elapsed().as_millis() as f64,
-                        connections_active: 1,
-                        connections_idle: 0,
-                        last_error: None,
-                        uptime_seconds: 0,
-                    }),
-                    Err(e) => Ok(HealthStatus {
-                        is_healthy: false,
-                        response_time_ms: start.elapsed().as_millis() as f64,
-                        connections_active: 1,
-                        connections_idle: 0,
-                        last_error: Some(e.to_string()),
-                        uptime_seconds: 0,
-                    })
-                }
-            }
+            Ok(mut client) => match client.simple_query("SELECT 1").await {
+                Ok(_) => Ok(HealthStatus {
+                    is_healthy: true,
+                    response_time_ms: start.elapsed().as_millis() as f64,
+                    connections_active: 1,
+                    connections_idle: 0,
+                    last_error: None,
+                    uptime_seconds: 0,
+                }),
+                Err(e) => Ok(HealthStatus {
+                    is_healthy: false,
+                    response_time_ms: start.elapsed().as_millis() as f64,
+                    connections_active: 1,
+                    connections_idle: 0,
+                    last_error: Some(e.to_string()),
+                    uptime_seconds: 0,
+                }),
+            },
             Err(e) => Ok(HealthStatus {
                 is_healthy: false,
                 response_time_ms: start.elapsed().as_millis() as f64,
@@ -204,11 +262,17 @@ impl StorageBackend for MSSQLStorage {
     }
 
     async fn store_oauth_state(&self, _state: &OAuthState) -> StorageResult<()> {
-        Err(StorageError::BackendError { backend: "MSSQL".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "MSSQL".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn get_oauth_state(&self, _state: &str) -> StorageResult<Option<OAuthState>> {
-        Err(StorageError::BackendError { backend: "MSSQL".to_string(), message: "Not implemented".to_string() })
+        Err(StorageError::BackendError {
+            backend: "MSSQL".to_string(),
+            message: "Not implemented".to_string(),
+        })
     }
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {

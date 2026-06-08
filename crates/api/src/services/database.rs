@@ -11,7 +11,7 @@ use tracing::warn;
 use crate::services::crypto::CryptoService;
 use secreton_secrets_database::{DatabaseConfig, DatabaseEngine, DatabaseRole};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Categorised service error that handlers can map to the appropriate HTTP status.
 #[derive(Debug)]
@@ -126,14 +126,19 @@ impl DatabaseService {
             for (name, role) in loaded_roles {
                 engine.add_role(name, role);
             }
-            self.initialized.store(true, std::sync::atomic::Ordering::Release);
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::Release);
         }
 
         Ok(())
     }
 
-    pub async fn set_config(&self, config: DatabaseConfig) -> std::result::Result<(), DatabaseServiceError> {
-        self.ensure_initialized().await
+    pub async fn set_config(
+        &self,
+        config: DatabaseConfig,
+    ) -> std::result::Result<(), DatabaseServiceError> {
+        self.ensure_initialized()
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Validate the connection URL early so the admin gets immediate feedback
@@ -176,7 +181,8 @@ impl DatabaseService {
         // concurrent `set_config` calls from ending up with the in-memory
         // engine holding a stale config that differs from what was last
         // written to storage.
-        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
+        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> =
+            self.engine.write().await;
 
         // Load roles from storage BEFORE persisting the new config.  If the
         // role-loading step fails, we return an error without having written
@@ -192,7 +198,10 @@ impl DatabaseService {
             limit: Some(DB_ROLE_LOAD_MAX_ENTRIES),
             ..Default::default()
         };
-        let entries = self.storage.list(&query).await
+        let entries = self
+            .storage
+            .list(&query)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let mut loaded_roles: Vec<(String, DatabaseRole)> = Vec::new();
         for entry in entries {
@@ -202,7 +211,10 @@ impl DatabaseService {
                         if let Ok(role) = serde_json::from_slice::<DatabaseRole>(&decrypted) {
                             loaded_roles.push((name.to_string(), role));
                         } else {
-                            warn!("Failed to deserialize role '{}' during set_config; it will be missing from the engine", name);
+                            warn!(
+                                "Failed to deserialize role '{}' during set_config; it will be missing from the engine",
+                                name
+                            );
                         }
                     }
                     Err(e) => warn!("Failed to decrypt role '{}' during set_config: {}", name, e),
@@ -217,7 +229,10 @@ impl DatabaseService {
         // if encryption fails, we haven't swapped the engine yet.
         let data = serde_json::to_vec(&config)
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
-        let encrypted = self.crypto.encrypt_data(&data).await
+        let encrypted = self
+            .crypto
+            .encrypt_data(&data)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         let mut new_engine = DatabaseEngine::new(config);
@@ -236,7 +251,9 @@ impl DatabaseService {
             SecurityLevel::TopSecret,
             uuid::Uuid::nil(),
         );
-        self.storage.store(&entry).await
+        self.storage
+            .store(&entry)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Swap the engine only after storage persistence succeeds.
@@ -245,20 +262,29 @@ impl DatabaseService {
         Ok(())
     }
 
-    pub async fn add_role(&self, name: &str, role: DatabaseRole) -> std::result::Result<(), DatabaseServiceError> {
-        self.ensure_initialized().await
+    pub async fn add_role(
+        &self,
+        name: &str,
+        role: DatabaseRole,
+    ) -> std::result::Result<(), DatabaseServiceError> {
+        self.ensure_initialized()
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Acquire the write lock FIRST (same strategy as set_config) to
         // prevent concurrent add_role calls from creating a divergence
         // between the persisted role and the in-memory engine.
-        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> = self.engine.write().await;
+        let mut engine: tokio::sync::RwLockWriteGuard<'_, DatabaseEngine> =
+            self.engine.write().await;
 
         // Persist
         let path = format!("{}{}", DB_ROLE_PREFIX, name);
-        let data = serde_json::to_vec(&role)
-            .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
-        let encrypted = self.crypto.encrypt_data(&data).await
+        let data =
+            serde_json::to_vec(&role).map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
+        let encrypted = self
+            .crypto
+            .encrypt_data(&data)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let entry = SecretEntry::new(
             path,
@@ -267,7 +293,9 @@ impl DatabaseService {
             SecurityLevel::Secret,
             uuid::Uuid::nil(),
         );
-        self.storage.store(&entry).await
+        self.storage
+            .store(&entry)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
 
         // Update engine
@@ -277,7 +305,8 @@ impl DatabaseService {
     }
 
     pub async fn list_roles(&self) -> std::result::Result<Vec<String>, DatabaseServiceError> {
-        self.ensure_initialized().await
+        self.ensure_initialized()
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let engine: tokio::sync::RwLockReadGuard<'_, DatabaseEngine> = self.engine.read().await;
         Ok(engine.list_roles())
@@ -294,25 +323,20 @@ impl DatabaseService {
         // are not blocked.
         let (mut creds, lease_duration) = {
             let engine = self.engine.read().await;
-            let creds = engine
-                .generate_credentials(role_name)
-                .await
-                .map_err(|e| {
-                    use secreton_secrets_database::DatabaseError;
-                    match &e {
-                        DatabaseError::RoleNotFound(_) => {
-                            DatabaseServiceError::NotFound(e.to_string())
-                        }
-                        DatabaseError::EngineDisabled => {
-                            DatabaseServiceError::Unavailable(e.to_string())
-                        }
-                        DatabaseError::InvalidConfiguration(_)
-                        | DatabaseError::UnsupportedDatabaseType(_) => {
-                            DatabaseServiceError::BadRequest(e.to_string())
-                        }
-                        _ => DatabaseServiceError::Internal(e.to_string()),
+            let creds = engine.generate_credentials(role_name).await.map_err(|e| {
+                use secreton_secrets_database::DatabaseError;
+                match &e {
+                    DatabaseError::RoleNotFound(_) => DatabaseServiceError::NotFound(e.to_string()),
+                    DatabaseError::EngineDisabled => {
+                        DatabaseServiceError::Unavailable(e.to_string())
                     }
-                })?;
+                    DatabaseError::InvalidConfiguration(_)
+                    | DatabaseError::UnsupportedDatabaseType(_) => {
+                        DatabaseServiceError::BadRequest(e.to_string())
+                    }
+                    _ => DatabaseServiceError::Internal(e.to_string()),
+                }
+            })?;
             // Read the role's default_ttl while we still hold the lock, since
             // the engine's returned HashMap does not include lease_duration.
             let ttl = engine.get_role_default_ttl(role_name).unwrap_or(3600);
@@ -377,7 +401,8 @@ impl DatabaseService {
     }
 
     pub async fn list_leases(&self) -> std::result::Result<Vec<Value>, DatabaseServiceError> {
-        self.ensure_initialized().await
+        self.ensure_initialized()
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         // Cap the lease scan with an explicit upper bound. Before the
         // PostgreSQL backend's default `LIMIT 100` was removed (in the
@@ -391,7 +416,10 @@ impl DatabaseService {
             limit: Some(DB_LEASE_LIST_MAX_ENTRIES),
             ..Default::default()
         };
-        let entries = self.storage.list(&query).await
+        let entries = self
+            .storage
+            .list(&query)
+            .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?;
         let mut leases = Vec::new();
         for entry in entries {
@@ -421,15 +449,23 @@ impl DatabaseService {
             .get_by_path(&lease_path)
             .await
             .map_err(|e| DatabaseServiceError::Internal(e.to_string()))?
-            .ok_or_else(|| DatabaseServiceError::NotFound(format!("Lease '{}' not found", lease_id)))?;
+            .ok_or_else(|| {
+                DatabaseServiceError::NotFound(format!("Lease '{}' not found", lease_id))
+            })?;
 
-        let decrypted = self.crypto.decrypt(&entry.encrypted_data).await
-            .map_err(|e| DatabaseServiceError::Internal(format!("Failed to decrypt lease: {}", e)))?;
+        let decrypted = self
+            .crypto
+            .decrypt(&entry.encrypted_data)
+            .await
+            .map_err(|e| {
+                DatabaseServiceError::Internal(format!("Failed to decrypt lease: {}", e))
+            })?;
 
         let lease_info: Value = serde_json::from_slice(&decrypted)
             .map_err(|e| DatabaseServiceError::Internal(format!("Failed to parse lease: {}", e)))?;
 
-        let username = lease_info.get("username")
+        let username = lease_info
+            .get("username")
             .and_then(|v| v.as_str())
             .ok_or_else(|| DatabaseServiceError::Internal("Lease missing username".to_string()))?;
 
@@ -443,7 +479,9 @@ impl DatabaseService {
             let engine = self.engine.read().await;
             match engine.revoke_credentials(username).await {
                 Ok(()) => {}
-                Err(secreton_secrets_database::DatabaseError::RevocationNotImplemented(ref msg)) => {
+                Err(secreton_secrets_database::DatabaseError::RevocationNotImplemented(
+                    ref msg,
+                )) => {
                     warn!(
                         "Revoking lease '{}': credential revocation not implemented — \
                          the database user '{}' may still be active on the target database. \
@@ -452,8 +490,14 @@ impl DatabaseService {
                     );
                 }
                 Err(e) => {
-                    warn!("Failed to revoke database credentials for '{}': {}", username, e);
-                    return Err(DatabaseServiceError::Internal(format!("Database revocation failed: {}", e)));
+                    warn!(
+                        "Failed to revoke database credentials for '{}': {}",
+                        username, e
+                    );
+                    return Err(DatabaseServiceError::Internal(format!(
+                        "Database revocation failed: {}",
+                        e
+                    )));
                 }
             }
         }

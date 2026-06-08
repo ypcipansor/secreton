@@ -115,20 +115,21 @@ impl AuthService {
             // Check storage first
             match storage.authenticate_user(username, password).await {
                 Ok(true) => {
-                     // Fetch actual user details including roles from DB
-                     if let Ok(Some(details)) = storage.get_user_details(username).await {
-                         // `UserInfo` from the storage trait does not carry policies.
-                         // Try to read them from the in-memory store first (which has
-                         // the real values); fall back to ["default"] only when the
-                         // user is not in the in-memory cache.  This mirrors the
-                         // pattern used in `refresh_token()`.
-                         let user_policies = {
-                             let user_store = self.user_store.read().await;
-                             user_store.get(username)
-                                 .map(|r| r.policies.clone())
-                                 .unwrap_or_else(|| vec!["default".to_string()])
-                         };
-                         Some(UserRecord {
+                    // Fetch actual user details including roles from DB
+                    if let Ok(Some(details)) = storage.get_user_details(username).await {
+                        // `UserInfo` from the storage trait does not carry policies.
+                        // Try to read them from the in-memory store first (which has
+                        // the real values); fall back to ["default"] only when the
+                        // user is not in the in-memory cache.  This mirrors the
+                        // pattern used in `refresh_token()`.
+                        let user_policies = {
+                            let user_store = self.user_store.read().await;
+                            user_store
+                                .get(username)
+                                .map(|r| r.policies.clone())
+                                .unwrap_or_else(|| vec!["default".to_string()])
+                        };
+                        Some(UserRecord {
                             id: details.id.unwrap_or_else(|| username.to_string()),
                             username: details.username,
                             email: details.email,
@@ -137,13 +138,13 @@ impl AuthService {
                             policies: user_policies,
                             created_at: chrono::Utc::now(), // Ideally fetched from details if available in UserInfo
                             last_login: Some(chrono::Utc::now()),
-                         })
-                     } else {
-                         // Fallback if details fetch fails (shouldn't happen if auth succeeded)
-                         None
-                     }
+                        })
+                    } else {
+                        // Fallback if details fetch fails (shouldn't happen if auth succeeded)
+                        None
+                    }
                 }
-                _ => None
+                _ => None,
             }
         } else {
             None
@@ -152,16 +153,20 @@ impl AuthService {
         // Fallback to in-memory store
         let user_store = self.user_store.read().await;
         let user = if let Some(u) = user_record_opt {
-             u
+            u
         } else if let Some(u) = user_store.get(username) {
-             // Verify password for in-memory
+            // Verify password for in-memory
             let parsed_hash =
-                PasswordHash::parse(&u.password_hash, argon2::password_hash::Encoding::B64).unwrap();
+                PasswordHash::parse(&u.password_hash, argon2::password_hash::Encoding::B64)
+                    .unwrap();
             let argon2 = Argon2::default();
-            if argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok() {
+            if argon2
+                .verify_password(password.as_bytes(), &parsed_hash)
+                .is_ok()
+            {
                 u.clone()
             } else {
-                 return Err(SecretonError::Authentication {
+                return Err(SecretonError::Authentication {
                     message: "Invalid credentials".to_string(),
                 });
             }
@@ -262,7 +267,8 @@ impl AuthService {
                 // user is not in the in-memory cache.
                 let user_policies = {
                     let user_store = self.user_store.read().await;
-                    user_store.get(&claims.username)
+                    user_store
+                        .get(&claims.username)
                         .map(|r| r.policies.clone())
                         .unwrap_or_else(|| vec!["default".to_string()])
                 };
@@ -275,7 +281,11 @@ impl AuthService {
         } else {
             let user_store = self.user_store.read().await;
             if let Some(record) = user_store.get(&claims.username) {
-                (record.roles.clone(), record.policies.clone(), record.email.clone())
+                (
+                    record.roles.clone(),
+                    record.policies.clone(),
+                    record.email.clone(),
+                )
             } else {
                 return Err(SecretonError::Authentication {
                     message: format!("User '{}' not found during token refresh", claims.username),
@@ -370,16 +380,20 @@ impl AuthService {
         roles: &[String],
     ) -> Result<UserInfo, SecretonError> {
         if let Some(storage) = &self.storage {
-             // Use storage
-             storage.create_user(username, password).await
-                .map_err(|e| SecretonError::Internal { message: e.to_string() })?;
+            // Use storage
+            storage
+                .create_user(username, password)
+                .await
+                .map_err(|e| SecretonError::Internal {
+                    message: e.to_string(),
+                })?;
 
-             // Assign roles?
-             for role in roles {
-                 let _ = storage.assign_role_to_user(username, role).await;
-             }
+            // Assign roles?
+            for role in roles {
+                let _ = storage.assign_role_to_user(username, role).await;
+            }
 
-             Ok(UserInfo {
+            Ok(UserInfo {
                 id: Some(username.to_string()),
                 username: username.to_string(),
                 email: email.map(|s| s.to_string()),
@@ -394,7 +408,7 @@ impl AuthService {
             let mut user_store = self.user_store.write().await;
 
             if user_store.contains_key(username) {
-                 return Err(SecretonError::Authentication {
+                return Err(SecretonError::Authentication {
                     message: format!("User {} already exists", username),
                 });
             }
@@ -403,7 +417,9 @@ impl AuthService {
             let argon2 = Argon2::default();
             let password_hash = argon2
                 .hash_password(password.as_bytes(), &salt)
-                .map_err(|e| SecretonError::Authentication { message: e.to_string() })?
+                .map_err(|e| SecretonError::Authentication {
+                    message: e.to_string(),
+                })?
                 .to_string();
 
             let user_id = format!("user-{}", username);
@@ -436,8 +452,12 @@ impl AuthService {
     /// List all users
     pub async fn list_users(&self) -> Result<Vec<UserInfo>, SecretonError> {
         if let Some(storage) = &self.storage {
-            storage.list_users().await
-                .map_err(|e| SecretonError::Internal { message: e.to_string() })
+            storage
+                .list_users()
+                .await
+                .map_err(|e| SecretonError::Internal {
+                    message: e.to_string(),
+                })
         } else {
             let user_store = self.user_store.read().await;
             let mut users = Vec::new();

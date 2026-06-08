@@ -1,10 +1,11 @@
+use crate::api;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::api;
-use secreton_common::dto::lifecycle::LifecycleStatistics;
 use secreton_common::dto::integrations::{
-    IntegrationConfig, IntegrationType, LifecycleHook, HookType, K8sSecret, PodInjection, InjectionStatus
+    HookType, InjectionStatus, IntegrationConfig, IntegrationType, K8sSecret, LifecycleHook,
+    PodInjection,
 };
+use secreton_common::dto::lifecycle::LifecycleStatistics;
 
 #[component]
 pub fn IntegrationsPage() -> impl IntoView {
@@ -19,7 +20,8 @@ pub fn IntegrationsPage() -> impl IntoView {
     // Form states
     let (show_add_integration, set_show_add_integration) = signal(false);
     let (new_integration_name, set_new_integration_name) = signal(String::new());
-    let (new_integration_type, set_new_integration_type) = signal(IntegrationType::AwsSecretsManager);
+    let (new_integration_type, set_new_integration_type) =
+        signal(IntegrationType::AwsSecretsManager);
 
     let load_data = move || {
         set_loading.set(true);
@@ -41,7 +43,9 @@ pub fn IntegrationsPage() -> impl IntoView {
             // Load integrations
             match api::get::<Vec<IntegrationConfig>>("/integrations").await {
                 Ok(res) => set_integrations.set(res),
-                Err(e) => web_sys::console::error_1(&format!("Failed to load integrations: {}", e).into()),
+                Err(e) => {
+                    web_sys::console::error_1(&format!("Failed to load integrations: {}", e).into())
+                }
             }
             set_k8s_secrets.set(vec![]);
             set_k8s_injections.set(vec![]);
@@ -54,7 +58,9 @@ pub fn IntegrationsPage() -> impl IntoView {
         let name = new_integration_name.get();
         let i_type = new_integration_type.get();
 
-        if name.is_empty() { return; }
+        if name.is_empty() {
+            return;
+        }
 
         spawn_local(async move {
             let config = IntegrationConfig {
@@ -70,8 +76,10 @@ pub fn IntegrationsPage() -> impl IntoView {
                 Ok(_) => {
                     set_show_add_integration.set(false);
                     load_data();
-                },
-                Err(e) => web_sys::console::error_1(&format!("Failed to create integration: {}", e).into()),
+                }
+                Err(e) => web_sys::console::error_1(
+                    &format!("Failed to create integration: {}", e).into(),
+                ),
             }
         });
     };

@@ -447,10 +447,7 @@ impl LDAPSecretsEngine {
                         line[colon_pos + 1..].trim().to_string()
                     };
 
-                attributes
-                    .entry(attr_name)
-                    .or_default()
-                    .insert(attr_value);
+                attributes.entry(attr_name).or_default().insert(attr_value);
             }
 
             *i += 1;

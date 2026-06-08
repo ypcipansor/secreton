@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::sync::Mutex;
 #[cfg(feature = "postgres")]
-use tokio_postgres::{Config, NoTls};
-#[cfg(feature = "postgres")]
 use tokio_postgres::types::ToSql;
+#[cfg(feature = "postgres")]
+use tokio_postgres::{Config, NoTls};
 
 /// Database secret engine for dynamic credentials
 pub struct DatabaseEngine {
@@ -64,12 +64,19 @@ impl DatabaseEngine {
                     .await
             }
             #[cfg(not(feature = "postgres"))]
-            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration("PostgreSQL feature disabled".to_string())),
+            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
+                "PostgreSQL feature disabled".to_string(),
+            )),
 
             #[cfg(feature = "mysql")]
-            DatabaseType::MySQL => self.generate_mysql_credentials(role_name, &role.sql, role.default_ttl).await,
+            DatabaseType::MySQL => {
+                self.generate_mysql_credentials(role_name, &role.sql, role.default_ttl)
+                    .await
+            }
             #[cfg(not(feature = "mysql"))]
-            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration("MySQL feature disabled".to_string())),
+            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
+                "MySQL feature disabled".to_string(),
+            )),
 
             DatabaseType::MongoDB => {
                 self.generate_mongodb_credentials(role_name, &role.sql)
@@ -80,10 +87,7 @@ impl DatabaseEngine {
     }
 
     /// Revoke database credentials
-    pub async fn revoke_credentials(
-        &self,
-        username: &str,
-    ) -> Result<(), DatabaseError> {
+    pub async fn revoke_credentials(&self, username: &str) -> Result<(), DatabaseError> {
         if !self.enabled {
             return Err(DatabaseError::EngineDisabled);
         }
@@ -93,25 +97,21 @@ impl DatabaseEngine {
 
         match db_type {
             #[cfg(feature = "postgres")]
-            DatabaseType::PostgreSQL => {
-                self.revoke_postgres_credentials(username).await
-            }
+            DatabaseType::PostgreSQL => self.revoke_postgres_credentials(username).await,
             #[cfg(not(feature = "postgres"))]
-            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration("PostgreSQL feature disabled".to_string())),
+            DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
+                "PostgreSQL feature disabled".to_string(),
+            )),
 
             #[cfg(feature = "mysql")]
-            DatabaseType::MySQL => {
-                self.revoke_mysql_credentials(username).await
-            }
+            DatabaseType::MySQL => self.revoke_mysql_credentials(username).await,
             #[cfg(not(feature = "mysql"))]
-            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration("MySQL feature disabled".to_string())),
+            DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
+                "MySQL feature disabled".to_string(),
+            )),
 
-            DatabaseType::MongoDB => {
-                self.revoke_mongodb_credentials(username).await
-            }
-            DatabaseType::Redis => {
-                self.revoke_redis_credentials(username).await
-            }
+            DatabaseType::MongoDB => self.revoke_mongodb_credentials(username).await,
+            DatabaseType::Redis => self.revoke_redis_credentials(username).await,
         }
     }
 
@@ -171,38 +171,51 @@ impl DatabaseEngine {
         })?;
 
         // Manual overrides if provided in config
-        if self.config.username.is_some() || self.config.password.is_some() || self.config.database_name.is_some() {
-             let mut builder = mysql_async::OptsBuilder::from_opts(opts);
-             if let Some(username) = &self.config.username {
-                 builder = builder.user(Some(username));
-             }
-             if let Some(password) = &self.config.password {
-                 builder = builder.pass(Some(password));
-             }
-             if let Some(dbname) = &self.config.database_name {
-                 builder = builder.db_name(Some(dbname));
-             }
-             // Apply pool limits
-             if self.config.max_open_connections.is_some() || self.config.max_idle_connections.is_some() {
-                 let min = self.config.max_idle_connections.unwrap_or(5) as usize;
-                 let max = self.config.max_open_connections.unwrap_or(10) as usize;
-                 let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
-                     DatabaseError::InvalidConfiguration("Invalid pool constraints: min > max".to_string())
-                 })?;
-                 builder = builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
-             }
+        if self.config.username.is_some()
+            || self.config.password.is_some()
+            || self.config.database_name.is_some()
+        {
+            let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+            if let Some(username) = &self.config.username {
+                builder = builder.user(Some(username));
+            }
+            if let Some(password) = &self.config.password {
+                builder = builder.pass(Some(password));
+            }
+            if let Some(dbname) = &self.config.database_name {
+                builder = builder.db_name(Some(dbname));
+            }
+            // Apply pool limits
+            if self.config.max_open_connections.is_some()
+                || self.config.max_idle_connections.is_some()
+            {
+                let min = self.config.max_idle_connections.unwrap_or(5) as usize;
+                let max = self.config.max_open_connections.unwrap_or(10) as usize;
+                let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
+                    DatabaseError::InvalidConfiguration(
+                        "Invalid pool constraints: min > max".to_string(),
+                    )
+                })?;
+                builder = builder
+                    .pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+            }
 
-             opts = builder.into();
-        } else if self.config.max_open_connections.is_some() || self.config.max_idle_connections.is_some() {
-             // Even if no overrides, we might need to apply pool options to the base opts
-             let mut builder = mysql_async::OptsBuilder::from_opts(opts);
-             let min = self.config.max_idle_connections.unwrap_or(5) as usize;
-             let max = self.config.max_open_connections.unwrap_or(10) as usize;
-             let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
-                 DatabaseError::InvalidConfiguration("Invalid pool constraints: min > max".to_string())
-             })?;
-             builder = builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
-             opts = builder.into();
+            opts = builder.into();
+        } else if self.config.max_open_connections.is_some()
+            || self.config.max_idle_connections.is_some()
+        {
+            // Even if no overrides, we might need to apply pool options to the base opts
+            let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+            let min = self.config.max_idle_connections.unwrap_or(5) as usize;
+            let max = self.config.max_open_connections.unwrap_or(10) as usize;
+            let constraints = mysql_async::PoolConstraints::new(min, max).ok_or_else(|| {
+                DatabaseError::InvalidConfiguration(
+                    "Invalid pool constraints: min > max".to_string(),
+                )
+            })?;
+            builder =
+                builder.pool_opts(mysql_async::PoolOpts::default().with_constraints(constraints));
+            opts = builder.into();
         }
 
         let pool = MySqlPool::new(opts);
@@ -219,7 +232,10 @@ impl DatabaseEngine {
         // PostgreSQL identifier quoting (double-quote escaping) is more robust
         // than MySQL string-literal escaping, but we still reject unexpected
         // characters to maintain a strict security posture.
-        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             return Err(DatabaseError::InvalidConfiguration(format!(
                 "Refusing to revoke PostgreSQL user '{}': username contains \
                  characters outside the expected [a-zA-Z0-9_] set",
@@ -247,10 +263,9 @@ impl DatabaseEngine {
 
         let params: &[&(dyn ToSql + Sync)] = &[];
 
-        client
-            .execute("BEGIN", params)
-            .await
-            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
+        client.execute("BEGIN", params).await.map_err(|e| {
+            DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e))
+        })?;
 
         let result = async {
             // Check whether the role exists before attempting REASSIGN/DROP OWNED.
@@ -267,10 +282,7 @@ impl DatabaseEngine {
             // transaction serializes it with any concurrent DROP USER against
             // pg_authid, closing the TOCTOU window.
             let role_exists_row = client
-                .query_opt(
-                    "SELECT 1 FROM pg_roles WHERE rolname = $1",
-                    &[&username],
-                )
+                .query_opt("SELECT 1 FROM pg_roles WHERE rolname = $1", &[&username])
                 .await
                 .map_err(|e| {
                     DatabaseError::QueryFailed(format!("Failed to check role existence: {}", e))
@@ -278,14 +290,12 @@ impl DatabaseEngine {
             let role_exists = role_exists_row.is_some();
 
             if role_exists {
-                client
-                    .execute(&reassign_sql, params)
-                    .await
-                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e)))?;
-                client
-                    .execute(&drop_owned_sql, params)
-                    .await
-                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e)))?;
+                client.execute(&reassign_sql, params).await.map_err(|e| {
+                    DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e))
+                })?;
+                client.execute(&drop_owned_sql, params).await.map_err(|e| {
+                    DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e))
+                })?;
             } else {
                 tracing::info!(
                     "PostgreSQL role '{}' does not exist; skipping REASSIGN/DROP OWNED \
@@ -293,20 +303,18 @@ impl DatabaseEngine {
                     username
                 );
             }
-            client
-                .execute(&drop_user_sql, params)
-                .await
-                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e)))?;
+            client.execute(&drop_user_sql, params).await.map_err(|e| {
+                DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e))
+            })?;
             Ok::<(), DatabaseError>(())
         }
         .await;
 
         match result {
             Ok(()) => {
-                client
-                    .execute("COMMIT", params)
-                    .await
-                    .map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
+                client.execute("COMMIT", params).await.map_err(|e| {
+                    DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e))
+                })?;
                 Ok(())
             }
             Err(e) => {
@@ -413,7 +421,10 @@ impl DatabaseEngine {
         // interpolation below.  The escaping (`replace`) is kept as a
         // secondary safeguard but should never be exercised for valid
         // usernames.
-        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             return Err(DatabaseError::InvalidConfiguration(format!(
                 "Refusing to revoke MySQL user '{}': username contains \
                  characters outside the expected [a-zA-Z0-9_] set",
@@ -430,9 +441,9 @@ impl DatabaseEngine {
         let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", safe_username);
 
         use mysql_async::prelude::Queryable;
-        conn.query_drop(revoke_sql).await.map_err(|e| {
-             DatabaseError::QueryFailed(format!("Failed to drop MySQL user: {}", e))
-        })?;
+        conn.query_drop(revoke_sql)
+            .await
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop MySQL user: {}", e)))?;
 
         Ok(())
     }
@@ -474,7 +485,7 @@ impl DatabaseEngine {
         use mysql_async::prelude::Queryable;
 
         conn.query_drop(create_user_sql).await.map_err(|e| {
-             DatabaseError::QueryFailed(format!("Failed to create MySQL user: {}", e))
+            DatabaseError::QueryFailed(format!("Failed to create MySQL user: {}", e))
         })?;
 
         // Execute role SQL statements
@@ -491,7 +502,9 @@ impl DatabaseEngine {
 
             if let Err(e) = conn.query_drop(stmt).await {
                 // Attempt cleanup
-                let _ = conn.query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username)).await;
+                let _ = conn
+                    .query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username))
+                    .await;
                 return Err(DatabaseError::QueryFailed(format!(
                     "Failed to execute role statement '{}': {}",
                     stmt, e
@@ -686,7 +699,8 @@ mod tests {
         let config = DatabaseConfig::default();
         let engine = DatabaseEngine::new(config);
 
-        let sql = "CREATE ROLE \"{{name}}\" WITH PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';";
+        let sql =
+            "CREATE ROLE \"{{name}}\" WITH PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';";
         let username = "user123";
         let password = "secretPassWord";
         let expiration = "2025-01-01T00:00:00Z";

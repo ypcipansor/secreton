@@ -426,10 +426,12 @@ impl AdminService {
         metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
         metadata.insert("type".to_string(), "full".to_string());
         metadata.insert("entry_count".to_string(), entries.len().to_string());
-        let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto {
-            let enc = crypto.encrypt_data(backup_data.as_bytes()).await.map_err(|e| {
-                AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e))
-            })?;
+        let (encrypted_data, encryption_metadata, is_encrypted) = if let Some(crypto) = &self.crypto
+        {
+            let enc = crypto
+                .encrypt_data(backup_data.as_bytes())
+                .await
+                .map_err(|e| AdminError::Internal(anyhow::anyhow!("Encryption failed: {}", e)))?;
             (
                 enc,
                 secreton_storage::EncryptionMetadata {
@@ -493,10 +495,7 @@ impl AdminService {
             checksum,
             metadata: {
                 let mut m = HashMap::new();
-                m.insert(
-                    "version".to_string(),
-                    env!("CARGO_PKG_VERSION").to_string(),
-                );
+                m.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
                 m.insert("type".to_string(), "full".to_string());
                 m.insert("entry_count".to_string(), entries.len().to_string());
                 m
@@ -536,7 +535,8 @@ impl AdminService {
             .into_iter()
             .filter_map(|entry| {
                 let backup_id = entry.path.split('/').next_back()?.to_string();
-                let encrypted = entry.encryption_metadata.algorithm != "none" || !entry.metadata.contains_key("data");
+                let encrypted = entry.encryption_metadata.algorithm != "none"
+                    || !entry.metadata.contains_key("data");
                 let size_bytes = if let Some(data) = entry.metadata.get("data") {
                     data.len() as u64
                 } else {
@@ -579,16 +579,24 @@ impl AdminService {
             data.as_bytes().to_vec()
         } else if !backup_entry.encrypted_data.is_empty() {
             if let Some(crypto) = &self.crypto {
-                crypto.decrypt(&backup_entry.encrypted_data).await.map_err(|e| {
-                    AdminError::Internal(anyhow::anyhow!("Failed to decrypt backup data: {}", e))
-                })?
+                crypto
+                    .decrypt(&backup_entry.encrypted_data)
+                    .await
+                    .map_err(|e| {
+                        AdminError::Internal(anyhow::anyhow!(
+                            "Failed to decrypt backup data: {}",
+                            e
+                        ))
+                    })?
             } else {
                 return Err(AdminError::Internal(anyhow::anyhow!(
                     "Crypto service unavailable, cannot decrypt backup"
                 )));
             }
         } else {
-            return Err(AdminError::Internal(anyhow::anyhow!("Backup data not found")));
+            return Err(AdminError::Internal(anyhow::anyhow!(
+                "Backup data not found"
+            )));
         };
 
         // Verify checksum
@@ -607,7 +615,8 @@ impl AdminService {
 
         // Parse entries
         let entries: Vec<secreton_storage::SecretEntry> =
-            serde_json::from_slice(&backup_data_bytes).map_err(|e| AdminError::Internal(e.into()))?;
+            serde_json::from_slice(&backup_data_bytes)
+                .map_err(|e| AdminError::Internal(e.into()))?;
 
         // Restore each entry (excluding backup entries themselves)
         for entry in &entries {
@@ -736,7 +745,8 @@ impl AdminService {
             created_at: entry.created_at,
             size_bytes,
             compressed: false,
-            encrypted: entry.encryption_metadata.algorithm != "none" || !entry.metadata.contains_key("data"),
+            encrypted: entry.encryption_metadata.algorithm != "none"
+                || !entry.metadata.contains_key("data"),
             checksum: entry.metadata.get("checksum").cloned().unwrap_or_default(),
             metadata: {
                 let mut m = entry.metadata;
@@ -963,7 +973,14 @@ impl AdminService {
     pub async fn get_policy_content(
         &self,
         name: &str,
-    ) -> Result<Option<(String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>, AdminError> {
+    ) -> Result<
+        Option<(
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+        )>,
+        AdminError,
+    > {
         let path = format!("sys/policies/content/{}", name);
 
         let entry = match self
@@ -991,10 +1008,7 @@ impl AdminService {
         if let Some(crypto) = &self.crypto {
             if !entry.encrypted_data.is_empty() {
                 let decrypted = crypto.decrypt(&entry.encrypted_data).await.map_err(|e| {
-                    AdminError::Internal(anyhow::anyhow!(
-                        "Failed to decrypt policy content: {}",
-                        e
-                    ))
+                    AdminError::Internal(anyhow::anyhow!("Failed to decrypt policy content: {}", e))
                 })?;
                 let content = String::from_utf8(decrypted).map_err(|e| {
                     AdminError::Internal(anyhow::anyhow!(
@@ -1007,7 +1021,10 @@ impl AdminService {
         }
 
         // Fallback: read from metadata (unencrypted path).
-        Ok(entry.metadata.get("content").map(|c| (c.clone(), created_at, updated_at)))
+        Ok(entry
+            .metadata
+            .get("content")
+            .map(|c| (c.clone(), created_at, updated_at)))
     }
 
     /// Update a policy definition.
@@ -1052,8 +1069,14 @@ impl AdminService {
             .get_by_path(&path)
             .await
             .map_err(AdminError::Storage)?;
-        let entry_id = existing.as_ref().map(|e| e.id).unwrap_or_else(uuid::Uuid::new_v4);
-        let created_at = existing.as_ref().map(|e| e.created_at).unwrap_or_else(chrono::Utc::now);
+        let entry_id = existing
+            .as_ref()
+            .map(|e| e.id)
+            .unwrap_or_else(uuid::Uuid::new_v4);
+        let created_at = existing
+            .as_ref()
+            .map(|e| e.created_at)
+            .unwrap_or_else(chrono::Utc::now);
         let version = existing.as_ref().map(|e| e.version + 1).unwrap_or(1);
 
         let (encrypted_data, encryption_metadata) = if let Some(crypto) = &self.crypto {
@@ -1091,18 +1114,28 @@ impl AdminService {
         entry.created_at = created_at;
         entry.version = version;
         let updated_at = chrono::Utc::now();
-        entry.metadata.insert("updated_at".to_string(), updated_at.to_rfc3339());
+        entry
+            .metadata
+            .insert("updated_at".to_string(), updated_at.to_rfc3339());
 
         // When crypto is not available, store the raw content in metadata as a
         // fallback so the UI can still retrieve it.
         if self.crypto.is_none() {
-            entry.metadata.insert("content".to_string(), content.to_string());
+            entry
+                .metadata
+                .insert("content".to_string(), content.to_string());
         }
 
         if existing.is_some() {
-            self.storage.update(&entry).await.map_err(AdminError::Storage)?;
+            self.storage
+                .update(&entry)
+                .await
+                .map_err(AdminError::Storage)?;
         } else {
-            self.storage.store(&entry).await.map_err(AdminError::Storage)?;
+            self.storage
+                .store(&entry)
+                .await
+                .map_err(AdminError::Storage)?;
         }
         Ok((created_at, updated_at))
     }
@@ -1123,7 +1156,10 @@ impl AdminService {
     pub async fn delete_policy_content(&self, name: &str) -> Result<bool, AdminError> {
         let _write_guard = self.policy_content_write_lock.lock().await;
         let path = format!("sys/policies/content/{}", name);
-        self.storage.delete_by_path(&path).await.map_err(AdminError::Storage)
+        self.storage
+            .delete_by_path(&path)
+            .await
+            .map_err(AdminError::Storage)
     }
 
     /// List the names of raw-content-only policies stored under
@@ -1996,11 +2032,36 @@ impl AdminService {
         }
         // Validate remaining numeric config keys
         for (num_key, min, max, label) in &[
-            ("jwt_expiration", 1u64, 8760u64, "jwt_expiration must be a positive integer (hours) no greater than 8760"),
-            ("max_failed_attempts", 1u64, 100u64, "max_failed_attempts must be a positive integer between 1 and 100"),
-            ("rate_limit_requests_per_minute", 1u64, 100000u64, "rate_limit_requests_per_minute must be a positive integer between 1 and 100000"),
-            ("backup_retention_days", 1u64, 3650u64, "backup_retention_days must be a positive integer between 1 and 3650"),
-            ("log_retention_days", 1u64, 3650u64, "log_retention_days must be a positive integer between 1 and 3650"),
+            (
+                "jwt_expiration",
+                1u64,
+                8760u64,
+                "jwt_expiration must be a positive integer (hours) no greater than 8760",
+            ),
+            (
+                "max_failed_attempts",
+                1u64,
+                100u64,
+                "max_failed_attempts must be a positive integer between 1 and 100",
+            ),
+            (
+                "rate_limit_requests_per_minute",
+                1u64,
+                100000u64,
+                "rate_limit_requests_per_minute must be a positive integer between 1 and 100000",
+            ),
+            (
+                "backup_retention_days",
+                1u64,
+                3650u64,
+                "backup_retention_days must be a positive integer between 1 and 3650",
+            ),
+            (
+                "log_retention_days",
+                1u64,
+                3650u64,
+                "log_retention_days must be a positive integer between 1 and 3650",
+            ),
         ] {
             if let Some(val) = config_updates.get(*num_key) {
                 match val.as_u64() {
@@ -2211,7 +2272,10 @@ impl AdminService {
                 "Role name cannot contain '..' (path traversal)".to_string(),
             ));
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@')
+        {
             return Err(AdminError::InvalidConfig(
                 "Role name contains invalid characters (only ASCII alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
@@ -2229,7 +2293,10 @@ impl AdminService {
             .await
             .map_err(AdminError::Storage)?
         {
-            return Err(AdminError::AlreadyExists(format!("Role '{}'", request.name)));
+            return Err(AdminError::AlreadyExists(format!(
+                "Role '{}'",
+                request.name
+            )));
         }
 
         let now = chrono::Utc::now();
@@ -2311,7 +2378,11 @@ impl AdminService {
             match crypto.decrypt(&entry.encrypted_data).await {
                 Ok(d) => d,
                 Err(e) => {
-                    tracing::warn!("Decryption failed for role at {}, falling back to plaintext: {}", entry.path, e);
+                    tracing::warn!(
+                        "Decryption failed for role at {}, falling back to plaintext: {}",
+                        entry.path,
+                        e
+                    );
                     entry.encrypted_data.clone()
                 }
             }
@@ -2436,7 +2507,10 @@ impl AdminService {
                 "Username cannot contain '..' (path traversal)".to_string(),
             ));
         }
-        if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+        if !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@')
+        {
             return Err(AdminError::InvalidConfig(
                 "Username contains invalid characters (only ASCII alphanumeric, '-', '_', '.', '@' are allowed)".to_string(),
             ));
@@ -2496,20 +2570,16 @@ impl AdminService {
                 })?;
 
             let raw_data = self.decrypt_entry_data(&original_entry).await?;
-            let mut doc: serde_json::Value =
-                serde_json::from_slice(&raw_data).map_err(|e| {
-                    AdminError::Internal(anyhow::anyhow!(
-                        "Failed to deserialize newly created user: {}",
-                        e
-                    ))
-                })?;
+            let mut doc: serde_json::Value = serde_json::from_slice(&raw_data).map_err(|e| {
+                AdminError::Internal(anyhow::anyhow!(
+                    "Failed to deserialize newly created user: {}",
+                    e
+                ))
+            })?;
 
             if !request.metadata.is_empty() {
                 doc["metadata"] = serde_json::to_value(&request.metadata).map_err(|e| {
-                    AdminError::Internal(anyhow::anyhow!(
-                        "Failed to serialize metadata: {}",
-                        e
-                    ))
+                    AdminError::Internal(anyhow::anyhow!("Failed to serialize metadata: {}", e))
                 })?;
             }
             if let Some(full_name) = &request.full_name {
@@ -2520,10 +2590,7 @@ impl AdminService {
             }
 
             let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
-                AdminError::Internal(anyhow::anyhow!(
-                    "Failed to serialize patched user: {}",
-                    e
-                ))
+                AdminError::Internal(anyhow::anyhow!("Failed to serialize patched user: {}", e))
             })?;
             let mut entry = self
                 .build_encrypted_entry(&updated_bytes, &original_entry.path)
@@ -2627,7 +2694,9 @@ impl AdminService {
         let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
             AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
         })?;
-        let mut entry = self.build_encrypted_entry(&updated_bytes, &original_entry.path).await?;
+        let mut entry = self
+            .build_encrypted_entry(&updated_bytes, &original_entry.path)
+            .await?;
         entry.id = original_entry.id;
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
@@ -2696,7 +2765,9 @@ impl AdminService {
         let updated_bytes = serde_json::to_vec(&doc).map_err(|e| {
             AdminError::Internal(anyhow::anyhow!("Failed to serialize user: {}", e))
         })?;
-        let mut entry = self.build_encrypted_entry(&updated_bytes, &original_entry.path).await?;
+        let mut entry = self
+            .build_encrypted_entry(&updated_bytes, &original_entry.path)
+            .await?;
         entry.id = original_entry.id;
         entry.path = original_entry.path.clone();
         entry.created_at = original_entry.created_at;
@@ -2890,7 +2961,11 @@ impl AdminService {
                 Ok(d) => d,
                 Err(e) => {
                     // Try plaintext fallback if decryption fails (legacy data)
-                    tracing::warn!("Decryption failed for user at {}, falling back to plaintext: {}", entry.path, e);
+                    tracing::warn!(
+                        "Decryption failed for user at {}, falling back to plaintext: {}",
+                        entry.path,
+                        e
+                    );
                     entry.encrypted_data.clone()
                 }
             }
@@ -3173,7 +3248,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
+        let service = AdminService::new(storage, auth, performance, audit)
+            .await
+            .unwrap();
 
         let stats = service
             .get_system_stats()
@@ -3265,7 +3342,9 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let service = AdminService::new(storage, auth, performance, audit).await.unwrap();
+        let service = AdminService::new(storage, auth, performance, audit)
+            .await
+            .unwrap();
 
         let result = service.run_garbage_collection().await.expect("gc");
         assert_eq!(result.operation, "garbage_collection");

@@ -1,10 +1,10 @@
-use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
-use gloo_storage::{LocalStorage, Storage};
-use serde::{Deserialize, Serialize};
 use crate::api;
 use crate::auth::use_auth;
+use gloo_storage::{LocalStorage, Storage};
+use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::hooks::use_navigate;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 struct LoginRequest {
@@ -43,7 +43,11 @@ pub fn Login() -> impl IntoView {
             let req = LoginRequest {
                 username: username.get_untracked(),
                 password: password.get_untracked(),
-                mfa_code: if mfa_val.is_empty() { None } else { Some(mfa_val) },
+                mfa_code: if mfa_val.is_empty() {
+                    None
+                } else {
+                    Some(mfa_val)
+                },
                 remember_me: Some(true),
             };
 
@@ -57,7 +61,7 @@ pub fn Login() -> impl IntoView {
                         });
                         navigate("/", Default::default());
                     } else {
-                         set_error.set(Some("Login successful but no token received.".to_string()));
+                        set_error.set(Some("Login successful but no token received.".to_string()));
                     }
                 }
                 Err(e) => {
