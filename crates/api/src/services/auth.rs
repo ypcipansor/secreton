@@ -505,6 +505,63 @@ impl AuthenticationService {
     ///
     /// This is the single source of truth for MFA enforcement so that
     /// `login()` and `authenticate()` stay in sync.
+    /// Create and store a new session, returning the session ID and expiry.
+    ///
+    /// This helper encapsulates the session object creation, serialization,
+    /// encryption, and storage, ensuring consistent metadata handling across
+    /// all authentication flows.
+    async fn create_and_store_session(
+        &self,
+        user_id: &str,
+        session_id: String,
+        access_token: String,
+        refresh_token: Option<String>,
+        ip_address: String,
+        user_agent: String,
+        duration_secs: u64,
+    ) -> Result<chrono::DateTime<chrono::Utc>, AuthError> {
+        let now = chrono::Utc::now();
+        let expires_at = now
+            + chrono::Duration::from_std(std::time::Duration::from_secs(duration_secs))
+                .unwrap_or(chrono::Duration::hours(1));
+
+        let session = Session {
+            id: session_id.clone(),
+            user_id: user_id.to_string(),
+            token: access_token,
+            refresh_token,
+            ip_address,
+            user_agent,
+            created_at: now,
+            expires_at,
+            last_accessed: now,
+        };
+
+        let session_json = serde_json::to_vec(&session).map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e))
+        })?;
+
+        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
+        })?;
+
+        let entry = SecretEntry::new(
+            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
+            session_data,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::parse_str(user_id).unwrap_or_default(),
+        )
+        .with_expiration(expires_at);
+
+        self.storage
+            .store(&entry)
+            .await
+            .map_err(AuthError::Storage)?;
+
+        Ok(expires_at)
+    }
+
     async fn enforce_mfa(
         &self,
         username: &str,
@@ -639,7 +696,12 @@ impl AuthenticationService {
     }
 
     /// Authenticate user with username and password
-    pub async fn login(&self, req: ApiLoginRequest) -> ApiResult<ApiLoginResponse> {
+    pub async fn login(
+        &self,
+        req: ApiLoginRequest,
+        ip_address: String,
+        user_agent: String,
+    ) -> ApiResult<ApiLoginResponse> {
         // Get effective config for session timeout and MFA enforcement
         let (session_timeout_secs, global_mfa_enabled) = self.get_effective_config().await;
 
@@ -931,15 +993,6 @@ impl AuthenticationService {
             }
         }
 
-        // Generate session ID first to bind it to the token
-        let session_id = Uuid::new_v4().to_string();
-
-        // Create and store session
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
-                .unwrap_or(chrono::Duration::hours(1));
-
         // Create token pair with session binding, using the dynamic timeout so
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
         let session_duration =
@@ -954,6 +1007,9 @@ impl AuthenticationService {
         // user completes enrollment.
         let token_mfa_required = (is_privileged || global_mfa_enabled) && !mfa_verified;
 
+        // Generate temporary session ID to bind it to the token up-front
+        let temp_session_id = Uuid::new_v4().to_string();
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
@@ -963,54 +1019,37 @@ impl AuthenticationService {
                 &user.roles,
                 &user.policies, // Use user.policies which we just created
                 token_mfa_required,
-                Some(session_id.clone()),
+                Some(temp_session_id.clone()),
                 Some(session_duration),
             )
             .map_err(|e| secreton_errors::SecretonError::Authentication {
                 message: e.to_string(),
             })?;
 
-        let session = Session {
-            id: session_id.clone(),
-            user_id: user.id.clone(),
-            token: token_pair.access_token.clone(),
-            refresh_token: Some(token_pair.refresh_token.clone()),
-            ip_address: "unknown".to_string(), // Request context not available here
-            user_agent: "unknown".to_string(),
-            created_at: now,
-            expires_at,
-            last_accessed: now,
-        };
-
-        // Serialize and encrypt session data to prevent plaintext session
-        // tokens from being exposed if an attacker gains storage access.
-        let session_json =
-            serde_json::to_vec(&session).map_err(|e| secreton_errors::SecretonError::Internal {
-                message: format!("Failed to serialize session: {}", e),
+        // Persist the session using the same ID bound to the token
+        let _ = self
+            .create_and_store_session(
+                &user.id,
+                temp_session_id,
+                token_pair.access_token.clone(),
+                Some(token_pair.refresh_token.clone()),
+                ip_address,
+                user_agent,
+                session_timeout_secs,
+            )
+            .await
+            .map_err(|e| match e {
+                AuthError::MfaRequired => secreton_errors::SecretonError::MfaRequired,
+                AuthError::MfaNotConfigured(u) => {
+                    secreton_errors::SecretonError::MfaNotConfigured { user: u }
+                }
+                AuthError::InvalidMfaCode => secreton_errors::SecretonError::Authentication {
+                    message: "Authentication failed".to_string(),
+                },
+                _ => secreton_errors::SecretonError::Authentication {
+                    message: "Authentication failed".to_string(),
+                },
             })?;
-
-        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
-            secreton_errors::SecretonError::Internal {
-                message: format!("Failed to encrypt session: {}", e),
-            }
-        })?;
-
-        // Create storage entry
-        let entry = SecretEntry::new(
-            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
-            session_data,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::parse_str(&user.id).unwrap_or_default(),
-        )
-        .with_expiration(expires_at);
-
-        // Store session
-        self.storage.store(&entry).await.map_err(|e| {
-            secreton_errors::SecretonError::Authentication {
-                message: format!("Failed to store session: {}", e),
-            }
-        })?;
 
         Ok(ApiLoginResponse {
             token: AuthToken {
@@ -1219,7 +1258,12 @@ impl AuthenticationService {
     }
 
     /// Refresh access token
-    pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthToken, AuthError> {
+    pub async fn refresh_token(
+        &self,
+        refresh_token: &str,
+        ip_address: String,
+        user_agent: String,
+    ) -> Result<AuthToken, AuthError> {
         // Fast-path early reject for a previously-exchanged refresh token.
         // This is purely an optimisation — the authoritative single-use
         // check is the atomic check-and-insert on the in-memory blacklist
@@ -1341,13 +1385,6 @@ impl AuthenticationService {
 
         // Get effective config for session timeout
         let (session_timeout_secs, _) = self.get_effective_config().await;
-
-        // Generate session ID
-        let session_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
-                .unwrap_or(chrono::Duration::hours(1));
 
         let session_duration =
             chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
@@ -1484,6 +1521,9 @@ impl AuthenticationService {
         let (user_roles, user_policies, user_email) =
             (stored_user.roles, stored_user.policies, stored_user.email);
 
+        // Generate temporary session ID to bind it to the token up-front
+        let temp_session_id = Uuid::new_v4().to_string();
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
@@ -1493,45 +1533,24 @@ impl AuthenticationService {
                 &user_roles,
                 &user_policies,
                 token_mfa_required,
-                Some(session_id.clone()),
+                Some(temp_session_id.clone()),
                 Some(session_duration),
             )
             .map_err(|_| AuthError::InvalidToken)?;
 
-        // Store session
-        let session = Session {
-            id: session_id.clone(),
-            user_id: claims.sub.clone(),
-            token: token_pair.access_token.clone(),
-            refresh_token: Some(token_pair.refresh_token.clone()),
-            ip_address: "unknown".to_string(),
-            user_agent: "unknown".to_string(),
-            created_at: now,
-            expires_at,
-            last_accessed: now,
-        };
-
-        let session_json = serde_json::to_vec(&session).map_err(|e| {
-            AuthError::Internal(anyhow::anyhow!("Failed to serialize session: {}", e))
-        })?;
-
-        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
-            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
-        })?;
-
-        let entry = SecretEntry::new(
-            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
-            session_data,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::parse_str(&claims.sub).unwrap_or_default(),
-        )
-        .with_expiration(expires_at);
-
-        self.storage
-            .store(&entry)
+        // Persist the session using the same ID bound to the token
+        let _ = self
+            .create_and_store_session(
+                &claims.sub,
+                temp_session_id,
+                token_pair.access_token.clone(),
+                Some(token_pair.refresh_token.clone()),
+                ip_address,
+                user_agent,
+                session_timeout_secs,
+            )
             .await
-            .map_err(AuthError::Storage)?;
+            .map_err(AuthError::from)?;
 
         // Build the User from the data we already loaded from storage
         // (or from the token claims as a fallback).
@@ -1916,19 +1935,21 @@ impl AuthenticationService {
     }
 
     /// Generate access token for user
-    pub async fn generate_token(&self, user: &User) -> Result<String, AuthError> {
+    pub async fn generate_token(
+        &self,
+        user: &User,
+        ip_address: String,
+        user_agent: String,
+    ) -> Result<String, AuthError> {
         // Get effective config for session timeout
         let (session_timeout_secs, _) = self.get_effective_config().await;
-
-        let session_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
-                .unwrap_or(chrono::Duration::hours(1));
 
         let session_duration =
             chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
                 .unwrap_or(chrono::Duration::hours(1));
+
+        // Generate temporary session ID to bind it to the token up-front
+        let temp_session_id = Uuid::new_v4().to_string();
 
         let token = self
             .token_service
@@ -1939,44 +1960,24 @@ impl AuthenticationService {
                 &user.roles,
                 &user.policies,
                 false, // MFA not required for simple token generation
-                Some(session_id.clone()),
+                Some(temp_session_id.clone()),
                 Some(session_duration),
             )
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Token generation failed: {}", e)))?;
 
-        // Store session for API token
-        let session = Session {
-            id: session_id.clone(),
-            user_id: user.id.clone(),
-            token: token.clone(),
-            refresh_token: None,
-            ip_address: "api".to_string(),
-            user_agent: "api".to_string(),
-            created_at: now,
-            expires_at,
-            last_accessed: now,
-        };
-
-        let session_json = serde_json::to_vec(&session)
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
-
-        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
-            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
-        })?;
-
-        let entry = SecretEntry::new(
-            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
-            session_data,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::parse_str(&user.id).unwrap_or_default(),
-        )
-        .with_expiration(expires_at);
-
-        self.storage
-            .store(&entry)
+        // Persist the session using the same ID bound to the token
+        let _ = self
+            .create_and_store_session(
+                &user.id,
+                temp_session_id,
+                token.clone(),
+                None,
+                ip_address,
+                user_agent,
+                session_timeout_secs,
+            )
             .await
-            .map_err(AuthError::Storage)?;
+            .map_err(AuthError::from)?;
 
         Ok(token)
     }
@@ -2003,6 +2004,8 @@ impl AuthenticationService {
     pub async fn authenticate(
         &self,
         credentials: crate::services::auth::LoginRequest,
+        ip_address: String,
+        user_agent: String,
     ) -> Result<secreton_core::AuthResult, AuthError> {
         // Root user cannot login via password — mirrors the check in `login()`
         // so that the root account is consistently blocked from password-based
@@ -2278,12 +2281,9 @@ impl AuthenticationService {
             }
         }
 
-        // Store session
-        let now = chrono::Utc::now();
         let session_duration =
             chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
                 .unwrap_or(chrono::Duration::hours(1));
-        let expires_at = now + session_duration;
 
         // Generate tokens with session binding, using the dynamic timeout so
         // that the JWT `exp` claim stays in sync with the session `expires_at`.
@@ -2299,6 +2299,9 @@ impl AuthenticationService {
         // evolves to set it independently.
         let token_mfa_required = (is_privileged || global_mfa_enabled) && !mfa_verified;
 
+        // Generate temporary session ID to bind it to the token up-front
+        let temp_session_id = Uuid::new_v4().to_string();
+
         let token_pair = self
             .token_service
             .create_token_pair_with_duration(
@@ -2308,43 +2311,24 @@ impl AuthenticationService {
                 user_roles,
                 &policies,
                 token_mfa_required,
-                Some(session_id.clone()),
+                Some(temp_session_id.clone()),
                 Some(session_duration),
             )
             .map_err(|_| AuthError::Internal(anyhow::anyhow!("Token generation failed")))?;
 
-        let session = Session {
-            id: session_id.clone(),
-            user_id: user_info.id.clone().unwrap_or_default(),
-            token: token_pair.access_token.clone(),
-            refresh_token: Some(token_pair.refresh_token.clone()),
-            ip_address: "legacy".to_string(),
-            user_agent: "legacy".to_string(),
-            created_at: now,
-            expires_at,
-            last_accessed: now,
-        };
-
-        let session_json = serde_json::to_vec(&session)
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
-
-        let session_data = self.crypto.encrypt_data(&session_json).await.map_err(|e| {
-            AuthError::Internal(anyhow::anyhow!("Failed to encrypt session: {}", e))
-        })?;
-
-        let entry = SecretEntry::new(
-            format!("{}{}", SESSION_STORAGE_PREFIX, session_id),
-            session_data,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::parse_str(&session.user_id).unwrap_or_default(),
-        )
-        .with_expiration(expires_at);
-
-        self.storage
-            .store(&entry)
+        // Persist the session using the same ID bound to the token
+        let _ = self
+            .create_and_store_session(
+                user_info.id.as_deref().unwrap_or_default(),
+                temp_session_id,
+                token_pair.access_token.clone(),
+                Some(token_pair.refresh_token.clone()),
+                ip_address,
+                user_agent,
+                session_timeout_secs,
+            )
             .await
-            .map_err(AuthError::Storage)?;
+            .map_err(AuthError::from)?;
 
         let mut result_metadata = std::collections::HashMap::new();
         result_metadata.insert("expires_in".to_string(), token_pair.expires_in.to_string());

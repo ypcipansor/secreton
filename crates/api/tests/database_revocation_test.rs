@@ -186,7 +186,10 @@ async fn test_database_lease_revocation_flow() {
         is_active: true,
         is_superuser: true,
     };
-    let token = auth.generate_token(&admin_user).await.unwrap();
+    let token = auth
+        .generate_token(&admin_user, "127.0.0.1".to_string(), "test".to_string())
+        .await
+        .unwrap();
 
     // Configure database engine (Mocked PostgreSQL)
     let db_config = DatabaseConfig {
