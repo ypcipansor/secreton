@@ -133,7 +133,7 @@ mod tests {
         };
         services
             .auth
-            .generate_token(&admin_user)
+            .generate_token(&admin_user, "127.0.0.1".to_string(), "test".to_string())
             .await
             .expect("Failed to generate admin token")
     }

@@ -57,7 +57,7 @@ async fn server_with_ssh() -> (TestServer, String) {
     };
     let token = services
         .auth
-        .generate_token(&user)
+        .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
         .await
         .expect("Failed to generate token");
 

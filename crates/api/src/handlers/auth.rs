@@ -271,7 +271,7 @@ mod tests {
         // Use service to generate token (this ensures valid JWT and session creation)
         let token = services
             .auth
-            .generate_token(&user)
+            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
             .await
             .expect("Failed to generate token");
 
@@ -326,7 +326,7 @@ mod tests {
 
         let token = services
             .auth
-            .generate_token(&user)
+            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
             .await
             .expect("Failed to generate token");
 
@@ -381,7 +381,7 @@ mod tests {
 
         let token = services
             .auth
-            .generate_token(&user)
+            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
             .await
             .expect("Failed to generate token");
 
@@ -715,7 +715,14 @@ pub async fn login(
         remember_me: request.remember_me,
     };
 
-    let auth_result = state.auth.authenticate(login_request).await;
+    // Extract client information from headers
+    let ip_address = extract_client_ip(&headers);
+    let user_agent = extract_user_agent(&headers);
+
+    let auth_result = state
+        .auth
+        .authenticate(login_request, ip_address, user_agent)
+        .await;
 
     match auth_result {
         Ok(auth_token) => {
@@ -914,10 +921,19 @@ pub async fn logout(
 /// Refresh access token
 pub async fn refresh_token(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
+    // Extract client information from headers
+    let ip_address = extract_client_ip(&headers);
+    let user_agent = extract_user_agent(&headers);
+
     // Validate refresh token and get new tokens
-    let auth_token = match state.auth.refresh_token(&request.refresh_token).await {
+    let auth_token = match state
+        .auth
+        .refresh_token(&request.refresh_token, ip_address, user_agent)
+        .await
+    {
         Ok(token) => token,
         Err(e) => {
             // Map specific auth errors to appropriate HTTP responses,
@@ -1567,11 +1583,16 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| crate::ApiError::Authentication(format!("OAuth login failed: {}", e)))?;
 
+    // Extract client information from headers
+    let ip_address = extract_client_ip(&headers);
+    let user_agent = extract_user_agent(&headers);
+
     // Generate JWT tokens
-    let jwt_access_token =
-        state.auth.generate_token(&user).await.map_err(|e| {
-            crate::ApiError::Authentication(format!("Token generation failed: {}", e))
-        })?;
+    let jwt_access_token = state
+        .auth
+        .generate_token(&user, ip_address, user_agent)
+        .await
+        .map_err(|e| crate::ApiError::Authentication(format!("Token generation failed: {}", e)))?;
 
     let refresh_token = state
         .auth
