@@ -183,6 +183,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Initialize rate limiting
+    if api_config.rate_limit.enabled {
+        info!(
+            "Initializing rate limiting: {} requests per {} seconds",
+            api_config.rate_limit.global.requests, api_config.rate_limit.global.window
+        );
+        secreton_api::middleware::init_rate_limiting(api_config.rate_limit.global.requests);
+    }
+
     // Ensure JWT secret exists (auto-generate if missing/None)
     if api_config.auth.jwt.secret.is_none() {
         info!("JWT secret not found in configuration. Generating a new secure random secret.");

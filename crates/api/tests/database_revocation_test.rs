@@ -105,45 +105,72 @@ async fn test_database_lease_revocation_flow() {
     ));
 
     let mut container = StandardServiceContainer::default();
-    container.register_service("storage".to_string(), storage.clone());
-    container.register_service("crypto".to_string(), crypto.clone());
-    container.register_service("audit".to_string(), audit.clone());
-    container.register_service("auth".to_string(), auth.clone());
-    container.register_service("secret".to_string(), secret.clone());
-    container.register_service("performance".to_string(), performance.clone());
-    container.register_service("seal".to_string(), seal.clone());
-    container.register_service("policy".to_string(), policy.clone());
-    container.register_service("mfa".to_string(), mfa.clone());
-    container.register_service("database".to_string(), database_svc.clone());
-    container.register_service(
+    container.register_service::<Arc<dyn StorageBackend + Send + Sync>>("storage".to_string(), storage.clone());
+    container.register_service::<Arc<secreton_api::services::crypto::CryptoService>>("crypto".to_string(), crypto.clone());
+    container.register_service::<Arc<secreton_api::services::audit::AuditLogger>>("audit".to_string(), audit.clone());
+    container.register_service::<Arc<secreton_api::services::auth::AuthenticationService>>("auth".to_string(), auth.clone());
+    container.register_service::<Arc<secreton_api::services::secret::SecretService>>("secret".to_string(), secret.clone());
+    container.register_service::<Arc<secreton_performance::SecretPerformanceOptimizer>>("performance".to_string(), performance.clone());
+    container.register_service::<Arc<secreton_api::services::seal::SealService>>("seal".to_string(), seal.clone());
+    container.register_service::<Arc<secreton_auth::PolicyService>>("policy".to_string(), policy.clone());
+    container.register_service::<Arc<secreton_auth::mfa::CombinedMfaService>>("mfa".to_string(), mfa.clone());
+    container.register_service::<Arc<secreton_api::services::database::DatabaseService>>("database".to_string(), database_svc.clone());
+    container.register_service::<Arc<secreton_api::services::pki::PkiPersistentService>>(
         "pki".to_string(),
         Arc::new(secreton_api::services::pki::PkiPersistentService::new(
             storage.clone(),
             crypto.clone(),
         )),
     );
-    container.register_service(
+    container.register_service::<Arc<secreton_api::services::totp_engine::TotpEngineService>>(
         "totp_engine".to_string(),
         Arc::new(secreton_api::services::totp_engine::TotpEngineService::new(
             storage.clone(),
             crypto.clone(),
         )),
     );
-    container.register_service(
+    container.register_service::<Arc<secreton_crypto::transit::TransitEngine>>(
         "transit".to_string(),
         Arc::new(secreton_crypto::transit::TransitEngine::new()),
     );
-    container.register_service(
+    container.register_service::<Arc<secreton_api::services::ssh::SshPersistentService>>(
         "ssh".to_string(),
         Arc::new(secreton_api::services::ssh::SshPersistentService::new(
             storage.clone(),
             crypto.clone(),
         )),
     );
-    container.register_service(
+    container.register_service::<Arc<secreton_core::telemetry::TelemetryCollector>>(
         "telemetry".to_string(),
         Arc::new(secreton_core::telemetry::TelemetryCollector::new(
             Default::default(),
+        )),
+    );
+
+    // Register lifecycle and integrations services required by create_api_router
+    let lifecycle_config =
+        secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
+            enabled: false,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: false,
+        };
+    container.register_service::<Arc<secreton_api::services::lifecycle::LifecycleService>>(
+        "lifecycle".to_string(),
+        Arc::new(secreton_api::services::lifecycle::LifecycleService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
+            lifecycle_config,
+        )),
+    );
+    container.register_service::<Arc<secreton_api::services::integrations::IntegrationsService>>(
+        "integrations".to_string(),
+        Arc::new(secreton_api::services::integrations::IntegrationsService::new(
+            storage.clone(),
+            crypto.clone(),
+            audit.clone(),
         )),
     );
 
@@ -261,5 +288,6 @@ async fn test_database_lease_revocation_flow() {
     // Status should be 500 (Internal) because DatabaseServiceError::Internal is mapped to 500.
     assert_eq!(res.status_code(), 500);
     let body: secreton_api::ApiResponse<()> = res.json();
-    assert!(body.error.unwrap().contains("Database revocation failed"));
+    // ApiError::Internal sanitizes detailed error messages for security
+    assert!(body.error.unwrap().contains("An internal server error occurred"));
 }
