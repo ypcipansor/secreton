@@ -427,41 +427,6 @@ pub async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-/// Rate limiting middleware
-pub async fn rate_limit(
-    headers: HeaderMap,
-    request: Request,
-    next: Next,
-) -> Result<Response, impl IntoResponse> {
-    // Get client identifier (IP address or user ID)
-    let client_ip = headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
-
-    // Check rate limit
-    {
-        let mut limiter_guard = RATE_LIMITER.lock().unwrap();
-        if let Some(ref mut limiter) = *limiter_guard {
-            if !limiter.check_rate_limit(client_ip) {
-                warn!("Rate limit exceeded for client: {}", client_ip);
-                return Err((
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(serde_json::json!({
-                        "error": "Rate limit exceeded",
-                        "status": 429,
-                        "retry_after": 60
-                    })),
-                ));
-            }
-        }
-    } // Guard is dropped here
-
-    Ok(next.run(request).await)
-}
-
-/// Request logging middleware
 pub async fn request_logging(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
@@ -633,6 +598,55 @@ mod tests {
 
         // Different client should be allowed
         assert!(rate_limiter.check_rate_limit("other-client"));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_middleware() {
+        use axum::{body::Body, http::Request, middleware::from_fn, routing::get, Router};
+        use tower::ServiceExt;
+
+        // Initialize rate limiting with a low threshold
+        init_rate_limiting(2);
+
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(from_fn(rate_limit::RateLimitMiddleware::limit));
+
+        // First request: should be allowed
+        let req1 = Request::builder()
+            .uri("/")
+            .header("x-real-ip", "1.2.3.4")
+            .body(Body::empty())
+            .unwrap();
+        let res1 = app.clone().oneshot(req1).await.unwrap();
+        assert_eq!(res1.status(), StatusCode::OK);
+
+        // Second request: should be allowed
+        let req2 = Request::builder()
+            .uri("/")
+            .header("x-real-ip", "1.2.3.4")
+            .body(Body::empty())
+            .unwrap();
+        let res2 = app.clone().oneshot(req2).await.unwrap();
+        assert_eq!(res2.status(), StatusCode::OK);
+
+        // Third request: should be rate limited
+        let req3 = Request::builder()
+            .uri("/")
+            .header("x-real-ip", "1.2.3.4")
+            .body(Body::empty())
+            .unwrap();
+        let res3 = app.clone().oneshot(req3).await.unwrap();
+        assert_eq!(res3.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // Different IP: should be allowed
+        let req4 = Request::builder()
+            .uri("/")
+            .header("x-real-ip", "5.6.7.8")
+            .body(Body::empty())
+            .unwrap();
+        let res4 = app.clone().oneshot(req4).await.unwrap();
+        assert_eq!(res4.status(), StatusCode::OK);
     }
 
     /// Build a User with the given `mfa_pending` metadata flag for testing.
@@ -959,15 +973,63 @@ pub mod cors {
 }
 
 pub mod rate_limit {
-    use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+    use axum::{
+        Json,
+        extract::Request,
+        http::{HeaderMap, StatusCode},
+        middleware::Next,
+        response::{IntoResponse, Response},
+    };
+    use tracing::warn;
 
     #[derive(Clone)]
     pub struct RateLimitMiddleware;
 
     impl RateLimitMiddleware {
-        pub async fn limit(req: Request, next: Next) -> Result<Response, StatusCode> {
-            // Placeholder rate limit
+        pub async fn limit(req: Request, next: Next) -> Result<Response, Response> {
+            // Get client identifier (IP address)
+            let client_ip = extract_client_ip(req.headers());
+
+            // Check rate limit
+            {
+                let mut limiter_guard = super::RATE_LIMITER.lock().unwrap();
+                if let Some(ref mut limiter) = *limiter_guard {
+                    if !limiter.check_rate_limit(&client_ip) {
+                        warn!("Rate limit exceeded for client: {}", client_ip);
+                        let body = Json(serde_json::json!({
+                            "error": "Rate limit exceeded",
+                            "status": 429,
+                            "retry_after": 60
+                        }));
+                        return Err((StatusCode::TOO_MANY_REQUESTS, body).into_response());
+                    }
+                }
+            }
+
             Ok(next.run(req).await)
         }
+    }
+
+    fn extract_client_ip(headers: &HeaderMap) -> String {
+        // IP Extraction Logic (Security Note):
+        // 1. Prefer X-Real-IP if set by a trusted local proxy.
+        // 2. Fall back to X-Forwarded-For. We take the LAST element if multiple
+        //    are present, as it is the most recently added by a proxy.
+        //    (Note: taking the FIRST element is easily spoofed by clients).
+        // 3. Fall back to "unknown". In production, the connection info from
+        //    Axum's ConnectInfo should be used for the ultimate source of truth.
+
+        if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            return real_ip.trim().to_string();
+        }
+
+        if let Some(forwarded_for) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            // Split and take the last one (most reliable in most chained proxy setups)
+            if let Some(last_ip) = forwarded_for.split(',').next_back() {
+                return last_ip.trim().to_string();
+            }
+        }
+
+        "unknown".to_string()
     }
 }

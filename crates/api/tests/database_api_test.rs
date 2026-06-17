@@ -153,6 +153,31 @@ async fn test_database_api_endpoints() {
     ));
     container.register_service("telemetry".to_string(), telemetry);
 
+    // Register lifecycle service required by create_api_router
+    let lifecycle_config =
+        secreton_integrations::integrations::secret_lifecycle_management::LifecycleConfig {
+            enabled: false,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: false,
+        };
+    let lifecycle = Arc::new(secreton_api::services::lifecycle::LifecycleService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+        lifecycle_config,
+    ));
+    container.register_service("lifecycle".to_string(), lifecycle);
+
+    // Register integrations service required by create_api_router
+    let integrations = Arc::new(secreton_api::services::integrations::IntegrationsService::new(
+        storage.clone(),
+        crypto.clone(),
+        audit.clone(),
+    ));
+    container.register_service("integrations".to_string(), integrations);
+
     let state = ApiState {
         kv: KVApiState::default(),
         database: database_state,
