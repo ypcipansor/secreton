@@ -2,8 +2,8 @@
 resolver = "3"
 members = [
     "crates/domain",
+    "crates/crypto",
     # Re-enabled one at a time as each crate is migrated to the new layout.
-    # "crates/crypto",
     # "crates/storage",
     # "crates/auth",
     # "crates/engines",
@@ -14,7 +14,6 @@ members = [
     # "crates/agent",
 ]
 exclude = [
-    "crates/crypto",
     "crates/storage",
     "crates/auth",
     "crates/secrets",

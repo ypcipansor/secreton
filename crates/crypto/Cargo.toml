@@ -1,82 +1,71 @@
 [package]
 name = "secreton-crypto"
+description = "Cryptographic primitives, transit engine and seal for Secreton"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Cryptographic primitives and quantum-safe algorithms for Secreton using Ed25519 for signatures"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# Core dependencies
-tokio.workspace = true
+secreton-domain.workspace = true
+
+async-trait.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
 tracing.workspace = true
 uuid.workspace = true
-chrono.workspace = true
 
-# Cryptographic dependencies - RustCrypto suite
-ring.workspace = true
-rsa = { version = "0.9.6", features = ["sha2"] }
-pkcs8 = "0.10.2"
-aes.workspace = true
+# AEAD
 aes-gcm.workspace = true
 chacha20poly1305.workspace = true
-cbc.workspace = true
+
+# Hashing and password hashing
 argon2.workspace = true
+blake3.workspace = true
+digest.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+pbkdf2 = "0.12"
+scrypt = "0.11"
 sha2.workspace = true
 sha3.workspace = true
-blake3.workspace = true
-hmac.workspace = true
-pbkdf2.workspace = true
-hkdf.workspace = true
-scrypt.workspace = true
-hex.workspace = true
-base64.workspace = true
-rand.workspace = true
-regex.workspace = true
 
-bincode.workspace = true
-serde_bytes.workspace = true
-
-# Elliptic curve cryptography
+# Signing.
+#
+# The `rsa` crate is deliberately NOT a dependency: RUSTSEC-2023-0071 (Marvin) is
+# an unfixed timing side channel in its decryption path, and Ed25519 / the NIST
+# curves cover every signing use in this codebase.
+ed25519-dalek.workspace = true
+k256 = { version = "0.13", features = ["ecdsa"] }
 p256.workspace = true
 p384.workspace = true
-k256.workspace = true
+pkcs8 = "0.10"
+signature = "2.2"
 x25519-dalek.workspace = true
-ed25519-dalek.workspace = true
-signature.workspace = true
 
-# Workspace dependencies
-generic-array.workspace = true
+# Shamir secret sharing for the unseal flow
+num-bigint = { version = "0.4", features = ["rand"] }
+num-integer = "0.1"
+num-traits = "0.2"
+
+base64.workspace = true
+hex.workspace = true
+rand.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 
-# Homomorphic Encryption
-# rust-elgamal = "0.4.0"  # ElGamal over ristretto255 curve - replaced with stub
-# curve25519-dalek = "4.0"  # Replaced with stub implementation
-
-# Threshold Cryptography
-# threshold_crypto = "0.4.0"  # Removed due to vulnerable failure crate dependency
-threshold-secret-sharing.workspace = true  # Shamir secret sharing
-
-# Shamir Secret Sharing
-num-bigint.workspace = true
-num-integer.workspace = true
-num-traits.workspace = true
-
-# Async utilities
-async-trait.workspace = true
-num_cpus.workspace = true
-reqwest.workspace = true
-
 [dev-dependencies]
-criterion.workspace = true
+anyhow.workspace = true
 proptest.workspace = true
+tokio = { workspace = true, features = ["full"] }
