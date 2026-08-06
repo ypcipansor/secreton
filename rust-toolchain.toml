@@ -1,0 +1,7 @@
+[toolchain]
+# Pinned so every developer, CI runner and Docker build compiles with the exact
+# same compiler. Bump deliberately in its own commit, never as a side effect.
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

@@ -1,31 +1,33 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
-    "crates/common",
-    "crates/errors",
-    "crates/config",
-    "crates/performance",
-    "crates/core",
-    # "crates/token",  # Merged into auth crate
-    "crates/monitoring",
-    "crates/agent",
-    "crates/ui",
+    "crates/domain",
+    # Re-enabled one at a time as each crate is migrated to the new layout.
+    # "crates/crypto",
+    # "crates/storage",
+    # "crates/auth",
+    # "crates/engines",
+    # "crates/client",
+    # "crates/ui",
+    # "crates/server",
+    # "crates/cli",
+    # "crates/agent",
+]
+exclude = [
     "crates/crypto",
     "crates/storage",
-    "crates/replication",
-    "crates/api",
-    "crates/cli",
-    "crates/security",
-    "crates/integrations",
-    "crates/infrastructure",
-    "crates/enterprise",
+    "crates/auth",
+    "crates/secrets",
     "crates/secrets-pki",
     "crates/secrets-database",
-    "crates/secrets",
-    "crates/auth",
-    # "crates/policies",  # Merged into auth crate
-    "crates/graphql",
+    "crates/security",
+    "crates/api",
+    "crates/config",
+    "crates/core",
     "crates/grpc",
+    "crates/ui",
+    "crates/cli",
+    "crates/agent",
 ]
 
 [workspace.package]
@@ -35,386 +37,261 @@ authors = ["Irhas <analisaperlengkapan@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/analisaperlengkapan/secreton"
 homepage = "https://github.com/analisaperlengkapan/secreton"
-description = "Advanced Security System with Quantum-Safe Cryptography"
-keywords = ["security", "secreton", "cryptography", "zero-trust", "quantum-safe"]
-categories = ["cryptography", "authentication", "security-tools"]
-rust-version = "1.95"
+description = "Secrets management platform built on Leptos and Axum"
+keywords = ["security", "secrets", "cryptography", "zero-trust", "vault"]
+categories = ["cryptography", "authentication", "web-programming"]
+# MSRV floor. The exact compiler used by CI and Docker is pinned in
+# rust-toolchain.toml; this is the oldest release the code is expected to build on.
+rust-version = "1.90"
 
 [workspace.dependencies]
-# Core crate dependencies
-secreton-common = { path = "crates/common" }
-secreton-errors = { path = "crates/errors" }
-secreton-config = { path = "crates/config" }
-secreton-performance = { path = "crates/performance" }
-secreton-core = { path = "crates/core" }
-# secreton-token = { path = "crates/token" }  # Merged into auth crate
-secreton-monitoring = { path = "crates/monitoring" }
-secreton-crypto = { path = "crates/crypto" }
-secreton-storage = { path = "crates/storage" }
-secreton-replication = { path = "crates/replication" }
-secreton-api = { path = "crates/api" }
-secreton-graphql = { path = "crates/graphql" }
-secreton-grpc = { path = "crates/grpc" }
-secreton-security = { path = "crates/security" }
-secreton-integrations = { path = "crates/integrations" }
-secreton-infrastructure = { path = "crates/infrastructure" }
-secreton-enterprise = { path = "crates/enterprise" }
-secreton-secrets-pki = { path = "crates/secrets-pki" }
-secreton-secrets-database = { path = "crates/secrets-database" }
-secreton-secrets = { path = "crates/secrets" }
-secreton-auth = { path = "crates/auth" }
-# secreton-policies = { path = "crates/policies" }  # Merged into auth crate
-audit-log = { path = "crates/security", package = "secreton-security" }
-# granular-revocation now part of auth crate
-# secret-versioning now part of enterprise crate
-# token crate merged into auth crate
-# Core dependencies
-tokio = { version = "1.47.1", features = ["full"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.140"
-anyhow = "1.0.100"
-thiserror = "2.0.17"
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-uuid = { version = "1.11.1", features = ["v4", "v5", "serde"] }
-chrono = { version = "0.4.42", features = ["serde"] }
-bincode = { version = "2.0.1", features = ["serde"] }
-zeroize = { version = "1.8.1", features = ["zeroize_derive", "aarch64"] }
-redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
+# ---- Internal crates -------------------------------------------------------
+secreton-domain = { path = "crates/domain", version = "0.1.0" }
+secreton-crypto = { path = "crates/crypto", version = "0.1.0" }
+secreton-storage = { path = "crates/storage", version = "0.1.0" }
+secreton-auth = { path = "crates/auth", version = "0.1.0" }
+secreton-engines = { path = "crates/engines", version = "0.1.0" }
+secreton-client = { path = "crates/client", version = "0.1.0" }
+secreton-ui = { path = "crates/ui", version = "0.1.0" }
 
-# System monitoring dependencies
-sysinfo = "0.37"
-nix = "0.27"
-
-# Testing dependencies
-criterion = { version = "0.7", features = ["html_reports"] }
-rmp-serde = "1.1"
-wiremock = { version = "0.6.5", default-features = false }
-proptest = { version = "1.5", default-features = false, features = ["std"] }
-
-# Async runtime
-async-trait = "0.1.89"
-futures = "0.3.31"
-futures-util = "0.3.31"
+# ---- Async runtime ---------------------------------------------------------
+tokio = "1.47"
 tokio-stream = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
 
-# Cryptography - Pure Rust, Audited by Security Experts
-# Using RustCrypto suite - audited, memory-safe, zero C dependencies
-ring = "0.17.14"  # Audited cryptography library (latest stable)
-rustls = "0.23.32"   # Pure Rust TLS 1.2/1.3 (audited, no OpenSSL)
-rustls-webpki = "0.103.7"  # Pure Rust X.509 certificate validation
-rustls-pemfile = "2.2.0"  # PEM file handling
-webpki-roots = "1.0.2"  # Mozilla CA certificates bundle
+# ---- Serialization ---------------------------------------------------------
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1"
+bincode = { version = "2.0", features = ["serde"] }
 
-# RustCrypto Symmetric Encryption (audited)
-aes-gcm = "0.10.3"  # AES-GCM AEAD
-aes = "0.8.4"  # AES block cipher
-ctr = "0.9.2"  # CTR mode
-cbc = "0.1.2"  # CBC mode
-chacha20poly1305 = "0.10.1"  # ChaCha20-Poly1305 AEAD
+# ---- Errors ----------------------------------------------------------------
+anyhow = "1.0"
+thiserror = "2.0"
 
-# RustCrypto Password Hashing (audited)
-argon2 = "0.5.3"  # Argon2 (winner of Password Hashing Competition)
-pbkdf2 = "0.12.2"  # PBKDF2
-scrypt = "0.11.0"  # scrypt
-bcrypt = "0.17.1"  # bcrypt
-password-hash = "0.5"
+# ---- Observability ---------------------------------------------------------
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
 
-# RustCrypto Hashing (audited)
-sha2 = "0.10.9"  # SHA-2 family
-sha3 = "0.10.8"  # SHA-3 family
-blake3 = "1.8.2"  # BLAKE3 (fastest secure hash)
-blake2 = "0.10.6"  # BLAKE2
-hmac = "0.12.1"  # HMAC
-hkdf = "0.12.4"  # HKDF key derivation
+# ---- Common utilities ------------------------------------------------------
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = "2.5"
+regex = "1.12"
+once_cell = "1.20"
+dashmap = "6.1"
+parking_lot = "0.12"
+lru = "0.16"
+humantime-serde = "1.1"
 
-# Encoding (pure Rust)
-hex = "0.4.3"
-base32 = "0.5.1"
-base64 = "0.22.1"
-data-encoding = "2.6.0"
+# ---- Web: Leptos + Axum ----------------------------------------------------
+leptos = "0.8"
+leptos_axum = "0.8"
+leptos_meta = "0.8"
+leptos_router = "0.8"
+axum = { version = "0.8", features = ["macros", "json", "tracing"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = [
+    "fs",
+    "trace",
+    "cors",
+    "timeout",
+    "limit",
+    "request-id",
+    "compression-full",
+] }
+http = "1"
+hyper = { version = "1.7", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+governor = "0.6"
+tower-governor = "0.7"
 
-serde_bytes = "0.11.5"
-rand = "0.8.5"  # Cryptographically secure RNG
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-rand_chacha = "0.3.1"  # ChaCha RNG
-getrandom = "0.3.3"  # OS randomness
+# ---- Web: client-side (wasm) ----------------------------------------------
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = "0.3"
 
-# Regex (pure Rust)
-regex = "1.12.1"
+# ---- gRPC (optional, feature = "grpc") -------------------------------------
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-build = "0.14"
+tonic-prost-build = "0.14"
+tonic-health = "0.14"
+tonic-reflection = "0.14"
+prost = "0.14"
+protoc-bin-vendored = "3"
 
-# Configuration
-config = { version = "0.15", default-features = false, features = ["toml", "json", "yaml"] }
-toml = "0.9"
-time = "0.3"
+# ---- OpenAPI ---------------------------------------------------------------
+# utoipa only. utoipa-swagger-ui is deliberately NOT used: its build script
+# downloads a zip over the network, which breaks hermetic and air-gapped builds.
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 
-# Database
-mongodb = "3.0"
+# ---- Cryptography (pure Rust, RustCrypto + ring) ---------------------------
+aes-gcm = "0.10"
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+sha2 = "0.10"
+sha3 = "0.10"
+blake3 = "1.8"
+hmac = "0.12"
+hkdf = "0.12"
+digest = "0.10"
+subtle = "2.6"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+secrecy = { version = "0.10", features = ["serde"] }
+rand = "0.8"
+rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = "0.3"
+ed25519-dalek = { version = "2.1", features = ["rand_core", "pkcs8"] }
+x25519-dalek = "2.0"
+p256 = "0.13"
+p384 = "0.13"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+totp-rs = { version = "5.6", default-features = false, features = ["otpauth"] }
 
-# Threshold cryptography
-threshold-secret-sharing = "0.1.1"
+# ---- Encoding --------------------------------------------------------------
+base64 = "0.22"
+base32 = "0.5"
+hex = "0.4"
 
-# Parser (pure Rust)
+# ---- X.509 / PKI -----------------------------------------------------------
+rcgen = "0.14"
+x509-parser = "0.18"
+pem = "3.0"
+
+# ---- TLS -------------------------------------------------------------------
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2.2"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+
+# ---- Storage backends ------------------------------------------------------
+tokio-postgres = { version = "0.7", features = [
+    "with-uuid-1",
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
+tokio-postgres-rustls = "0.13"
+deadpool-postgres = "0.14"
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
+
+# ---- Config / CLI ----------------------------------------------------------
+config = { version = "0.15", default-features = false, features = ["toml"] }
+clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
+comfy-table = "7"
+dirs = "5"
+rpassword = "7"
+
+# ---- Policy grammar --------------------------------------------------------
 pest = "2.7"
 pest_derive = "2.7"
 
-# RustCrypto Elliptic Curves (audited, pure Rust, NO RSA)
-# Ed25519/X25519 - fastest, most secure, audited by multiple teams
-ed25519-dalek = "2.1.1"  # Ed25519 signatures (primary algorithm)
-x25519-dalek = "2.0.1"  # X25519 key exchange
-curve25519-dalek = "4.1.3"  # Curve25519 operations
+# ---- Dev / test ------------------------------------------------------------
+axum-test = "18"
+proptest = { version = "1.5", default-features = false, features = ["std"] }
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+tempfile = "3.14"
+wiremock = { version = "0.6", default-features = false }
+criterion = { version = "0.7", features = ["html_reports"] }
 
-# NIST curves (when interoperability required)
-p256 = "0.13.2"  # NIST P-256 (secp256r1)
-p384 = "0.13.0"  # NIST P-384 (secp384r1)
-k256 = "0.13.4"  # secp256k1 (Bitcoin/Ethereum)
+# ============================================================================
+# Lints — set once here, inherited by every crate via `[lints] workspace = true`
+# ============================================================================
 
-# X.509 and Certificate handling (pure Rust)
-x509-parser = "0.18.0"  # X.509 certificate parsing
-x509-cert = "0.2.5"  # X.509 certificate handling (RustCrypto)
-pem = "3.0.4"  # PEM encoding
-rcgen = "0.14.5"  # Certificate generation (pure Rust)
-der = "0.7.9"  # DER encoding (RustCrypto)
-yasna = "0.5.2"  # ASN.1 encoding
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
 
-# Cryptographic traits (RustCrypto)
-digest = "0.10.7"  # Digest trait
-signature = "2.2.0"  # Signature trait
-elliptic-curve = "0.13.8"  # EC traits
-generic-array = "1.3.3"  # Generic arrays
-subtle = "2.6.1"  # Constant-time operations
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# A secrets manager must not take the process down on malformed input, and it must
+# not paper over a failure by substituting a default secret.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+# Silent truncation of a length or an index is a memory-safety-adjacent bug class.
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+# Holding a std lock across an await point deadlocks the runtime.
+await_holding_lock = "deny"
 
-# Post-quantum cryptography (experimental/deprecated - not ready for production)
-# kyber = "0.1"
-# dilithium = "0.2.0-alpha.3"  
-# falcon = "0.5"
-# sphincs-plus = "0.2"
+# ============================================================================
+# Build profiles
+# ============================================================================
 
-# Network and HTTP
-axum = { version = "0.8", features = ["macros", "multipart", "json", "tracing"] }
-leptos = { version = "0.8", features = ["csr"] }
-leptos_router = "0.8"
-hyper = { version = "1.7.0", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-web-sys = { version = "0.3.70", features = ["console", "Storage", "Window", "Location"] }
-wasm-bindgen-futures = "0.4"
-rust-embed = "8.0"
-mime_guess = "2.0"
-rpassword = "7.3"
-tonic = { version = "0.12", features = ["tls"] }
-tower = { version = "0.5", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs", "trace", "cors", "compression-full"] }
-prost = "0.13"
-
-# AWS SDK
-aws-config = "1.8.8"
-aws-sdk-iam = "1.91.0"
-aws-sdk-sts = "1.91.0"
-aws-sdk-ec2 = "1.95.0"
-aws-sdk-secretsmanager = "1.91.0"
-
-# Authentication protocols
-jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
-oauth2 = { version = "5.0", features = ["reqwest"] }
-openidconnect = "3.5"
-saml = "0.4"
-
-# LDAP
-ldap3 = { version = "0.12.1" }
-
-# RADIUS
-radius-rust = "0.4.4"
-
-# XML parsing for SAML
-xml = "1.1"
-
-# Kubernetes client
-kube = { version = "2.0", features = ["client", "rustls-tls"] }
-k8s-openapi = { version = "0.26", features = ["v1_30"] }
-
-# Threading and concurrency
-parking_lot = "0.12"
-
-# Database - Pure Rust stack with rustls (NO OpenSSL)
-tokio-postgres = { version = "0.7.12", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-postgres-types = { version = "0.2.11", features = ["derive"] }
-postgres = { version = "0.19.9", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
-deadpool-postgres = "0.14.0"
-# Using rustls instead of native-tls (pure Rust, no OpenSSL)
-tokio-postgres-rustls = "0.13.0"  # Pure Rust TLS for PostgreSQL
-# SQLx with PostgreSQL-only (removing RSA vulnerability from MySQL) - temporarily disabled
-# sqlx = { version = "0.8.2", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
-
-# GraphQL
-async-graphql = { version = "7.0", features = ["chrono", "uuid", "tracing"] }
-async-graphql-axum = "7.0"
-
-# CLI
-clap = { version = "4.4", features = ["derive"] }
-clap_complete = "4.4"
-dirs = "5.0"
-comfy-table = "7.1"
-
-# Metrics and monitoring
-prometheus = "0.14.0"  # Updated to address protobuf vulnerability
-opentelemetry = "0.31"
-opentelemetry-jaeger = "0.20"
-tracing-opentelemetry = "0.22"
-metrics = "0.24"
-metrics-exporter-prometheus = "0.17"
-axum-tracing-opentelemetry = "0.32"
-
-# Security monitoring and alerting
-sentry = "0.32"
-sentry-tracing = "0.45"
-
-# Runtime security validation
-# bollard = "0.16"  # Docker API for container security - temporarily disabled
-# kube = { version = "0.87", features = ["client", "derive"] }  # Kubernetes integration - temporarily disabled
-
-# Health checks and monitoring
-axum-health = "0.1"
-
-# Configuration security
-secrecy = { version = "0.10", features = ["serde"] }
-
-# Serialization formats
-cbor4ii = "1.1.1"  # Pinned to resolve version conflict
-num_cpus = "1.16"
-
-# Additional commonly used dependencies (pure Rust, audited)
-once_cell = "1.20.2"  # Thread-safe lazy initialization
-dashmap = "6.1.0"  # Concurrent hashmap (lock-free)
-tempfile = "3.14.0"  # Temporary files (secure)
-url = "2.5.4"  # URL parsing (audited)
-glob = "0.3.1"  # File pattern matching
-log = "0.4.22"  # Logging facade
-sha1 = "0.10.6"  # SHA1 (legacy only, use SHA2/SHA3 for new code)
-md5 = "0.8.0"  # MD5 (legacy only, BROKEN, use SHA2/SHA3)
-urlencoding = "2.1.3"  # URL encoding
-libloading = "0.9.0"  # Dynamic library loading
-flate2 = "1.0.35"  # Compression (pure Rust miniz_oxide backend)
-
-# API and HTTP
-http-body-util = "0.1"
-lazy_static = "1.4"
-lru = "0.16"
-governor = "0.6"
-headers = "0.4"
-utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
-mockito = "1.4"
-bollard = "0.19"
-axum-server = { version = "0.7.1", features = ["tls-rustls"] }
-tokio-rustls = "0.26"
-tonic-build = "0.12"
-
-# Authentication and crypto utilities (audited)
-# jwt-simple = "0.12"  # JWT (pure Rust, no RSA dependency) - removed due to rsa dependency
-totp-rs = { version = "5.6.0", default-features = false, features = ["otpauth", "qr"] }  # TOTP
-qrcode = "0.14.1"  # QR code generation
-
-# LDAP (with rustls for TLS)
-# ldap3 = { version = "0.12.1" }  # Already defined above
-
-# Database
-mysql_async = { version = "0.36", default-features = false, features = ["default-rustls", "chrono"] }
-
-# WebAssembly (pure Rust, audited)
-# wasmtime = "35.0.0"  # Removed to avoid old ring
-wasmi = "0.51.1"  # Alternative WASM interpreter (lighter)
-
-# HTTP frameworks
-warp = "0.3"  # Alternative HTTP framework
-
-# PQC (Post-Quantum Cryptography) - NIST standardized algorithms
-# Pure Rust implementations, actively maintained
-# pqcrypto-traits = "0.3.5"
-# pqcrypto-mldsa = "0.1.2"  # ML-DSA (NIST FIPS 204)
-# pqcrypto-mlkem = "0.1.1"  # ML-KEM (NIST FIPS 203)
-# pqcrypto-falcon = "0.4.1"  # Falcon signatures
-
-# Numeric utilities (pure Rust)
-num-bigint = { version = "0.4.6", features = ["rand"] }  # Big integers
-num-traits = "0.2.19"  # Numeric traits
-num-integer = "0.1.46"  # Integer utilities
-
-# Serialization
-ciborium = "0.2"  # CBOR
-
-# Cloud provider SDKs (pure Rust with rustls)
-aws-sdk-dynamodb = "1.95.0"
-aws-sdk-s3 = "1.108.0"
-aws-smithy-types = "1.2.7"
-aws-types = "1.3.3"
-aws-smithy-runtime = "1.7.2"
-# GCP (pure Rust)
-# google-cloud-storage = "1.1.0"
-
-# Database drivers
-mysql = { version = "26.0", features = ["chrono"] }  # MySQL sync
-
-# Additional security utilities
-const-oid = "0.10.1"  # Const OID (RustCrypto)
-spki = "0.7.3"  # SubjectPublicKeyInfo (RustCrypto)
-pkcs8 = "0.10.2"  # PKCS#8 (RustCrypto)
-sec1 = "0.7.3"  # SEC1 EC keys (RustCrypto)
-
-# Development and testing dependencies
-tokio-test = "0.4.4"
-pretty_assertions = "1.4.1"
-criterion-cycles-per-byte = "0.7.0"  # Benchmarking constant-time operations
-
-# Performance optimization profiles
 [profile.dev]
-# Faster compile times for development
-opt-level = 1                # Light optimization for better dev experience
-debug = true                 # Keep debug info for development
-incremental = true           # Enable incremental compilation
-codegen-units = 256          # Parallel compilation for faster builds
-lto = false                  # Disable LTO in dev for faster incremental builds
-split-debuginfo = "unpacked" # Faster debug builds on Linux/macOS
+opt-level = 1
+incremental = true
+codegen-units = 256
+split-debuginfo = "unpacked"
+
+# Dependencies rarely change; optimising them keeps dev-mode runtime and test
+# suites usable without slowing down incremental rebuilds of our own crates.
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
-# Maximum optimization for production
-opt-level = 3                # Maximum optimization level
-lto = "fat"                  # Full LTO for maximum optimization
-codegen-units = 1            # Single codegen unit for best optimization
-panic = "abort"              # Smaller binary, faster panics
-strip = true                 # Strip symbols for smaller binary
-overflow-checks = true       # Keep overflow checks for security
-debug = false                # No debug info in release
-incremental = false          # Disable incremental for clean release builds
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+debug = false
+incremental = false
+# Integer overflow is a security bug in a secrets manager, not a performance
+# tradeoff, so the checks stay on in release builds.
+overflow-checks = true
+# `panic = "abort"` is deliberately NOT set: it disables `#[should_panic]`
+# tests and unwinding in the cryptographic crates.
 
 [profile.bench]
 inherits = "release"
 debug = true
 
-# Optimize dependencies in dev mode for faster runtime
-[profile.dev.package."*"]
-opt-level = 2           # Optimize dependencies while keeping fast compile times
+# Optimise the wasm bundle for size rather than speed.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
 
-# Optimize specific heavy dependencies
-[profile.dev.package.tokio]
-opt-level = 3           # Tokio benefits from optimization
+# ============================================================================
+# cargo-leptos
+# ============================================================================
 
-[profile.dev.package.ring]
-opt-level = 3           # Crypto benefits from optimization
+[[workspace.metadata.leptos]]
+name = "secreton"
+bin-package = "secreton-server"
+lib-package = "secreton-ui"
 
-# Security-hardened profile for production deployment
-[profile.security]
-inherits = "release" 
-opt-level = 3
-lto = "fat"  # Maximum LTO
-codegen-units = 1
-panic = "abort"
-strip = true
-overflow-checks = true  # Runtime integer overflow detection
-debug-assertions = false
-incremental = false
+site-root = "target/site"
+site-pkg-dir = "pkg"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
 
-# Hardening flags via RUSTFLAGS (set in CI/CD):
-# -C control-flow-guard=checks  # CFG on Windows
-# -C relocation-model=pic  # Position independent code
-# -Z sanitizer=address  # AddressSanitizer (nightly)
-# -Z sanitizer=memory  # MemorySanitizer (nightly)
+style-file = "crates/ui/style/main.css"
+tailwind-input-file = "crates/ui/style/tailwind.css"
+tailwind-config-file = "crates/ui/tailwind.config.js"
+assets-dir = "crates/ui/public"
+
+browserquery = "defaults"
+watch = false
+env = "DEV"
+
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"
