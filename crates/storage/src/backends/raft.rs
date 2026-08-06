@@ -16,7 +16,7 @@ use crate::{
     HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
     StorageStats, StorageTransaction,
 };
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 
 /// Raft node configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,6 +320,7 @@ impl RaftStateMachine {
 }
 
 /// Raft integrated storage backend
+#[derive(Debug)]
 pub struct RaftStorageBackend {
     /// Raft configuration
     config: RaftConfig,
@@ -671,6 +672,7 @@ impl StorageBackend for RaftStorageBackend {
 }
 
 /// Raft transaction implementation
+#[derive(Debug)]
 pub struct RaftTransaction {
     state_machine: Arc<RwLock<RaftStateMachine>>,
     transaction_mutex: Arc<Mutex<()>>,

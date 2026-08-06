@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::Utc;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +25,7 @@ pub struct RedisTransaction {
     committed: bool,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum RedisTransactionOp {
     Store(SecretEntry),
     Update(SecretEntry),
@@ -150,6 +150,22 @@ impl RedisBackend {
         Ok(Self {
             manager: Arc::new(Mutex::new(manager)),
         })
+    }
+}
+
+// `redis::aio::ConnectionManager` is not `Debug`, so these are written by hand rather
+// than derived. They deliberately print no connection details.
+impl std::fmt::Debug for RedisBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedisBackend")
+    }
+}
+
+impl std::fmt::Debug for RedisTransaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisTransaction")
+            .field("pending_operations", &self.operations.len())
+            .finish()
     }
 }
 

@@ -1,110 +1,60 @@
 [package]
 name = "secreton-storage"
+description = "Storage abstraction and backends (memory, file, PostgreSQL, Redis, Raft) for Secreton"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Secure storage backend for Secreton system"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# Core dependencies
-tokio.workspace = true
+secreton-crypto.workspace = true
+secreton-domain.workspace = true
+
+async-trait.workspace = true
+bincode.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "sync", "time", "macros", "rt"] }
+tokio-stream.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-chrono.workspace = true
-async-trait.workspace = true
 
-# HTTP client for Consul/etcd
-reqwest.workspace = true
 base64.workspace = true
-urlencoding.workspace = true
-
-# Database - Using postgres crate for better dependency isolation
-postgres.workspace = true
-postgres-types.workspace = true
-
-# MongoDB client
-mongodb.workspace = true
-
-# Database
-tokio-postgres.workspace = true
-deadpool-postgres.workspace = true
-redis.workspace = true
-couch_rs = "0.12"
-tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "rustls", "tds73"] }
-tokio-util = { version = "0.7", features = ["compat"] }
-zookeeper-client = "0.7"
-hmac = "0.12"
-sha1 = "0.10"
-sha2 = "0.10"
-time = "0.3"
-rsa = "0.9"
-pkcs8 = "0.10"
-spki = "0.7"
-# SQLx temporarily disabled due to RSA vulnerability in MySQL backend
-# sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
-# mysql.workspace = true
-mysql_async.workspace = true
-aws-sdk-dynamodb.workspace = true
-aws-sdk-s3.workspace = true
-aws-config.workspace = true
-aws-smithy-types.workspace = true
-aws-types.workspace = true
-
-# Azure Storage - removed to avoid failure dependency
-# azure_storage.workspace = true
-# azure_storage_blobs.workspace = true
-# azure_core.workspace = true
-
-# Async streams
-futures.workspace = true
-tokio-stream.workspace = true
-regex.workspace = true
-
-# Cryptography
-secreton-crypto = { path = "../crypto" }
+hex.workspace = true
+rand.workspace = true
 zeroize.workspace = true
 
-# Random number generation
-rand.workspace = true
-hex.workspace = true
-
-# Common utilities
-secreton-common.workspace = true
-# secreton-core = { path = "../core" }
-
-# Configuration
-toml.workspace = true
-
-# Utilities
-bincode.workspace = true
-ciborium.workspace = true
-
-# GCP (pure Rust)
-# google-cloud-storage.workspace = true
-
-# Kubernetes (optional)
-kube = { workspace = true, optional = true }
-k8s-openapi = { workspace = true, optional = true }
+# Backends. Everything reachable from the default feature set is a backend that is
+# actually implemented and covered by tests; the 19 sketched backends that used to
+# live here (DynamoDB, Spanner, FoundationDB, ZooKeeper, …) were removed rather than
+# left as a promise, along with their transitive `rsa` and cloud-SDK dependencies.
+deadpool-postgres = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+tokio-postgres = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = { workspace = true, features = ["async_tokio"] }
 proptest.workspace = true
+toml.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 [features]
-default = []
-kubernetes = ["kube", "k8s-openapi"]
-
-[[bench]]
-name = "postgres_benchmark"
-harness = false
+# `memory` and `file` need no external service, so they are always available and
+# make the crate usable in tests and in `cargo leptos serve` with no dependencies.
+default = ["postgres", "redis", "raft"]
+postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
+redis = ["dep:redis"]
+# Experimental: single-node only, no cluster membership changes yet.
+raft = []

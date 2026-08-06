@@ -7,12 +7,13 @@ use crate::{
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
 use futures::future::try_join_all;
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use std::sync::Arc;
 use tokio_postgres::{NoTls, Row};
 use uuid::Uuid;
 
 /// PostgreSQL storage backend
+#[derive(Debug)]
 pub struct PostgresBackend {
     pool: Arc<Pool>,
 }
@@ -735,12 +736,14 @@ impl PostgresBackend {
 }
 
 /// PostgreSQL transaction implementation
+#[derive(Debug)]
 pub struct PostgresTransaction {
     pool: Arc<Pool>,
     operations: Vec<PostgresOperation>,
     committed: bool,
 }
 
+#[derive(Debug)]
 enum PostgresOperation {
     Store(SecretEntry),
     Update(SecretEntry),

@@ -2,14 +2,14 @@
 
 use crate::{SecretEntry, StorageResult};
 use async_trait::async_trait;
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
 /// Cache backend trait
 #[async_trait]
-pub trait CacheBackend: Send + Sync {
+pub trait CacheBackend: std::fmt::Debug + Send + Sync {
     /// Get an entry from cache
     async fn get(&self, key: &str) -> StorageResult<Option<Vec<u8>>>;
 
@@ -41,6 +41,7 @@ pub struct CacheStats {
 }
 
 /// In-memory cache implementation for development/testing
+#[derive(Debug)]
 pub struct InMemoryCache {
     data: std::sync::RwLock<std::collections::HashMap<String, CacheEntry>>,
     stats: std::sync::RwLock<CacheStats>,
@@ -185,6 +186,7 @@ impl CacheBackend for InMemoryCache {
 }
 
 /// Cached storage wrapper that adds caching to any storage backend
+#[derive(Debug)]
 pub struct CachedStorage<S: crate::StorageBackend, C: CacheBackend> {
     storage: S,
     cache: C,
