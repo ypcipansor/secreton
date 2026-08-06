@@ -8,10 +8,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod backends;
-mod middleware;
 
 pub use backends::*;
-pub use middleware::*;
 
 /// Audit log entry
 #[derive(Debug, Clone, Serialize, Deserialize)]

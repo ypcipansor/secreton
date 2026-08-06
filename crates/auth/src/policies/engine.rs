@@ -10,7 +10,7 @@ use super::error::PolicyResult;
 use super::model::{
     ConditionOperator, Policy, PolicyCondition, PolicyEffect, PolicyRule, PolicyType,
 };
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Pest parser for policy language
 #[derive(Parser)]

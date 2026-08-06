@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::certificate::*;
 use super::registry::*;
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Revocation service trait
 #[async_trait]

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::agent::*;
 use super::template::*;
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Agent service trait
 #[async_trait]

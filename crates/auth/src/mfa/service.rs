@@ -3,7 +3,7 @@
 use crate::service::AuthMethodResult;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

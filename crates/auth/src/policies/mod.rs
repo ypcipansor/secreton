@@ -32,5 +32,5 @@ pub use engine::*;
 pub use error::{PolicyResult, ValidationError, ValidationErrors};
 pub use evaluator::*;
 pub use model::*;
-pub use secreton_errors::SecretonError;
+pub use secreton_domain::SecretonError;
 pub use service::*;

@@ -10,8 +10,8 @@ use super::engine::PolicyEngine;
 use super::error::{PolicyResult, ValidationErrors};
 use super::evaluator::PolicyEvaluator;
 use super::model::{EvaluationContext, EvaluationResult, Policy, Role};
-use secreton_common::{Service, ServiceHealth, ServiceResult};
-use secreton_errors::SecretonError;
+use secreton_domain::ServiceHealth;
+use secreton_domain::SecretonError;
 
 /// Policy service for managing policies and roles
 pub struct PolicyService {
@@ -433,21 +433,20 @@ impl Default for PolicyService {
     }
 }
 
-#[async_trait::async_trait]
-impl Service for PolicyService {
-    async fn start(&self) -> ServiceResult<()> {
-        let mut start_time = self.start_time.lock().unwrap();
+impl PolicyService {
+    pub async fn start(&self) -> Result<(), SecretonError> {
+        let mut start_time = self.start_time.lock().expect("start_time mutex poisoned");
         *start_time = Some(std::time::Instant::now());
         tracing::info!("PolicyService started");
         Ok(())
     }
 
-    async fn stop(&self) -> ServiceResult<()> {
+    pub async fn stop(&self) -> Result<(), SecretonError> {
         tracing::info!("PolicyService stopped");
         Ok(())
     }
 
-    async fn health(&self) -> ServiceResult<ServiceHealth> {
+    pub async fn health(&self) -> Result<ServiceHealth, SecretonError> {
         // Basic health check - check if storage is accessible
         let policies_result = self.policies.try_read();
         let roles_result = self.roles.try_read();
@@ -460,15 +459,15 @@ impl Service for PolicyService {
         }
     }
 
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.service_name
     }
 
-    fn version(&self) -> &str {
+    pub fn version(&self) -> &str {
         &self.service_version
     }
 
-    fn uptime_seconds(&self) -> u64 {
+    pub fn uptime_seconds(&self) -> u64 {
         self.start_time
             .lock()
             .unwrap()

@@ -1,37 +1,27 @@
-//! Individual authentication method implementations
+//! Authentication methods.
+//!
+//! The set is deliberately small and each entry is reachable from a route:
+//!
+//! - `userpass`  — username and password, the bootstrap path
+//! - `approle`   — role id plus secret id, for machine-to-machine authentication
+//! - `oidc`      — human SSO against an OpenID Connect provider
+//! - `kubernetes`— workload identity via a projected service-account token
+//!
+//! Seven further methods (LDAP, GitHub, Okta, AWS IAM, SAML, RADIUS, X.509) previously
+//! lived here as unwired, untested implementations that no route could reach. They were
+//! removed rather than left to imply support that did not exist; the `AuthMethod` trait
+//! is the extension point for adding one back with tests.
 
 pub mod approle;
-#[cfg(feature = "aws")]
-pub mod aws;
-pub mod certificate;
-pub mod github;
 #[cfg(feature = "kubernetes")]
 pub mod kubernetes;
-#[cfg(feature = "ldap")]
-pub mod ldap;
 #[cfg(feature = "oidc")]
 pub mod oidc;
-pub mod okta;
-#[cfg(feature = "radius")]
-pub mod radius;
-#[cfg(feature = "saml")]
-pub mod saml;
 pub mod userpass;
 
 pub use approle::*;
-#[cfg(feature = "aws")]
-pub use aws::*;
-pub use certificate::*;
-pub use github::*;
 #[cfg(feature = "kubernetes")]
 pub use kubernetes::*;
-#[cfg(feature = "ldap")]
-pub use ldap::*;
 #[cfg(feature = "oidc")]
 pub use oidc::*;
-pub use okta::*;
-#[cfg(feature = "radius")]
-pub use radius::*;
-#[cfg(feature = "saml")]
-pub use saml::*;
 pub use userpass::*;

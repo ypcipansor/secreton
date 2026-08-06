@@ -4,7 +4,7 @@
 //! and abuse prevention.
 
 use chrono::{DateTime, Utc};
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

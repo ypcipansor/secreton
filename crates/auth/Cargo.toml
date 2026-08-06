@@ -1,106 +1,71 @@
 [package]
 name = "secreton-auth"
+description = "Authentication methods, identity, MFA, tokens, policy and governance for Secreton"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Authentication methods and login flows for Secreton system"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# Core dependencies
+secreton-crypto.workspace = true
+secreton-domain.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "sync", "time", "macros", "rt"] }
 tracing.workspace = true
 uuid.workspace = true
-chrono.workspace = true
-async-trait.workspace = true
-tokio.workspace = true
-futures.workspace = true
-regex.workspace = true
 
-# Shared crates
-secreton-common.workspace = true
-secreton-errors.workspace = true
-secreton-config.workspace = true
-secreton-crypto.workspace = true
-
-# HTTP client for OAuth/OIDC
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
-
-# URL encoding
-urlencoding.workspace = true
-
-# LDAP support
-ldap3 = { workspace = true, optional = true }
-
-# JWT support for OIDC/OAuth
+# Tokens
 jsonwebtoken.workspace = true
 
-# Password hashing for userpass
+# Password hashing
 argon2.workspace = true
-password-hash.workspace = true
+password-hash = "0.5"
 
-# OAuth2 support
-oauth2 = { workspace = true, optional = true }
-
-# Kubernetes support
-k8s-openapi = { workspace = true, optional = true }
-kube = { workspace = true, optional = true }
-
-# AWS support
-aws-config = { workspace = true, optional = true }
-aws-sdk-sts = { workspace = true, optional = true }
-aws-sdk-iam = { workspace = true, optional = true }
-
-# SAML XML parsing
-xml = { workspace = true, optional = true }
-
-# Compression for SAML
-flate2.workspace = true
-
-# RADIUS support
-radius-rust = { workspace = true, optional = true }
-
-# X.509 certificate parsing
-x509-parser.workspace = true
-
-# MD5 for RADIUS
-md5.workspace = true
-
-# Base64 encoding
-base64.workspace = true
-
-# Random number generation
-rand.workspace = true
-
-# Hex encoding
-hex.workspace = true
-
-# Base32 encoding for TOTP
+# MFA
 base32.workspace = true
-
-# HMAC and SHA for MFA
+glob = "0.3"
 hmac.workspace = true
-sha1.workspace = true
+sha1 = "0.10"
 sha2.workspace = true
+totp-rs.workspace = true
 
-# Policy evaluation
+# Policy grammar
 pest.workspace = true
 pest_derive.workspace = true
 
+base64.workspace = true
+hex.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+regex.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+# Optional auth methods
+oauth2 = { version = "5.0", features = ["reqwest"], optional = true }
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
 [features]
-default = ["ldap", "oidc", "oauth2", "saml"]
-ldap = ["dep:ldap3"]
-radius = ["dep:radius-rust"]
-oidc = ["dep:oauth2"]
-oauth2 = ["dep:oauth2"]
-saml = ["dep:xml"]
-kubernetes = ["dep:k8s-openapi", "dep:kube"]
-aws = ["dep:aws-config", "dep:aws-sdk-sts", "dep:aws-sdk-iam"]
+default = ["oidc"]
+oidc = ["dep:oauth2", "dep:reqwest"]
+# Kubernetes workload identity. Off by default: it only makes sense in-cluster,
+# where the projected service-account token is mounted.
+kubernetes = ["dep:reqwest"]

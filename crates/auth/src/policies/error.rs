@@ -3,7 +3,7 @@
 //! This module now uses SecretonError for all error handling to ensure consistency
 //! across the entire codebase.
 
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::fmt;
 
 /// Result type for policy operations using unified SecretonError

@@ -2,7 +2,7 @@
 
 use crate::model::*;
 use async_trait::async_trait;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -1,6 +1,6 @@
 // Quotas System - Resource limiting per _path, namespace, and role
 use chrono::{DateTime, Utc};
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

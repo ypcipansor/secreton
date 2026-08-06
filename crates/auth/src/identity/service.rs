@@ -11,7 +11,7 @@ use super::entity::*;
 use super::group::*;
 use crate::model::*;
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Identity service trait
 #[async_trait]

@@ -1,7 +1,8 @@
-//! # Secreton Security Policies & Compliance
+//! Governance: policy enforcement, quotas, RBAC, audit devices and the seal.
 //!
-//! Comprehensive security policy enforcement, compliance frameworks,
-//! audit logging, and governance services for the Secreton security system.
+//! This was a separate `secreton-security` crate. It is a submodule of `secreton-auth`
+//! because every type here answers the same question the rest of the crate does — may
+//! this principal perform this operation, and what is recorded about it.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,15 +12,10 @@ pub mod auto_unseal;
 pub mod error;
 pub mod policies;
 
-// Re-export main types
 pub use audit::{AuditBackend, AuditError, AuditLog, AuditStatus};
 pub use auto_unseal::{AutoUnsealError, KmsProvider};
 pub use error::SecurityError;
 pub use policies::audit::{AuditEvent, AuditEventType, AuditStatus as PolicyAuditStatus};
-pub use policies::compliance_framework::{
-    ComplianceProfile, ComplianceRequirement, ComplianceStandard,
-};
-pub use policies::policy::PolicySet;
 pub use policies::quotas::{QuotaConfig, QuotaType, QuotaUsage};
 
 /// Security context for operations
@@ -63,9 +59,4 @@ pub trait SecurityEngine: Send + Sync {
     /// Log security event
     async fn log_event(&self, event: AuditEvent) -> Result<(), SecurityError>;
 
-    /// Check compliance
-    async fn check_compliance(
-        &self,
-        context: &SecurityContext,
-    ) -> Result<Vec<ComplianceProfile>, SecurityError>;
 }

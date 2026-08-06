@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Template type
 #[derive(Debug, Clone, PartialEq)]

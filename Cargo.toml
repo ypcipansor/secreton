@@ -4,8 +4,8 @@ members = [
     "crates/domain",
     "crates/crypto",
     "crates/storage",
+    "crates/auth",
     # Re-enabled one at a time as each crate is migrated to the new layout.
-    # "crates/auth",
     # "crates/engines",
     # "crates/client",
     # "crates/ui",
@@ -14,7 +14,6 @@ members = [
     # "crates/agent",
 ]
 exclude = [
-    "crates/auth",
     "crates/secrets",
     "crates/secrets-pki",
     "crates/secrets-database",

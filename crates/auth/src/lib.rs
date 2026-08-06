@@ -42,6 +42,7 @@
 //! - `error/`: Authentication-specific error types
 
 pub mod agent;
+pub mod governance;
 pub mod identity;
 pub mod jwt;
 pub mod method;
@@ -54,9 +55,7 @@ pub mod token;
 
 pub use agent::*;
 pub use identity::*;
-pub use method::{
-    AppRoleAuthMethod, CertAuth, GithubAuthMethod, OktaAuthMethod, UserPassAuthMethod,
-};
+pub use method::{AppRoleAuthMethod, UserPassAuthMethod};
 pub use mfa::{
     CombinedMfaService, EmailService, HardwareService, InMemoryEmailService,
     InMemoryHardwareService, InMemorySmsService, InMemoryTotpService, MfaService, SmsService,
