@@ -97,10 +97,10 @@ mod tests {
     #[tokio::test]
     async fn replaces_ids_that_could_poison_a_log_line() {
         for hostile in [
-            "a\tb",                  // control character
-            &"x".repeat(4096),       // unbounded growth
-            "id with spaces",        // separator
-            "",                      // empty
+            "a\tb",            // control character
+            &"x".repeat(4096), // unbounded growth
+            "id with spaces",  // separator
+            "",                // empty
         ] {
             let Ok(req) = Request::builder()
                 .uri("/")

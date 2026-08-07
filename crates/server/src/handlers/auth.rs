@@ -35,12 +35,12 @@ pub struct SessionInfo {
 // Use types from secreton_auth
 use secreton_auth::{LoginRequest, MfaService, RefreshTokenRequest, UserInfo};
 
-use secreton_engines::services::audit::SecurityEventType;
+use crate::error::ApiResult;
 use crate::router::AppState;
 use secreton_domain::ApiResponse;
-use crate::error::ApiResult;
-use secreton_engines::services::auth::AuthError;
 use secreton_engines::Services;
+use secreton_engines::services::audit::SecurityEventType;
+use secreton_engines::services::auth::AuthError;
 use secreton_engines::services::auth::OAuthUserInfo;
 
 // Import Claims from auth service for JWT decoding
@@ -77,7 +77,6 @@ pub fn authenticated_routes() -> Router<AppState> {
         .route("/sessions/{session_id}", delete(revoke_session))
         .route("/users", post(create_user))
 }
-
 
 // LoginRequest, RefreshTokenRequest, UserInfo imported from secreton_auth
 
@@ -164,7 +163,10 @@ pub struct OAuthProvidersConfig {
 }
 
 impl OAuthProvider {
-    fn new(provider: &str, config: Option<&secreton_engines::config::OAuth2Config>) -> Option<Self> {
+    fn new(
+        provider: &str,
+        config: Option<&secreton_engines::config::OAuth2Config>,
+    ) -> Option<Self> {
         let config = config?;
 
         // Find the provider in the providers vector
@@ -364,7 +366,9 @@ pub async fn login(
             // AuthResult.token is Option<String>, use it as access_token
             let access_token = auth_token.token.clone().unwrap_or_default();
             let user_info = auth_token.user_info.as_ref().ok_or_else(|| {
-                crate::error::ApiError(SecretonError::Authentication { message: "User info not available".to_string() })
+                crate::error::ApiError(SecretonError::Authentication {
+                    message: "User info not available".to_string(),
+                })
             })?;
 
             // Read dynamic expires_in from AuthResult metadata (set by
@@ -446,9 +450,9 @@ pub async fn login(
                     // MfaNotConfigured only fires after successful password
                     // verification, so a distinct message would confirm that
                     // the credentials are valid.
-                    Err(crate::error::ApiError(SecretonError::Authentication { message: 
-                        "Authentication failed".to_string(),
-                     }))
+                    Err(crate::error::ApiError(SecretonError::Authentication {
+                        message: "Authentication failed".to_string(),
+                    }))
                 }
                 AuthError::MfaRequired => {
                     // NOTE: "MFA required" implicitly confirms valid credentials
@@ -457,7 +461,9 @@ pub async fn login(
                     // client needs to know when to prompt for a code.  We use a
                     // dedicated SecretonError variant so the HTTP layer returns
                     // the correct 401 status with the MFA-specific message.
-                    Err(crate::error::ApiError(secreton_domain::SecretonError::MfaRequired))
+                    Err(crate::error::ApiError(
+                        secreton_domain::SecretonError::MfaRequired,
+                    ))
                 }
                 AuthError::Internal(ref inner) => {
                     tracing::error!(
@@ -465,9 +471,9 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during authentication".to_string(),
-                     }))
+                    Err(crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during authentication".to_string(),
+                    }))
                 }
                 AuthError::Storage(ref inner) => {
                     tracing::error!(
@@ -475,9 +481,9 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during authentication".to_string(),
-                     }))
+                    Err(crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during authentication".to_string(),
+                    }))
                 }
                 AuthError::Crypto(ref inner) => {
                     tracing::error!(
@@ -485,25 +491,29 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during authentication".to_string(),
-                     }))
+                    Err(crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during authentication".to_string(),
+                    }))
                 }
                 // InvalidMfaCode only fires after successful password
                 // verification, so returning "Invalid MFA code" would
                 // confirm that the credentials are valid.  Use a generic
                 // message consistent with MfaNotConfigured handling above.
-                AuthError::InvalidMfaCode => Err(crate::error::ApiError(SecretonError::Authentication { message: 
-                    "Authentication failed".to_string(),
-                 })),
+                AuthError::InvalidMfaCode => {
+                    Err(crate::error::ApiError(SecretonError::Authentication {
+                        message: "Authentication failed".to_string(),
+                    }))
+                }
                 // UserNotFound / UserAlreadyExists — return a generic
                 // message to prevent user enumeration.
-                AuthError::UserNotFound | AuthError::UserAlreadyExists => Err(
-                    crate::error::ApiError(SecretonError::Authentication { message: "Authentication failed".to_string() }),
-                ),
-                _ => Err(crate::error::ApiError(SecretonError::Authentication { message: 
-                    "Authentication failed".to_string(),
-                 })),
+                AuthError::UserNotFound | AuthError::UserAlreadyExists => {
+                    Err(crate::error::ApiError(SecretonError::Authentication {
+                        message: "Authentication failed".to_string(),
+                    }))
+                }
+                _ => Err(crate::error::ApiError(SecretonError::Authentication {
+                    message: "Authentication failed".to_string(),
+                })),
             }
         }
     }
@@ -521,7 +531,9 @@ pub async fn logout(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Missing or invalid authorization header".to_string(),
+            })
         })?;
 
     // Extract session ID from token for accurate auditing
@@ -577,32 +589,38 @@ pub async fn refresh_token(
             return Err(match e {
                 AuthError::Storage(ref inner) => {
                     tracing::error!("Storage error during token refresh: {}", inner);
-                    crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during token refresh".to_string(),
-                     })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during token refresh".to_string(),
+                    })
                 }
                 AuthError::Internal(ref inner) => {
                     tracing::error!("Internal error during token refresh: {}", inner);
-                    crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during token refresh".to_string(),
-                     })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during token refresh".to_string(),
+                    })
                 }
                 AuthError::Crypto(ref inner) => {
                     tracing::error!("Crypto error during token refresh: {}", inner);
-                    crate::error::ApiError(SecretonError::Internal { message: 
-                        "An internal error occurred during token refresh".to_string(),
-                     })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: "An internal error occurred during token refresh".to_string(),
+                    })
                 }
                 // InvalidCredentials covers disabled/locked accounts and
                 // UserNotFound — return a generic auth failure message to
                 // avoid confirming whether the account exists or its status.
                 AuthError::InvalidCredentials | AuthError::UserNotFound => {
-                    crate::error::ApiError(SecretonError::Authentication { message: "Token refresh failed".to_string() })
+                    crate::error::ApiError(SecretonError::Authentication {
+                        message: "Token refresh failed".to_string(),
+                    })
                 }
                 AuthError::InvalidToken | AuthError::TokenExpired => {
-                    crate::error::ApiError(SecretonError::Authentication { message: e.to_string() })
+                    crate::error::ApiError(SecretonError::Authentication {
+                        message: e.to_string(),
+                    })
                 }
-                _ => crate::error::ApiError(SecretonError::Authentication { message: "Token refresh failed".to_string() }),
+                _ => crate::error::ApiError(SecretonError::Authentication {
+                    message: "Token refresh failed".to_string(),
+                }),
             });
         }
     };
@@ -660,11 +678,16 @@ pub async fn verify_token(
     Json(request): Json<VerifyTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
     // Validate token and get user information
-    let user: secreton_auth::User = state
-        .auth
-        .validate_token(&request.token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+    let user: secreton_auth::User =
+        state
+            .auth
+            .validate_token(&request.token)
+            .await
+            .map_err(|e| {
+                crate::error::ApiError(SecretonError::Authentication {
+                    message: e.to_string(),
+                })
+            })?;
 
     let user_info = UserInfo {
         id: Some(user.id.clone()),
@@ -687,8 +710,11 @@ pub async fn setup_mfa(
     Json(request): Json<MfaSetupRequest>,
 ) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
     // Parse user ID to UUID
-    let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: "Invalid user ID".to_string(),
+        })
+    })?;
 
     let mut response = MfaSetupResponse {
         method: request.method.clone(),
@@ -704,14 +730,20 @@ pub async fn setup_mfa(
                 .mfa
                 .enable_totp(user_id, user.username.clone())
                 .await
-                .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup MFA: {}", e) }))?;
+                .map_err(|e| {
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: format!("Failed to setup MFA: {}", e),
+                    })
+                })?;
 
             response.secret = Some(totp_config.secret);
             response.qr_code = Some(totp_config.url);
         }
         "sms" => {
             let phone_number = request.phone_number.ok_or_else(|| {
-                crate::error::ApiError(SecretonError::Validation { message: "Phone number is required for SMS MFA".to_string() })
+                crate::error::ApiError(SecretonError::Validation {
+                    message: "Phone number is required for SMS MFA".to_string(),
+                })
             })?;
 
             state
@@ -719,16 +751,22 @@ pub async fn setup_mfa(
                 .enable_sms(user_id, phone_number)
                 .await
                 .map_err(|e| {
-                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup SMS MFA: {}", e) })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: format!("Failed to setup SMS MFA: {}", e),
+                    })
                 })?;
         }
         "email" => {
             let email = request.email.ok_or_else(|| {
-                crate::error::ApiError(SecretonError::Validation { message: "Email is required for Email MFA".to_string() })
+                crate::error::ApiError(SecretonError::Validation {
+                    message: "Email is required for Email MFA".to_string(),
+                })
             })?;
 
             state.mfa.enable_email(user_id, email).await.map_err(|e| {
-                crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup Email MFA: {}", e) })
+                crate::error::ApiError(SecretonError::Internal {
+                    message: format!("Failed to setup Email MFA: {}", e),
+                })
             })?;
         }
         "webauthn" => {
@@ -741,18 +779,17 @@ pub async fn setup_mfa(
                 )
                 .await
                 .map_err(|e| {
-                    crate::error::ApiError(SecretonError::Internal { message: format!(
-                        "Failed to start WebAuthn registration: {}",
-                        e
-                    ) })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: format!("Failed to start WebAuthn registration: {}", e),
+                    })
                 })?;
 
             response.webauthn_challenge = Some(challenge);
         }
         _ => {
-            return Err(crate::error::ApiError(SecretonError::Validation { message: 
-                "Unsupported MFA method".to_string(),
-             }));
+            return Err(crate::error::ApiError(SecretonError::Validation {
+                message: "Unsupported MFA method".to_string(),
+            }));
         }
     }
 
@@ -763,7 +800,9 @@ pub async fn setup_mfa(
             .regenerate_recovery_codes(user_id)
             .await
             .map_err(|e| {
-                crate::error::ApiError(SecretonError::Internal { message: format!("Failed to generate recovery codes: {}", e) })
+                crate::error::ApiError(SecretonError::Internal {
+                    message: format!("Failed to generate recovery codes: {}", e),
+                })
             })?;
         response.backup_codes = codes;
     }
@@ -787,8 +826,11 @@ pub async fn complete_mfa_setup(
     Json(request): Json<MfaSetupCompleteRequest>,
 ) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
     // Parse user ID to UUID
-    let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: "Invalid user ID".to_string(),
+        })
+    })?;
 
     match request.method.as_str() {
         "webauthn" => {
@@ -798,53 +840,62 @@ pub async fn complete_mfa_setup(
                     .complete_webauthn_registration(response)
                     .await
                     .map_err(|e| {
-                        crate::error::ApiError(SecretonError::Internal { message: format!(
-                            "Failed to complete WebAuthn registration: {}",
-                            e
-                        ) })
+                        crate::error::ApiError(SecretonError::Internal {
+                            message: format!("Failed to complete WebAuthn registration: {}", e),
+                        })
                     })?;
             } else {
-                return Err(crate::error::ApiError(SecretonError::Validation { message: 
-                    "Missing WebAuthn response".to_string(),
-                 }));
+                return Err(crate::error::ApiError(SecretonError::Validation {
+                    message: "Missing WebAuthn response".to_string(),
+                }));
             }
         }
         "sms" => {
-            let code = request
-                .code
-                .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing code".to_string() }))?;
+            let code = request.code.ok_or_else(|| {
+                crate::error::ApiError(SecretonError::Validation {
+                    message: "Missing code".to_string(),
+                })
+            })?;
             let valid = state
                 .mfa
                 .verify_and_enable_sms(user_id, code)
                 .await
                 .map_err(|e| {
-                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to verify SMS code: {}", e) })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: format!("Failed to verify SMS code: {}", e),
+                    })
                 })?;
             if !valid {
-                return Err(crate::error::ApiError(SecretonError::Validation { message: "Invalid SMS code".to_string() }));
+                return Err(crate::error::ApiError(SecretonError::Validation {
+                    message: "Invalid SMS code".to_string(),
+                }));
             }
         }
         "email" => {
-            let code = request
-                .code
-                .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing code".to_string() }))?;
+            let code = request.code.ok_or_else(|| {
+                crate::error::ApiError(SecretonError::Validation {
+                    message: "Missing code".to_string(),
+                })
+            })?;
             let valid = state
                 .mfa
                 .verify_and_enable_email(user_id, code)
                 .await
                 .map_err(|e| {
-                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to verify Email code: {}", e) })
+                    crate::error::ApiError(SecretonError::Internal {
+                        message: format!("Failed to verify Email code: {}", e),
+                    })
                 })?;
             if !valid {
-                return Err(crate::error::ApiError(SecretonError::Validation { message: 
-                    "Invalid Email code".to_string(),
-                 }));
+                return Err(crate::error::ApiError(SecretonError::Validation {
+                    message: "Invalid Email code".to_string(),
+                }));
             }
         }
         _ => {
-            return Err(crate::error::ApiError(SecretonError::Validation { message: 
-                "Unsupported MFA method for completion".to_string(),
-             }));
+            return Err(crate::error::ApiError(SecretonError::Validation {
+                message: "Unsupported MFA method for completion".to_string(),
+            }));
         }
     }
 
@@ -854,7 +905,9 @@ pub async fn complete_mfa_setup(
         .regenerate_recovery_codes(user_id)
         .await
         .map_err(|e| {
-            crate::error::ApiError(SecretonError::Internal { message: format!("Failed to generate recovery codes: {}", e) })
+            crate::error::ApiError(SecretonError::Internal {
+                message: format!("Failed to generate recovery codes: {}", e),
+            })
         })?;
 
     let response = MfaSetupResponse {
@@ -889,19 +942,24 @@ pub async fn verify_mfa(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Missing or invalid authorization header".to_string(),
+            })
         })?;
 
     // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+    let user = state.auth.validate_token(token).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: e.to_string(),
+        })
+    })?;
 
     // Parse user ID to UUID
-    let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: "Invalid user ID".to_string(),
+        })
+    })?;
 
     use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
 
@@ -925,23 +983,23 @@ pub async fn verify_mfa(
             webauthn_response: None,
         },
         _ => {
-            return Err(crate::error::ApiError(SecretonError::Validation { message: 
-                "Unsupported MFA method for verification".to_string(),
-             }));
+            return Err(crate::error::ApiError(SecretonError::Validation {
+                message: "Unsupported MFA method for verification".to_string(),
+            }));
         }
     };
 
     // Validate using the MFA service
-    let is_valid = state
-        .mfa
-        .validate(validation_request)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("MFA validation failed: {}", e) }))?;
+    let is_valid = state.mfa.validate(validation_request).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("MFA validation failed: {}", e),
+        })
+    })?;
 
     if !is_valid {
-        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
-            "Invalid MFA code".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authentication {
+            message: "Invalid MFA code".to_string(),
+        }));
     }
 
     let data = serde_json::json!({
@@ -973,46 +1031,55 @@ pub async fn disable_mfa(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Missing or invalid authorization header".to_string(),
+            })
         })?;
 
     // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+    let user = state.auth.validate_token(token).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: e.to_string(),
+        })
+    })?;
 
     // Verify password for additional security
     let password_valid: bool = state
         .auth
         .verify_password(&user.username, &request.password)
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Authentication {
+                message: e.to_string(),
+            })
+        })?;
 
     if !password_valid {
-        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
-            "Invalid password".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authentication {
+            message: "Invalid password".to_string(),
+        }));
     }
 
     // Parse UUID
-    let user_uuid = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::error::ApiError(SecretonError::Internal { message: "Invalid user ID format".to_string() }))?;
+    let user_uuid = Uuid::parse_str(&user.id).map_err(|_| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: "Invalid user ID format".to_string(),
+        })
+    })?;
 
     // Disable MFA (specific logic from mfa-integration tailored to use user_uuid)
-    state
-        .mfa
-        .disable_totp(user_uuid)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to disable MFA: {}", e) }))?;
+    state.mfa.disable_totp(user_uuid).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("Failed to disable MFA: {}", e),
+        })
+    })?;
 
     // Remove MFA enrollment (disables all methods)
-    state
-        .mfa
-        .remove_enrollment(user_uuid)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to disable MFA: {}", e) }))?;
+    state.mfa.remove_enrollment(user_uuid).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("Failed to disable MFA: {}", e),
+        })
+    })?;
 
     let method = "all"; // All MFA methods disabled
 
@@ -1041,10 +1108,9 @@ pub async fn oauth_login(
     // Validate supported providers
     let supported_providers = ["google", "github", "microsoft", "okta"];
     if !supported_providers.contains(&provider.as_str()) {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: format!(
-            "Unsupported OAuth provider: {}",
-            provider
-        ) }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: format!("Unsupported OAuth provider: {}", provider),
+        }));
     }
 
     // Generate secure random state
@@ -1075,7 +1141,11 @@ pub async fn oauth_login(
         .storage
         .store_oauth_state(&oauth_state)
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to store OAuth state: {}", e) }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Internal {
+                message: format!("Failed to store OAuth state: {}", e),
+            })
+        })?;
 
     // Build authorization URL based on provider
     let auth_url = if let Some(oauth2_config) = state.config.auth.oauth2.as_ref() {
@@ -1085,7 +1155,9 @@ pub async fn oauth_login(
             .iter()
             .find(|p| p.name.to_lowercase() == provider.to_lowercase())
             .ok_or_else(|| {
-                crate::error::ApiError(SecretonError::Validation { message: format!("OAuth provider '{}' not configured", provider) })
+                crate::error::ApiError(SecretonError::Validation {
+                    message: format!("OAuth provider '{}' not configured", provider),
+                })
             })?;
 
         // Build redirect URI
@@ -1131,9 +1203,9 @@ pub async fn oauth_login(
             )
         }
     } else {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "OAuth providers not configured".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "OAuth providers not configured".to_string(),
+        }));
     };
 
     let data = serde_json::json!({
@@ -1153,70 +1225,93 @@ pub async fn oauth_callback(
     Query(params): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
     // Extract OAuth parameters
-    let code: &String = params
-        .get("code")
-        .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "OAuth state mismatch".to_string() }))?;
+    let code: &String = params.get("code").ok_or_else(|| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: "OAuth state mismatch".to_string(),
+        })
+    })?;
 
-    let state_param: &String = params
-        .get("state")
-        .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing authorization code".to_string() }))?;
+    let state_param: &String = params.get("state").ok_or_else(|| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: "Missing authorization code".to_string(),
+        })
+    })?;
 
     // Verify state parameter against stored state for CSRF protection
     let stored_state = state
         .storage
         .get_oauth_state(state_param)
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to get OAuth state: {}", e) }))?
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Internal {
+                message: format!("Failed to get OAuth state: {}", e),
+            })
+        })?
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Invalid or expired OAuth state".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Invalid or expired OAuth state".to_string(),
+            })
         })?;
 
     // Verify the state matches the expected provider
     if stored_state.provider != provider {
-        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
-            "OAuth state provider mismatch".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authentication {
+            message: "OAuth state provider mismatch".to_string(),
+        }));
     }
 
     if let Some(error) = params.get("error") {
-        return Err(crate::error::ApiError(SecretonError::Authentication { message: format!(
-            "OAuth error: {}",
-            error
-        ) }));
+        return Err(crate::error::ApiError(SecretonError::Authentication {
+            message: format!("OAuth error: {}", error),
+        }));
     }
 
     // Get OAuth provider configuration
-    let oauth2_config =
-        state.config.auth.oauth2.as_ref().ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Validation { message: "OAuth providers not configured".to_string() })
-        })?;
+    let oauth2_config = state.config.auth.oauth2.as_ref().ok_or_else(|| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: "OAuth providers not configured".to_string(),
+        })
+    })?;
 
     let oauth_provider = OAuthProvider::new(&provider, Some(oauth2_config)).ok_or_else(|| {
-        crate::error::ApiError(SecretonError::Validation { message: format!("Unsupported OAuth provider: {}", provider) })
+        crate::error::ApiError(SecretonError::Validation {
+            message: format!("Unsupported OAuth provider: {}", provider),
+        })
     })?;
 
     // Exchange authorization code for access token
     let token_data: serde_json::Value = oauth_provider
         .exchange_code_for_token(code)
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("Token exchange failed: {}", e) }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Authentication {
+                message: format!("Token exchange failed: {}", e),
+            })
+        })?;
 
     let access_token = token_data["access_token"].as_str().ok_or_else(|| {
-        crate::error::ApiError(SecretonError::Authentication { message: "No access token in response".to_string() })
+        crate::error::ApiError(SecretonError::Authentication {
+            message: "No access token in response".to_string(),
+        })
     })?;
 
     // Fetch user information from provider
-    let oauth_user: OAuthUserInfo = oauth_provider
-        .get_user_info(access_token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("User info fetch failed: {}", e) }))?;
+    let oauth_user: OAuthUserInfo =
+        oauth_provider
+            .get_user_info(access_token)
+            .await
+            .map_err(|e| {
+                crate::error::ApiError(SecretonError::Authentication {
+                    message: format!("User info fetch failed: {}", e),
+                })
+            })?;
 
     // Create or update user account
-    let user = state
-        .auth
-        .oauth_login(&oauth_user)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("OAuth login failed: {}", e) }))?;
+    let user = state.auth.oauth_login(&oauth_user).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: format!("OAuth login failed: {}", e),
+        })
+    })?;
 
     // Extract client information from headers
     let ip_address = extract_client_ip(&headers);
@@ -1227,14 +1322,20 @@ pub async fn oauth_callback(
         .auth
         .generate_token(&user, ip_address, user_agent)
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("Token generation failed: {}", e) }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Authentication {
+                message: format!("Token generation failed: {}", e),
+            })
+        })?;
 
     let refresh_token = state
         .auth
         .generate_refresh_token(&user)
         .await
         .map_err(|e| {
-            crate::error::ApiError(SecretonError::Authentication { message: format!("Refresh token generation failed: {}", e) })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: format!("Refresh token generation failed: {}", e),
+            })
         })?;
 
     let response = LoginResponse {
@@ -1279,25 +1380,27 @@ pub async fn list_sessions(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Missing or invalid authorization header".to_string(),
+            })
         })?;
 
     // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+    let user = state.auth.validate_token(token).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: e.to_string(),
+        })
+    })?;
 
     // Extract JTI from current token to identify current session
     let current_jti = extract_jti_from_token(token, &state);
 
     // Get all sessions for the user from backend storage
-    let sessions = state
-        .auth
-        .list_user_sessions(&user.id)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let sessions = state.auth.list_user_sessions(&user.id).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
 
     // Mark the current session based on JTI match
     let sessions_info: Vec<SessionInfo> = sessions
@@ -1336,15 +1439,17 @@ pub async fn revoke_session(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
+            crate::error::ApiError(SecretonError::Authentication {
+                message: "Missing or invalid authorization header".to_string(),
+            })
         })?;
 
     // Get user from token
-    let user = state
-        .auth
-        .validate_token(token)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
+    let user = state.auth.validate_token(token).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Authentication {
+            message: e.to_string(),
+        })
+    })?;
 
     // Revoke the session via service
     state
@@ -1352,10 +1457,12 @@ pub async fn revoke_session(
         .revoke_user_session(&session_id, &user.id)
         .await
         .map_err(|e| match e {
-            AuthError::PermissionDenied => {
-                crate::error::ApiError(SecretonError::Authorization { message: "Access denied".to_string() })
-            }
-            _ => crate::error::ApiError(SecretonError::NotFound { resource: "Session not found".to_string() }),
+            AuthError::PermissionDenied => crate::error::ApiError(SecretonError::Authorization {
+                message: "Access denied".to_string(),
+            }),
+            _ => crate::error::ApiError(SecretonError::NotFound {
+                resource: "Session not found".to_string(),
+            }),
         })?;
 
     let data = serde_json::json!({
@@ -1388,9 +1495,9 @@ pub async fn create_user(
         && !admin_user.roles.contains(&"admin".to_string())
         && !admin_user.roles.contains(&"root".to_string())
     {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Insufficient permissions".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Insufficient permissions".to_string(),
+        }));
     }
 
     // Create user
@@ -1404,7 +1511,11 @@ pub async fn create_user(
             request.permissions,
         )
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Internal {
+                message: e.to_string(),
+            })
+        })?;
 
     // Return info
     let user_info = UserInfo {

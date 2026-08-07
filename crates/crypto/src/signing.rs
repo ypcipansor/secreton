@@ -25,10 +25,11 @@ impl SigningEngine {
                         actual: key.len(),
                     });
                 }
-                let seed: &[u8; 32] = key.try_into().map_err(|_| CryptoError::InvalidKeyLength {
-                    expected: 32,
-                    actual: key.len(),
-                })?;
+                let seed: &[u8; 32] =
+                    key.try_into().map_err(|_| CryptoError::InvalidKeyLength {
+                        expected: 32,
+                        actual: key.len(),
+                    })?;
                 let signing_key = SigningKey::from_bytes(seed);
                 let signature = signing_key.sign(data);
                 Ok(signature.to_vec())

@@ -10,14 +10,14 @@ use axum::{
 };
 use serde_json::Value;
 
+use crate::error::ApiResult;
 use crate::extractors::AuthenticatedUser;
-use crate::router::AppState;
 use crate::handlers::validate_name;
+use crate::router::AppState;
+use secreton_domain::ApiResponse;
 use secreton_engines::Services;
-use secreton_engines::services::database::DatabaseServiceError;
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiResult};
 use secreton_engines::database::{DatabaseConfig, DatabaseRole};
+use secreton_engines::services::database::DatabaseServiceError;
 
 /// Validate a system-generated lease ID.
 ///
@@ -29,28 +29,28 @@ use secreton_engines::database::{DatabaseConfig, DatabaseRole};
 /// the length ceiling so that every generated lease ID remains revocable.
 fn validate_lease_id(id: &str) -> Result<(), crate::error::ApiError> {
     if id.is_empty() {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "Lease ID must not be empty".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "Lease ID must not be empty".to_string(),
+        }));
     }
     // 128 (max role name) + 3 ("db_") + 1 ("_") + 32 (UUID simple) = 164
     if id.len() > 200 {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "Lease ID must not exceed 200 characters".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "Lease ID must not exceed 200 characters".to_string(),
+        }));
     }
     if !id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "Lease ID contains invalid characters".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "Lease ID contains invalid characters".to_string(),
+        }));
     }
     if id.contains("..") {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "Lease ID must not contain '..'".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "Lease ID must not contain '..'".to_string(),
+        }));
     }
     Ok(())
 }
@@ -59,13 +59,21 @@ fn validate_lease_id(id: &str) -> Result<(), crate::error::ApiError> {
 /// so that the HTTP response carries the correct status code.
 fn map_db_err(err: DatabaseServiceError) -> crate::error::ApiError {
     match err {
-        DatabaseServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
+        DatabaseServiceError::NotFound(msg) => {
+            crate::error::ApiError(SecretonError::NotFound { resource: msg })
+        }
         DatabaseServiceError::Unavailable(msg) => {
             // SecretonError::ServiceUnavailable maps to 503 in IntoResponse
-            crate::error::ApiError(secreton_domain::SecretonError::ServiceUnavailable { service: msg })
+            crate::error::ApiError(secreton_domain::SecretonError::ServiceUnavailable {
+                service: msg,
+            })
         }
-        DatabaseServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
-        DatabaseServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
+        DatabaseServiceError::BadRequest(msg) => {
+            crate::error::ApiError(SecretonError::Validation { message: msg })
+        }
+        DatabaseServiceError::Internal(msg) => {
+            crate::error::ApiError(SecretonError::Internal { message: msg })
+        }
     }
 }
 
@@ -86,9 +94,9 @@ async fn set_config(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     // Only admin/root users may configure database connections
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to configure database engine".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to configure database engine".to_string(),
+        }));
     }
 
     state
@@ -109,9 +117,9 @@ async fn list_roles(
     // Only admin/root users may list roles (consistent with list_leases and
     // other database engine endpoints that expose infrastructure details)
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to list database roles".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to list database roles".to_string(),
+        }));
     }
 
     let roles = state.database.list_roles().await.map_err(map_db_err)?;
@@ -129,9 +137,9 @@ async fn add_role(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     // Only admin/root users may manage roles
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to manage database roles".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to manage database roles".to_string(),
+        }));
     }
 
     validate_name(&name)?;
@@ -156,9 +164,9 @@ async fn generate_credentials(
     // Restrict to admin/root users until policy-based authorization is
     // implemented.
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to generate database credentials".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to generate database credentials".to_string(),
+        }));
     }
 
     validate_name(&role)?;
@@ -169,8 +177,11 @@ async fn generate_credentials(
         .await
         .map_err(map_db_err)?;
 
-    let value =
-        serde_json::to_value(creds).map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let value = serde_json::to_value(creds).map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(value)))
 }
 
@@ -180,9 +191,9 @@ async fn list_leases(
 ) -> ApiResult<Json<ApiResponse<Vec<Value>>>> {
     // Only admin/root users may list leases (they contain database usernames)
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to list leases".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to list leases".to_string(),
+        }));
     }
 
     let leases = state.database.list_leases().await.map_err(map_db_err)?;
@@ -197,9 +208,9 @@ async fn revoke_lease(
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     // Only admin/root users may revoke leases
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to revoke leases".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to revoke leases".to_string(),
+        }));
     }
 
     validate_lease_id(&id)?;

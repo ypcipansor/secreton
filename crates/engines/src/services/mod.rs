@@ -19,9 +19,9 @@ pub mod pki;
 pub mod seal;
 pub mod secret;
 pub mod ssh;
-pub mod totp_engine;
 #[cfg(test)]
 pub mod tests_audit_integration;
+pub mod totp_engine;
 
 use std::sync::Arc;
 
@@ -246,7 +246,6 @@ impl Services {
             crypto.clone(),
         ));
 
-
         // Initialize admin service
         let admin = Arc::new(
             admin::AdminService::new(
@@ -273,12 +272,12 @@ impl Services {
         // deployment cannot silently delete expired secrets before an operator has
         // reviewed the retention policy.
         let lifecycle_config = LifecycleConfig {
-                enabled: false,
-                default_ttl_days: 90,
-                grace_period_days: 7,
-                auto_archive_enabled: false,
-                cleanup_enabled: false,
-            };
+            enabled: false,
+            default_ttl_days: 90,
+            grace_period_days: 7,
+            auto_archive_enabled: false,
+            cleanup_enabled: false,
+        };
         let lifecycle = Arc::new(lifecycle::LifecycleService::new(
             storage.clone(),
             crypto.clone(),
@@ -288,7 +287,6 @@ impl Services {
 
         // Inject lifecycle into secret service
         let secreton = Arc::new(secreton_inner.with_lifecycle(lifecycle.clone()));
-
 
         Ok(Self {
             config: Arc::new(config.clone()),

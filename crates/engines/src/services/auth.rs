@@ -2343,10 +2343,7 @@ impl AuthenticationService {
     }
 
     /// OAuth login - create or update user from OAuth info
-    pub async fn oauth_login(
-        &self,
-        oauth_user: &OAuthUserInfo,
-    ) -> Result<User, AuthError> {
+    pub async fn oauth_login(&self, oauth_user: &OAuthUserInfo) -> Result<User, AuthError> {
         // Try to find existing user by OAuth ID or email
         // For now, create a stub user
         let user = User {

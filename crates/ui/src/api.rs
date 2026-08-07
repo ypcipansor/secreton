@@ -33,8 +33,9 @@ pub struct SystemStatus {
 /// forgets to is a startup failure rather than a silent `None` at request time.
 #[cfg(feature = "ssr")]
 fn services() -> Result<Services, ServerFnError> {
-    use_context::<Services>()
-        .ok_or_else(|| ServerFnError::new("services were not provided to the server-function context"))
+    use_context::<Services>().ok_or_else(|| {
+        ServerFnError::new("services were not provided to the server-function context")
+    })
 }
 
 #[server(name = GetSystemStatus, prefix = "/api/sfn")]
@@ -232,8 +233,7 @@ fn set_session_cookie(_token: &str, _ttl_seconds: i64) -> Result<(), ServerFnErr
 fn clear_session_cookie() -> Result<(), ServerFnError> {
     // Attributes must match the ones used when setting, or the browser treats this as a
     // different cookie and the original session stays live.
-    let cookie =
-        format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
     if let Some(response) = use_context::<leptos_axum::ResponseOptions>() {
         response.insert_header(
             axum::http::header::SET_COOKIE,

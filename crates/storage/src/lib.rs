@@ -16,13 +16,13 @@ pub mod cache;
 pub mod factory;
 pub mod models;
 
-pub use backends::{FileBackend, MemoryBackend};
 #[cfg(feature = "postgres")]
 pub use backends::PostgresBackend;
-#[cfg(feature = "raft")]
-pub use backends::{RaftConfig, RaftStorageBackend};
 #[cfg(feature = "redis")]
 pub use backends::RedisBackend;
+pub use backends::{FileBackend, MemoryBackend};
+#[cfg(feature = "raft")]
+pub use backends::{RaftConfig, RaftStorageBackend};
 
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
@@ -483,7 +483,6 @@ impl Default for PoolSettings {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

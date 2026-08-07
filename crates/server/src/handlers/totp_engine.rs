@@ -11,21 +11,27 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::error::ApiResult;
 use crate::extractors::AuthenticatedUser;
-use crate::router::AppState;
 use crate::handlers::validate_name;
+use crate::router::AppState;
+use secreton_domain::ApiResponse;
 use secreton_engines::Services;
 use secreton_engines::services::totp_engine::TotpServiceError;
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiResult};
 
 /// Map a [`TotpServiceError`] to the appropriate [`crate::error::ApiError`] variant
 /// so that the HTTP response carries the correct status code.
 fn map_totp_err(err: TotpServiceError) -> crate::error::ApiError {
     match err {
-        TotpServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
-        TotpServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
-        TotpServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
+        TotpServiceError::NotFound(msg) => {
+            crate::error::ApiError(SecretonError::NotFound { resource: msg })
+        }
+        TotpServiceError::BadRequest(msg) => {
+            crate::error::ApiError(SecretonError::Validation { message: msg })
+        }
+        TotpServiceError::Internal(msg) => {
+            crate::error::ApiError(SecretonError::Internal { message: msg })
+        }
     }
 }
 

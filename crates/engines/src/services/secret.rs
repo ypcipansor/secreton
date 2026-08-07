@@ -10,12 +10,12 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::warn;
 
+use crate::performance::{AccessType, SecretPerformanceOptimizer};
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::crypto::CryptoService;
 use secreton_auth::policies::service::PolicyService;
 use secreton_auth::{IdentityService, policies::model::EvaluationContext};
 use secreton_crypto::EncryptedData;
-use crate::performance::{AccessType, SecretPerformanceOptimizer};
 use secreton_storage::StorageBackend;
 use uuid::Uuid;
 
@@ -3290,7 +3290,7 @@ mod list_secrets_tests {
             id: id.to_string(),
             username: format!("user_{}", id),
             email: Some(format!("user_{}@example.com", id)),
-            roles: roles,
+            roles,
             permissions: vec![],
             policies: vec![],
             display_name: None,
@@ -3450,8 +3450,6 @@ mod list_secrets_tests {
         assert_eq!(secrets_admin.len(), 0);
     }
 }
-
-
 
 impl From<SecretError> for secreton_domain::SecretonError {
     fn from(e: SecretError) -> Self {

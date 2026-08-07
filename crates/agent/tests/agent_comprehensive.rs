@@ -3,11 +3,11 @@
 //! Tests for the agent's configuration, health checking and templating.
 
 use anyhow::Result;
+use secreton_agent::config::{MetricsConfig, SecurityConfig};
 use secreton_agent::{
     config::AgentConfig,
     metrics::{MetricPoint, MetricType},
 };
-use secreton_agent::config::{MetricsConfig, SecurityConfig};
 
 #[cfg(test)]
 mod agent_core_tests {

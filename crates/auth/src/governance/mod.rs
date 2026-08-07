@@ -58,5 +58,4 @@ pub trait SecurityEngine: Send + Sync {
 
     /// Log security event
     async fn log_event(&self, event: AuditEvent) -> Result<(), SecurityError>;
-
 }

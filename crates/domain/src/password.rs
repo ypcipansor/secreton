@@ -40,7 +40,9 @@ impl Default for PasswordPolicy {
 
 impl PasswordPolicy {
     fn special_chars(&self) -> &str {
-        self.allowed_special_chars.as_deref().unwrap_or(DEFAULT_SPECIAL)
+        self.allowed_special_chars
+            .as_deref()
+            .unwrap_or(DEFAULT_SPECIAL)
     }
 
     /// Number of distinct character classes this policy demands at least one of.
@@ -195,7 +197,9 @@ mod tests {
         let policy = PasswordPolicy::default();
         for _ in 0..200 {
             let pw = policy.generate().unwrap();
-            policy.check(&pw).expect("generated password must pass check");
+            policy
+                .check(&pw)
+                .expect("generated password must pass check");
             assert_eq!(pw.chars().count(), policy.min_length);
         }
     }
@@ -208,7 +212,10 @@ mod tests {
         let varied = (0..200)
             .map(|_| policy.generate().unwrap())
             .any(|pw| !pw.chars().next().unwrap().is_ascii_lowercase());
-        assert!(varied, "first character never varied — shuffle is not applied");
+        assert!(
+            varied,
+            "first character never varied — shuffle is not applied"
+        );
     }
 
     #[test]

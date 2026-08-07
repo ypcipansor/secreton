@@ -10,8 +10,8 @@ use super::engine::PolicyEngine;
 use super::error::{PolicyResult, ValidationErrors};
 use super::evaluator::PolicyEvaluator;
 use super::model::{EvaluationContext, EvaluationResult, Policy, Role};
-use secreton_domain::ServiceHealth;
 use secreton_domain::SecretonError;
+use secreton_domain::ServiceHealth;
 
 /// Policy service for managing policies and roles
 pub struct PolicyService {

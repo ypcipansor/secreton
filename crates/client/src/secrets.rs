@@ -47,11 +47,7 @@ impl Client {
         self.get(&format!("secret/secrets/{path}")).await
     }
 
-    pub async fn put_secret(
-        &self,
-        path: &str,
-        data: &HashMap<String, String>,
-    ) -> Result<Secret> {
+    pub async fn put_secret(&self, path: &str, data: &HashMap<String, String>) -> Result<Secret> {
         self.post(&format!("secret/secrets/{path}"), &PutBody { data })
             .await
     }

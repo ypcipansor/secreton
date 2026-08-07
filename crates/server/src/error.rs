@@ -6,6 +6,7 @@
 
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use secreton_domain::{ApiResponse, SecretonError};
 
 /// Newtype so the orphan rule lets us implement `IntoResponse` for the shared error.
@@ -32,10 +33,15 @@ impl IntoResponse for ApiError {
             tracing::warn!(status = %status, category, error = %self.0, "request rejected");
         }
 
-        // 5xx messages can carry connection strings, file paths and driver internals.
-        // Clients get a fixed string; the detail is in the log above, correlated by the
-        // request id that `middleware::request_id` attaches to both.
-        let message = if status.is_server_error() {
+        // A 500 can carry connection strings, file paths and driver internals, so its
+        // message is replaced wholesale; the detail is in the log above, correlated by
+        // the request id.
+        //
+        // Other 5xx are *operational states*, not faults, and the client needs to know
+        // which: 503 while sealed has to say "unseal it", or the operator is left staring
+        // at "internal server error" with no idea the vault is simply locked. 504 and 507
+        // are likewise safe and actionable.
+        let message = if status == StatusCode::INTERNAL_SERVER_ERROR {
             "internal server error".to_string()
         } else {
             self.0.to_string()
@@ -52,7 +58,6 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use axum::body::to_bytes;
-    use http::StatusCode;
 
     async fn body_of(resp: Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
@@ -86,6 +91,23 @@ mod tests {
         assert_eq!(body, "internal server error");
         assert!(!body.contains("hunter2"), "credentials leaked to client");
         assert!(!body.contains("db.internal"), "hostname leaked to client");
+    }
+
+    #[tokio::test]
+    async fn actionable_5xx_states_keep_their_message() {
+        // A sealed vault is an operational state the caller must be told about.
+        // Redacting every 5xx alike left operators with "internal server error" and no
+        // hint that the vault was simply locked.
+        let err = ApiError(SecretonError::ServiceUnavailable {
+            service: "secreton is sealed; unseal it at POST /api/v1/sys/unseal".into(),
+        });
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let json = body_of(resp).await;
+        assert!(
+            json["error"].as_str().unwrap().contains("unseal"),
+            "the caller must be told what to do: {json}"
+        );
     }
 
     #[tokio::test]

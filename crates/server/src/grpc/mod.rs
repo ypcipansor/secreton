@@ -22,10 +22,16 @@ use crate::router::AppState;
 use server::{GrpcAuthService, GrpcSecretService};
 
 /// Descriptor set produced by the build script, used by the reflection service.
-const FILE_DESCRIPTOR_SET: &[u8] =
-    tonic::include_file_descriptor_set!("secreton_descriptor");
+const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("secreton_descriptor");
 
 /// Build the gRPC routes as an `axum::Router`.
+///
+/// Each service is mounted with `route_service` at its own gRPC path prefix rather than
+/// by merging `Routes::into_axum_router()` wholesale. That matters: tonic's router carries
+/// a catch-all fallback, and merging it made *every* unmatched path in the application —
+/// a typo'd API route, a missing page — answer `200 OK` with an empty body instead of 404.
+/// `route_service` passes the original URI through unchanged, which tonic requires, and
+/// introduces no fallback.
 pub fn routes(services: &Services) -> Router<AppState> {
     let secret = SecretServiceServer::new(GrpcSecretService::new(
         services.secret.clone(),
@@ -33,27 +39,31 @@ pub fn routes(services: &Services) -> Router<AppState> {
     ));
     let auth = AuthServiceServer::new(GrpcAuthService::new(services.auth.clone()));
 
-    // Health and reflection were both missing. Without health there is no gRPC probe for
+    // Health and reflection were both absent. Without health there is no gRPC probe for
     // Kubernetes; without reflection `grpcurl` cannot describe the service, so debugging
     // means carrying the .proto around.
-    let mut health_reporter = tonic_health::server::HealthReporter::default();
-    health_reporter.set_serving::<SecretServiceServer<GrpcSecretService>>();
-    health_reporter.set_serving::<AuthServiceServer<GrpcAuthService>>();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    // Detached: the reporter is only needed to flip a service to NOT_SERVING during
+    // draining, which the graceful-shutdown path does not yet do.
+    drop(health_reporter);
 
-    let reflection = tonic_reflection::server::Builder::configure()
+    let mut router = Router::new()
+        .route_service("/secreton.v1.SecretService/{*method}", secret)
+        .route_service("/secreton.v1.AuthService/{*method}", auth)
+        .route_service("/grpc.health.v1.Health/{*method}", health_service);
+
+    match tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
-        .build_v1();
-
-    let mut routes = tonic::service::Routes::default();
-    routes = routes.add_service(secret).add_service(auth);
-    routes = routes.add_service(tonic_health::server::health_reporter().1);
-    if let Ok(reflection) = reflection {
-        routes = routes.add_service(reflection);
-    } else {
-        tracing::warn!("gRPC reflection unavailable; grpcurl will need the .proto file");
+        .build_v1()
+    {
+        Ok(reflection) => {
+            router =
+                router.route_service("/grpc.reflection.v1.ServerReflection/{*method}", reflection);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "gRPC reflection unavailable; grpcurl will need the .proto file");
+        }
     }
 
-    // `Routes::into_axum_router()` yields a `Router<()>`; the outer router is
-    // `Router<AppState>`, and a stateless sub-router merges into a stateful one.
-    routes.into_axum_router().with_state(())
+    router
 }

@@ -266,7 +266,6 @@ impl AgentConfig {
     }
 }
 
-
 impl AgentConfig {
     /// Reject a configuration that would make the agent unsafe or useless.
     pub fn validate(&self) -> Result<(), SecretonError> {

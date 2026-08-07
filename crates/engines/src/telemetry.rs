@@ -426,7 +426,6 @@ impl SystemMetrics {
     }
 }
 
-
 /// Collect current system metrics
 ///
 /// NOTE: This function cannot compute real uptime because it has no access to

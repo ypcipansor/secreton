@@ -101,7 +101,9 @@ fn init_tracing(json: bool) {
 
     let registry = tracing_subscriber::registry().with(filter);
     if json {
-        registry.with(tracing_subscriber::fmt::layer().json()).init();
+        registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .init();
     } else {
         registry.with(tracing_subscriber::fmt::layer()).init();
     }
@@ -113,7 +115,8 @@ fn leptos_options(config: &ServerConfig) -> Result<leptos::prelude::LeptosOption
 
     // cargo-leptos writes its settings into the manifest; reading them here keeps the
     // asset paths in one place rather than duplicated between build and runtime.
-    let conf = get_configuration(None).context("failed to read the [workspace.metadata.leptos] configuration")?;
+    let conf = get_configuration(None)
+        .context("failed to read the [workspace.metadata.leptos] configuration")?;
     let mut options = conf.leptos_options;
     options.site_addr = config.http.bind_address;
     Ok(options)

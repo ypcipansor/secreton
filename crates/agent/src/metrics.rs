@@ -1,7 +1,7 @@
 //! Metrics collection module for the Secreton agent
 
-use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use crate::config::MetricsConfig;
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};

@@ -32,7 +32,10 @@ pub fn routes(state: &AppState) -> Router<AppState> {
                 move || secreton_ui::app::shell(options.clone())
             },
         )
-        .fallback(leptos_axum::file_and_error_handler_with_context::<AppState, _>(
+        .fallback(leptos_axum::file_and_error_handler_with_context::<
+            AppState,
+            _,
+        >(
             {
                 let services = services.clone();
                 move || provide_context(services.clone())

@@ -15,13 +15,15 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::router::AppState;
-use crate::handlers::secret::ListQuery;
-use secreton_engines::Services;
-use secreton_domain::ApiResponse;
 use crate::error::ApiResult;
-use secreton_engines::services::admin::{CreateRoleRequest, CreateUserRequest, UpdateRoleRequest, UpdateUserRequest};
+use crate::handlers::secret::ListQuery;
+use crate::router::AppState;
 use secreton_crypto::{encryption, hashing};
+use secreton_domain::ApiResponse;
+use secreton_engines::Services;
+use secreton_engines::services::admin::{
+    CreateRoleRequest, CreateUserRequest, UpdateRoleRequest, UpdateUserRequest,
+};
 use secreton_storage::SecretEntry; // Moved from inside function to top-level
 
 /// Create administrative routes
@@ -72,7 +74,6 @@ pub fn routes() -> Router<AppState> {
             get(get_security_incident),
         )
 }
-
 
 /// User management models
 #[derive(Debug, Serialize, Deserialize)]
@@ -357,15 +358,15 @@ pub async fn update_user(
     if username == user.username {
         if let Some(ref roles) = request.roles {
             if !roles.contains(&"admin".to_string()) && !roles.contains(&"root".to_string()) {
-                return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-                    "Cannot remove admin privileges from your own account".to_string(),
-                 }));
+                return Err(crate::error::ApiError(SecretonError::Authorization {
+                    message: "Cannot remove admin privileges from your own account".to_string(),
+                }));
             }
         }
         if let Some(false) = request.enabled {
-            return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-                "Cannot disable your own account".to_string(),
-             }));
+            return Err(crate::error::ApiError(SecretonError::Authorization {
+                message: "Cannot disable your own account".to_string(),
+            }));
         }
     }
 
@@ -401,9 +402,9 @@ pub async fn delete_user(
 
     // Prevent admins from deleting their own account
     if username == user.username {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Cannot delete your own account".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Cannot delete your own account".to_string(),
+        }));
     }
 
     state
@@ -503,11 +504,11 @@ pub async fn get_system_metrics(
     Query(_query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<SystemMetrics>>> {
     require_admin(&user)?;
-    let stats = state
-        .admin
-        .get_system_stats()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let stats = state.admin.get_system_stats().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
 
     // Use shared telemetry collector
     let m = state.telemetry.get_metrics().await;
@@ -656,11 +657,11 @@ pub async fn run_security_scan(
     crate::extractors::AuthenticatedUser(user): crate::extractors::AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<SecurityScanResult>>> {
     require_admin(&user)?;
-    let report = state
-        .admin
-        .run_security_scan()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let report = state.admin.run_security_scan().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
 
     let scan_result = SecurityScanResult {
         scan_id: report.scan_id,
@@ -720,10 +721,10 @@ pub async fn run_garbage_collection(
     if result.success {
         Ok(Json(ApiResponse::success(data)))
     } else {
-        Err(crate::error::ApiError(SecretonError::Internal { message: 
-            serde_json::to_string(&data)
+        Err(crate::error::ApiError(SecretonError::Internal {
+            message: serde_json::to_string(&data)
                 .unwrap_or_else(|_| "Garbage collection failed".to_string()),
-         }))
+        }))
     }
 }
 
@@ -733,11 +734,11 @@ pub async fn clear_performance_cache(
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     require_admin(&user)?;
 
-    state
-        .performance
-        .clear_cache()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    state.performance.clear_cache().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "message": "Performance cache cleared successfully"
@@ -766,10 +767,10 @@ pub async fn compact_database(
     if result.success {
         Ok(Json(ApiResponse::success(data)))
     } else {
-        Err(crate::error::ApiError(SecretonError::Internal { message: 
-            serde_json::to_string(&data)
+        Err(crate::error::ApiError(SecretonError::Internal {
+            message: serde_json::to_string(&data)
                 .unwrap_or_else(|_| "Database compaction failed".to_string()),
-         }))
+        }))
     }
 }
 
@@ -837,7 +838,9 @@ async fn check_auth_health(state: &Services) -> String {
 }
 
 /// Map AdminError to the appropriate SecretonError variant for proper HTTP status codes.
-fn map_admin_error(e: secreton_engines::services::admin::AdminError) -> secreton_domain::SecretonError {
+fn map_admin_error(
+    e: secreton_engines::services::admin::AdminError,
+) -> secreton_domain::SecretonError {
     match e {
         secreton_engines::services::admin::AdminError::NotFound(msg) => {
             secreton_domain::SecretonError::NotFound { resource: msg }
@@ -893,9 +896,9 @@ fn require_admin(user: &secreton_auth::User) -> Result<(), crate::error::ApiErro
         && !user.roles.contains(&"admin".to_string())
         && !user.roles.contains(&"root".to_string())
     {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Insufficient permissions".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Insufficient permissions".to_string(),
+        }));
     }
     Ok(())
 }
@@ -930,9 +933,9 @@ pub async fn assign_user_roles(
         && !request.roles.contains(&"admin".to_string())
         && !request.roles.contains(&"root".to_string())
     {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Cannot remove admin privileges from your own account".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Cannot remove admin privileges from your own account".to_string(),
+        }));
     }
 
     state
@@ -1087,7 +1090,11 @@ pub async fn update_config(
         .map_err(map_admin_error)?;
 
     Ok(Json(ApiResponse::success(
-        serde_json::to_value(result).map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?,
+        serde_json::to_value(result).map_err(|e| {
+            crate::error::ApiError(SecretonError::Internal {
+                message: e.to_string(),
+            })
+        })?,
     )))
 }
 
@@ -1132,9 +1139,10 @@ pub async fn vacuum_database(
     if result.success {
         Ok(Json(ApiResponse::success(data)))
     } else {
-        Err(crate::error::ApiError(SecretonError::Internal { message: 
-            serde_json::to_string(&data).unwrap_or_else(|_| "Database vacuum failed".to_string()),
-         }))
+        Err(crate::error::ApiError(SecretonError::Internal {
+            message: serde_json::to_string(&data)
+                .unwrap_or_else(|_| "Database vacuum failed".to_string()),
+        }))
     }
 }
 
@@ -1204,11 +1212,11 @@ pub async fn create_backup(
 ) -> ApiResult<Json<ApiResponse<secreton_engines::services::admin::BackupInfo>>> {
     require_admin(&user)?;
 
-    let backup_info = state
-        .admin
-        .create_backup()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to create backup: {}", e) }))?;
+    let backup_info = state.admin.create_backup().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("Failed to create backup: {}", e),
+        })
+    })?;
 
     Ok(Json(ApiResponse::success(backup_info)))
 }
@@ -1219,11 +1227,11 @@ pub async fn list_backups(
 ) -> ApiResult<Json<ApiResponse<Vec<secreton_engines::services::admin::BackupInfo>>>> {
     require_admin(&user)?;
 
-    let backups = state
-        .admin
-        .list_backups()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list backups: {}", e) }))?;
+    let backups = state.admin.list_backups().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("Failed to list backups: {}", e),
+        })
+    })?;
 
     Ok(Json(ApiResponse::success(backups)))
 }
@@ -1241,9 +1249,13 @@ pub async fn get_backup(
         .await
         .map_err(|e| match e {
             secreton_engines::services::admin::AdminError::NotFound(_) => {
-                crate::error::ApiError(SecretonError::NotFound { resource: format!("Backup {} not found", backup_id) })
+                crate::error::ApiError(SecretonError::NotFound {
+                    resource: format!("Backup {} not found", backup_id),
+                })
             }
-            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to get backup: {}", e) }),
+            _ => crate::error::ApiError(SecretonError::Internal {
+                message: format!("Failed to get backup: {}", e),
+            }),
         })?;
 
     Ok(Json(ApiResponse::success(backup)))
@@ -1256,11 +1268,11 @@ pub async fn restore_backup(
 ) -> ApiResult<Json<ApiResponse<secreton_engines::services::admin::MaintenanceResult>>> {
     require_admin(&user)?;
 
-    let result = state
-        .admin
-        .restore_backup(&backup_id)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to restore backup: {}", e) }))?;
+    let result = state.admin.restore_backup(&backup_id).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: format!("Failed to restore backup: {}", e),
+        })
+    })?;
 
     Ok(Json(ApiResponse::success(result)))
 }
@@ -1278,9 +1290,13 @@ pub async fn delete_backup(
         .await
         .map_err(|e| match e {
             secreton_engines::services::admin::AdminError::NotFound(_) => {
-                crate::error::ApiError(SecretonError::NotFound { resource: format!("Backup {} not found", backup_id) })
+                crate::error::ApiError(SecretonError::NotFound {
+                    resource: format!("Backup {} not found", backup_id),
+                })
             }
-            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to delete backup: {}", e) }),
+            _ => crate::error::ApiError(SecretonError::Internal {
+                message: format!("Failed to delete backup: {}", e),
+            }),
         })?;
 
     let data = serde_json::json!({

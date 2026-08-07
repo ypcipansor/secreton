@@ -1,16 +1,15 @@
-use secreton_engines::Services;
-use secreton_domain::SecretonError;
+use crate::error::{ApiError, ApiResult};
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiError, ApiResult};
 use axum::{
-
     Json, Router,
     extract::{Path, State},
     routing::{delete, get, post, put},
 };
+use secreton_domain::ApiResponse;
+use secreton_domain::SecretonError;
 pub use secreton_domain::dto::lifecycle::{LifecycleStatistics, SecretLifecycle};
+use secreton_engines::Services;
 use secreton_engines::lifecycle::LifecycleHook;
 use serde::{Deserialize, Serialize};
 
@@ -31,9 +30,9 @@ async fn get_lifecycle_stats(
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<LifecycleStatistics>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can access statistics".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can access statistics".to_string(),
+        }));
     }
     let stats = state.lifecycle.manager().get_statistics().await;
     Ok(Json(ApiResponse::success(stats)))
@@ -50,7 +49,11 @@ async fn get_secret_lifecycle_status(
         .manager()
         .get_lifecycle(&path)
         .await
-        .ok_or_else(|| ApiError(SecretonError::NotFound { resource: format!("Lifecycle for {} not found", path) }))?;
+        .ok_or_else(|| {
+            ApiError(SecretonError::NotFound {
+                resource: format!("Lifecycle for {} not found", path),
+            })
+        })?;
     Ok(Json(ApiResponse::success(lifecycle)))
 }
 
@@ -86,7 +89,11 @@ async fn extend_secret_ttl(
         .manager()
         .get_lifecycle(&path)
         .await
-        .ok_or_else(|| ApiError(SecretonError::Internal { message: "Failed to retrieve updated lifecycle".to_string() }))?;
+        .ok_or_else(|| {
+            ApiError(SecretonError::Internal {
+                message: "Failed to retrieve updated lifecycle".to_string(),
+            })
+        })?;
     Ok(Json(ApiResponse::success(lifecycle)))
 }
 
@@ -95,15 +102,15 @@ async fn list_hooks(
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Vec<LifecycleHook>>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can manage hooks".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can manage hooks".to_string(),
+        }));
     }
-    let hooks = state
-        .lifecycle
-        .list_hooks()
-        .await
-        .map_err(|e| ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let hooks = state.lifecycle.list_hooks().await.map_err(|e| {
+        ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(hooks)))
 }
 
@@ -113,16 +120,24 @@ async fn get_hook(
     Path(id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<LifecycleHook>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can manage hooks".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can manage hooks".to_string(),
+        }));
     }
     let hook = state
         .lifecycle
         .get_hook(&id)
         .await
-        .map_err(|e| ApiError(SecretonError::Internal { message: e.to_string() }))?
-        .ok_or_else(|| ApiError(SecretonError::NotFound { resource: format!("Hook {} not found", id) }))?;
+        .map_err(|e| {
+            ApiError(SecretonError::Internal {
+                message: e.to_string(),
+            })
+        })?
+        .ok_or_else(|| {
+            ApiError(SecretonError::NotFound {
+                resource: format!("Hook {} not found", id),
+            })
+        })?;
     Ok(Json(ApiResponse::success(hook)))
 }
 
@@ -132,15 +147,15 @@ async fn create_hook(
     Json(hook): Json<LifecycleHook>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can manage hooks".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can manage hooks".to_string(),
+        }));
     }
-    state
-        .lifecycle
-        .create_hook(hook)
-        .await
-        .map_err(|e| ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    state.lifecycle.create_hook(hook).await.map_err(|e| {
+        ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -151,16 +166,16 @@ async fn update_hook(
     Json(mut hook): Json<LifecycleHook>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can manage hooks".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can manage hooks".to_string(),
+        }));
     }
     hook.hook_id = id;
-    state
-        .lifecycle
-        .update_hook(hook)
-        .await
-        .map_err(|e| ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    state.lifecycle.update_hook(hook).await.map_err(|e| {
+        ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -170,14 +185,14 @@ async fn delete_hook(
     Path(id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
     if !user.roles.contains(&"admin".to_string()) {
-        return Err(ApiError(SecretonError::Authorization { message: 
-            "Only admins can manage hooks".to_string(),
-         }));
+        return Err(ApiError(SecretonError::Authorization {
+            message: "Only admins can manage hooks".to_string(),
+        }));
     }
-    state
-        .lifecycle
-        .delete_hook(&id)
-        .await
-        .map_err(|e| ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    state.lifecycle.delete_hook(&id).await.map_err(|e| {
+        ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(())))
 }

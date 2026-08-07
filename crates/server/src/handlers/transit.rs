@@ -15,15 +15,15 @@ use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::error::ApiResult;
 use crate::extractors::AuthenticatedUser;
-use crate::router::AppState;
 use crate::handlers::validate_name;
-use secreton_engines::Services;
-use secreton_engines::services::audit::SecurityEventType;
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiResult};
+use crate::router::AppState;
 use secreton_crypto::CryptoError;
 use secreton_crypto::transit::{HashAlgorithm, KeyOptions, KeyType, SignatureAlgorithm};
+use secreton_domain::ApiResponse;
+use secreton_engines::Services;
+use secreton_engines::services::audit::SecurityEventType;
 use tracing::{info, warn};
 
 /// Create transit engine routes
@@ -134,9 +134,13 @@ pub struct RandomResponse {
 fn map_crypto_err(e: CryptoError) -> crate::error::ApiError {
     match &e {
         CryptoError::KeyNotFound(_) | CryptoError::KeyVersionNotFound(_) => {
-            crate::error::ApiError(SecretonError::NotFound { resource: e.to_string() })
+            crate::error::ApiError(SecretonError::NotFound {
+                resource: e.to_string(),
+            })
         }
-        CryptoError::KeyAlreadyExists(_) => crate::error::ApiError(SecretonError::Conflict { message: e.to_string() }),
+        CryptoError::KeyAlreadyExists(_) => crate::error::ApiError(SecretonError::Conflict {
+            message: e.to_string(),
+        }),
         CryptoError::InvalidInput(_)
         | CryptoError::InvalidUsage(_)
         | CryptoError::InvalidParameter(_)
@@ -150,12 +154,20 @@ fn map_crypto_err(e: CryptoError) -> crate::error::ApiError {
         | CryptoError::EncryptionFailed(_)
         | CryptoError::DecryptionFailed(_)
         | CryptoError::SigningFailed(_)
-        | CryptoError::VerificationFailed(_) => crate::error::ApiError(SecretonError::Validation { message: e.to_string() }),
-        CryptoError::PermissionDenied(_) => crate::error::ApiError(SecretonError::Authorization { message: e.to_string() }),
+        | CryptoError::VerificationFailed(_) => crate::error::ApiError(SecretonError::Validation {
+            message: e.to_string(),
+        }),
+        CryptoError::PermissionDenied(_) => crate::error::ApiError(SecretonError::Authorization {
+            message: e.to_string(),
+        }),
         CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
-            crate::error::ApiError(SecretonError::RateLimitExceeded { message: e.to_string() })
+            crate::error::ApiError(SecretonError::RateLimitExceeded {
+                message: e.to_string(),
+            })
         }
-        _ => crate::error::ApiError(SecretonError::Internal { message: e.to_string() }),
+        _ => crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        }),
     }
 }
 
@@ -194,9 +206,9 @@ pub async fn create_key(
 ) -> ApiResult<Json<ApiResponse<()>>> {
     // Only admin/root users may create transit keys
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to create transit keys".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to create transit keys".to_string(),
+        }));
     }
 
     validate_name(&name)?;
@@ -254,9 +266,9 @@ pub async fn rotate_key(
 ) -> ApiResult<Json<ApiResponse<u32>>> {
     // Only admin/root users may rotate transit keys
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to rotate transit keys".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to rotate transit keys".to_string(),
+        }));
     }
 
     validate_name(&name)?;
@@ -287,9 +299,9 @@ pub async fn delete_key(
 ) -> ApiResult<Json<ApiResponse<()>>> {
     // Only admin/root users may delete transit keys
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to delete transit keys".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to delete transit keys".to_string(),
+        }));
     }
 
     validate_name(&name)?;
@@ -318,9 +330,11 @@ pub async fn encrypt(
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
     validate_name(&name)?;
-    let plaintext = BASE64_STANDARD
-        .decode(&request.plaintext)
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 plaintext: {}", e) }))?;
+    let plaintext = BASE64_STANDARD.decode(&request.plaintext).map_err(|e| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: format!("Invalid base64 plaintext: {}", e),
+        })
+    })?;
 
     let data_size = plaintext.len() as u64;
 
@@ -328,7 +342,11 @@ pub async fn encrypt(
         .context
         .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 context: {}", e) }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Validation {
+                message: format!("Invalid base64 context: {}", e),
+            })
+        })?;
 
     let ciphertext = state
         .transit
@@ -363,7 +381,11 @@ pub async fn decrypt(
         .context
         .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 context: {}", e) }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Validation {
+                message: format!("Invalid base64 context: {}", e),
+            })
+        })?;
 
     let plaintext = state
         .transit
@@ -396,9 +418,11 @@ pub async fn sign(
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
     validate_name(&name)?;
-    let input = BASE64_STANDARD
-        .decode(&request.input)
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
+    let input = BASE64_STANDARD.decode(&request.input).map_err(|e| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: format!("Invalid base64 input: {}", e),
+        })
+    })?;
 
     let data_size = input.len() as u64;
 
@@ -431,9 +455,11 @@ pub async fn verify(
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
     validate_name(&name)?;
-    let input = BASE64_STANDARD
-        .decode(&request.input)
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
+    let input = BASE64_STANDARD.decode(&request.input).map_err(|e| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: format!("Invalid base64 input: {}", e),
+        })
+    })?;
 
     let data_size = input.len() as u64;
 
@@ -465,9 +491,11 @@ pub async fn hash(
     AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
-    let input = BASE64_STANDARD
-        .decode(&request.input)
-        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
+    let input = BASE64_STANDARD.decode(&request.input).map_err(|e| {
+        crate::error::ApiError(SecretonError::Validation {
+            message: format!("Invalid base64 input: {}", e),
+        })
+    })?;
 
     let hash = state
         .transit
@@ -494,4 +522,3 @@ pub async fn random(
         data: BASE64_STANDARD.encode(data),
     })))
 }
-

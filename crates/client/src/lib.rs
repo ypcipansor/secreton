@@ -169,7 +169,8 @@ impl Client {
     }
 
     pub(crate) async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        self.request::<T, ()>(reqwest::Method::GET, path, None).await
+        self.request::<T, ()>(reqwest::Method::GET, path, None)
+            .await
     }
 
     pub(crate) async fn post<T: DeserializeOwned, B: Serialize>(
@@ -206,7 +207,12 @@ fn truncate(s: &str) -> String {
     if s.len() <= MAX {
         return s.to_string();
     }
-    let cut = s.char_indices().map(|(i, _)| i).take_while(|i| *i <= MAX).last().unwrap_or(0);
+    let cut = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|i| *i <= MAX)
+        .last()
+        .unwrap_or(0);
     format!("{}… ({} bytes total)", &s[..cut], s.len())
 }
 
@@ -233,7 +239,10 @@ mod tests {
         // to /api/secret/kv/app and every request would 404.
         let client = Client::new("http://localhost:3000/api/v1").expect("client");
         let joined = client.base_url().join("secret/kv/app").expect("join");
-        assert_eq!(joined.as_str(), "http://localhost:3000/api/v1/secret/kv/app");
+        assert_eq!(
+            joined.as_str(),
+            "http://localhost:3000/api/v1/secret/kv/app"
+        );
     }
 
     #[test]

@@ -48,13 +48,11 @@ pub async fn require_authentication(
 
     let token = extract_credential(&request).ok_or(ApiError(SecretonError::MissingAuthHeader))?;
 
-    let user = services
-        .auth
-        .validate_token(&token)
-        .await
-        .map_err(|_| ApiError(SecretonError::TokenInvalid {
+    let user = services.auth.validate_token(&token).await.map_err(|_| {
+        ApiError(SecretonError::TokenInvalid {
             reason: "token rejected".to_string(),
-        }))?;
+        })
+    })?;
 
     enforce_mfa_pending(&user, &path)?;
 

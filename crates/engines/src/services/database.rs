@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::warn;
 
-use crate::services::crypto::CryptoService;
 use crate::database::{DatabaseConfig, DatabaseEngine, DatabaseRole};
+use crate::services::crypto::CryptoService;
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
 use serde_json::{Value, json};
 
@@ -479,9 +479,7 @@ impl DatabaseService {
             let engine = self.engine.read().await;
             match engine.revoke_credentials(username).await {
                 Ok(()) => {}
-                Err(crate::database::DatabaseError::RevocationNotImplemented(
-                    ref msg,
-                )) => {
+                Err(crate::database::DatabaseError::RevocationNotImplemented(ref msg)) => {
                     warn!(
                         "Revoking lease '{}': credential revocation not implemented — \
                          the database user '{}' may still be active on the target database. \

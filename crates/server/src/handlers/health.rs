@@ -86,7 +86,11 @@ pub async fn readiness(State(services): State<Services>) -> impl IntoResponse {
 /// showing nothing real.
 pub async fn metrics(State(services): State<Services>) -> impl IntoResponse {
     let sealed = u8::from(services.seal.is_sealed().await);
-    let secrets = services.storage.count(&Default::default()).await.unwrap_or(0);
+    let secrets = services
+        .storage
+        .count(&Default::default())
+        .await
+        .unwrap_or(0);
     let uptime = services.telemetry.uptime_seconds();
 
     let body = format!(

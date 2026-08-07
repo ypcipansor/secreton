@@ -66,6 +66,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let app = Router::new()
         .merge(public_routes())
+        .nest("/api/v1/auth", unauthenticated_routes(&state))
         .nest("/api/v1", protected_routes(&state));
 
     #[cfg(feature = "grpc")]
@@ -95,12 +96,12 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum_middleware::from_fn(middleware::request_id::attach))
 }
 
-/// Routes that must answer before authentication and while sealed.
+/// Routes that answer with no credential and while the barrier is sealed.
 ///
-/// These live outside the auth and seal layers by construction. The previous
-/// implementation kept a hand-maintained list of exact path strings *inside* each
-/// middleware, which had to be kept in sync with the router by hand — and drifted, so a
-/// liveness probe required a bearer token.
+/// These live outside both layers by construction. The previous implementation kept a
+/// hand-maintained list of exact path strings *inside* each middleware, which had to be
+/// kept in sync with the router by hand — and drifted, so the liveness probe required a
+/// bearer token.
 fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::health::liveness))
@@ -110,8 +111,21 @@ fn public_routes() -> Router<AppState> {
             "/api-docs/openapi.json",
             get(crate::openapi::openapi_document),
         )
-        .nest("/api/v1/auth", handlers::auth::public_routes())
         .nest("/api/v1/sys", handlers::sys::unsealed_routes())
+}
+
+/// Login and refresh: no credential required, but the barrier must be open.
+///
+/// These sit behind the seal gate and outside the auth gate. Login *cannot* succeed while
+/// sealed — the credential store is encrypted at rest — so leaving it outside the gate
+/// meant a login attempt against a sealed server hit a decryption failure deep in the
+/// service and surfaced as a 500. It now returns the same actionable 503 as everything
+/// else, telling the caller to unseal.
+fn unauthenticated_routes(state: &AppState) -> Router<AppState> {
+    handlers::auth::public_routes().route_layer(axum_middleware::from_fn_with_state(
+        state.services.clone(),
+        middleware::seal::reject_when_sealed,
+    ))
 }
 
 /// Everything behind authentication and the seal gate.

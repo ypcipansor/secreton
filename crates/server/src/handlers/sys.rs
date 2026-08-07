@@ -1,16 +1,15 @@
-use secreton_engines::Services;
-use secreton_domain::SecretonError;
+use crate::error::ApiResult;
 use crate::handlers::AppState;
-use secreton_engines::services::seal::{InitResponse, UnsealResponse};
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiResult};
 use axum::{
-
     Router,
     extract::{Json, State},
     http::StatusCode,
     routing::{get, post},
 };
+use secreton_domain::ApiResponse;
+use secreton_domain::SecretonError;
+use secreton_engines::Services;
+use secreton_engines::services::seal::{InitResponse, UnsealResponse};
 use serde::Deserialize;
 
 /// Routes that must answer while the barrier is sealed.
@@ -60,7 +59,11 @@ async fn initialize(
             &state.mfa,
         )
         .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+        .map_err(|e| {
+            crate::error::ApiError(SecretonError::Internal {
+                message: e.to_string(),
+            })
+        })?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -69,11 +72,11 @@ async fn unseal(
     State(state): State<Services>,
     Json(payload): Json<UnsealRequest>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
-    let result = state
-        .seal
-        .unseal(&payload.key)
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let result = state.seal.unseal(&payload.key).await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -81,11 +84,11 @@ async fn unseal(
 async fn get_seal_status(
     State(state): State<Services>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
-    let result = state
-        .seal
-        .get_status()
-        .await
-        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
+    let result = state.seal.get_status().await.map_err(|e| {
+        crate::error::ApiError(SecretonError::Internal {
+            message: e.to_string(),
+        })
+    })?;
     Ok(Json(ApiResponse::success(result)))
 }
 

@@ -52,10 +52,7 @@ pub async fn apply(request: Request, next: Next) -> Response {
     headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    headers.insert(
-        REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
-    );
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     headers.insert(
         "cross-origin-opener-policy",
         HeaderValue::from_static("same-origin"),

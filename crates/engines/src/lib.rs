@@ -15,10 +15,10 @@ pub mod performance;
 pub mod pki;
 pub mod services;
 
+pub mod ssh;
+pub mod telemetry;
 #[cfg(test)]
 pub(crate) mod test_support;
-pub mod telemetry;
-pub mod ssh;
 
 pub use config::ServerConfig;
 pub use services::Services;

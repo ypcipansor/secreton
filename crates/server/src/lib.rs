@@ -22,10 +22,10 @@ pub mod shutdown;
 
 #[cfg(feature = "grpc")]
 pub mod grpc;
-#[cfg(feature = "ui")]
-pub mod ui;
 #[cfg(feature = "grpc")]
 pub mod proto;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 pub use router::{AppState, build_router};
 pub use shutdown::shutdown_signal;

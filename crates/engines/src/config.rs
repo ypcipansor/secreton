@@ -823,7 +823,6 @@ mod tests {
     }
 }
 
-
 impl ServerConfig {
     /// Load configuration, layering file over defaults and environment over both.
     ///
@@ -839,7 +838,10 @@ impl ServerConfig {
             let text = std::fs::read_to_string(path)?;
             toml::from_str::<Self>(&text)?
         } else {
-            tracing::info!(path, "no configuration file found; using defaults and environment");
+            tracing::info!(
+                path,
+                "no configuration file found; using defaults and environment"
+            );
             Self::default()
         };
 
@@ -936,7 +938,10 @@ mod validation_tests {
 
         c.auth.jwt.secret = Some("too-short".into());
         let err = c.validate().unwrap_err().to_string();
-        assert!(err.contains("32"), "message should state the requirement: {err}");
+        assert!(
+            err.contains("32"),
+            "message should state the requirement: {err}"
+        );
     }
 
     #[test]

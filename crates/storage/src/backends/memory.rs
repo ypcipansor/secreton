@@ -265,7 +265,6 @@ impl StorageBackend for MemoryBackend {
     }
 }
 
-
 /// Transaction over [`MemoryBackend`].
 ///
 /// The previous implementation returned a transaction whose methods were all `Ok(())`
@@ -303,7 +302,8 @@ impl StorageTransaction for MemoryTransaction {
     }
 
     async fn update(&mut self, entry: &SecretEntry) -> StorageResult<()> {
-        self.pending.push(PendingOp::Update(Box::new(entry.clone())));
+        self.pending
+            .push(PendingOp::Update(Box::new(entry.clone())));
         Ok(())
     }
 
@@ -359,7 +359,10 @@ mod tests {
         let e = entry("kv/app/db");
         backend.store(&e).await.unwrap();
 
-        assert_eq!(backend.get_by_path("kv/app/db").await.unwrap().unwrap().id, e.id);
+        assert_eq!(
+            backend.get_by_path("kv/app/db").await.unwrap().unwrap().id,
+            e.id
+        );
         assert_eq!(backend.get_by_id(e.id).await.unwrap().unwrap().path, e.path);
         assert!(backend.exists("kv/app/db").await.unwrap());
     }
@@ -374,7 +377,11 @@ mod tests {
         tx.commit().await.unwrap();
 
         assert!(
-            backend.get_by_path("kv/tx/committed").await.unwrap().is_some(),
+            backend
+                .get_by_path("kv/tx/committed")
+                .await
+                .unwrap()
+                .is_some(),
             "a committed transaction must persist its writes"
         );
     }
@@ -388,7 +395,13 @@ mod tests {
         tx.store(&e).await.unwrap();
         tx.rollback().await.unwrap();
 
-        assert!(backend.get_by_path("kv/tx/rolled-back").await.unwrap().is_none());
+        assert!(
+            backend
+                .get_by_path("kv/tx/rolled-back")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

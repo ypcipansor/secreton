@@ -1,7 +1,7 @@
 //! SSH Secret Engine Handlers
 
-use secreton_engines::Services;
 use secreton_domain::SecretonError;
+use secreton_engines::Services;
 
 use axum::{
     Router,
@@ -11,20 +11,28 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::error::ApiResult;
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
+use secreton_domain::ApiResponse;
 use secreton_engines::services::audit::SecurityEventType;
 use secreton_engines::services::ssh::{SSH_MAX_LEASE_TTL, SshServiceError};
-use secreton_domain::{ApiResponse};
-use crate::error::{ApiResult};
 
 /// Map a [`SshServiceError`] to the appropriate [`crate::error::ApiError`] variant
 fn map_ssh_err(err: SshServiceError) -> crate::error::ApiError {
     match err {
-        SshServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
-        SshServiceError::Conflict(msg) => crate::error::ApiError(SecretonError::Conflict { message: msg }),
-        SshServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
-        SshServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
+        SshServiceError::NotFound(msg) => {
+            crate::error::ApiError(SecretonError::NotFound { resource: msg })
+        }
+        SshServiceError::Conflict(msg) => {
+            crate::error::ApiError(SecretonError::Conflict { message: msg })
+        }
+        SshServiceError::BadRequest(msg) => {
+            crate::error::ApiError(SecretonError::Validation { message: msg })
+        }
+        SshServiceError::Internal(msg) => {
+            crate::error::ApiError(SecretonError::Internal { message: msg })
+        }
     }
 }
 
@@ -64,9 +72,9 @@ async fn get_ca_public_key(
         Some(pk) => Ok(AxumJson(ApiResponse::success(CaResponse {
             public_key: pk,
         }))),
-        None => Err(crate::error::ApiError(SecretonError::NotFound { resource: 
-            "SSH CA not configured".to_string(),
-         })),
+        None => Err(crate::error::ApiError(SecretonError::NotFound {
+            resource: "SSH CA not configured".to_string(),
+        })),
     }
 }
 
@@ -76,9 +84,9 @@ async fn generate_ca(
 ) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
     // Only admin/root users may generate a CA
     if !user.is_admin() {
-        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-            "Admin privileges required to generate SSH CA".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to generate SSH CA".to_string(),
+        }));
     }
 
     let pub_key = state.ssh.generate_ca().await.map_err(map_ssh_err)?;
@@ -103,9 +111,9 @@ async fn sign_key(
 ) -> ApiResult<AxumJson<ApiResponse<SignedKeyResponse>>> {
     // Validate that a public key was actually provided.
     if payload.public_key.trim().is_empty() {
-        return Err(crate::error::ApiError(SecretonError::Validation { message: 
-            "public_key must not be empty".to_string(),
-         }));
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "public_key must not be empty".to_string(),
+        }));
     }
 
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
@@ -125,9 +133,10 @@ async fn sign_key(
             if !user.is_admin() {
                 // Non-admin users can only request their own username
                 if p.len() != 1 || p[0] != user.username {
-                    return Err(crate::error::ApiError(SecretonError::Authorization { message: 
-                        "Non-admin users can only sign keys for their own username".to_string(),
-                     }));
+                    return Err(crate::error::ApiError(SecretonError::Authorization {
+                        message: "Non-admin users can only sign keys for their own username"
+                            .to_string(),
+                    }));
                 }
             }
             p
