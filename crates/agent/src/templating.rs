@@ -6,7 +6,7 @@
 use crate::auth::AuthHandler;
 use crate::config::TemplateConfig;
 use handlebars::Handlebars;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::process::Command;

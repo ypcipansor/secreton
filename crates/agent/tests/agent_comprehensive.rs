@@ -1,13 +1,13 @@
 //! Comprehensive Agent crate tests
 //!
-//! Tests for monitoring agent, security agent, and system monitoring functionality
+//! Tests for the agent's configuration, health checking and templating.
 
 use anyhow::Result;
 use secreton_agent::{
     config::AgentConfig,
     metrics::{MetricPoint, MetricType},
 };
-use secreton_config::{MetricsConfig, SecurityConfig};
+use secreton_agent::config::{MetricsConfig, SecurityConfig};
 
 #[cfg(test)]
 mod agent_core_tests {
@@ -56,38 +56,6 @@ mod agent_core_tests {
 
         Ok(())
     }
-
-    #[test]
-    fn test_security_config_initialization() -> Result<()> {
-        // Test security configuration with all compliance checks enabled
-        let config = SecurityConfig {
-            jwt: Default::default(),
-            mfa: Default::default(),
-            password_policy: Default::default(),
-            session: Default::default(),
-            audit: Default::default(),
-            rate_limiting: Default::default(),
-            agent: secreton_config::AgentSecurityConfig {
-                scan_interval_seconds: 300,
-                intrusion_detection_enabled: true,
-                malware_scan_enabled: true,
-                vulnerability_scan_enabled: true,
-                compliance_check_enabled: true,
-                auto_quarantine: false,
-                auto_block_ips: false,
-                encryption_enabled: true,
-                access_control_enabled: true,
-                data_protection_enabled: true,
-            },
-        };
-
-        assert_eq!(config.agent.scan_interval_seconds, 300);
-        assert!(config.agent.intrusion_detection_enabled);
-        assert!(config.agent.encryption_enabled);
-        assert!(config.agent.access_control_enabled);
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -128,68 +96,6 @@ mod metrics_tests {
 }
 
 #[cfg(test)]
-mod security_agent_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_security_enforcer() -> Result<()> {
-        // Test security enforcement functionality
-        use secreton_agent::security::SecurityEnforcer;
-        use tokio::sync::mpsc;
-
-        let (_tx, _rx) = mpsc::unbounded_channel();
-        let config = SecurityConfig::default();
-        let _enforcer = SecurityEnforcer::new(config, _tx);
-
-        // For now, just test that enforcer can be created
-        // Actual security methods not implemented in test
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_threat_detection() -> Result<()> {
-        // Test threat detection functionality - simplified
-        use secreton_agent::security::SecurityEnforcer;
-        use tokio::sync::mpsc;
-
-        let (_tx, _rx) = mpsc::unbounded_channel();
-        let config = SecurityConfig::default();
-        let _enforcer = SecurityEnforcer::new(config, _tx);
-
-        // For now, just test that enforcer can be created
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_log_analysis() -> Result<()> {
-        // Test log analysis functionality - simplified
-        use secreton_agent::security::SecurityEnforcer;
-        use tokio::sync::mpsc;
-
-        let (_tx, _rx) = mpsc::unbounded_channel();
-        let config = SecurityConfig::default();
-        let _enforcer = SecurityEnforcer::new(config, _tx);
-
-        // For now, just test that enforcer can be created
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_anomaly_detection() -> Result<()> {
-        // Test anomaly detection functionality - simplified
-        use secreton_agent::security::SecurityEnforcer;
-        use tokio::sync::mpsc;
-
-        let (_tx, _rx) = mpsc::unbounded_channel();
-        let config = SecurityConfig::default();
-        let _enforcer = SecurityEnforcer::new(config, _tx);
-
-        // For now, just test that enforcer can be created
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod agent_integration_tests {
     use super::*;

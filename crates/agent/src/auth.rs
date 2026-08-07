@@ -3,7 +3,7 @@
 //! Handles authentication with the Secreton API and token management.
 
 use crate::config::VaultConfig;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;

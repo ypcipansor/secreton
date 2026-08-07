@@ -1,7 +1,11 @@
 //! Agent configuration management
 
-use secreton_config::{AlertingConfig, LoggingConfig, MetricsConfig, SecurityConfig};
-use secreton_errors::SecretonError;
+//! The agent is a sidecar with its own lifecycle, so its configuration is defined here
+//! rather than shared with the server. Previously these were type aliases onto the
+//! server's config crate — including `MonitoringConfig = CoreConfig`, which handed the
+//! agent the *entire* server configuration surface, most of it meaningless to a sidecar.
+
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 
 /// Main agent configuration
@@ -114,23 +118,89 @@ impl Default for AgentConfig {
     }
 }
 
-/// Monitoring configuration
-pub type MonitoringConfig = secreton_config::CoreConfig;
+/// What the agent watches on the host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MonitoringConfig {
+    pub enabled: bool,
+    /// Seconds between samples.
+    pub interval_seconds: u64,
+}
 
-/// Alert severity thresholds
-pub type SeverityThresholds = secreton_config::CoreConfig;
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_seconds: 60,
+        }
+    }
+}
 
-/// Email alert configuration
-pub type EmailConfig = secreton_config::EmailConfig;
+/// Where the agent sends alerts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AlertingConfig {
+    pub enabled: bool,
+    /// Webhook to POST alerts to. No credentials are read from configuration; put a
+    /// token in the URL's own auth mechanism or in the environment.
+    pub webhook_url: Option<String>,
+}
 
-/// SMS alert configuration
-pub type SmsConfig = secreton_config::SmsConfig;
+/// Agent-side security posture.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecurityConfig {
+    /// Verify the server's TLS certificate. Turning this off is a downgrade to an
+    /// unauthenticated channel and is never appropriate outside a local test.
+    pub verify_tls: bool,
+    /// Refuse to write a rendered template to a world-readable path.
+    pub strict_file_permissions: bool,
+}
 
-/// Webhook alert configuration
-pub type WebhookConfig = secreton_config::WebhookConfig;
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            verify_tls: true,
+            strict_file_permissions: true,
+        }
+    }
+}
 
-/// Slack alert configuration
-pub type SlackConfig = secreton_config::SlackConfig;
+/// Prometheus exposition from the agent itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetricsConfig {
+    pub enabled: bool,
+    pub prometheus_port: u16,
+    pub collection_interval_seconds: u64,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            prometheus_port: 9100,
+            collection_interval_seconds: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub level: String,
+    /// Emit JSON rather than human-readable lines.
+    pub json: bool,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            json: false,
+        }
+    }
+}
 
 impl AgentConfig {
     /// Load configuration from environment variables
@@ -155,13 +225,9 @@ impl AgentConfig {
 
     /// Load configuration from file
     pub async fn load_from_file(path: &str) -> Result<Self, SecretonError> {
-        let content = std::fs::read_to_string(path).map_err(secreton_core::CoreError::Io)?;
-
-        let config: AgentConfig =
-            toml::from_str(&content).map_err(|e| secreton_core::CoreError::Configuration {
-                message: format!("Failed to parse config: {}", e),
-            })?;
-
+        let content = std::fs::read_to_string(path)?;
+        let config: AgentConfig = toml::from_str(&content)?;
+        config.validate()?;
         Ok(config)
     }
 
@@ -197,5 +263,102 @@ impl AgentConfig {
     /// Get report interval (convenience method) - alias for collection_interval
     pub fn report_interval(&self) -> u64 {
         self.collection_interval()
+    }
+}
+
+
+impl AgentConfig {
+    /// Reject a configuration that would make the agent unsafe or useless.
+    pub fn validate(&self) -> Result<(), SecretonError> {
+        if let Some(vault) = &self.vault {
+            if vault.server_url.is_empty() {
+                return Err(SecretonError::Configuration {
+                    message: "vault.server_url cannot be empty".into(),
+                });
+            }
+            // Refusing TLS verification against a non-local server means the agent will
+            // hand its token to anything that answers.
+            if !self.security.verify_tls && !is_loopback(&vault.server_url) {
+                return Err(SecretonError::Configuration {
+                    message: format!(
+                        "security.verify_tls is disabled for a non-local server ({}). \
+                         That sends the agent's token to any host that answers.",
+                        vault.server_url
+                    ),
+                });
+            }
+        }
+
+        for template in &self.templates {
+            if template.refresh_interval_seconds == 0 {
+                return Err(SecretonError::Configuration {
+                    message: format!(
+                        "templates[{}].refresh_interval_seconds is 0, which would spin \
+                         the render loop without pausing",
+                        template.source
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_loopback(url: &str) -> bool {
+    url.starts_with("http://127.0.0.1")
+        || url.starts_with("http://localhost")
+        || url.starts_with("http://[::1]")
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn with_vault(url: &str) -> AgentConfig {
+        AgentConfig {
+            vault: Some(VaultConfig {
+                server_url: url.to_string(),
+                token: None,
+                token_file: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_default_configuration_is_valid() {
+        assert!(AgentConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn disabling_tls_verification_against_a_remote_server_is_rejected() {
+        let mut config = with_vault("https://secreton.example.com");
+        config.security.verify_tls = false;
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("verify_tls"), "{err}");
+    }
+
+    #[test]
+    fn disabling_tls_verification_is_allowed_against_loopback_only() {
+        let mut config = with_vault("http://127.0.0.1:3000");
+        config.security.verify_tls = false;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_zero_refresh_interval_is_rejected() {
+        let mut config = AgentConfig::default();
+        config.templates.push(TemplateConfig {
+            source: "app.tmpl".into(),
+            destination: "/etc/app.conf".into(),
+            command: None,
+            refresh_interval_seconds: 0,
+        });
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn an_empty_server_url_is_rejected() {
+        assert!(with_vault("").validate().is_err());
     }
 }

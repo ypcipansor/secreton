@@ -11,13 +11,13 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# Core dependencies
-secreton-core = { path = "../core" }
-secreton-monitoring = { path = "../monitoring" }
-secreton-errors = { path = "../errors" }
-secreton-config = { path = "../config" }
-tokio = { workspace = true }
+secreton-client.workspace = true
+secreton-domain.workspace = true
+tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -29,18 +29,16 @@ chrono = { workspace = true }
 
 # Additional dependencies for agent functionality
 clap = { workspace = true }
-config = { workspace = true }
 reqwest = { workspace = true }
-handlebars = "4.3"
-serde_yaml = "0.9"
-regex = "1.10"
+handlebars = "6"
+regex = { workspace = true }
 futures = { workspace = true }
 toml = { workspace = true }
 rand = { workspace = true }
 
 # System monitoring dependencies
-sysinfo = { workspace = true }
-nix = { workspace = true }
+sysinfo = "0.37"
+nix = { version = "0.29", features = ["user"] }
 
 # HTTP server for metrics
 axum = { workspace = true }

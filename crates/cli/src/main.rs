@@ -7,7 +7,6 @@ use tracing_subscriber::FmtSubscriber;
 mod config;
 
 use config::CliConfig;
-use secreton_config::Config;
 
 #[derive(Parser)]
 #[command(
