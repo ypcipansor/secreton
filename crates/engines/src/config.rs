@@ -66,6 +66,15 @@ pub struct HttpConfig {
 
     /// Enable static file serving
     pub static_files: Option<StaticFilesConfig>,
+
+    /// How many reverse proxies sit in front of this process.
+    ///
+    /// Used to resolve the client address from `X-Forwarded-For`. Zero — the default —
+    /// means the header is ignored entirely and the socket peer address is used, which is
+    /// correct when the process is exposed directly. Setting it higher than the real
+    /// number lets a client forge its own address by prepending entries.
+    #[serde(default)]
+    pub trusted_proxies: usize,
 }
 
 /// gRPC server configuration
@@ -496,6 +505,7 @@ impl Default for HttpConfig {
             keep_alive: 75,
             compression: true,
             static_files: None,
+            trusted_proxies: 0,
         }
     }
 }
@@ -601,7 +611,11 @@ impl Default for CorsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            allowed_origins: vec!["*".to_string()],
+            // Empty means same-origin only. The default used to be `["*"]`, which let any
+            // page on the internet script this API with the visitor's credentials — on a
+            // secrets manager, out of the box. Same-origin is now correct by default
+            // because the UI is served by this same process.
+            allowed_origins: Vec::new(),
             allowed_methods: vec![
                 "GET".to_string(),
                 "POST".to_string(),
@@ -643,6 +657,7 @@ mod tests {
     fn sample_api_config() -> ServerConfig {
         ServerConfig {
             http: HttpConfig {
+                trusted_proxies: 0,
                 bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8200),
                 timeout: 30,
                 max_body_size: 5 * 1024 * 1024,
@@ -805,5 +820,155 @@ mod tests {
         assert!(cookie.secure);
         assert!(cookie.http_only);
         assert_eq!(cookie.same_site, "Lax");
+    }
+}
+
+
+impl ServerConfig {
+    /// Load configuration, layering file over defaults and environment over both.
+    ///
+    /// A missing file is not an error: the defaults plus environment variables are enough
+    /// to start with in-memory storage, which is what makes `cargo leptos serve` work on a
+    /// fresh checkout. A file that exists but cannot be parsed *is* an error — silently
+    /// falling back to defaults would start the server with a different configuration than
+    /// the operator wrote.
+    pub fn load(path: &str) -> Result<Self, secreton_domain::SecretonError> {
+        use secreton_domain::SecretonError;
+
+        let mut config = if std::path::Path::new(path).exists() {
+            let text = std::fs::read_to_string(path)?;
+            toml::from_str::<Self>(&text)?
+        } else {
+            tracing::info!(path, "no configuration file found; using defaults and environment");
+            Self::default()
+        };
+
+        // `SECRETON__AUTH__JWT__SECRET` and friends override the file, so a secret never
+        // has to be written to disk.
+        config.apply_environment();
+        Ok(config)
+    }
+
+    fn apply_environment(&mut self) {
+        if let Ok(secret) = std::env::var("SECRETON__AUTH__JWT__SECRET") {
+            self.auth.jwt.secret = Some(secret);
+        }
+        if let Ok(addr) = std::env::var("SECRETON__HTTP__BIND_ADDRESS")
+            && let Ok(parsed) = addr.parse()
+        {
+            self.http.bind_address = parsed;
+        }
+        if let Ok(n) = std::env::var("SECRETON__HTTP__TRUSTED_PROXIES")
+            && let Ok(parsed) = n.parse()
+        {
+            self.http.trusted_proxies = parsed;
+        }
+    }
+
+    /// Reject a configuration that cannot serve traffic safely.
+    ///
+    /// Run at startup so a mistake stops the process rather than surfacing on a user's
+    /// first request — or worse, not surfacing at all.
+    pub fn validate(&self) -> Result<(), secreton_domain::SecretonError> {
+        use secreton_domain::SecretonError;
+        let reject = |message: String| Err(SecretonError::Configuration { message });
+
+        match self.auth.jwt.secret.as_deref() {
+            None | Some("") => {
+                return reject(
+                    "auth.jwt.secret is not set. Set SECRETON__AUTH__JWT__SECRET or the \
+                     `secret` key under [auth.jwt]. It is never generated automatically: a \
+                     secret invented at boot invalidates every issued token on restart."
+                        .into(),
+                );
+            }
+            // 32 bytes is the smallest key that gives HS256 its full security margin.
+            Some(s) if s.len() < 32 => {
+                return reject(format!(
+                    "auth.jwt.secret is {} bytes; at least 32 are required",
+                    s.len()
+                ));
+            }
+            Some(_) => {}
+        }
+
+        if self.http.timeout == 0 {
+            return reject("http.timeout must be greater than zero".into());
+        }
+        if self.http.max_body_size == 0 {
+            return reject("http.max_body_size must be greater than zero".into());
+        }
+        if self.cors.allowed_origins.iter().any(|o| o == "*") {
+            return reject(
+                "cors.allowed_origins contains \"*\". A wildcard origin lets any site \
+                 script this API with the visitor's credentials; list origins explicitly, \
+                 or leave the list empty for same-origin only."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn valid() -> ServerConfig {
+        let mut c = ServerConfig::default();
+        c.auth.jwt.secret = Some("x".repeat(32));
+        c
+    }
+
+    #[test]
+    fn a_valid_configuration_is_accepted() {
+        assert!(valid().validate().is_ok());
+    }
+
+    #[test]
+    fn a_missing_or_short_jwt_secret_stops_startup() {
+        let mut c = valid();
+        c.auth.jwt.secret = None;
+        assert!(c.validate().is_err());
+
+        c.auth.jwt.secret = Some(String::new());
+        assert!(c.validate().is_err());
+
+        c.auth.jwt.secret = Some("too-short".into());
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("32"), "message should state the requirement: {err}");
+    }
+
+    #[test]
+    fn a_wildcard_cors_origin_is_rejected() {
+        let mut c = valid();
+        c.cors.allowed_origins = vec!["*".into()];
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("wildcard") || err.contains("*"), "{err}");
+    }
+
+    #[test]
+    fn zero_timeout_or_body_limit_is_rejected() {
+        let mut c = valid();
+        c.http.timeout = 0;
+        assert!(c.validate().is_err());
+
+        let mut c = valid();
+        c.http.max_body_size = 0;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn a_missing_file_falls_back_to_defaults_but_a_malformed_one_does_not() {
+        assert!(ServerConfig::load("/nonexistent/secreton.toml").is_ok());
+
+        let dir = std::env::temp_dir().join("secreton-config-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.toml");
+        std::fs::write(&path, "this is not = valid toml [[[").unwrap();
+        assert!(
+            ServerConfig::load(path.to_str().unwrap()).is_err(),
+            "a malformed file must fail loudly, not silently fall back to defaults"
+        );
     }
 }

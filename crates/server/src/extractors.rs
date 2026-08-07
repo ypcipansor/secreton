@@ -1,58 +1,40 @@
-use crate::auth::extract_bearer_token;
-use crate::handlers::AppState;
-use axum::{
-    extract::FromRequestParts,
-    http::{StatusCode, request::Parts},
-};
-use secreton_auth::User;
-use std::future::Future;
+//! Axum extractors.
 
-/// Authenticated user extractor.
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use secreton_auth::User;
+use secreton_domain::SecretonError;
+
+use crate::error::ApiError;
+use crate::middleware::auth::CurrentUser;
+
+/// The authenticated principal for the current request.
 ///
-/// First checks whether the `auth_middleware` (used by `create_api_router`)
-/// already validated the token and inserted a [`User`] into request
-/// extensions.  If so, the user is returned without a second token
-/// validation round-trip.  Falls back to extracting and validating the
-/// Bearer token directly so that routes mounted via `create_router` (which
-/// uses a different middleware stack) still work.
+/// The auth middleware has already validated the credential and inserted the user, so this
+/// only reads the extension. The previous version re-validated the bearer token here as a
+/// fallback, because two different middleware stacks were in play and neither was
+/// guaranteed to have run — a second signature check on every extraction, and a silent
+/// bypass if the extension was missing for any other reason. With one router there is one
+/// stack, so a missing extension means the route was mounted outside it, which is a
+/// wiring bug and is reported as one.
+#[derive(Debug, Clone)]
 pub struct AuthenticatedUser(pub User);
 
-impl FromRequestParts<AppState> for AuthenticatedUser {
-    type Rejection = (StatusCode, String);
+impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
+    type Rejection = ApiError;
 
-    fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        // Try to read a User already inserted by auth_middleware to avoid
-        // a redundant token validation.
-        let existing_user = parts.extensions.get::<User>().cloned();
-        let auth_header = parts.headers.get("authorization").cloned();
-        let state = state.clone();
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<CurrentUser>()
+            .map(|u| AuthenticatedUser(u.0.clone()))
+            .ok_or(ApiError(SecretonError::MissingAuthHeader))
+    }
+}
 
-        async move {
-            // Fast path: user already validated by upstream middleware.
-            if let Some(user) = existing_user {
-                return Ok(AuthenticatedUser(user));
-            }
-
-            // Slow path: validate the token ourselves.
-            let auth_header = auth_header.ok_or((
-                StatusCode::UNAUTHORIZED,
-                "Missing authorization header".to_string(),
-            ))?;
-
-            let token = extract_bearer_token(&auth_header).ok_or((
-                StatusCode::UNAUTHORIZED,
-                "Invalid authorization header".to_string(),
-            ))?;
-
-            state
-                .auth
-                .validate_token(&token)
-                .await
-                .map(AuthenticatedUser)
-                .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))
-        }
+impl std::ops::Deref for AuthenticatedUser {
+    type Target = User;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

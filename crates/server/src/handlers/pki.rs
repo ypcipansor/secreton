@@ -1,5 +1,8 @@
 //! PKI Secret Engine Handlers
 
+use secreton_engines::Services;
+use secreton_domain::SecretonError;
+
 use axum::{
     Router,
     extract::{Json, State},
@@ -10,26 +13,27 @@ use serde::Deserialize;
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
-use crate::services::pki::PkiServiceError;
-use crate::{ApiResponse, ApiResult};
-use secreton_secrets_pki::{CertificateRequest, CertificateResponse};
+use secreton_engines::services::pki::PkiServiceError;
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
+use secreton_engines::pki::{CertificateRequest, CertificateResponse};
 use zeroize::Zeroize;
 
-/// Map a [`PkiServiceError`] to the appropriate [`crate::ApiError`] variant
+/// Map a [`PkiServiceError`] to the appropriate [`crate::error::ApiError`] variant
 /// so that the HTTP response carries the correct status code.
-fn map_pki_err(err: PkiServiceError) -> crate::ApiError {
+fn map_pki_err(err: PkiServiceError) -> crate::error::ApiError {
     match err {
-        PkiServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
+        PkiServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
         PkiServiceError::Conflict(msg) => {
             // SecretonError::Conflict maps to 409 CONFLICT in IntoResponse
-            crate::ApiError(secreton_domain::SecretonError::Conflict { message: msg })
+            crate::error::ApiError(secreton_domain::SecretonError::Conflict { message: msg })
         }
-        PkiServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
-        PkiServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+        PkiServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+        PkiServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
     }
 }
 
-pub fn create_routes() -> Router<AppState> {
+pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/ca/pem", get(get_ca_pem))
         .route("/root/generate", post(generate_root_ca))
@@ -43,29 +47,29 @@ pub struct GenerateRootCaRequest {
 }
 
 async fn get_ca_pem(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<String>>> {
     let pem = state.pki.get_ca_pem().await.map_err(map_pki_err)?;
 
     match pem {
         Some(p) => Ok(AxumJson(ApiResponse::success(p))),
-        None => Err(crate::ApiError::NotFound(
+        None => Err(crate::error::ApiError(SecretonError::NotFound { resource: 
             "Root CA not configured".to_string(),
-        )),
+         })),
     }
 }
 
 async fn generate_root_ca(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<GenerateRootCaRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<CertificateResponse>>> {
     // Only admin/root users may generate a Root CA
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to generate Root CA".to_string(),
-        ));
+         }));
     }
 
     let mut response = state
@@ -83,15 +87,15 @@ async fn generate_root_ca(
 }
 
 async fn issue_certificate(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<CertificateRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<CertificateResponse>>> {
     // Only admin/root users may issue certificates
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to issue certificates".to_string(),
-        ));
+         }));
     }
 
     let response = state

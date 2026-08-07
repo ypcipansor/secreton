@@ -470,7 +470,11 @@ impl SecretService {
     ///                           absolute timestamps from historical versions
     ///                           without lossy now-relative TTL conversion).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn put_secret_internal(
+    /// Write without re-running the caller-facing policy check.
+    ///
+    /// `pub` because the lifecycle and rotation handlers in `secreton-server` need it, but
+    /// the name is deliberately explicit: callers must have already authorised the write.
+    pub async fn put_secret_internal(
         &self,
         path: &str,
         data: HashMap<String, String>,
@@ -802,7 +806,9 @@ impl SecretService {
 
     /// Delete secret with option to preserve history (used for rollbacks)
     /// `check_perms`: If true, checks the "delete" permission. If false, bypasses RBAC (e.g. for internal rollback).
-    pub(crate) async fn delete_secret_internal(
+    /// Delete without re-running the caller-facing policy check. See
+    /// [`Self::put_secret_internal`] for the contract.
+    pub async fn delete_secret_internal(
         &self,
         path: &str,
         user: &secreton_auth::User,
@@ -3442,5 +3448,26 @@ mod list_secrets_tests {
 
         // Expectation changed from 2 to 0 to reflect strict Zero Trust isolation
         assert_eq!(secrets_admin.len(), 0);
+    }
+}
+
+
+
+impl From<SecretError> for secreton_domain::SecretonError {
+    fn from(e: SecretError) -> Self {
+        use secreton_domain::SecretonError as S;
+        match e {
+            SecretError::SecretNotFound { path } => S::NotFound { resource: path },
+            SecretError::KeyNotFound { key_id } => S::NotFound { resource: key_id },
+            SecretError::PolicyNotFound { name } => S::PolicyNotFound { policy_id: name },
+            SecretError::BackupNotFound { id } => S::NotFound { resource: id },
+            SecretError::PermissionDenied(message) => S::Authorization { message },
+            SecretError::InvalidOperation(message) => S::Validation { message },
+            // Everything else is an internal failure. The HTTP layer replaces 5xx
+            // bodies wholesale, so the detail below only ever reaches the log.
+            other => S::Internal {
+                message: other.to_string(),
+            },
+        }
     }
 }

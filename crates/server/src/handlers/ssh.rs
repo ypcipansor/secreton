@@ -1,5 +1,8 @@
 //! SSH Secret Engine Handlers
 
+use secreton_engines::Services;
+use secreton_domain::SecretonError;
+
 use axum::{
     Router,
     extract::{Json, State},
@@ -10,21 +13,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
-use crate::services::audit::SecurityEventType;
-use crate::services::ssh::{SSH_MAX_LEASE_TTL, SshServiceError};
-use crate::{ApiResponse, ApiResult};
+use secreton_engines::services::audit::SecurityEventType;
+use secreton_engines::services::ssh::{SSH_MAX_LEASE_TTL, SshServiceError};
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
 
-/// Map a [`SshServiceError`] to the appropriate [`crate::ApiError`] variant
-fn map_ssh_err(err: SshServiceError) -> crate::ApiError {
+/// Map a [`SshServiceError`] to the appropriate [`crate::error::ApiError`] variant
+fn map_ssh_err(err: SshServiceError) -> crate::error::ApiError {
     match err {
-        SshServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
-        SshServiceError::Conflict(msg) => crate::ApiError::Conflict(msg),
-        SshServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
-        SshServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+        SshServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
+        SshServiceError::Conflict(msg) => crate::error::ApiError(SecretonError::Conflict { message: msg }),
+        SshServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+        SshServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
     }
 }
 
-pub fn create_routes() -> Router<AppState> {
+pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/config/ca", get(get_ca_public_key).post(generate_ca))
         .route("/sign", post(sign_key))
@@ -51,7 +55,7 @@ pub struct SignedKeyResponse {
 }
 
 async fn get_ca_public_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
     let pub_key = state.ssh.get_ca_public_key().await.map_err(map_ssh_err)?;
@@ -60,21 +64,21 @@ async fn get_ca_public_key(
         Some(pk) => Ok(AxumJson(ApiResponse::success(CaResponse {
             public_key: pk,
         }))),
-        None => Err(crate::ApiError::NotFound(
+        None => Err(crate::error::ApiError(SecretonError::NotFound { resource: 
             "SSH CA not configured".to_string(),
-        )),
+         })),
     }
 }
 
 async fn generate_ca(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
     // Only admin/root users may generate a CA
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to generate SSH CA".to_string(),
-        ));
+         }));
     }
 
     let pub_key = state.ssh.generate_ca().await.map_err(map_ssh_err)?;
@@ -93,15 +97,15 @@ async fn generate_ca(
 }
 
 async fn sign_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(payload): Json<SignKeyRequest>,
 ) -> ApiResult<AxumJson<ApiResponse<SignedKeyResponse>>> {
     // Validate that a public key was actually provided.
     if payload.public_key.trim().is_empty() {
-        return Err(crate::ApiError::BadRequest(
+        return Err(crate::error::ApiError(SecretonError::Validation { message: 
             "public_key must not be empty".to_string(),
-        ));
+         }));
     }
 
     // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
@@ -121,9 +125,9 @@ async fn sign_key(
             if !user.is_admin() {
                 // Non-admin users can only request their own username
                 if p.len() != 1 || p[0] != user.username {
-                    return Err(crate::ApiError::Authorization(
+                    return Err(crate::error::ApiError(SecretonError::Authorization { message: 
                         "Non-admin users can only sign keys for their own username".to_string(),
-                    ));
+                     }));
                 }
             }
             p

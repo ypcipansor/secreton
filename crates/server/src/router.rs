@@ -1,9 +1,14 @@
 //! The single Axum router.
 //!
-//! Everything the process serves is assembled here: the Leptos application and its server
-//! functions, the REST API under `/api/v1`, static assets, health and metrics, and — when
-//! the `grpc` feature is on — the gRPC services. One router means one listener, one TLS
-//! configuration, one middleware stack and one port to expose in Kubernetes.
+//! Everything the process serves is assembled here: the REST API under `/api/v1`, health
+//! and metrics, the Leptos application and its server functions, and — with the `grpc`
+//! feature — the gRPC services. One router means one listener, one TLS configuration, one
+//! middleware stack and one port to expose in Kubernetes.
+//!
+//! Before this refactor the process ran warp on the configured port and Axum on that port
+//! plus ten, because warp is built on hyper 0.14 and Axum on hyper 1.0. That forced two
+//! TLS configurations, two sets of middleware, a hardcoded offset duplicated into the
+//! frontend's proxy config, and two major versions of Axum in the dependency tree.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,10 +16,7 @@ use std::time::Duration;
 use axum::extract::FromRef;
 use axum::routing::get;
 use axum::{Router, middleware as axum_middleware};
-use leptos::prelude::*;
-use leptos_axum::{LeptosRoutes, generate_route_list};
-use secreton_engines::Services;
-use tower::ServiceBuilder;
+use secreton_engines::{ServerConfig, Services};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -23,23 +25,20 @@ use tower_http::trace::TraceLayer;
 
 use crate::handlers;
 use crate::middleware;
+use crate::middleware::rate_limit::RateLimit;
 
 /// State shared by every handler and server function.
 ///
 /// `Services` is a typed struct, so a handler that asks for the wrong service does not
-/// compile. This replaces the previous string-keyed `Box<dyn Any>` registry, where the
-/// same mistake surfaced as a runtime `None` — or worse, as the wrong service downcast
-/// successfully.
+/// compile. This replaces a string-keyed `Box<dyn Any>` registry where the same mistake
+/// surfaced at runtime — or worse, downcast successfully to the wrong service, which is
+/// exactly what happened with the admin and audit services.
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub services: Services,
-    pub leptos_options: LeptosOptions,
-}
-
-impl FromRef<AppState> for LeptosOptions {
-    fn from_ref(state: &AppState) -> Self {
-        state.leptos_options.clone()
-    }
+    pub rate_limit: RateLimit,
+    #[cfg(feature = "ui")]
+    pub leptos_options: leptos::prelude::LeptosOptions,
 }
 
 impl FromRef<AppState> for Services {
@@ -48,26 +47,76 @@ impl FromRef<AppState> for Services {
     }
 }
 
+impl FromRef<AppState> for RateLimit {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate_limit.clone()
+    }
+}
+
+#[cfg(feature = "ui")]
+impl FromRef<AppState> for leptos::prelude::LeptosOptions {
+    fn from_ref(state: &AppState) -> Self {
+        state.leptos_options.clone()
+    }
+}
+
 /// Build the complete application router.
 pub fn build_router(state: AppState) -> Router {
     let cfg = Arc::clone(&state.services.config);
-    let leptos_options = state.leptos_options.clone();
-    let routes = generate_route_list(secreton_ui::App);
 
-    // Routes that must answer before authentication: a liveness probe that requires a
-    // token is useless to Kubernetes, and a login endpoint that requires a session is a
-    // deadlock.
-    let public = Router::new()
+    let app = Router::new()
+        .merge(public_routes())
+        .nest("/api/v1", protected_routes(&state));
+
+    #[cfg(feature = "grpc")]
+    let app = app.merge(crate::grpc::routes(&state.services));
+
+    #[cfg(feature = "ui")]
+    let app = app.merge(crate::ui::routes(&state));
+
+    // Layers are applied one at a time rather than through a `ServiceBuilder`: axum's
+    // `from_fn` needs to infer the inner service type, and a builder chain leaves it
+    // ambiguous. Applied bottom-up, so the last `.layer` here is the outermost.
+    app.with_state(state.clone())
+        .layer(CompressionLayer::new())
+        .layer(RequestBodyLimitLayer::new(cfg.http.max_body_size))
+        .layer(TimeoutLayer::new(Duration::from_secs(cfg.http.timeout)))
+        .layer(cors_layer(&cfg))
+        .layer(axum_middleware::from_fn_with_state(
+            state.rate_limit.clone(),
+            middleware::rate_limit::enforce,
+        ))
+        .layer(axum_middleware::from_fn(
+            middleware::security_headers::apply,
+        ))
+        .layer(TraceLayer::new_for_http())
+        // Outermost, so every request — including one rejected by rate limiting —
+        // carries an id that ties the client's 429 to a log line.
+        .layer(axum_middleware::from_fn(middleware::request_id::attach))
+}
+
+/// Routes that must answer before authentication and while sealed.
+///
+/// These live outside the auth and seal layers by construction. The previous
+/// implementation kept a hand-maintained list of exact path strings *inside* each
+/// middleware, which had to be kept in sync with the router by hand — and drifted, so a
+/// liveness probe required a bearer token.
+fn public_routes() -> Router<AppState> {
+    Router::new()
         .route("/health", get(handlers::health::liveness))
         .route("/health/ready", get(handlers::health::readiness))
         .route("/metrics", get(handlers::health::metrics))
-        .nest("/api/v1/auth", handlers::auth::public_routes())
         .route(
             "/api-docs/openapi.json",
             get(crate::openapi::openapi_document),
-        );
+        )
+        .nest("/api/v1/auth", handlers::auth::public_routes())
+        .nest("/api/v1/sys", handlers::sys::unsealed_routes())
+}
 
-    let api = Router::new()
+/// Everything behind authentication and the seal gate.
+fn protected_routes(state: &AppState) -> Router<AppState> {
+    Router::new()
         .nest("/secret", handlers::secret::routes())
         .nest("/database", handlers::database::routes())
         .nest("/pki", handlers::pki::routes())
@@ -78,85 +127,26 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/admin", handlers::admin::routes())
         .nest("/sys", handlers::sys::routes())
         .nest("/auth", handlers::auth::authenticated_routes())
-        // `route_layer` applies only to matched routes, so an unknown path under
-        // /api/v1 returns 404 rather than 401 — a 401 there tells an unauthenticated
-        // caller which paths exist.
+        // `route_layer` runs only on a matched route, so an unknown path under /api/v1
+        // returns 404 rather than 401. A 401 there tells an unauthenticated caller which
+        // paths exist.
         .route_layer(axum_middleware::from_fn_with_state(
-            state.clone(),
+            state.services.clone(),
             middleware::auth::require_authentication,
         ))
         .route_layer(axum_middleware::from_fn_with_state(
-            state.clone(),
+            state.services.clone(),
             middleware::seal::reject_when_sealed,
-        ));
-
-    let leptos = Router::new()
-        .leptos_routes(&state, routes, {
-            let opts = leptos_options.clone();
-            move || shell(opts.clone())
-        })
-        .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell));
-
-    let app = Router::new()
-        .merge(public)
-        .nest("/api/v1", api)
-        .merge(leptos);
-
-    #[cfg(feature = "grpc")]
-    let app = app.merge(crate::grpc::routes(&state.services));
-
-    app.layer(
-        ServiceBuilder::new()
-            // Outermost: every request gets an id, and it is on the response and in
-            // every log line for that request.
-            .layer(axum_middleware::from_fn(middleware::request_id::attach))
-            .layer(TraceLayer::new_for_http())
-            .layer(axum_middleware::from_fn(
-                middleware::security_headers::apply,
-            ))
-            .layer(cors_layer(&cfg))
-            .layer(TimeoutLayer::new(Duration::from_secs(cfg.http.timeout)))
-            .layer(RequestBodyLimitLayer::new(cfg.http.max_body_size))
-            .layer(CompressionLayer::new()),
-    )
-    .with_state(state)
+        ))
 }
-
-/// The HTML shell Leptos hydrates into.
-fn shell(options: LeptosOptions) -> impl IntoView {
-    use leptos::prelude::*;
-    use leptos_meta::MetaTags;
-
-    view! {
-        <!DOCTYPE html>
-        <html lang="en">
-            <head>
-                <meta charset="utf-8"/>
-                <meta name="viewport" content="width=device-width, initial-scale=1"/>
-                // Tailwind is compiled locally by cargo-leptos into this stylesheet.
-                // It used to be pulled from cdn.tailwindcss.com at runtime, which is a
-                // dev-only build and an uncontrolled third-party script in a page that
-                // renders secrets.
-                <AutoReload options=options.clone()/>
-                <HydrationScripts options islands=true/>
-                <MetaTags/>
-            </head>
-            <body>
-                <App/>
-            </body>
-        </html>
-    }
-}
-
-use secreton_ui::App;
 
 /// CORS policy.
 ///
-/// The previous router used `allow_origin(Any).allow_methods(Any).allow_headers(Any)` on a
-/// secrets manager, which lets any site on the internet script the API with the caller's
-/// credentials. Origins are now an explicit allowlist, and an empty list means same-origin
-/// only — which is the correct default now that the UI is served by this same process.
-fn cors_layer(cfg: &secreton_engines::ServerConfig) -> CorsLayer {
+/// The previous router applied `allow_origin(Any).allow_methods(Any).allow_headers(Any)`
+/// to a secrets manager, which lets any page on the internet script the API with the
+/// visitor's credentials. Origins are an explicit allowlist; an empty list means
+/// same-origin only, which is the right default now that the UI is served by this process.
+fn cors_layer(cfg: &ServerConfig) -> CorsLayer {
     use axum::http::{HeaderName, HeaderValue, Method};
 
     if cfg.cors.allowed_origins.is_empty() {
@@ -194,8 +184,8 @@ fn cors_layer(cfg: &secreton_engines::ServerConfig) -> CorsLayer {
         .allow_origin(origins)
         .allow_methods(methods)
         .allow_headers(headers)
-        // Session cookies only travel cross-origin when this is on, and it is only sound
-        // because the origin list above is explicit — `Any` plus credentials is rejected
-        // by browsers and by tower-http.
+        // Session cookies only travel cross-origin with this on, and it is only sound
+        // because the origin list above is explicit — browsers and tower-http both reject
+        // `Any` combined with credentials.
         .allow_credentials(true)
 }

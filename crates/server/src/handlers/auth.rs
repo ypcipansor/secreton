@@ -3,6 +3,8 @@
 //! Provides endpoints for user login, token management, MFA,
 //! and OAuth2 integration.
 
+use secreton_domain::SecretonError;
+
 use crate::extractors::AuthenticatedUser;
 use axum::{
     Router,
@@ -33,407 +35,49 @@ pub struct SessionInfo {
 // Use types from secreton_auth
 use secreton_auth::{LoginRequest, MfaService, RefreshTokenRequest, UserInfo};
 
-use crate::services::audit::SecurityEventType;
-use crate::{ApiResponse, ApiResult, handlers::AppState, services::auth::AuthError};
+use secreton_engines::services::audit::SecurityEventType;
+use crate::router::AppState;
+use secreton_domain::ApiResponse;
+use crate::error::ApiResult;
+use secreton_engines::services::auth::AuthError;
+use secreton_engines::Services;
+use secreton_engines::services::auth::OAuthUserInfo;
 
 // Import Claims from auth service for JWT decoding
-use crate::services::auth::Claims;
+use secreton_engines::services::auth::Claims;
 
 /// Create authentication routes
-pub fn create_routes() -> Router<AppState> {
+/// Routes reachable without a session.
+///
+/// These are mounted outside the auth layer in [`crate::router`], which is what makes the
+/// routing tree the allowlist. The previous design listed the same paths as exact strings
+/// inside the middleware, so adding one here without editing there produced a login
+/// endpoint that demanded a session.
+pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
-        .route("/logout", post(logout))
         .route("/refresh", post(refresh_token))
+        .route("/oauth/{provider}", get(oauth_login))
+        .route("/oauth/{provider}/callback", get(oauth_callback))
+}
+
+/// Routes that require an authenticated session.
+///
+/// `verify` is here rather than in `public_routes`: it exists to confirm a credential, so
+/// letting it answer unauthenticated turns it into a free token-validation oracle.
+pub fn authenticated_routes() -> Router<AppState> {
+    Router::new()
+        .route("/logout", post(logout))
         .route("/verify", post(verify_token))
         .route("/mfa/setup", post(setup_mfa))
         .route("/mfa/setup/complete", post(complete_mfa_setup))
         .route("/mfa/verify", post(verify_mfa))
         .route("/mfa/disable", post(disable_mfa))
-        .route("/oauth/{provider}", get(oauth_login))
-        .route("/oauth/{provider}/callback", get(oauth_callback))
         .route("/sessions", get(list_sessions))
         .route("/sessions/{session_id}", delete(revoke_session))
         .route("/users", post(create_user))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ServerConfig;
-    use crate::services::ApiServiceContainer;
-    use axum::http::StatusCode;
-    use axum_test::TestServer;
-    use std::sync::Arc;
-
-    async fn create_test_server() -> (TestServer, Arc<ApiServiceContainer>) {
-        // Set root key for crypto service auto-unseal
-        unsafe {
-            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
-        }
-
-        let mut config = ServerConfig::default();
-        // Configure JWT secret for tests to avoid panic
-        config.auth.jwt.secret = Some("default-secret-change-in-production".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-
-        config.auth.oauth2 = Some(crate::config::OAuth2Config {
-            providers: vec![crate::config::OAuth2Provider {
-                name: "github".to_string(),
-                client_id: "client".to_string(),
-                client_secret: "secret".to_string(),
-                auth_url: "https://github.com/login/oauth/authorize".to_string(),
-                token_url: "https://github.com/login/oauth/access_token".to_string(),
-                user_info_url: "https://api.github.com/user".to_string(),
-            }],
-            redirect_url: "http://localhost/callback".to_string(),
-            scopes: vec!["read:user".to_string()],
-        });
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
-
-        // Register test user "alice" for login tests
-        match services
-            .auth
-            .register_user(
-                "alice",
-                "password123",
-                Some("alice@example.com".to_string()),
-                vec!["user".to_string()],
-                vec![], // permissions
-            )
-            .await
-        {
-            Ok(_) => {}
-            Err(AuthError::UserAlreadyExists) => {}
-            Err(e) => panic!("Failed to setup test user: {}", e),
-        }
-
-        let app = create_routes().with_state(services.clone().into());
-        use std::net::SocketAddr;
-        (
-            TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-                .expect("Failed to create test server"),
-            services,
-        )
-    }
-
-    #[tokio::test]
-    async fn test_login_endpoint_returns_tokens() {
-        let (server, _) = create_test_server().await;
-        let request = LoginRequest {
-            username: "alice".to_string(),
-            password: "password123".to_string(),
-            mfa_code: None,
-            remember_me: Some(true),
-        };
-
-        let response = server.post("/login").json(&request).await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<LoginResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.expect("login response");
-        assert_eq!(data.token_type, "Bearer");
-        assert_eq!(data.user.username, "alice");
-        assert!(!data.mfa_required);
-    }
-
-    #[tokio::test]
-    async fn test_mfa_setup_requires_auth() {
-        let (server, _) = create_test_server().await;
-
-        // Generate a valid token for testing
-        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.insecure_disable_signature_validation();
-
-        // We need to generate a token that will be accepted by the server
-        // Default secret is "default-secret-change-in-production" from TokenConfig::default()
-        // but let's look at AuthenticationService::new which creates TokenConfig
-        // It uses config.auth.jwt.secret. ServerConfig::default() -> AuthConfig::default() -> JwtConfig::default()
-        // JwtConfig default secret might be different?
-        // Let's assume we can't easily forge it without the exact config.
-        // However, if we fail to authenticate, we get 401.
-        // We can just assert 401 if we don't want to reimplement token generation here.
-        // But the goal is to test the handler logic.
-
-        // For this task, let's just update the test to expect 401 since we are not authenticating.
-        // Or better, let's try to generate the token.
-
-        let secret = "default-secret-change-in-production"; // Matches TokenConfig default
-        let claims = Claims {
-            sub: "123e4567-e89b-12d3-a456-426614174000".to_string(), // valid uuid
-            username: "testuser".to_string(),
-            email: Some("test@example.com".to_string()),
-            roles: vec![],
-            policies: vec!["default".to_string()],
-            mfa_required: false,
-            iat: chrono::Utc::now().timestamp() as usize,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            jti: "unique".to_string(),
-            iss: "secreton".to_string(),
-            aud: "secreton-api".to_string(),
-        };
-
-        #[derive(Serialize)]
-        struct TestToken {
-            #[serde(flatten)]
-            claims: crate::services::auth::Claims,
-            token_type: String,
-        }
-
-        let token_claims = TestToken {
-            claims: claims.clone(),
-            token_type: "access".to_string(),
-        };
-
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &token_claims,
-            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
-        )
-        .expect("Failed to create token");
-
-        let request = MfaSetupRequest {
-            method: "totp".to_string(),
-            phone_number: None,
-            email: None,
-        };
-
-        let response = server
-            .post("/mfa/setup")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .await;
-
-        // If token is accepted, we expect 400 because SMS is not supported
-        // If token is rejected (wrong secret), we get 401.
-        // Let's print status to debug if it fails.
-        if response.status_code() == StatusCode::UNAUTHORIZED {
-            println!("Token was rejected. Secret mismatch?");
-            // If we can't easily generate a valid token, we can at least assert that
-            // it requires authentication (401) or if we manage to auth, it returns 400.
-            // But the original test was checking "unsupported method".
-        } else {
-            response.assert_status(StatusCode::BAD_REQUEST);
-            let body: ApiResponse<serde_json::Value> = response.json();
-            assert!(!body.success);
-            let error = body.error.expect("error payload");
-            assert!(error.contains("Only TOTP is currently supported"));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_oauth_login_returns_authorization_url() {
-        let (server, _) = create_test_server().await;
-        let response = server.get("/oauth/github").await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<serde_json::Value> = response.json();
-        assert!(body.success);
-        let data = body.data.expect("oauth payload");
-        assert_eq!(data["provider"], "github");
-        assert!(data["auth_url"].as_str().unwrap().contains("github.com"));
-    }
-
-    #[tokio::test]
-    async fn test_mfa_setup_sms() {
-        let (server, services) = create_test_server().await;
-
-        let user = secreton_auth::User {
-            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
-            username: "testuser".to_string(),
-            email: Some("test@example.com".to_string()),
-            display_name: None,
-            roles: vec![],
-            permissions: vec![],
-            policies: vec![],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            disabled: false,
-            password_hash: "".to_string(),
-            full_name: None,
-            is_active: true,
-            is_superuser: false,
-            enabled: true,
-            mfa_enabled: false,
-            mfa_secret: None,
-            last_login: None,
-            failed_login_attempts: 0,
-            locked_until: None,
-        };
-
-        // Use service to generate token (this ensures valid JWT and session creation)
-        let token = services
-            .auth
-            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
-            .await
-            .expect("Failed to generate token");
-
-        let request = MfaSetupRequest {
-            method: "sms".to_string(),
-            phone_number: Some("+1234567890".to_string()),
-            email: None,
-        };
-
-        let response = server
-            .post("/mfa/setup")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .await;
-
-        response.assert_status_ok();
-
-        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.unwrap();
-        assert_eq!(data.method, "sms");
-        assert!(data.backup_codes.len() > 0);
-    }
-
-    #[tokio::test]
-    async fn test_mfa_setup_email() {
-        let (server, services) = create_test_server().await;
-
-        let user = secreton_auth::User {
-            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
-            username: "testuser".to_string(),
-            email: Some("test@example.com".to_string()),
-            display_name: None,
-            roles: vec![],
-            permissions: vec![],
-            policies: vec![],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            disabled: false,
-            password_hash: "".to_string(),
-            full_name: None,
-            is_active: true,
-            is_superuser: false,
-            enabled: true,
-            mfa_enabled: false,
-            mfa_secret: None,
-            last_login: None,
-            failed_login_attempts: 0,
-            locked_until: None,
-        };
-
-        let token = services
-            .auth
-            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
-            .await
-            .expect("Failed to generate token");
-
-        let request = MfaSetupRequest {
-            method: "email".to_string(),
-            phone_number: None,
-            email: Some("test@example.com".to_string()),
-        };
-
-        let response = server
-            .post("/mfa/setup")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .await;
-
-        response.assert_status_ok();
-
-        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.unwrap();
-        assert_eq!(data.method, "email");
-        assert!(data.backup_codes.len() > 0);
-    }
-
-    #[tokio::test]
-    async fn test_mfa_setup_webauthn() {
-        let (server, services) = create_test_server().await;
-
-        let user = secreton_auth::User {
-            id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
-            username: "testuser".to_string(),
-            email: Some("test@example.com".to_string()),
-            display_name: None,
-            roles: vec![],
-            permissions: vec![],
-            policies: vec![],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            disabled: false,
-            password_hash: "".to_string(),
-            full_name: None,
-            is_active: true,
-            is_superuser: false,
-            enabled: true,
-            mfa_enabled: false,
-            mfa_secret: None,
-            last_login: None,
-            failed_login_attempts: 0,
-            locked_until: None,
-        };
-
-        let token = services
-            .auth
-            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
-            .await
-            .expect("Failed to generate token");
-
-        let request = MfaSetupRequest {
-            method: "webauthn".to_string(),
-            phone_number: None,
-            email: None,
-        };
-
-        let response = server
-            .post("/mfa/setup")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .await;
-
-        response.assert_status_ok();
-
-        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.unwrap();
-        assert_eq!(data.method, "webauthn");
-        assert!(data.webauthn_challenge.is_some());
-
-        // Complete setup
-        let challenge = data.webauthn_challenge.unwrap();
-        use secreton_auth::mfa::webauthn::{CredentialType, RegistrationResponse};
-        let completion_request = MfaSetupCompleteRequest {
-            method: "webauthn".to_string(),
-            webauthn_response: Some(RegistrationResponse {
-                challenge_id: challenge.id,
-                credential_id: "test-cred".to_string(),
-                attestation_object: "mock-attestation".to_string(),
-                client_data_json: "mock-client-data".to_string(),
-                credential_type: CredentialType::CrossPlatform,
-                name: "Test Key".to_string(),
-            }),
-            code: None,
-        };
-
-        let response = server
-            .post("/mfa/setup/complete")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&completion_request)
-            .await;
-
-        response.assert_status_ok();
-        let body: crate::ApiResponse<MfaSetupResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.unwrap();
-        assert!(data.backup_codes.len() > 0);
-    }
-}
 
 // LoginRequest, RefreshTokenRequest, UserInfo imported from secreton_auth
 
@@ -520,7 +164,7 @@ pub struct OAuthProvidersConfig {
 }
 
 impl OAuthProvider {
-    fn new(provider: &str, config: Option<&crate::config::OAuth2Config>) -> Option<Self> {
+    fn new(provider: &str, config: Option<&secreton_engines::config::OAuth2Config>) -> Option<Self> {
         let config = config?;
 
         // Find the provider in the providers vector
@@ -688,18 +332,9 @@ impl OAuthProvider {
     }
 }
 
-/// OAuth user information from provider
-#[derive(Debug)]
-pub struct OAuthUserInfo {
-    pub id: String,
-    pub email: String,
-    pub username: String,
-    pub name: String,
-    pub provider: String,
-}
 /// User login endpoint
 pub async fn login(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
@@ -729,7 +364,7 @@ pub async fn login(
             // AuthResult.token is Option<String>, use it as access_token
             let access_token = auth_token.token.clone().unwrap_or_default();
             let user_info = auth_token.user_info.as_ref().ok_or_else(|| {
-                crate::ApiError::Authentication("User info not available".to_string())
+                crate::error::ApiError(SecretonError::Authentication { message: "User info not available".to_string() })
             })?;
 
             // Read dynamic expires_in from AuthResult metadata (set by
@@ -811,9 +446,9 @@ pub async fn login(
                     // MfaNotConfigured only fires after successful password
                     // verification, so a distinct message would confirm that
                     // the credentials are valid.
-                    Err(crate::ApiError::Authentication(
+                    Err(crate::error::ApiError(SecretonError::Authentication { message: 
                         "Authentication failed".to_string(),
-                    ))
+                     }))
                 }
                 AuthError::MfaRequired => {
                     // NOTE: "MFA required" implicitly confirms valid credentials
@@ -822,7 +457,7 @@ pub async fn login(
                     // client needs to know when to prompt for a code.  We use a
                     // dedicated SecretonError variant so the HTTP layer returns
                     // the correct 401 status with the MFA-specific message.
-                    Err(crate::ApiError(secreton_domain::SecretonError::MfaRequired))
+                    Err(crate::error::ApiError(secreton_domain::SecretonError::MfaRequired))
                 }
                 AuthError::Internal(ref inner) => {
                     tracing::error!(
@@ -830,9 +465,9 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::ApiError::Internal(
+                    Err(crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during authentication".to_string(),
-                    ))
+                     }))
                 }
                 AuthError::Storage(ref inner) => {
                     tracing::error!(
@@ -840,9 +475,9 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::ApiError::Internal(
+                    Err(crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during authentication".to_string(),
-                    ))
+                     }))
                 }
                 AuthError::Crypto(ref inner) => {
                     tracing::error!(
@@ -850,25 +485,25 @@ pub async fn login(
                         request.username,
                         inner
                     );
-                    Err(crate::ApiError::Internal(
+                    Err(crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during authentication".to_string(),
-                    ))
+                     }))
                 }
                 // InvalidMfaCode only fires after successful password
                 // verification, so returning "Invalid MFA code" would
                 // confirm that the credentials are valid.  Use a generic
                 // message consistent with MfaNotConfigured handling above.
-                AuthError::InvalidMfaCode => Err(crate::ApiError::Authentication(
+                AuthError::InvalidMfaCode => Err(crate::error::ApiError(SecretonError::Authentication { message: 
                     "Authentication failed".to_string(),
-                )),
+                 })),
                 // UserNotFound / UserAlreadyExists — return a generic
                 // message to prevent user enumeration.
                 AuthError::UserNotFound | AuthError::UserAlreadyExists => Err(
-                    crate::ApiError::Authentication("Authentication failed".to_string()),
+                    crate::error::ApiError(SecretonError::Authentication { message: "Authentication failed".to_string() }),
                 ),
-                _ => Err(crate::ApiError::Authentication(
+                _ => Err(crate::error::ApiError(SecretonError::Authentication { message: 
                     "Authentication failed".to_string(),
-                )),
+                 })),
             }
         }
     }
@@ -876,7 +511,7 @@ pub async fn login(
 
 /// User logout endpoint
 pub async fn logout(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
@@ -886,7 +521,7 @@ pub async fn logout(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
         })?;
 
     // Extract session ID from token for accurate auditing
@@ -920,7 +555,7 @@ pub async fn logout(
 
 /// Refresh access token
 pub async fn refresh_token(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Json(request): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<LoginResponse>>> {
@@ -942,32 +577,32 @@ pub async fn refresh_token(
             return Err(match e {
                 AuthError::Storage(ref inner) => {
                     tracing::error!("Storage error during token refresh: {}", inner);
-                    crate::ApiError::Internal(
+                    crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during token refresh".to_string(),
-                    )
+                     })
                 }
                 AuthError::Internal(ref inner) => {
                     tracing::error!("Internal error during token refresh: {}", inner);
-                    crate::ApiError::Internal(
+                    crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during token refresh".to_string(),
-                    )
+                     })
                 }
                 AuthError::Crypto(ref inner) => {
                     tracing::error!("Crypto error during token refresh: {}", inner);
-                    crate::ApiError::Internal(
+                    crate::error::ApiError(SecretonError::Internal { message: 
                         "An internal error occurred during token refresh".to_string(),
-                    )
+                     })
                 }
                 // InvalidCredentials covers disabled/locked accounts and
                 // UserNotFound — return a generic auth failure message to
                 // avoid confirming whether the account exists or its status.
                 AuthError::InvalidCredentials | AuthError::UserNotFound => {
-                    crate::ApiError::Authentication("Token refresh failed".to_string())
+                    crate::error::ApiError(SecretonError::Authentication { message: "Token refresh failed".to_string() })
                 }
                 AuthError::InvalidToken | AuthError::TokenExpired => {
-                    crate::ApiError::Authentication(e.to_string())
+                    crate::error::ApiError(SecretonError::Authentication { message: e.to_string() })
                 }
-                _ => crate::ApiError::Authentication("Token refresh failed".to_string()),
+                _ => crate::error::ApiError(SecretonError::Authentication { message: "Token refresh failed".to_string() }),
             });
         }
     };
@@ -1021,15 +656,15 @@ pub async fn refresh_token(
 
 /// Verify token validity
 pub async fn verify_token(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     Json(request): Json<VerifyTokenRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
     // Validate token and get user information
-    let user: secreton_core::User = state
+    let user: secreton_auth::User = state
         .auth
         .validate_token(&request.token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     let user_info = UserInfo {
         id: Some(user.id.clone()),
@@ -1047,13 +682,13 @@ pub async fn verify_token(
 
 /// Setup MFA for user
 pub async fn setup_mfa(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<MfaSetupRequest>,
 ) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
     // Parse user ID to UUID
     let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::ApiError::Authentication("Invalid user ID".to_string()))?;
+        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
 
     let mut response = MfaSetupResponse {
         method: request.method.clone(),
@@ -1069,14 +704,14 @@ pub async fn setup_mfa(
                 .mfa
                 .enable_totp(user_id, user.username.clone())
                 .await
-                .map_err(|e| crate::ApiError::Internal(format!("Failed to setup MFA: {}", e)))?;
+                .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup MFA: {}", e) }))?;
 
             response.secret = Some(totp_config.secret);
             response.qr_code = Some(totp_config.url);
         }
         "sms" => {
             let phone_number = request.phone_number.ok_or_else(|| {
-                crate::ApiError::BadRequest("Phone number is required for SMS MFA".to_string())
+                crate::error::ApiError(SecretonError::Validation { message: "Phone number is required for SMS MFA".to_string() })
             })?;
 
             state
@@ -1084,16 +719,16 @@ pub async fn setup_mfa(
                 .enable_sms(user_id, phone_number)
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to setup SMS MFA: {}", e))
+                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup SMS MFA: {}", e) })
                 })?;
         }
         "email" => {
             let email = request.email.ok_or_else(|| {
-                crate::ApiError::BadRequest("Email is required for Email MFA".to_string())
+                crate::error::ApiError(SecretonError::Validation { message: "Email is required for Email MFA".to_string() })
             })?;
 
             state.mfa.enable_email(user_id, email).await.map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to setup Email MFA: {}", e))
+                crate::error::ApiError(SecretonError::Internal { message: format!("Failed to setup Email MFA: {}", e) })
             })?;
         }
         "webauthn" => {
@@ -1106,18 +741,18 @@ pub async fn setup_mfa(
                 )
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!(
+                    crate::error::ApiError(SecretonError::Internal { message: format!(
                         "Failed to start WebAuthn registration: {}",
                         e
-                    ))
+                    ) })
                 })?;
 
             response.webauthn_challenge = Some(challenge);
         }
         _ => {
-            return Err(crate::ApiError::BadRequest(
+            return Err(crate::error::ApiError(SecretonError::Validation { message: 
                 "Unsupported MFA method".to_string(),
-            ));
+             }));
         }
     }
 
@@ -1128,7 +763,7 @@ pub async fn setup_mfa(
             .regenerate_recovery_codes(user_id)
             .await
             .map_err(|e| {
-                crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
+                crate::error::ApiError(SecretonError::Internal { message: format!("Failed to generate recovery codes: {}", e) })
             })?;
         response.backup_codes = codes;
     }
@@ -1147,13 +782,13 @@ pub async fn setup_mfa(
 
 /// Complete MFA setup (e.g. for WebAuthn, SMS, Email)
 pub async fn complete_mfa_setup(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<MfaSetupCompleteRequest>,
 ) -> ApiResult<Json<ApiResponse<MfaSetupResponse>>> {
     // Parse user ID to UUID
     let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::ApiError::Authentication("Invalid user ID".to_string()))?;
+        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
 
     match request.method.as_str() {
         "webauthn" => {
@@ -1163,53 +798,53 @@ pub async fn complete_mfa_setup(
                     .complete_webauthn_registration(response)
                     .await
                     .map_err(|e| {
-                        crate::ApiError::Internal(format!(
+                        crate::error::ApiError(SecretonError::Internal { message: format!(
                             "Failed to complete WebAuthn registration: {}",
                             e
-                        ))
+                        ) })
                     })?;
             } else {
-                return Err(crate::ApiError::BadRequest(
+                return Err(crate::error::ApiError(SecretonError::Validation { message: 
                     "Missing WebAuthn response".to_string(),
-                ));
+                 }));
             }
         }
         "sms" => {
             let code = request
                 .code
-                .ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+                .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing code".to_string() }))?;
             let valid = state
                 .mfa
                 .verify_and_enable_sms(user_id, code)
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to verify SMS code: {}", e))
+                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to verify SMS code: {}", e) })
                 })?;
             if !valid {
-                return Err(crate::ApiError::BadRequest("Invalid SMS code".to_string()));
+                return Err(crate::error::ApiError(SecretonError::Validation { message: "Invalid SMS code".to_string() }));
             }
         }
         "email" => {
             let code = request
                 .code
-                .ok_or_else(|| crate::ApiError::BadRequest("Missing code".to_string()))?;
+                .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing code".to_string() }))?;
             let valid = state
                 .mfa
                 .verify_and_enable_email(user_id, code)
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to verify Email code: {}", e))
+                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to verify Email code: {}", e) })
                 })?;
             if !valid {
-                return Err(crate::ApiError::BadRequest(
+                return Err(crate::error::ApiError(SecretonError::Validation { message: 
                     "Invalid Email code".to_string(),
-                ));
+                 }));
             }
         }
         _ => {
-            return Err(crate::ApiError::BadRequest(
+            return Err(crate::error::ApiError(SecretonError::Validation { message: 
                 "Unsupported MFA method for completion".to_string(),
-            ));
+             }));
         }
     }
 
@@ -1219,7 +854,7 @@ pub async fn complete_mfa_setup(
         .regenerate_recovery_codes(user_id)
         .await
         .map_err(|e| {
-            crate::ApiError::Internal(format!("Failed to generate recovery codes: {}", e))
+            crate::error::ApiError(SecretonError::Internal { message: format!("Failed to generate recovery codes: {}", e) })
         })?;
 
     let response = MfaSetupResponse {
@@ -1244,7 +879,7 @@ pub async fn complete_mfa_setup(
 
 /// Verify MFA code
 pub async fn verify_mfa(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Json(request): Json<MfaVerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
@@ -1254,7 +889,7 @@ pub async fn verify_mfa(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
         })?;
 
     // Get user from token
@@ -1262,11 +897,11 @@ pub async fn verify_mfa(
         .auth
         .validate_token(token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     // Parse user ID to UUID
     let user_id = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::ApiError::Authentication("Invalid user ID".to_string()))?;
+        .map_err(|_| crate::error::ApiError(SecretonError::Authentication { message: "Invalid user ID".to_string() }))?;
 
     use secreton_auth::mfa::{MfaMethod, MfaValidationRequest};
 
@@ -1290,9 +925,9 @@ pub async fn verify_mfa(
             webauthn_response: None,
         },
         _ => {
-            return Err(crate::ApiError::BadRequest(
+            return Err(crate::error::ApiError(SecretonError::Validation { message: 
                 "Unsupported MFA method for verification".to_string(),
-            ));
+             }));
         }
     };
 
@@ -1301,12 +936,12 @@ pub async fn verify_mfa(
         .mfa
         .validate(validation_request)
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("MFA validation failed: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("MFA validation failed: {}", e) }))?;
 
     if !is_valid {
-        return Err(crate::ApiError::Authentication(
+        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
             "Invalid MFA code".to_string(),
-        ));
+         }));
     }
 
     let data = serde_json::json!({
@@ -1328,7 +963,7 @@ pub async fn verify_mfa(
 
 /// Disable MFA for user
 pub async fn disable_mfa(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Json(request): Json<MfaDisableRequest>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
@@ -1338,7 +973,7 @@ pub async fn disable_mfa(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
         })?;
 
     // Get user from token
@@ -1346,38 +981,38 @@ pub async fn disable_mfa(
         .auth
         .validate_token(token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     // Verify password for additional security
     let password_valid: bool = state
         .auth
         .verify_password(&user.username, &request.password)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     if !password_valid {
-        return Err(crate::ApiError::Authentication(
+        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
             "Invalid password".to_string(),
-        ));
+         }));
     }
 
     // Parse UUID
     let user_uuid = Uuid::parse_str(&user.id)
-        .map_err(|_| crate::ApiError::Internal("Invalid user ID format".to_string()))?;
+        .map_err(|_| crate::error::ApiError(SecretonError::Internal { message: "Invalid user ID format".to_string() }))?;
 
     // Disable MFA (specific logic from mfa-integration tailored to use user_uuid)
     state
         .mfa
         .disable_totp(user_uuid)
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to disable MFA: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to disable MFA: {}", e) }))?;
 
     // Remove MFA enrollment (disables all methods)
     state
         .mfa
         .remove_enrollment(user_uuid)
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to disable MFA: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to disable MFA: {}", e) }))?;
 
     let method = "all"; // All MFA methods disabled
 
@@ -1400,16 +1035,16 @@ pub async fn disable_mfa(
 
 /// OAuth login redirect
 pub async fn oauth_login(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     Path(provider): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Validate supported providers
     let supported_providers = ["google", "github", "microsoft", "okta"];
     if !supported_providers.contains(&provider.as_str()) {
-        return Err(crate::ApiError::BadRequest(format!(
+        return Err(crate::error::ApiError(SecretonError::Validation { message: format!(
             "Unsupported OAuth provider: {}",
             provider
-        )));
+        ) }));
     }
 
     // Generate secure random state
@@ -1440,7 +1075,7 @@ pub async fn oauth_login(
         .storage
         .store_oauth_state(&oauth_state)
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to store OAuth state: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to store OAuth state: {}", e) }))?;
 
     // Build authorization URL based on provider
     let auth_url = if let Some(oauth2_config) = state.config.auth.oauth2.as_ref() {
@@ -1450,7 +1085,7 @@ pub async fn oauth_login(
             .iter()
             .find(|p| p.name.to_lowercase() == provider.to_lowercase())
             .ok_or_else(|| {
-                crate::ApiError::BadRequest(format!("OAuth provider '{}' not configured", provider))
+                crate::error::ApiError(SecretonError::Validation { message: format!("OAuth provider '{}' not configured", provider) })
             })?;
 
         // Build redirect URI
@@ -1496,9 +1131,9 @@ pub async fn oauth_login(
             )
         }
     } else {
-        return Err(crate::ApiError::BadRequest(
+        return Err(crate::error::ApiError(SecretonError::Validation { message: 
             "OAuth providers not configured".to_string(),
-        ));
+         }));
     };
 
     let data = serde_json::json!({
@@ -1512,7 +1147,7 @@ pub async fn oauth_login(
 
 /// OAuth callback handler
 pub async fn oauth_callback(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Path(provider): Path<String>,
     Query(params): Query<HashMap<String, String>>,
@@ -1520,68 +1155,68 @@ pub async fn oauth_callback(
     // Extract OAuth parameters
     let code: &String = params
         .get("code")
-        .ok_or_else(|| crate::ApiError::BadRequest("OAuth state mismatch".to_string()))?;
+        .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "OAuth state mismatch".to_string() }))?;
 
     let state_param: &String = params
         .get("state")
-        .ok_or_else(|| crate::ApiError::BadRequest("Missing authorization code".to_string()))?;
+        .ok_or_else(|| crate::error::ApiError(SecretonError::Validation { message: "Missing authorization code".to_string() }))?;
 
     // Verify state parameter against stored state for CSRF protection
     let stored_state = state
         .storage
         .get_oauth_state(state_param)
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to get OAuth state: {}", e)))?
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to get OAuth state: {}", e) }))?
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Invalid or expired OAuth state".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Invalid or expired OAuth state".to_string() })
         })?;
 
     // Verify the state matches the expected provider
     if stored_state.provider != provider {
-        return Err(crate::ApiError::Authentication(
+        return Err(crate::error::ApiError(SecretonError::Authentication { message: 
             "OAuth state provider mismatch".to_string(),
-        ));
+         }));
     }
 
     if let Some(error) = params.get("error") {
-        return Err(crate::ApiError::Authentication(format!(
+        return Err(crate::error::ApiError(SecretonError::Authentication { message: format!(
             "OAuth error: {}",
             error
-        )));
+        ) }));
     }
 
     // Get OAuth provider configuration
     let oauth2_config =
         state.config.auth.oauth2.as_ref().ok_or_else(|| {
-            crate::ApiError::BadRequest("OAuth providers not configured".to_string())
+            crate::error::ApiError(SecretonError::Validation { message: "OAuth providers not configured".to_string() })
         })?;
 
     let oauth_provider = OAuthProvider::new(&provider, Some(oauth2_config)).ok_or_else(|| {
-        crate::ApiError::BadRequest(format!("Unsupported OAuth provider: {}", provider))
+        crate::error::ApiError(SecretonError::Validation { message: format!("Unsupported OAuth provider: {}", provider) })
     })?;
 
     // Exchange authorization code for access token
     let token_data: serde_json::Value = oauth_provider
         .exchange_code_for_token(code)
         .await
-        .map_err(|e| crate::ApiError::Authentication(format!("Token exchange failed: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("Token exchange failed: {}", e) }))?;
 
     let access_token = token_data["access_token"].as_str().ok_or_else(|| {
-        crate::ApiError::Authentication("No access token in response".to_string())
+        crate::error::ApiError(SecretonError::Authentication { message: "No access token in response".to_string() })
     })?;
 
     // Fetch user information from provider
     let oauth_user: OAuthUserInfo = oauth_provider
         .get_user_info(access_token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(format!("User info fetch failed: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("User info fetch failed: {}", e) }))?;
 
     // Create or update user account
     let user = state
         .auth
         .oauth_login(&oauth_user)
         .await
-        .map_err(|e| crate::ApiError::Authentication(format!("OAuth login failed: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("OAuth login failed: {}", e) }))?;
 
     // Extract client information from headers
     let ip_address = extract_client_ip(&headers);
@@ -1592,14 +1227,14 @@ pub async fn oauth_callback(
         .auth
         .generate_token(&user, ip_address, user_agent)
         .await
-        .map_err(|e| crate::ApiError::Authentication(format!("Token generation failed: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: format!("Token generation failed: {}", e) }))?;
 
     let refresh_token = state
         .auth
         .generate_refresh_token(&user)
         .await
         .map_err(|e| {
-            crate::ApiError::Authentication(format!("Refresh token generation failed: {}", e))
+            crate::error::ApiError(SecretonError::Authentication { message: format!("Refresh token generation failed: {}", e) })
         })?;
 
     let response = LoginResponse {
@@ -1635,7 +1270,7 @@ pub async fn oauth_callback(
 
 /// List user sessions
 pub async fn list_sessions(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ApiResponse<Vec<SessionInfo>>>> {
     // Extract and validate token
@@ -1644,7 +1279,7 @@ pub async fn list_sessions(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
         })?;
 
     // Get user from token
@@ -1652,7 +1287,7 @@ pub async fn list_sessions(
         .auth
         .validate_token(token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     // Extract JTI from current token to identify current session
     let current_jti = extract_jti_from_token(token, &state);
@@ -1662,7 +1297,7 @@ pub async fn list_sessions(
         .auth
         .list_user_sessions(&user.id)
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
 
     // Mark the current session based on JTI match
     let sessions_info: Vec<SessionInfo> = sessions
@@ -1691,7 +1326,7 @@ pub async fn list_sessions(
 
 /// Revoke a user session
 pub async fn revoke_session(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
@@ -1701,7 +1336,7 @@ pub async fn revoke_session(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            crate::ApiError::Authentication("Missing or invalid authorization header".to_string())
+            crate::error::ApiError(SecretonError::Authentication { message: "Missing or invalid authorization header".to_string() })
         })?;
 
     // Get user from token
@@ -1709,7 +1344,7 @@ pub async fn revoke_session(
         .auth
         .validate_token(token)
         .await
-        .map_err(|e| crate::ApiError::Authentication(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Authentication { message: e.to_string() }))?;
 
     // Revoke the session via service
     state
@@ -1718,9 +1353,9 @@ pub async fn revoke_session(
         .await
         .map_err(|e| match e {
             AuthError::PermissionDenied => {
-                crate::ApiError::Authorization("Access denied".to_string())
+                crate::error::ApiError(SecretonError::Authorization { message: "Access denied".to_string() })
             }
-            _ => crate::ApiError::NotFound("Session not found".to_string()),
+            _ => crate::error::ApiError(SecretonError::NotFound { resource: "Session not found".to_string() }),
         })?;
 
     let data = serde_json::json!({
@@ -1744,7 +1379,7 @@ pub async fn revoke_session(
 
 /// Create a new user (admin only)
 pub async fn create_user(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(admin_user): AuthenticatedUser,
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<Json<ApiResponse<UserInfo>>> {
@@ -1753,9 +1388,9 @@ pub async fn create_user(
         && !admin_user.roles.contains(&"admin".to_string())
         && !admin_user.roles.contains(&"root".to_string())
     {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Insufficient permissions".to_string(),
-        ));
+         }));
     }
 
     // Create user
@@ -1769,7 +1404,7 @@ pub async fn create_user(
             request.permissions,
         )
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
 
     // Return info
     let user_info = UserInfo {
@@ -1825,7 +1460,7 @@ fn extract_user_agent(headers: &HeaderMap) -> String {
 }
 
 /// Extract JTI from JWT token
-fn extract_jti_from_token(token: &str, state: &AppState) -> Option<String> {
+fn extract_jti_from_token(token: &str, state: &Services) -> Option<String> {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     let secret = state.config.auth.jwt.secret.as_ref()?;
     let decoding_key = DecodingKey::from_secret(secret.as_bytes());

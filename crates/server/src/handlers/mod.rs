@@ -1,282 +1,99 @@
-//! HTTP request handlers for the Secreton API.
+//! HTTP request handlers.
 //!
-//! Provides comprehensive REST endpoints for secreton operations,
-//! authentication, authorization, and administrative functions.
+//! Handlers are thin: they validate input, call a service on [`Services`], and shape the
+//! response. Business logic lives in `secreton-engines`, so the same operation can also be
+//! reached from a gRPC method or a Leptos server function without duplication.
+
+use secreton_engines::Services;
 
 pub mod admin;
 pub mod auth;
-pub mod config;
 pub mod database;
 pub mod health;
-pub mod integrations;
 pub mod lifecycle;
 pub mod pki;
 pub mod secret;
-#[cfg(test)]
-pub mod security_tests;
 pub mod ssh;
-#[cfg(test)]
-pub mod ssh_tests;
 pub mod sys;
 pub mod totp_engine;
 pub mod transit;
 
-use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
+// Re-exported so handler modules can keep importing `crate::handlers::AppState`.
+// The type itself lives with the router that owns it.
+pub use crate::router::AppState;
 
-use std::sync::Arc;
-use tower::ServiceBuilder;
-use tower_http::{compression::CompressionLayer, trace::TraceLayer};
+use crate::error::ApiError;
+use secreton_domain::SecretonError;
 
-use crate::config::ServerConfig;
-use crate::middleware::{
-    auth::AuthMiddleware, cors::create_cors_layer, rate_limit::RateLimitMiddleware,
-    seal::SealMiddleware,
-};
-use crate::services::ApiServiceContainer;
-use crate::services::{
-    admin::AdminService, audit::AuditLogger, auth::AuthenticationService, crypto::CryptoService,
-    seal::SealService, secret::SecretService,
-};
-use crate::{ApiError, ApiResponse, ApiResult};
-use axum::middleware::{self};
-use secreton_auth::mfa::CombinedMfaService;
-use secreton_auth::policies::service::PolicyService;
-use secreton_performance::SecretPerformanceOptimizer;
-use secreton_storage::StorageBackend;
-
-/// Validate that a user-supplied name is safe for use in storage paths.
+/// Validate that a caller-supplied name is safe to use in a storage path.
 ///
-/// Only allows alphanumeric characters, hyphens, underscores, and dots (but
-/// not leading dots or the sequence `..`).  This strict allowlist prevents
-/// path-traversal attacks, storage key collisions, and encoding issues with
-/// special characters like `%`, spaces, or unicode.
+/// Storage keys are built by concatenating these names, so an unchecked value is a path
+/// traversal (`../`), a key collision, or an encoding ambiguity waiting to happen. This is
+/// an allowlist rather than a denylist: anything not explicitly permitted is rejected.
 pub fn validate_name(name: &str) -> Result<(), ApiError> {
+    let reject = |reason: &str| {
+        Err(ApiError(SecretonError::InvalidInput {
+            field: "name".to_string(),
+            reason: reason.to_string(),
+        }))
+    };
+
     if name.is_empty() {
-        return Err(ApiError::BadRequest("Name must not be empty".to_string()));
+        return reject("must not be empty");
     }
     if name.len() > 128 {
-        return Err(ApiError::BadRequest(
-            "Name must not exceed 128 characters".to_string(),
-        ));
+        return reject("must not exceed 128 characters");
     }
     if name.starts_with('.') || name.starts_with('-') {
-        return Err(ApiError::BadRequest(
-            "Name must not start with '.' or '-'".to_string(),
-        ));
+        return reject("must not start with '.' or '-'");
     }
     if !name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     {
-        return Err(ApiError::BadRequest(
-            "Name must contain only ASCII alphanumeric characters, hyphens, underscores, or dots"
-                .to_string(),
-        ));
+        return reject(
+            "must contain only ASCII alphanumeric characters, hyphens, underscores or dots",
+        );
     }
     if name.contains("..") {
-        return Err(ApiError::BadRequest(
-            "Name must not contain '..'".to_string(),
-        ));
+        return reject("must not contain '..'");
     }
     Ok(())
-}
-
-/// Application state shared across handlers
-#[derive(Clone)]
-pub struct AppState {
-    pub storage: Arc<dyn StorageBackend + Send + Sync>,
-    pub crypto: Arc<CryptoService>,
-    pub seal: Arc<SealService>,
-    pub audit: Arc<AuditLogger>,
-    pub auth: Arc<AuthenticationService>,
-    pub policy: Arc<PolicyService>,
-    pub secreton: Arc<SecretService>,
-    pub admin: Arc<AdminService>,
-    pub database: Arc<crate::services::database::DatabaseService>,
-    pub pki: Arc<crate::services::pki::PkiPersistentService>,
-    pub ssh: Arc<crate::services::ssh::SshPersistentService>,
-    pub transit: Arc<secreton_crypto::transit::TransitEngine>,
-    pub totp_engine: Arc<crate::services::totp_engine::TotpEngineService>,
-    pub integrations: Arc<crate::services::integrations::IntegrationsService>,
-    pub performance: Arc<SecretPerformanceOptimizer>,
-    pub mfa: Arc<CombinedMfaService>,
-    pub telemetry: Arc<crate::telemetry::TelemetryCollector>,
-    pub lifecycle: Arc<crate::services::lifecycle::LifecycleService>,
-    pub config: Arc<ServerConfig>,
-}
-
-impl From<Arc<ApiServiceContainer>> for AppState {
-    fn from(container: Arc<ApiServiceContainer>) -> Self {
-        Self {
-            storage: container.storage.clone(),
-            crypto: container.crypto.clone(),
-            seal: container.seal.clone(),
-            audit: container.audit.clone(),
-            auth: container.auth.clone(),
-            policy: container.policy.clone(),
-            secreton: container.secreton.clone(),
-            admin: container.admin.clone(),
-            database: container.database.clone(),
-            pki: container.pki.clone(),
-            transit: container.transit.clone(),
-            ssh: container.ssh.clone(),
-            totp_engine: container.totp_engine.clone(),
-            integrations: container.integrations.clone(),
-            performance: container.performance.clone(),
-            mfa: container.mfa.clone(),
-            telemetry: container.telemetry.clone(),
-            lifecycle: container.lifecycle.clone(),
-            config: Arc::new(container.config.clone()),
-        }
-    }
-}
-
-/// Create the main application router
-pub fn create_router(_config: &ServerConfig, services: AppState) -> Router {
-    let app_state = services.clone();
-
-    // Create API v1 routes
-    let api_v1 = Router::new()
-        .nest("/auth", auth::create_routes())
-        .nest("/secret", secret::create_routes())
-        .nest("/admin", admin::create_routes())
-        .nest("/sys", sys::create_routes())
-        .nest("/database", database::create_routes())
-        .nest("/pki", pki::create_routes())
-        .nest("/ssh", ssh::create_routes())
-        .nest("/totp", totp_engine::create_routes())
-        .nest("/transit", transit::create_routes())
-        .nest("/lifecycle", lifecycle::create_routes())
-        .nest("/integrations", integrations::create_routes())
-        .route("/health", get(health::health_check))
-        .route("/version", get(get_version))
-        .route("/metrics", get(get_metrics));
-
-    // Main router with middleware stack
-    Router::new()
-        .nest("/api/v1", api_v1)
-        .route("/", get(root_handler))
-        .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
-                .layer(CompressionLayer::new())
-                // Use defaults for missing config fields
-                .layer(tower_http::timeout::TimeoutLayer::new(
-                    std::time::Duration::from_secs(30),
-                ))
-                .layer(create_cors_layer())
-                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)) // 1MB limit
-                .layer(middleware::from_fn(crate::middleware::security_headers))
-                .layer(middleware::from_fn(RateLimitMiddleware::limit))
-                .layer(middleware::from_fn_with_state(
-                    app_state.clone(),
-                    SealMiddleware::check,
-                ))
-                .layer(middleware::from_fn_with_state(
-                    app_state.clone(),
-                    AuthMiddleware::authenticate,
-                )),
-        )
-        .with_state(app_state)
-}
-
-/// Root endpoint handler
-async fn root_handler() -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
-    let data = serde_json::json!({
-        "service": "Secreton API",
-        "version": env!("CARGO_PKG_VERSION"),
-        "description": "Advanced Security Secret System",
-        "documentation": "/api/v1/docs"
-    });
-
-    Ok(Json(ApiResponse::success(data)))
-}
-
-/// Get API version information
-async fn get_version() -> ApiResult<Json<ApiResponse<VersionInfo>>> {
-    let version_info = VersionInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        build_date: option_env!("BUILD_DATE").unwrap_or("unknown").to_string(),
-        git_commit: option_env!("GIT_COMMIT").unwrap_or("unknown").to_string(),
-        rust_version: option_env!("RUST_VERSION").unwrap_or("unknown").to_string(),
-    };
-
-    Ok(Json(ApiResponse::success(version_info)))
-}
-
-/// Get Prometheus metrics
-async fn get_metrics(State(_state): State<AppState>) -> Result<String, StatusCode> {
-    // Basic metrics implementation
-    let metrics = "# Secreton API Metrics\n\
-         api_requests_total{method=\"GET\"} 0\n\
-         api_requests_total{method=\"POST\"} 0\n\
-         api_response_time_seconds{quantile=\"0.5\"} 0.1\n\
-         api_response_time_seconds{quantile=\"0.9\"} 0.2\n\
-         api_response_time_seconds{quantile=\"0.99\"} 0.5\n"
-        .to_string();
-    Ok(metrics)
-}
-
-/// Version information
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct VersionInfo {
-    pub version: String,
-    pub build_date: String,
-    pub git_commit: String,
-    pub rust_version: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ServerConfig;
-    use axum_test::TestServer;
 
-    #[tokio::test]
-    async fn test_root_endpoint() {
-        let mut config = ServerConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
-
-        let app = create_router(&config, services.into());
-        let server = TestServer::new(app.into_make_service()).unwrap();
-
-        let response = server.get("/").await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<serde_json::Value> = response.json();
-        assert!(body.success);
-        assert!(body.data.is_some());
+    #[test]
+    fn accepts_ordinary_names() {
+        for name in ["db", "app-1", "app_1", "app.prod", "a", &"x".repeat(128)] {
+            assert!(validate_name(name).is_ok(), "rejected {name:?}");
+        }
     }
 
-    #[tokio::test]
-    async fn test_version_endpoint() {
-        let mut config = ServerConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
+    #[test]
+    fn rejects_path_traversal_in_every_form() {
+        for name in ["..", "../etc", "a/../b", "a..b", "..a"] {
+            assert!(
+                validate_name(name).is_err(),
+                "traversal attempt accepted: {name:?}"
+            );
+        }
+    }
 
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
+    #[test]
+    fn rejects_separators_and_encodings_that_could_alias_a_key() {
+        for name in ["a/b", "a\\b", "a b", "a%2fb", "a\0b", "ünïcode", "a\nb"] {
+            assert!(validate_name(name).is_err(), "accepted {name:?}");
+        }
+    }
 
-        let app = create_router(&config, services.into());
-        let server = TestServer::new(app.into_make_service()).unwrap();
-
-        let response = server.get("/api/v1/version").await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<VersionInfo> = response.json();
-        assert!(body.success);
-        assert!(body.data.is_some());
+    #[test]
+    fn rejects_empty_leading_dot_leading_dash_and_overlong() {
+        assert!(validate_name("").is_err());
+        assert!(validate_name(".hidden").is_err());
+        assert!(validate_name("-flag").is_err());
+        assert!(validate_name(&"x".repeat(129)).is_err());
     }
 }

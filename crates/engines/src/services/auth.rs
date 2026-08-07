@@ -2355,18 +2355,19 @@ impl AuthenticationService {
                 // Fall back to the email, then to the provider id, so a provider that
                 // omits a username can still produce a usable account rather than one
                 // with an empty primary identifier.
-                oauth_user
-                    .email
-                    .clone()
-                    .unwrap_or_else(|| oauth_user.id.clone())
+                if oauth_user.email.is_empty() {
+                    oauth_user.id.clone()
+                } else {
+                    oauth_user.email.clone()
+                }
             } else {
                 oauth_user.username.clone()
             },
-            email: oauth_user.email.clone(),
-            display_name: oauth_user.display_name.clone(),
+            email: (!oauth_user.email.is_empty()).then(|| oauth_user.email.clone()),
+            display_name: (!oauth_user.name.is_empty()).then(|| oauth_user.name.clone()),
             disabled: false,
             password_hash: "".to_string(), // OAuth users don't have password
-            full_name: oauth_user.display_name.clone(),
+            full_name: (!oauth_user.name.is_empty()).then(|| oauth_user.name.clone()),
             is_active: true,
             is_superuser: false,
             roles: vec!["user".to_string()],
@@ -2533,8 +2534,10 @@ mod tests {
 pub struct OAuthUserInfo {
     pub id: String,
     pub username: String,
-    pub email: Option<String>,
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub avatar_url: Option<String>,
+    /// Some providers do not return an address, or return an unverified one; empty
+    /// means "not supplied" rather than a fabricated placeholder.
+    pub email: String,
+    pub name: String,
+    /// Which provider issued this profile, e.g. `google` or `github`.
+    pub provider: String,
 }

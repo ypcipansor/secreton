@@ -1,7 +1,11 @@
+use secreton_engines::Services;
+use secreton_domain::SecretonError;
 use crate::handlers::AppState;
-use crate::services::seal::{InitResponse, UnsealResponse};
-use crate::{ApiResponse, ApiResult};
+use secreton_engines::services::seal::{InitResponse, UnsealResponse};
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
 use axum::{
+
     Router,
     extract::{Json, State},
     http::StatusCode,
@@ -9,13 +13,21 @@ use axum::{
 };
 use serde::Deserialize;
 
-pub fn create_routes() -> Router<AppState> {
+/// Routes that must answer while the barrier is sealed.
+///
+/// Mounted outside the seal gate. Without this the unseal endpoint would be refused for
+/// being sealed, which is unrecoverable without a restart.
+pub fn unsealed_routes() -> Router<AppState> {
     Router::new()
         .route("/init", post(initialize))
         .route("/unseal", post(unseal))
         .route("/seal-status", get(get_seal_status))
-        .route("/seal", post(seal))
         .route("/health", get(health_check))
+}
+
+/// Routes that need an unsealed, authenticated system.
+pub fn routes() -> Router<AppState> {
+    Router::new().route("/seal", post(seal))
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +45,7 @@ pub struct UnsealRequest {
 
 /// Initialize the vault
 async fn initialize(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     Json(payload): Json<InitRequest>,
 ) -> ApiResult<Json<ApiResponse<InitResponse>>> {
     let root_username = payload.root_username.as_deref().unwrap_or("root");
@@ -48,44 +60,44 @@ async fn initialize(
             &state.mfa,
         )
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
     Ok(Json(ApiResponse::success(result)))
 }
 
 /// Unseal the vault
 async fn unseal(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     Json(payload): Json<UnsealRequest>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
     let result = state
         .seal
         .unseal(&payload.key)
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
     Ok(Json(ApiResponse::success(result)))
 }
 
 /// Get seal status
 async fn get_seal_status(
-    State(state): State<AppState>,
+    State(state): State<Services>,
 ) -> ApiResult<Json<ApiResponse<UnsealResponse>>> {
     let result = state
         .seal
         .get_status()
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
     Ok(Json(ApiResponse::success(result)))
 }
 
 /// Seal the vault
-async fn seal(State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn seal(State(state): State<Services>) -> ApiResult<StatusCode> {
     state.seal.seal().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// System health check (that works even when sealed)
 async fn health_check(
-    State(state): State<AppState>,
+    State(state): State<Services>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     let sealed = state.seal.is_sealed().await;
     let initialized = state.seal.is_initialized().await;

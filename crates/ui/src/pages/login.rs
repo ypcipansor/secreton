@@ -1,147 +1,80 @@
-use crate::api;
-use crate::auth::use_auth;
-use gloo_storage::{LocalStorage, Storage};
 use leptos::prelude::*;
-use leptos::task::spawn_local;
-use leptos_router::hooks::use_navigate;
-use serde::{Deserialize, Serialize};
+use leptos_router::components::Redirect;
 
-#[derive(Serialize)]
-struct LoginRequest {
-    username: String,
-    password: String,
-    mfa_code: Option<String>,
-    remember_me: Option<bool>,
-}
-
-#[derive(Deserialize)]
-struct LoginResponse {
-    access_token: Option<String>,
-    // refresh_token: Option<String>,
-    user: crate::auth::UserInfo,
-}
+use crate::api::{Credentials, Login as LoginAction};
+use crate::auth::use_session;
+use crate::components::{Button, Input};
 
 #[component]
 pub fn Login() -> impl IntoView {
-    let auth = use_auth();
-    let navigate = use_navigate();
+    let session = use_session();
 
-    let (username, set_username) = signal("".to_string());
-    let (password, set_password) = signal("".to_string());
-    let (mfa_code, set_mfa_code) = signal("".to_string());
-    let (error, set_error) = signal(Option::<String>::None);
-    let (loading, set_loading) = signal(false);
+    // `ServerAction` submits through the generated endpoint and, crucially, works before
+    // hydration: the form posts normally if WebAssembly has not loaded yet, so a slow
+    // connection or a blocked bundle still gets a usable login.
+    let action = ServerAction::<LoginAction>::new();
 
-    let on_submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        set_loading.set(true);
-        set_error.set(None);
-
-        let navigate = navigate.clone(); // Clone for async block if needed, though use_navigate returns copy-able type usually
-        spawn_local(async move {
-            let mfa_val = mfa_code.get_untracked();
-            let req = LoginRequest {
-                username: username.get_untracked(),
-                password: password.get_untracked(),
-                mfa_code: if mfa_val.is_empty() {
-                    None
-                } else {
-                    Some(mfa_val)
-                },
-                remember_me: Some(true),
-            };
-
-            match api::post::<LoginResponse, _>("/auth/login", req).await {
-                Ok(resp) => {
-                    if let Some(token) = resp.access_token {
-                        let _ = LocalStorage::set("secreton_token", token.clone());
-                        auth.update(|s| {
-                            s.token = Some(token);
-                            s.user = Some(resp.user);
-                        });
-                        navigate("/", Default::default());
-                    } else {
-                        set_error.set(Some("Login successful but no token received.".to_string()));
-                    }
-                }
-                Err(e) => {
-                    set_error.set(Some(e.to_string()));
-                }
-            }
-            set_loading.set(false);
-        });
+    let error = move || {
+        action
+            .value()
+            .get()
+            .and_then(|r| r.err())
+            .map(|e| e.to_string())
     };
 
+    // Re-read the session once the action succeeds, so the redirect below fires.
+    Effect::new(move |_| {
+        if matches!(action.value().get(), Some(Ok(_))) {
+            session.refetch();
+        }
+    });
+
     view! {
-        <div class="flex items-center justify-center min-h-screen bg-gray-100">
-            <div class="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-lg">
-                <div class="text-center">
-                    <h2 class="text-3xl font-bold text-gray-900">"Sign in"</h2>
-                    <p class="mt-2 text-sm text-gray-600">"Access your Secreton vault"</p>
+        <Show when=move || session.is_authenticated() fallback=move || view! {
+            <main class="flex min-h-screen items-center justify-center px-4">
+                <div class="w-full max-w-sm space-y-6 rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+                    <div class="space-y-1 text-center">
+                        <h1 class="text-2xl font-semibold">"Secreton"</h1>
+                        <p class="text-sm text-slate-500">"Sign in to continue"</p>
+                    </div>
+
+                    <ActionForm action=action attr:class="space-y-4">
+                        <Input
+                            name="credentials[username]"
+                            label="Username"
+                            input_type="text"
+                            autocomplete="username"
+                            required=true
+                        />
+                        <Input
+                            name="credentials[password]"
+                            label="Password"
+                            input_type="password"
+                            autocomplete="current-password"
+                            required=true
+                        />
+                        <Input
+                            name="credentials[mfa_code]"
+                            label="MFA code"
+                            input_type="text"
+                            autocomplete="one-time-code"
+                            required=false
+                        />
+
+                        <Show when=move || error().is_some()>
+                            <p role="alert" class="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                                {move || error().unwrap_or_default()}
+                            </p>
+                        </Show>
+
+                        <Button loading=Signal::derive(move || action.pending().get())>
+                            "Sign in"
+                        </Button>
+                    </ActionForm>
                 </div>
-
-                <form class="mt-8 space-y-6" on:submit=on_submit>
-                    <div class="space-y-4 rounded-md shadow-sm">
-                        <div>
-                            <label for="username" class="sr-only">"Username"</label>
-                            <input
-                                id="username"
-                                name="username"
-                                type="text"
-                                required
-                                class="relative block w-full px-3 py-2 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                placeholder="Username"
-                                prop:value=username
-                                on:input=move |ev| set_username.set(event_target_value(&ev))
-                                disabled=loading
-                            />
-                        </div>
-                        <div>
-                            <label for="password" class="sr-only">"Password"</label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                class="relative block w-full px-3 py-2 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                placeholder="Password"
-                                prop:value=password
-                                on:input=move |ev| set_password.set(event_target_value(&ev))
-                                disabled=loading
-                            />
-                        </div>
-                        <div>
-                            <label for="mfa_code" class="sr-only">"MFA Code (Optional)"</label>
-                            <input
-                                id="mfa_code"
-                                name="mfa_code"
-                                type="text"
-                                class="relative block w-full px-3 py-2 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                placeholder="MFA Code (if required)"
-                                prop:value=mfa_code
-                                on:input=move |ev| set_mfa_code.set(event_target_value(&ev))
-                                disabled=loading
-                            />
-                        </div>
-                    </div>
-
-                    <Show when=move || error.get().is_some()>
-                        <div class="p-3 text-sm text-red-700 bg-red-100 rounded-md">
-                            {move || error.get().unwrap()}
-                        </div>
-                    </Show>
-
-                    <div>
-                        <button
-                            type="submit"
-                            disabled=loading
-                            class="relative flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md group hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            {move || if loading.get() { "Signing in..." } else { "Sign in" }}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+            </main>
+        }>
+            <Redirect path="/"/>
+        </Show>
     }
 }

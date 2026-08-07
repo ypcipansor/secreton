@@ -1,5 +1,5 @@
-use crate::services::auth::AuthenticationService;
-use crate::services::secret::SecretService as CoreSecretService;
+use secreton_engines::services::auth::AuthenticationService;
+use secreton_engines::services::secret::SecretService as CoreSecretService;
 use secreton_grpc::secreton::v1::secret_service_server::SecretService;
 use secreton_grpc::secreton::v1::{
     GetSecretRequest, GetSecretResponse, PutSecretRequest, PutSecretResponse,

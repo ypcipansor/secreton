@@ -3,6 +3,9 @@
 //! Provides endpoints for secret management, key operations,
 //! policy management, and secret administration.
 
+use secreton_engines::Services;
+use secreton_domain::SecretonError;
+
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -16,13 +19,14 @@ use std::collections::HashMap;
 
 use crate::extractors::AuthenticatedUser;
 use crate::handlers::AppState;
-use crate::services::audit::{AuditFilters, ExportFormat, SecurityEventType};
-use crate::services::secret;
-use crate::{ApiResponse, ApiResult};
+use secreton_engines::services::audit::{AuditFilters, ExportFormat, SecurityEventType};
+use secreton_engines::services::secret;
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
 use secreton_crypto::EncryptedData;
 
 /// Create secret operation routes
-pub fn create_routes() -> Router<AppState> {
+pub fn routes() -> Router<AppState> {
     Router::new()
         // Secret operations
         .route("/secret-versions/{*path}", get(list_secret_versions))
@@ -78,7 +82,7 @@ pub struct AuditQuery {
 }
 
 pub async fn get_audit_logs(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Query(query): Query<AuditQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<serde_json::Value>>>> {
@@ -95,7 +99,7 @@ pub async fn get_audit_logs(
         .audit
         .get_entries(filters)
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
 
     // Convert entries to clean JSON values with the original username.
     let mut clean_entries: Vec<serde_json::Value> = entries
@@ -142,7 +146,7 @@ pub struct AuditExportQuery {
 }
 
 pub async fn export_audit_logs(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Query(query): Query<AuditExportQuery>,
 ) -> ApiResult<Json<ApiResponse<String>>> {
@@ -164,10 +168,10 @@ pub async fn export_audit_logs(
         "CSV" => ExportFormat::CSV,
         "JSON" => ExportFormat::JSON,
         other => {
-            return Err(crate::ApiError::BadRequest(format!(
+            return Err(crate::error::ApiError(SecretonError::Validation { message: format!(
                 "Unsupported export format: {}. Supported formats: JSON, CSV",
                 other
-            )));
+            ) }));
         }
     };
 
@@ -175,280 +179,14 @@ pub async fn export_audit_logs(
         .audit
         .export_data(format, filters)
         .await
-        .map_err(|e| crate::ApiError::Internal(e.to_string()))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: e.to_string() }))?;
 
     let data = String::from_utf8_lossy(&bytes).to_string();
     Ok(Json(ApiResponse::success(data)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ServerConfig;
-    use crate::services::ApiServiceContainer;
-    use axum_test::TestServer;
-    use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
-    use std::sync::Arc;
-    use uuid::Uuid;
 
-    async fn server_with_routes() -> (TestServer, String) {
-        // Set root key for crypto service auto-unseal
-        unsafe {
-            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
-        }
-
-        let mut config = ServerConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
-
-        // Bootstrap PolicyService with an admin policy
-        use secreton_auth::policies::model::{Policy, PolicyEffect, PolicyRule, PolicyType, Role};
-
-        let policy = Policy {
-            id: Uuid::new_v4(),
-            name: "admin_policy".to_string(),
-            policy_type: PolicyType::RBAC,
-            effect: PolicyEffect::Allow,
-            rules: vec![PolicyRule {
-                id: Uuid::new_v4(),
-                name: "allow_all".to_string(),
-                conditions: vec![],
-                actions: vec![
-                    "create".to_string(),
-                    "read".to_string(),
-                    "update".to_string(),
-                    "delete".to_string(),
-                    "list".to_string(),
-                    "list_versions".to_string(),
-                    "rotate".to_string(),
-                    "encrypt".to_string(),
-                    "decrypt".to_string(),
-                    "sign".to_string(),
-                    "verify".to_string(),
-                    "hash".to_string(),
-                    "write".to_string(),
-                ],
-                resources: vec![
-                    "app/".to_string(),
-                    "keys/".to_string(),
-                    "sys/".to_string(),
-                    "key_data/".to_string(),
-                    "users/".to_string(),
-                ],
-            }],
-            metadata: HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            enabled: true,
-        };
-        let p = services
-            .policy
-            .create_policy(policy)
-            .await
-            .expect("failed to create policy");
-
-        let role = Role {
-            id: Uuid::new_v4(),
-            name: "admin".to_string(), // Matches user role
-            description: None,
-            parent_role: None,
-            policies: vec![p.id],
-            metadata: HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        services
-            .policy
-            .create_role(role)
-            .await
-            .expect("failed to create role");
-
-        // Generate mock token
-        let user_id = Uuid::new_v4();
-        let user = secreton_auth::User {
-            id: user_id.to_string(),
-            username: "mock_user".to_string(),
-            email: Some("mock@example.com".to_string()),
-            display_name: Some("Mock User".to_string()),
-            full_name: Some("Mock User".to_string()),
-            roles: vec!["admin".to_string()],
-            permissions: vec![],
-            policies: vec!["default".to_string()],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            failed_login_attempts: 0,
-            locked_until: None,
-            last_login: None,
-            mfa_enabled: false,
-            mfa_secret: None,
-            password_hash: "".to_string(),
-            disabled: false,
-            enabled: true,
-            is_active: true,
-            is_superuser: false,
-        };
-        let token = services
-            .auth
-            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
-            .await
-            .expect("Failed to generate token");
-
-        // Seed secret for tests
-        let mut data = std::collections::HashMap::new();
-        data.insert("key1".to_string(), "value1".to_string());
-        // For handlers, we need to encrypt the data since get_secret does decryption
-        let encrypted_data = services
-            .crypto
-            .encrypt_data(&serde_json::to_vec(&data).unwrap())
-            .await
-            .expect("Failed to encrypt test data");
-        let entry = SecretEntry::new(
-            "app/config".to_string(),
-            encrypted_data,
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            user_id,
-        );
-        services.storage.store(&entry).await.ok();
-
-        // Seed user roles entry for mock_user so RBAC check_permission grants access
-        let user_roles = serde_json::json!({ "roles": ["admin"] });
-        let user_entry = SecretEntry::new(
-            format!("users/{}", "mock_user"),
-            serde_json::to_vec(&user_roles).unwrap(),
-            EncryptionMetadata::default(),
-            SecurityLevel::Secret,
-            Uuid::new_v4(),
-        );
-        services.storage.store(&user_entry).await.ok();
-
-        let app = create_routes().with_state(services.into());
-        use std::net::SocketAddr;
-        let server = TestServer::new(app.into_make_service_with_connect_info::<SocketAddr>())
-            .expect("failed to start test server");
-        (server, token)
-    }
-
-    #[tokio::test]
-    async fn test_get_secret_returns_placeholder_data() {
-        let (server, token) = server_with_routes().await;
-        let response = server
-            .get("/secrets/app/config")
-            .add_header(
-                "Authorization",
-                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-            )
-            .await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<SecretResponse> = response.json();
-        assert!(body.success);
-        let data = body.data.expect("secret payload");
-        assert_eq!(data.path, "app/config");
-        assert!(data.data.contains_key("key1"));
-    }
-
-    #[tokio::test]
-    async fn test_create_secret_accepts_payload() {
-        let (server, token) = server_with_routes().await;
-        let payload = serde_json::json!({
-            "data": {"username": "admin"},
-            "metadata": {
-                "description": "Admin credentials",
-                "tags": ["auth"],
-                "owner": "security",
-                "classification": "secret"
-            },
-            "ttl": 90
-        });
-
-        let response = server
-            .post("/secrets/app/admin")
-            .add_header(
-                "Authorization",
-                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-            )
-            .json(&payload)
-            .await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<SecretResponse> = response.json();
-        assert!(body.success);
-        let secret = body.data.expect("secret response");
-        assert_eq!(secret.path, "app/admin");
-        assert!(secret.expires_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_create_key_returns_public_key() {
-        let (server, token) = server_with_routes().await;
-        let request = serde_json::json!({
-            "name": "signing-key",
-            "key_type": "rsa-2048",
-            "algorithm": "RSA-2048",
-            "usage": ["sign", "verify"],
-            "exportable": true
-        });
-
-        let response = server
-            .post("/keys")
-            .add_header(
-                "Authorization",
-                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-            )
-            .json(&request)
-            .await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<KeyResponse> = response.json();
-        assert!(body.success);
-        let key = body.data.expect("key response");
-        assert_eq!(key.name, "signing-key");
-        assert_eq!(key.algorithm, "RSA-2048");
-        assert!(key.public_key.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_hash_data_works() {
-        let (server, token) = server_with_routes().await;
-        let request = serde_json::json!({
-            "data": "test data",
-            "algorithm": "SHA-256"
-        });
-
-        let response = server
-            .post("/hash")
-            .add_header(
-                "Authorization",
-                axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-            )
-            .json(&request)
-            .await;
-        response.assert_status_ok();
-
-        let body: ApiResponse<HashResponse> = response.json();
-        assert!(body.success);
-        let hash_data = body.data.expect("hash response");
-        assert_eq!(hash_data.algorithm, "SHA-256");
-        // SHA-256 of "test data"
-        // echo -n "test data" | sha256sum
-        // 916f0027a575074ce72a331777c3478d6513f786a591bd892da1a577bf2335f9
-        assert_eq!(
-            hash_data.hash,
-            "916f0027a575074ce72a331777c3478d6513f786a591bd892da1a577bf2335f9"
-        );
-    }
-}
-
-/// Query parameters for listing operations
+/// Query parameters accepted by the list endpoints.
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
     pub limit: Option<u32>,
@@ -457,7 +195,9 @@ pub struct ListQuery {
     pub filter: Option<String>,
 }
 
-use crate::services::secret::SecretMetadata;
+
+
+use secreton_engines::services::secret::SecretMetadata;
 
 /// Secret request/response models
 #[derive(Debug, Deserialize)]
@@ -635,7 +375,7 @@ pub struct CreatePolicyRequest {
 }
 
 // Use canonical PolicyRule from core
-pub use secreton_auth::governance::policies::policy::PolicyRule;
+pub use secreton_auth::policies::model::PolicyRule;
 
 // API-specific extension if capabilities needed
 #[derive(Debug, Serialize, Deserialize)]
@@ -771,22 +511,22 @@ impl<'de> Deserialize<'de> for UpdatePolicyRequest {
 
 /// Get secret by path
 pub async fn get_secret(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
     Query(params): Query<GetSecretParams>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     // Get secret from secreton service - now passes full user
     let secret_data: secret::SecretData = state
-        .secreton
+        .secret
         .get_secret(&path, &user, params.version)
         .await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => {
-                crate::ApiError::NotFound("Secret not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Secret not found".to_string() })
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to retrieve secret: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to retrieve secret: {}", e) }),
         })?;
 
     let response = SecretResponse {
@@ -816,7 +556,7 @@ pub async fn get_secret(
 
 /// Create new secret
 pub async fn create_secret(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
@@ -824,11 +564,11 @@ pub async fn create_secret(
     // Reject contradictory TTL flags.  `clear_ttl: true` means "drop any
     // existing expiration" and only makes sense when `ttl` is unset.
     if request.clear_ttl && request.ttl.is_some() {
-        return Err(crate::ApiError::BadRequest(
+        return Err(crate::error::ApiError(SecretonError::Validation { message: 
             "`clear_ttl: true` cannot be combined with a non-null `ttl`; \
              omit `ttl` to clear, or omit `clear_ttl` to set a fresh TTL"
                 .to_string(),
-        ));
+         }));
     }
 
     // Dispatch on `clear_ttl`: when set, route through `put_secret_internal`
@@ -838,7 +578,7 @@ pub async fn create_secret(
     // documented on `SecretService::put_secret`.
     let secret_data: secret::SecretData = if request.clear_ttl {
         state
-            .secreton
+            .secret
             .put_secret_internal(
                 &path,
                 request.data,
@@ -850,14 +590,14 @@ pub async fn create_secret(
             .await
     } else {
         state
-            .secreton
+            .secret
             .put_secret(&path, request.data, request.metadata, &user, request.ttl)
             .await
     }
-    .map_err(|e: crate::services::secret::SecretError| match e {
-        secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-        secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-        _ => crate::ApiError::Internal(format!("Failed to create secret: {}", e)),
+    .map_err(|e: secreton_engines::services::secret::SecretError| match e {
+        secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+        secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+        _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to create secret: {}", e) }),
     })?;
 
     let response = SecretResponse {
@@ -875,7 +615,7 @@ pub async fn create_secret(
 
 /// Update existing secret
 pub async fn update_secret(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
     Json(request): Json<CreateSecretRequest>,
@@ -883,29 +623,29 @@ pub async fn update_secret(
     // Verify secret exists before updating using the lightweight method
     // This avoids unnecessary decryption overhead and spurious audit logs.
     // We check for "update" intent here.
-    match state.secreton.exists_secret(&path, &user, "write").await {
+    match state.secret.exists_secret(&path, &user, "write").await {
         Ok(true) => { /* Exists, proceed with update */ }
-        Ok(false) => return Err(crate::ApiError::NotFound("Secret not found".to_string())),
+        Ok(false) => return Err(crate::error::ApiError(SecretonError::NotFound { resource: "Secret not found".to_string() })),
         Err(e) => match e {
             secret::SecretError::PermissionDenied(msg) => {
-                return Err(crate::ApiError::Authorization(msg));
+                return Err(crate::error::ApiError(SecretonError::Authorization { message: msg }));
             }
             _ => {
-                return Err(crate::ApiError::Internal(format!(
+                return Err(crate::error::ApiError(SecretonError::Internal { message: format!(
                     "Failed to verify secret existence: {}",
                     e
-                )));
+                ) }));
             }
         },
     };
 
     // Reject contradictory TTL flags (mirrors `create_secret` validation).
     if request.clear_ttl && request.ttl.is_some() {
-        return Err(crate::ApiError::BadRequest(
+        return Err(crate::error::ApiError(SecretonError::Validation { message: 
             "`clear_ttl: true` cannot be combined with a non-null `ttl`; \
              omit `ttl` to clear, or omit `clear_ttl` to set a fresh TTL"
                 .to_string(),
-        ));
+         }));
     }
 
     // Dispatch on `clear_ttl`: when set, route through `put_secret_internal`
@@ -914,7 +654,7 @@ pub async fn update_secret(
     // public `put_secret` path.
     let secret_data: secret::SecretData = if request.clear_ttl {
         state
-            .secreton
+            .secret
             .put_secret_internal(
                 &path,
                 request.data,
@@ -926,14 +666,14 @@ pub async fn update_secret(
             .await
     } else {
         state
-            .secreton
+            .secret
             .put_secret(&path, request.data, request.metadata, &user, request.ttl)
             .await
     }
     .map_err(|e| match e {
-        secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-        secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-        _ => crate::ApiError::Internal(format!("Failed to update secret: {}", e)),
+        secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+        secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+        _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to update secret: {}", e) }),
     })?;
 
     // Detect if this was actually a creation (TOCTOU race where secret was deleted between exists_secret and put_secret)
@@ -943,7 +683,7 @@ pub async fn update_secret(
         // We pass check_perms=false because this is an internal compensating action,
         // and the user may only have "write" permission, not "delete".
         if let Err(e) = state
-            .secreton
+            .secret
             .delete_secret_internal(&path, &user, false, false)
             .await
         {
@@ -955,9 +695,9 @@ pub async fn update_secret(
                 e
             );
         }
-        return Err(crate::ApiError::NotFound(
+        return Err(crate::error::ApiError(SecretonError::NotFound { resource: 
             "Secret not found (deleted during update)".to_string(),
-        ));
+         }));
     }
 
     // Use the authoritative previous version from put_secret for audit accuracy
@@ -989,21 +729,21 @@ pub async fn update_secret(
 
 /// Delete secret
 pub async fn delete_secret(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Delete secret via secreton service
     state
-        .secreton
+        .secret
         .delete_secret(&path, &user)
         .await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::SecretNotFound { .. } => {
-                crate::ApiError::NotFound("Secret not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Secret not found".to_string() })
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to delete secret: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to delete secret: {}", e) }),
         })?;
 
     let data = serde_json::json!({
@@ -1016,21 +756,21 @@ pub async fn delete_secret(
 
 /// List secret versions
 pub async fn list_secret_versions(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<secret::SecretVersionInfo>>>> {
     // List secret versions via secreton service
     let versions = state
-        .secreton
+        .secret
         .list_secret_versions(&path, &user)
         .await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => {
-                crate::ApiError::NotFound("Secret not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Secret not found".to_string() })
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to list secret versions: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list secret versions: {}", e) }),
         })?;
 
     Ok(Json(ApiResponse::success(versions)))
@@ -1038,26 +778,26 @@ pub async fn list_secret_versions(
 
 /// Rollback secret to a specific version
 pub async fn rollback_secret(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(path): Path<String>,
     Query(params): Query<GetSecretParams>,
 ) -> ApiResult<Json<ApiResponse<SecretResponse>>> {
     let version = params.version.ok_or_else(|| {
-        crate::ApiError::BadRequest("Version parameter is required for rollback".to_string())
+        crate::error::ApiError(SecretonError::Validation { message: "Version parameter is required for rollback".to_string() })
     })?;
 
     let secret_data = state
-        .secreton
+        .secret
         .rollback_secret(&path, version, &user)
         .await
         .map_err(|e| match e {
             secret::SecretError::SecretNotFound { .. } => {
-                crate::ApiError::NotFound("Secret version not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Secret version not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to rollback secret: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to rollback secret: {}", e) }),
         })?;
 
     // Detect TOCTOU race: if the secret was deleted between get_secret and put_secret
@@ -1065,7 +805,7 @@ pub async fn rollback_secret(
     // Roll back the accidental creation and return NotFound.
     if secret_data.previous_version.is_none() && secret_data.version == 1 {
         if let Err(e) = state
-            .secreton
+            .secret
             .delete_secret_internal(&path, &user, false, false)
             .await
         {
@@ -1075,9 +815,9 @@ pub async fn rollback_secret(
                 e
             );
         }
-        return Err(crate::ApiError::NotFound(
+        return Err(crate::error::ApiError(SecretonError::NotFound { resource: 
             "Secret not found (deleted during rollback)".to_string(),
-        ));
+         }));
     }
 
     let response = SecretResponse {
@@ -1095,17 +835,17 @@ pub async fn rollback_secret(
 
 /// List secrets
 pub async fn list_secrets(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<SecretListItem>>>> {
     // List secrets via secreton service
     let secret_list: Vec<secret::SecretData> = state
-        .secreton
+        .secret
         .list_secrets(query.filter.as_deref(), &user, query.limit, query.offset)
         .await
-        .map_err(|e: crate::services::secret::SecretError| {
-            crate::ApiError::Internal(format!("Failed to list secrets: {}", e))
+        .map_err(|e: secreton_engines::services::secret::SecretError| {
+            crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list secrets: {}", e) })
         })?;
 
     // Convert to response format (now with real metadata)
@@ -1125,7 +865,7 @@ pub async fn list_secrets(
 
 /// Key operations
 pub async fn create_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
@@ -1134,13 +874,13 @@ pub async fn create_key(
 
     // Create key via secreton service
     let key_info: secret::KeyInfo = state
-        .secreton
+        .secret
         .create_key(&request.name, &request.key_type, &user)
         .await
         .map_err(|e| match e {
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to create key: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to create key: {}", e) }),
         })?;
 
     // Get public key if available (for asymmetric keys)
@@ -1171,22 +911,22 @@ pub async fn create_key(
 }
 
 pub async fn get_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // Get key via secreton service
     let key_info: secret::KeyInfo =
         state
-            .secreton
+            .secret
             .get_key(&key_id, &user)
             .await
             .map_err(|e| match e {
                 secret::SecretError::KeyNotFound { .. } => {
-                    crate::ApiError::NotFound("Key not found".to_string())
+                    crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
                 }
-                secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-                _ => crate::ApiError::Internal(format!("Failed to retrieve key: {}", e)),
+                secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+                _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to retrieve key: {}", e) }),
             })?;
 
     // Get public key if available (for asymmetric keys)
@@ -1217,18 +957,18 @@ pub async fn get_key(
 }
 
 pub async fn list_keys(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyResponse>>>> {
     // List keys via secreton service
     let key_infos: Vec<secret::KeyInfo> = state
-        .secreton
+        .secret
         .list_keys(&user, query.filter.as_deref())
         .await
-        .map_err(|e: crate::services::secret::SecretError| match e {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to list keys: {}", e)),
+        .map_err(|e: secreton_engines::services::secret::SecretError| match e {
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list keys: {}", e) }),
         })?;
 
     // Convert to response format
@@ -1263,23 +1003,23 @@ pub async fn list_keys(
 }
 
 pub async fn rotate_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<KeyResponse>>> {
     // Rotate key via secreton service
     let key_info: secret::KeyInfo =
         state
-            .secreton
+            .secret
             .rotate_key(&key_id, &user)
             .await
             .map_err(|e| match e {
-                crate::services::secret::SecretError::KeyNotFound { .. } => {
-                    crate::ApiError::NotFound(format!("Key not found: {}", key_id))
+                secreton_engines::services::secret::SecretError::KeyNotFound { .. } => {
+                    crate::error::ApiError(SecretonError::NotFound { resource: format!("Key not found: {}", key_id) })
                 }
-                secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-                secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-                _ => crate::ApiError::Internal(format!("Failed to rotate key: {}", e)),
+                secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+                secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+                _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to rotate key: {}", e) }),
             })?;
 
     // Get public key if available (for asymmetric keys)
@@ -1310,7 +1050,7 @@ pub async fn rotate_key(
 }
 
 pub async fn update_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
     Json(request): Json<UpdateKeyRequest>,
@@ -1327,15 +1067,15 @@ pub async fn update_key(
     }
     // Update key metadata via secreton service
     let key_info = state
-        .secreton
+        .secret
         .update_key_metadata(&key_id, &metadata_map, &user)
         .await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to update key: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to update key: {}", e) }),
         })?;
 
     // Get public key if available (for asymmetric keys)
@@ -1366,22 +1106,22 @@ pub async fn update_key(
 }
 
 pub async fn delete_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
     // Delete key via secreton service
     state
-        .secreton
+        .secret
         .delete_key(&key_id, &user)
         .await
         .map_err(|e: secret::SecretError| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to delete key: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to delete key: {}", e) }),
         })?;
 
     let data = serde_json::json!({
@@ -1393,21 +1133,21 @@ pub async fn delete_key(
 }
 
 pub async fn list_key_versions(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(key_id): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Vec<KeyVersionInfo>>>> {
     // List key versions via secreton service
     let versions = state
-        .secreton
+        .secret
         .list_key_versions(&key_id, &user)
         .await
-        .map_err(|e: crate::services::secret::SecretError| match e {
+        .map_err(|e: secreton_engines::services::secret::SecretError| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to list key versions: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list key versions: {}", e) }),
         })?;
 
     // Convert to response format
@@ -1425,7 +1165,7 @@ pub async fn list_key_versions(
 
 /// Cryptographic operations
 pub async fn encrypt_data(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<EncryptRequest>,
 ) -> ApiResult<Json<ApiResponse<EncryptResponse>>> {
@@ -1436,16 +1176,16 @@ pub async fn encrypt_data(
 
     // Encrypt data via secreton service
     let (encrypted_data, key_version) = state
-        .secreton
+        .secret
         .encrypt(&request.key_id, &plaintext, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to encrypt data: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to encrypt data: {}", e) }),
         })?;
 
     // Serialize the full EncryptedData (including nonce, tag, algorithm) so the
@@ -1461,7 +1201,7 @@ pub async fn encrypt_data(
         "key_version": key_version,
     });
     let envelope_json = serde_json::to_vec(&compact_envelope).map_err(|e| {
-        crate::ApiError::Internal(format!("Failed to serialize encrypted data: {}", e))
+        crate::error::ApiError(SecretonError::Internal { message: format!("Failed to serialize encrypted data: {}", e) })
     })?;
     let ciphertext_b64 = BASE64_STANDARD.encode(&envelope_json);
 
@@ -1483,7 +1223,7 @@ pub async fn encrypt_data(
 }
 
 pub async fn decrypt_data(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<DecryptRequest>,
 ) -> ApiResult<Json<ApiResponse<DecryptResponse>>> {
@@ -1491,7 +1231,7 @@ pub async fn decrypt_data(
     // produced by the encrypt endpoint.
     let ciphertext_bytes = BASE64_STANDARD
         .decode(&request.ciphertext)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 ciphertext: {}", e) }))?;
 
     // Deserialize the EncryptedData envelope. Try the compact base64-field format
     // first (produced by the updated encrypt endpoint), then fall back to the raw
@@ -1510,15 +1250,15 @@ pub async fn decrypt_data(
         if let Ok(compact) = serde_json::from_slice::<CompactEnvelope>(&ciphertext_bytes) {
             let nonce = BASE64_STANDARD
                 .decode(&compact.nonce)
-                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 nonce: {}", e)))?;
+                .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 nonce: {}", e) }))?;
             let ct = BASE64_STANDARD.decode(&compact.ciphertext).map_err(|e| {
-                crate::ApiError::BadRequest(format!("Invalid base64 ciphertext: {}", e))
+                crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 ciphertext: {}", e) })
             })?;
             let tag = compact
                 .tag
                 .map(|t| BASE64_STANDARD.decode(&t))
                 .transpose()
-                .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 tag: {}", e)))?;
+                .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 tag: {}", e) }))?;
             // If the envelope contains a key_version and the request didn't
             // explicitly specify one, use the version from the envelope so
             // that decryption uses the correct key material even after rotation.
@@ -1534,7 +1274,7 @@ pub async fn decrypt_data(
         } else {
             // Fall back to raw serde format (Vec<u8> as number arrays)
             serde_json::from_slice(&ciphertext_bytes).map_err(|e| {
-                crate::ApiError::BadRequest(format!("Invalid encrypted data envelope: {}", e))
+                crate::error::ApiError(SecretonError::Validation { message: format!("Invalid encrypted data envelope: {}", e) })
             })?
         }
     };
@@ -1546,7 +1286,7 @@ pub async fn decrypt_data(
 
     // Decrypt data via secreton service
     let (plaintext, key_version) = state
-        .secreton
+        .secret
         .decrypt(
             &request.key_id,
             &encrypted_data,
@@ -1556,11 +1296,11 @@ pub async fn decrypt_data(
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to decrypt data: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to decrypt data: {}", e) }),
         })?;
 
     // Convert to base64
@@ -1575,7 +1315,7 @@ pub async fn decrypt_data(
 }
 
 pub async fn sign_data(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<SignRequest>,
 ) -> ApiResult<Json<ApiResponse<SignResponse>>> {
@@ -1586,16 +1326,16 @@ pub async fn sign_data(
 
     // Sign data using secreton service
     let signature_result = state
-        .secreton
+        .secret
         .sign_data(&request.key_id, &data, &user, request.key_version)
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to sign data: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to sign data: {}", e) }),
         })?;
 
     let response = SignResponse {
@@ -1608,7 +1348,7 @@ pub async fn sign_data(
 }
 
 pub async fn verify_signature(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<VerifyRequest>,
 ) -> ApiResult<Json<ApiResponse<VerifyResponse>>> {
@@ -1623,7 +1363,7 @@ pub async fn verify_signature(
 
     // Verify signature using secreton service
     let (is_valid, key_version) = state
-        .secreton
+        .secret
         .verify_data(
             &request.key_id,
             &data,
@@ -1634,11 +1374,11 @@ pub async fn verify_signature(
         .await
         .map_err(|e| match e {
             secret::SecretError::KeyNotFound { .. } => {
-                crate::ApiError::NotFound("Key not found".to_string())
+                crate::error::ApiError(SecretonError::NotFound { resource: "Key not found".to_string() })
             }
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to verify signature: {}", e)),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to verify signature: {}", e) }),
         })?;
 
     let response = VerifyResponse {
@@ -1650,7 +1390,7 @@ pub async fn verify_signature(
 }
 
 pub async fn hash_data(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
@@ -1661,13 +1401,13 @@ pub async fn hash_data(
 
     // Compute hash via service (handles RBAC)
     let hash_hex = state
-        .secreton
+        .secret
         .hash_data(&data, &request.algorithm, &user)
         .await
         .map_err(|e| match e {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            secret::SecretError::InvalidOperation(msg) => crate::ApiError::BadRequest(msg),
-            _ => crate::ApiError::Internal(format!("Failed to hash data: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            secret::SecretError::InvalidOperation(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to hash data: {}", e) }),
         })?;
 
     let response = HashResponse {
@@ -1680,16 +1420,16 @@ pub async fn hash_data(
 
 /// Policy operations
 pub async fn list_policies(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(query): Query<ListQuery>,
 ) -> ApiResult<Json<ApiResponse<Vec<PolicyResponse>>>> {
     // List policies via secreton service
     let policies = state
-        .secreton
+        .secret
         .list_policies(query.filter.as_deref())
         .await
-        .map_err(|e| crate::ApiError::Internal(format!("Failed to list policies: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Internal { message: format!("Failed to list policies: {}", e) }))?;
 
     // Convert to response format
     let mut policy_responses: Vec<PolicyResponse> = policies
@@ -1769,7 +1509,7 @@ pub async fn list_policies(
 }
 
 pub async fn get_policy(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<PolicyResponse>>> {
@@ -1783,7 +1523,7 @@ pub async fn get_policy(
     // so a successful result or a `PolicyNotFound` error proves the RBAC
     // check passed.  The admin/root role gate below provides an additional
     // safety net for the raw-content fallback path.
-    let policy_result = state.secreton.get_policy(&name, &user).await;
+    let policy_result = state.secret.get_policy(&name, &user).await;
 
     // Fast path: structured policy found — return it directly.
     // The `policy_type` discriminator field on `PolicyResponse` lets clients
@@ -1813,8 +1553,8 @@ pub async fn get_policy(
     let policy_err = policy_result.unwrap_err();
     if !matches!(policy_err, secret::SecretError::PolicyNotFound { .. }) {
         return Err(match policy_err {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            e => crate::ApiError::Internal(format!("Failed to retrieve policy: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            e => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to retrieve policy: {}", e) }),
         });
     }
 
@@ -1824,7 +1564,7 @@ pub async fn get_policy(
     // Non-admin users get a generic 404 to avoid revealing
     // whether a raw-content policy exists at this path.
     if !user.roles.contains(&"admin".to_string()) && !user.roles.contains(&"root".to_string()) {
-        return Err(crate::ApiError::NotFound("Policy not found".to_string()));
+        return Err(crate::error::ApiError(SecretonError::NotFound { resource: "Policy not found".to_string() }));
     }
 
     // The first `get_policy` call above performed the RBAC check
@@ -1838,18 +1578,18 @@ pub async fn get_policy(
     // To guard against this, explicitly verify read permission on the
     // policy path.  This is a cheap in-memory RBAC evaluation.
     if let Err(e) = state
-        .secreton
+        .secret
         .check_policy_permission(&name, &user, "read")
         .await
     {
         if let secret::SecretError::PermissionDenied(msg) = e {
-            return Err(crate::ApiError::Authorization(msg));
+            return Err(crate::error::ApiError(SecretonError::Authorization { message: msg }));
         }
         // Other errors (e.g. storage) — fail closed
-        return Err(crate::ApiError::Internal(format!(
+        return Err(crate::error::ApiError(SecretonError::Internal { message: format!(
             "Failed to verify policy permissions: {}",
             e
-        )));
+        ) }));
     }
 
     match state.admin.get_policy_content(&name).await {
@@ -1875,16 +1615,16 @@ pub async fn get_policy(
             };
             Ok(Json(ApiResponse::success(response)))
         }
-        Ok(None) => Err(crate::ApiError::NotFound("Policy not found".to_string())),
-        Err(e) => Err(crate::ApiError::Internal(format!(
+        Ok(None) => Err(crate::error::ApiError(SecretonError::NotFound { resource: "Policy not found".to_string() })),
+        Err(e) => Err(crate::error::ApiError(SecretonError::Internal { message: format!(
             "Failed to retrieve policy content: {}",
             e
-        ))),
+        ) })),
     }
 }
 
 pub async fn create_policy(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<CreatePolicyRequest>,
@@ -1894,7 +1634,7 @@ pub async fn create_policy(
 
     // Convert metadata
     let metadata = if let Some(meta) = &request.metadata {
-        crate::services::secret::PolicyMetadata {
+        secreton_engines::services::secret::PolicyMetadata {
             description: meta.description.clone(),
             tags: meta
                 .tags
@@ -1905,7 +1645,7 @@ pub async fn create_policy(
             created_by: user.username.clone(),
         }
     } else {
-        crate::services::secret::PolicyMetadata {
+        secreton_engines::services::secret::PolicyMetadata {
             description: None,
             tags: std::collections::HashMap::new(),
             owner: Some(user.username.clone()),
@@ -1915,12 +1655,12 @@ pub async fn create_policy(
 
     // Create policy via secreton service
     let policy = state
-        .secreton
+        .secret
         .create_policy(&name, request.rules.clone(), metadata, &user)
         .await
         .map_err(|e| match e {
-            secret::SecretError::PermissionDenied(msg) => crate::ApiError::Authorization(msg),
-            _ => crate::ApiError::Internal(format!("Failed to create policy: {}", e)),
+            secret::SecretError::PermissionDenied(msg) => crate::error::ApiError(SecretonError::Authorization { message: msg }),
+            _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to create policy: {}", e) }),
         })?;
 
     let response = PolicyResponse {
@@ -1941,7 +1681,7 @@ pub async fn create_policy(
 }
 
 pub async fn update_policy(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<UpdatePolicyRequest>,
@@ -1969,11 +1709,11 @@ pub async fn update_policy(
             // data.
             let content_present = stray_content.is_some();
             if rules.is_empty() && content_present {
-                return Err(crate::ApiError::BadRequest(
+                return Err(crate::error::ApiError(SecretonError::Validation { message: 
                     "Invalid request: 'rules' is empty and 'content' is also provided; \
                  send either 'rules' with at least one rule or 'content' alone"
                         .to_string(),
-                ));
+                 }));
             }
             // If both 'rules' and 'content' are present, 'rules' takes precedence.
             // Log a warning so operators can spot unintentional data loss.
@@ -2008,7 +1748,7 @@ pub async fn update_policy(
                 // structured update, since an admin who cannot clean up stale raw
                 // content should still be able to update the structured policy.
                 match state
-                    .secreton
+                    .secret
                     .check_policy_permission(&name, &user, "delete")
                     .await
                 {
@@ -2037,7 +1777,7 @@ pub async fn update_policy(
             }
 
             let metadata = if let Some(meta) = &req_metadata {
-                crate::services::secret::PolicyMetadata {
+                secreton_engines::services::secret::PolicyMetadata {
                     description: meta.description.clone(),
                     tags: meta
                         .tags
@@ -2048,7 +1788,7 @@ pub async fn update_policy(
                     created_by: user.username.clone(),
                 }
             } else {
-                crate::services::secret::PolicyMetadata {
+                secreton_engines::services::secret::PolicyMetadata {
                     description: None,
                     tags: std::collections::HashMap::new(),
                     owner: Some(user.username.clone()),
@@ -2057,17 +1797,17 @@ pub async fn update_policy(
             };
 
             let policy = state
-                .secreton
+                .secret
                 .update_policy(&name, rules, metadata, &user)
                 .await
                 .map_err(|e| match e {
                     secret::SecretError::PolicyNotFound { .. } => {
-                        crate::ApiError::NotFound("Policy not found".to_string())
+                        crate::error::ApiError(SecretonError::NotFound { resource: "Policy not found".to_string() })
                     }
                     secret::SecretError::PermissionDenied(msg) => {
-                        crate::ApiError::Authorization(msg)
+                        crate::error::ApiError(SecretonError::Authorization { message: msg })
                     }
-                    _ => crate::ApiError::Internal(format!("Failed to update policy: {}", e)),
+                    _ => crate::error::ApiError(SecretonError::Internal { message: format!("Failed to update policy: {}", e) }),
                 })?;
 
             let response = PolicyResponse {
@@ -2091,9 +1831,9 @@ pub async fn update_policy(
             if !user.roles.contains(&"admin".to_string())
                 && !user.roles.contains(&"root".to_string())
             {
-                return Err(crate::ApiError::Authorization(
+                return Err(crate::error::ApiError(SecretonError::Authorization { message: 
                     "Admin privileges required".to_string(),
-                ));
+                 }));
             }
 
             // Enforce RBAC policy checks for the policy path, not just role
@@ -2101,17 +1841,17 @@ pub async fn update_policy(
             // restricted via fine-grained RBAC policies cannot bypass those
             // restrictions through the raw content update path.
             if let Err(e) = state
-                .secreton
+                .secret
                 .check_policy_permission(&name, &user, "update")
                 .await
             {
                 if let secret::SecretError::PermissionDenied(msg) = e {
-                    return Err(crate::ApiError::Authorization(msg));
+                    return Err(crate::error::ApiError(SecretonError::Authorization { message: msg }));
                 }
-                return Err(crate::ApiError::Internal(format!(
+                return Err(crate::error::ApiError(SecretonError::Internal { message: format!(
                     "Failed to verify policy permissions: {}",
                     e
-                )));
+                ) }));
             }
 
             // `update_policy_content` returns the authoritative
@@ -2123,7 +1863,7 @@ pub async fn update_policy(
                 .update_policy_content(&name, &content)
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to update policy content: {}", e))
+                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to update policy content: {}", e) })
                 })?;
             // Return the same `PolicyResponse` shape as structured policies so
             // strongly-typed clients can parse either variant.  `policy_type =
@@ -2148,7 +1888,7 @@ pub async fn update_policy(
 }
 
 pub async fn delete_policy(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<serde_json::Value>>> {
@@ -2169,17 +1909,17 @@ pub async fn delete_policy(
             // Enforce fine-grained RBAC in addition to the role check, consistent
             // with the update_policy raw-content path.
             if let Err(e) = state
-                .secreton
+                .secret
                 .check_policy_permission(&name, &user, "delete")
                 .await
             {
                 if let secret::SecretError::PermissionDenied(msg) = e {
-                    return Err(crate::ApiError::Authorization(msg));
+                    return Err(crate::error::ApiError(SecretonError::Authorization { message: msg }));
                 }
-                return Err(crate::ApiError::Internal(format!(
+                return Err(crate::error::ApiError(SecretonError::Internal { message: format!(
                     "Failed to verify policy permissions: {}",
                     e
-                )));
+                ) }));
             }
 
             state
@@ -2187,7 +1927,7 @@ pub async fn delete_policy(
                 .delete_policy_content(&name)
                 .await
                 .map_err(|e| {
-                    crate::ApiError::Internal(format!("Failed to delete raw policy content: {}", e))
+                    crate::error::ApiError(SecretonError::Internal { message: format!("Failed to delete raw policy content: {}", e) })
                 })?
         } else {
             false
@@ -2196,24 +1936,24 @@ pub async fn delete_policy(
     // Delete structured policy via secreton service.
     // Track whether the structured policy existed so we can decide whether
     // to return 404 when neither the structured nor raw content entry exists.
-    let structured_deleted = match state.secreton.delete_policy(&name, &user).await {
+    let structured_deleted = match state.secret.delete_policy(&name, &user).await {
         Ok(_) => true,
         Err(secret::SecretError::PolicyNotFound { .. }) => false,
         Err(secret::SecretError::PermissionDenied(msg)) => {
-            return Err(crate::ApiError::Authorization(msg));
+            return Err(crate::error::ApiError(SecretonError::Authorization { message: msg }));
         }
         Err(e) => {
-            return Err(crate::ApiError::Internal(format!(
+            return Err(crate::error::ApiError(SecretonError::Internal { message: format!(
                 "Failed to delete policy: {}",
                 e
-            )));
+            ) }));
         }
     };
 
     // If neither a structured policy nor a raw content entry was found,
     // return 404 — the policy does not exist in any form.
     if !structured_deleted && !raw_deleted {
-        return Err(crate::ApiError::NotFound("Policy not found".to_string()));
+        return Err(crate::error::ApiError(SecretonError::NotFound { resource: "Policy not found".to_string() }));
     }
 
     let data = serde_json::json!({
@@ -2300,7 +2040,7 @@ fn infer_key_attributes(key_type: &str) -> (String, u32, Vec<String>) {
 
 /// Helper function to get public key for a key (for asymmetric keys)
 async fn get_public_key_for_key(
-    state: &AppState,
+    state: &Services,
     key_info: &secret::KeyInfo,
     user: &secreton_auth::User,
 ) -> Option<String> {

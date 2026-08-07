@@ -1,19 +1,9 @@
+/** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./src/**/*.rs", "./index.html"],
-  theme: {
-    extend: {
-      colors: {
-        primary: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-        }
-      }
-    },
-  },
-  plugins: [
-    require('@tailwindcss/forms'),
-  ],
-}
+  // Scanning the .rs sources is what makes the local build work: Tailwind reads the
+  // class names out of the `view!` macros. This file had no effect before, because the
+  // page loaded Tailwind from a CDN at runtime instead of compiling it.
+  content: ["./src/**/*.rs"],
+  theme: { extend: {} },
+  plugins: [],
+};

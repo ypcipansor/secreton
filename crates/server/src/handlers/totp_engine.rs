@@ -1,5 +1,7 @@
 //! TOTP Secret Engine Handlers
 
+use secreton_domain::SecretonError;
+
 use axum::{
     Router,
     extract::{Path, State},
@@ -10,21 +12,24 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::extractors::AuthenticatedUser;
-use crate::handlers::{AppState, validate_name};
-use crate::services::totp_engine::TotpServiceError;
-use crate::{ApiResponse, ApiResult};
+use crate::router::AppState;
+use crate::handlers::validate_name;
+use secreton_engines::Services;
+use secreton_engines::services::totp_engine::TotpServiceError;
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
 
-/// Map a [`TotpServiceError`] to the appropriate [`crate::ApiError`] variant
+/// Map a [`TotpServiceError`] to the appropriate [`crate::error::ApiError`] variant
 /// so that the HTTP response carries the correct status code.
-fn map_totp_err(err: TotpServiceError) -> crate::ApiError {
+fn map_totp_err(err: TotpServiceError) -> crate::error::ApiError {
     match err {
-        TotpServiceError::NotFound(msg) => crate::ApiError::NotFound(msg),
-        TotpServiceError::BadRequest(msg) => crate::ApiError::BadRequest(msg),
-        TotpServiceError::Internal(msg) => crate::ApiError::Internal(msg),
+        TotpServiceError::NotFound(msg) => crate::error::ApiError(SecretonError::NotFound { resource: msg }),
+        TotpServiceError::BadRequest(msg) => crate::error::ApiError(SecretonError::Validation { message: msg }),
+        TotpServiceError::Internal(msg) => crate::error::ApiError(SecretonError::Internal { message: msg }),
     }
 }
 
-pub fn create_routes() -> Router<AppState> {
+pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/keys", get(list_keys))
         .route("/keys/{name}", post(create_key).delete(delete_key))
@@ -50,7 +55,7 @@ impl std::fmt::Debug for CreateKeyRequest {
 }
 
 async fn list_keys(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
     let keys = state
@@ -65,7 +70,7 @@ async fn list_keys(
 }
 
 async fn create_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(payload): Json<CreateKeyRequest>,
@@ -90,7 +95,7 @@ async fn create_key(
 }
 
 async fn generate_code(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {
@@ -108,7 +113,7 @@ async fn generate_code(
 }
 
 async fn delete_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<Value>>> {

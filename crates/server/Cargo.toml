@@ -1,0 +1,99 @@
+[package]
+name = "secreton-server"
+description = "Axum server for Secreton: REST API, Leptos SSR and optional gRPC on one listener"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "secreton_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "secreton-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+secreton-auth.workspace = true
+secreton-crypto.workspace = true
+secreton-domain.workspace = true
+secreton-engines.workspace = true
+secreton-storage.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+chrono.workspace = true
+clap.workspace = true
+futures.workspace = true
+governor.workspace = true
+http.workspace = true
+hyper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time = "0.3"
+tokio = { workspace = true, features = ["full"] }
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+base64.workspace = true
+hex.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+zeroize.workspace = true
+metrics.workspace = true
+num_cpus = "1"
+metrics-exporter-prometheus.workspace = true
+
+# Leptos SSR. Optional so the API can be built and tested without the frontend
+# toolchain, which keeps the `cargo test` loop fast.
+leptos = { workspace = true, optional = true }
+leptos_axum = { workspace = true, optional = true }
+leptos_meta = { workspace = true, optional = true }
+secreton-ui = { workspace = true, optional = true, features = ["ssr"] }
+
+# gRPC. tonic 0.14 depends on axum 0.8 and hyper 1, so it merges into the same
+# router; 0.12 pulled a second major version of axum into the tree.
+prost = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
+tonic-health = { workspace = true, optional = true }
+tonic-prost = { workspace = true, optional = true }
+tonic-reflection = { workspace = true, optional = true }
+
+[build-dependencies]
+protoc-bin-vendored = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
+
+[dev-dependencies]
+axum-test.workspace = true
+pretty_assertions.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[features]
+default = ["grpc", "ui"]
+ui = ["dep:leptos", "dep:leptos_axum", "dep:leptos_meta", "dep:secreton-ui"]
+grpc = [
+    "dep:prost",
+    "dep:protoc-bin-vendored",
+    "dep:tonic",
+    "dep:tonic-health",
+    "dep:tonic-prost",
+    "dep:tonic-prost-build",
+    "dep:tonic-reflection",
+]

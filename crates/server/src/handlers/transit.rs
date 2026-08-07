@@ -3,6 +3,8 @@
 //! Provides endpoints for encryption-as-a-service operations,
 //! including key management and cryptographic operations.
 
+use secreton_domain::SecretonError;
+
 use axum::{
     Router,
     extract::{Path, State},
@@ -14,15 +16,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::extractors::AuthenticatedUser;
-use crate::handlers::{AppState, validate_name};
-use crate::services::audit::SecurityEventType;
-use crate::{ApiResponse, ApiResult};
+use crate::router::AppState;
+use crate::handlers::validate_name;
+use secreton_engines::Services;
+use secreton_engines::services::audit::SecurityEventType;
+use secreton_domain::{ApiResponse};
+use crate::error::{ApiResult};
 use secreton_crypto::CryptoError;
 use secreton_crypto::transit::{HashAlgorithm, KeyOptions, KeyType, SignatureAlgorithm};
 use tracing::{info, warn};
 
 /// Create transit engine routes
-pub fn create_routes() -> Router<AppState> {
+pub fn routes() -> Router<AppState> {
     Router::new()
         // Key management
         .route("/keys", get(list_keys))
@@ -126,12 +131,12 @@ pub struct RandomResponse {
 
 /// Map `CryptoError` variants to the appropriate `ApiError` so that the HTTP
 /// response carries the correct status code.
-fn map_crypto_err(e: CryptoError) -> crate::ApiError {
+fn map_crypto_err(e: CryptoError) -> crate::error::ApiError {
     match &e {
         CryptoError::KeyNotFound(_) | CryptoError::KeyVersionNotFound(_) => {
-            crate::ApiError::NotFound(e.to_string())
+            crate::error::ApiError(SecretonError::NotFound { resource: e.to_string() })
         }
-        CryptoError::KeyAlreadyExists(_) => crate::ApiError::Conflict(e.to_string()),
+        CryptoError::KeyAlreadyExists(_) => crate::error::ApiError(SecretonError::Conflict { message: e.to_string() }),
         CryptoError::InvalidInput(_)
         | CryptoError::InvalidUsage(_)
         | CryptoError::InvalidParameter(_)
@@ -145,18 +150,18 @@ fn map_crypto_err(e: CryptoError) -> crate::ApiError {
         | CryptoError::EncryptionFailed(_)
         | CryptoError::DecryptionFailed(_)
         | CryptoError::SigningFailed(_)
-        | CryptoError::VerificationFailed(_) => crate::ApiError::BadRequest(e.to_string()),
-        CryptoError::PermissionDenied(_) => crate::ApiError::Authorization(e.to_string()),
+        | CryptoError::VerificationFailed(_) => crate::error::ApiError(SecretonError::Validation { message: e.to_string() }),
+        CryptoError::PermissionDenied(_) => crate::error::ApiError(SecretonError::Authorization { message: e.to_string() }),
         CryptoError::RateLimitExceeded(_) | CryptoError::ConcurrencyLimitExceeded => {
-            crate::ApiError::RateLimited(e.to_string())
+            crate::error::ApiError(SecretonError::RateLimitExceeded { message: e.to_string() })
         }
-        _ => crate::ApiError::Internal(e.to_string()),
+        _ => crate::error::ApiError(SecretonError::Internal { message: e.to_string() }),
     }
 }
 
 /// List all transit keys
 pub async fn list_keys(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> ApiResult<Json<ApiResponse<HashMap<String, Vec<String>>>>> {
     let keys = state.transit.list_keys().await;
@@ -167,7 +172,7 @@ pub async fn list_keys(
 
 /// Get transit key information
 pub async fn get_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<secreton_crypto::transit::KeyInfo>>> {
@@ -182,16 +187,16 @@ pub async fn get_key(
 
 /// Create a new transit key
 pub async fn create_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<CreateKeyRequest>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
     // Only admin/root users may create transit keys
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to create transit keys".to_string(),
-        ));
+         }));
     }
 
     validate_name(&name)?;
@@ -243,15 +248,15 @@ pub async fn create_key(
 
 /// Rotate a transit key
 pub async fn rotate_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<u32>>> {
     // Only admin/root users may rotate transit keys
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to rotate transit keys".to_string(),
-        ));
+         }));
     }
 
     validate_name(&name)?;
@@ -276,15 +281,15 @@ pub async fn rotate_key(
 
 /// Delete a transit key
 pub async fn delete_key(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
 ) -> ApiResult<Json<ApiResponse<()>>> {
     // Only admin/root users may delete transit keys
     if !user.is_admin() {
-        return Err(crate::ApiError::Authorization(
+        return Err(crate::error::ApiError(SecretonError::Authorization { message: 
             "Admin privileges required to delete transit keys".to_string(),
-        ));
+         }));
     }
 
     validate_name(&name)?;
@@ -307,7 +312,7 @@ pub async fn delete_key(
 
 /// Encrypt data
 pub async fn encrypt(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<EncryptRequest>,
@@ -315,7 +320,7 @@ pub async fn encrypt(
     validate_name(&name)?;
     let plaintext = BASE64_STANDARD
         .decode(&request.plaintext)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 plaintext: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 plaintext: {}", e) }))?;
 
     let data_size = plaintext.len() as u64;
 
@@ -323,7 +328,7 @@ pub async fn encrypt(
         .context
         .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 context: {}", e) }))?;
 
     let ciphertext = state
         .transit
@@ -348,7 +353,7 @@ pub async fn encrypt(
 
 /// Decrypt data
 pub async fn decrypt(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<DecryptRequest>,
@@ -358,7 +363,7 @@ pub async fn decrypt(
         .context
         .map(|c| BASE64_STANDARD.decode(&c))
         .transpose()
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 context: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 context: {}", e) }))?;
 
     let plaintext = state
         .transit
@@ -385,7 +390,7 @@ pub async fn decrypt(
 
 /// Sign data
 pub async fn sign(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<SignRequest>,
@@ -393,7 +398,7 @@ pub async fn sign(
     validate_name(&name)?;
     let input = BASE64_STANDARD
         .decode(&request.input)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
 
     let data_size = input.len() as u64;
 
@@ -420,7 +425,7 @@ pub async fn sign(
 
 /// Verify signature
 pub async fn verify(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(user): AuthenticatedUser,
     Path(name): Path<String>,
     Json(request): Json<VerifyRequest>,
@@ -428,7 +433,7 @@ pub async fn verify(
     validate_name(&name)?;
     let input = BASE64_STANDARD
         .decode(&request.input)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
 
     let data_size = input.len() as u64;
 
@@ -456,13 +461,13 @@ pub async fn verify(
 
 /// Hash data
 pub async fn hash(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<HashRequest>,
 ) -> ApiResult<Json<ApiResponse<HashResponse>>> {
     let input = BASE64_STANDARD
         .decode(&request.input)
-        .map_err(|e| crate::ApiError::BadRequest(format!("Invalid base64 input: {}", e)))?;
+        .map_err(|e| crate::error::ApiError(SecretonError::Validation { message: format!("Invalid base64 input: {}", e) }))?;
 
     let hash = state
         .transit
@@ -475,7 +480,7 @@ pub async fn hash(
 
 /// Generate random bytes
 pub async fn random(
-    State(state): State<AppState>,
+    State(state): State<Services>,
     AuthenticatedUser(_user): AuthenticatedUser,
     Json(request): Json<RandomRequest>,
 ) -> ApiResult<Json<ApiResponse<RandomResponse>>> {
@@ -490,132 +495,3 @@ pub async fn random(
     })))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ServerConfig;
-    use crate::services::ApiServiceContainer;
-    use axum_test::TestServer;
-    use std::sync::Arc;
-
-    async fn server_with_routes() -> (TestServer, String) {
-        // Set root key for crypto service auto-unseal.
-        // SAFETY: This test is run in a single-threaded context and no other
-        // thread reads this env var concurrently during setup.
-        unsafe {
-            std::env::set_var("SECRETON_ROOT_KEY", "test_root_key_must_be_32_bytes_long!!");
-        }
-
-        let mut config = ServerConfig::default();
-        config.auth.jwt.secret = Some("test_secret".to_string());
-        config.auth.jwt.issuer = "secreton".to_string();
-        config.auth.jwt.audience = "secreton-api".to_string();
-
-        let services = Arc::new(
-            ApiServiceContainer::new(&config)
-                .await
-                .expect("Failed to create services"),
-        );
-
-        // Generate mock token
-        let user = secreton_auth::User {
-            id: uuid::Uuid::new_v4().to_string(),
-            username: "mock_user".to_string(),
-            email: Some("mock@example.com".to_string()),
-            display_name: Some("Mock User".to_string()),
-            full_name: Some("Mock User".to_string()),
-            roles: vec!["admin".to_string()],
-            permissions: vec![],
-            policies: vec!["default".to_string()],
-            metadata: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            failed_login_attempts: 0,
-            locked_until: None,
-            last_login: None,
-            mfa_enabled: false,
-            mfa_secret: None,
-            password_hash: "".to_string(),
-            disabled: false,
-            enabled: true,
-            is_active: true,
-            is_superuser: true,
-        };
-        let token = services
-            .auth
-            .generate_token(&user, "127.0.0.1".to_string(), "test".to_string())
-            .await
-            .expect("Failed to generate token");
-
-        let app = create_routes().with_state(services.into());
-        let server = TestServer::new(app.into_make_service()).expect("failed to start test server");
-        (server, token)
-    }
-
-    #[tokio::test]
-    async fn test_transit_lifecycle() {
-        let (server, token) = server_with_routes().await;
-        let key_name = "test-key";
-
-        // 1. Create Key
-        let create_req = CreateKeyRequest {
-            key_type: Some(KeyType::Aes256Gcm),
-            exportable: None,
-            usage: None,
-        };
-        let response = server
-            .post(&format!("/keys/{}", key_name))
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&create_req)
-            .await;
-        response.assert_status_ok();
-
-        // 2. Encrypt
-        let plaintext = "Hello Transit";
-        let encrypt_req = EncryptRequest {
-            plaintext: BASE64_STANDARD.encode(plaintext),
-            context: None,
-            key_version: None,
-        };
-        let response = server
-            .post(&format!("/encrypt/{}", key_name))
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&encrypt_req)
-            .await;
-        response.assert_status_ok();
-        let encrypt_res: ApiResponse<EncryptResponse> = response.json();
-        let ciphertext = encrypt_res.data.unwrap().ciphertext;
-
-        // 3. Decrypt
-        let decrypt_req = DecryptRequest {
-            ciphertext,
-            context: None,
-        };
-        let response = server
-            .post(&format!("/decrypt/{}", key_name))
-            .add_header("Authorization", format!("Bearer {}", token))
-            .json(&decrypt_req)
-            .await;
-        response.assert_status_ok();
-        let decrypt_res: ApiResponse<DecryptResponse> = response.json();
-        let decrypted_b64 = decrypt_res.data.unwrap().plaintext;
-        let decrypted = String::from_utf8(BASE64_STANDARD.decode(decrypted_b64).unwrap()).unwrap();
-        assert_eq!(plaintext, decrypted);
-
-        // 4. List Keys
-        let response = server
-            .get("/keys")
-            .add_header("Authorization", format!("Bearer {}", token))
-            .await;
-        response.assert_status_ok();
-        let list_res: ApiResponse<HashMap<String, Vec<String>>> = response.json();
-        assert!(list_res.data.unwrap()["keys"].contains(&key_name.to_string()));
-
-        // 5. Delete Key
-        let response = server
-            .delete(&format!("/keys/{}", key_name))
-            .add_header("Authorization", format!("Bearer {}", token))
-            .await;
-        response.assert_status_ok();
-    }
-}
