@@ -1,0 +1,8 @@
+# Keep the MSRV floor honest: clippy will flag suggestions that need a newer compiler.
+msrv = "1.90"
+
+# A secrets manager should not be building strings of key material by hand.
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "not thread-safe; set configuration through ServerConfig" },
+    { path = "std::env::remove_var", reason = "not thread-safe; set configuration through ServerConfig" },
+]

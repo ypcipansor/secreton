@@ -1,0 +1,97 @@
+//! Turning a [`SecretonError`] into an HTTP response.
+//!
+//! This lives in the server rather than in `secreton-domain` so the domain crate stays
+//! free of a web framework and keeps compiling for `wasm32-unknown-unknown`, which is what
+//! lets the Leptos UI share the same error type.
+
+use axum::Json;
+use axum::response::{IntoResponse, Response};
+use secreton_domain::{ApiResponse, SecretonError};
+
+/// Newtype so the orphan rule lets us implement `IntoResponse` for the shared error.
+#[derive(Debug)]
+pub struct ApiError(pub SecretonError);
+
+impl<E: Into<SecretonError>> From<E> for ApiError {
+    fn from(e: E) -> Self {
+        ApiError(e.into())
+    }
+}
+
+pub type ApiResult<T> = Result<T, ApiError>;
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let status = self.0.status_code();
+        let category = self.0.category();
+
+        // Log at a level matching severity, then decide what the client is told.
+        if status.is_server_error() {
+            tracing::error!(status = %status, category, error = %self.0, "request failed");
+        } else {
+            tracing::warn!(status = %status, category, error = %self.0, "request rejected");
+        }
+
+        // 5xx messages can carry connection strings, file paths and driver internals.
+        // Clients get a fixed string; the detail is in the log above, correlated by the
+        // request id that `middleware::request_id` attaches to both.
+        let message = if status.is_server_error() {
+            "internal server error".to_string()
+        } else {
+            self.0.to_string()
+        };
+
+        let body = ApiResponse::<()>::error(message)
+            .with_metadata("category", serde_json::Value::String(category.to_string()));
+
+        (status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use http::StatusCode;
+
+    async fn body_of(resp: Response) -> serde_json::Value {
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+        serde_json::from_slice(&bytes).expect("json")
+    }
+
+    #[tokio::test]
+    async fn client_errors_keep_their_message() {
+        let err = ApiError(SecretonError::NotFound {
+            resource: "kv/app/db".into(),
+        });
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let json = body_of(resp).await;
+        assert_eq!(json["success"], false);
+        assert!(
+            json["error"].as_str().unwrap().contains("kv/app/db"),
+            "client errors should say what was not found: {json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn server_errors_do_not_leak_internals_to_the_client() {
+        let err = ApiError(SecretonError::Database {
+            message: "postgres://secreton:hunter2@db.internal:5432 connection refused".into(),
+        });
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let json = body_of(resp).await;
+        let body = json["error"].as_str().unwrap();
+        assert_eq!(body, "internal server error");
+        assert!(!body.contains("hunter2"), "credentials leaked to client");
+        assert!(!body.contains("db.internal"), "hostname leaked to client");
+    }
+
+    #[tokio::test]
+    async fn responses_carry_the_error_category() {
+        let resp = ApiError(SecretonError::InvalidCredentials).into_response();
+        let json = body_of(resp).await;
+        assert!(json["metadata"]["category"].is_string());
+    }
+}

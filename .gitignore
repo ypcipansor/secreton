@@ -1,6 +1,10 @@
 # Rust
 /target/
-Cargo.lock
+# Cargo.lock IS committed. This is an application, not a library: the lockfile is what
+# makes `--locked` builds, `cargo audit` and Dependabot describe the artifact that ships.
+
+# Leptos / cargo-leptos build output
+/target/site/
 
 # Database
 *.db
@@ -9,7 +13,6 @@ Cargo.lock
 
 # Logs
 *.log
-*.txt
 
 # Environment variables
 .env
@@ -29,8 +32,8 @@ Thumbs.db
 dist/
 build/
 
-# Config files with secrets (in production)
-config/secreton.toml
+# Local config that may hold real values
+/secreton.local.toml
 
 # CI/CD artifacts
 *.lcov
@@ -41,13 +44,12 @@ trivy-results.sarif
 # Coverage reports
 coverage/
 
-# Docker
-.dockerignore
 
 # Temporary files
 *.tmp
 *.bak
-*.diff
 
-# SSL Certificates
-nginx/ssl/
+# SSL certificates
+/certs/
+*.pem
+!crates/**/testdata/*.pem
