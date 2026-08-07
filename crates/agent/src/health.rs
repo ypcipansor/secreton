@@ -173,10 +173,7 @@ impl HealthChecker {
                 name: "memory_usage".to_string(),
                 status,
                 message: format!("Memory usage: {:.1}%", usage_percent),
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                timestamp: unix_secs_source().as_secs(),
                 response_time_ms: None,
                 details: {
                     let mut map = HashMap::new();
@@ -226,10 +223,7 @@ impl HealthChecker {
                     name: format!("disk_usage_{}", mount_point),
                     status,
                     message: format!("Disk usage ({}): {:.1}%", mount_point, usage_percent),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: {
                         let mut map = HashMap::new();
@@ -269,10 +263,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Healthy,
                     message: "Network connectivity is healthy".to_string(),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -283,10 +274,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Degraded,
                     message: "Network connectivity has issues".to_string(),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -297,10 +285,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Unhealthy,
                     message: format!("Network connectivity failed: {}", e),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -350,10 +335,7 @@ impl HealthChecker {
 
         HealthSummary {
             overall_status,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: unix_secs_source().as_secs(),
             healthy_checks,
             degraded_checks,
             unhealthy_checks,
@@ -381,4 +363,14 @@ impl HealthChecker {
             .unwrap_or(Duration::ZERO)
             .as_secs()
     }
+}
+
+/// Seconds since the Unix epoch, saturating at 0.
+///
+/// `duration_since(UNIX_EPOCH).unwrap()` panics on a host whose clock predates 1970.
+/// A health reporter is the last component that should take the process down.
+fn unix_secs_source() -> std::time::Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::ZERO)
 }

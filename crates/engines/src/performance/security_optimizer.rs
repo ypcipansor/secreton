@@ -262,16 +262,18 @@ impl PerformanceBenchmark {
             let mut data = vec![0u8; size];
             rand::RngCore::fill_bytes(&mut rng, &mut data);
 
-            let key = generate_key(AlgorithmId::Aes256Gcm).unwrap();
+            let key = generate_key(AlgorithmId::Aes256Gcm).expect("self-benchmark key generation");
 
             let start = Instant::now();
 
             for _ in 0..iterations {
                 let engine = CryptoEngine::new();
-                let _encrypted = engine.encrypt(AlgorithmId::Aes256Gcm, &data, &key).unwrap();
+                let _encrypted = engine
+                    .encrypt(AlgorithmId::Aes256Gcm, &data, &key)
+                    .expect("self-benchmark encryption of a fixed input");
             }
 
-            let duration = start.elapsed() / iterations as u32;
+            let duration = start.elapsed() / u32::try_from(iterations).unwrap_or(1).max(1);
             results.insert(size, duration);
         }
 
@@ -292,19 +294,23 @@ impl PerformanceBenchmark {
             let mut data = vec![0u8; size];
             rand::RngCore::fill_bytes(&mut rng, &mut data);
 
-            let key = generate_key(AlgorithmId::Aes256Gcm).unwrap();
+            let key = generate_key(AlgorithmId::Aes256Gcm).expect("self-benchmark key generation");
             let engine = CryptoEngine::new();
 
             // Pre-encrypt data
-            let encrypted = engine.encrypt(AlgorithmId::Aes256Gcm, &data, &key).unwrap();
+            let encrypted = engine
+                .encrypt(AlgorithmId::Aes256Gcm, &data, &key)
+                .expect("self-benchmark encryption of a fixed input");
 
             let start = Instant::now();
 
             for _ in 0..iterations {
-                let _decrypted = engine.decrypt(&encrypted, &key).unwrap();
+                let _decrypted = engine
+                    .decrypt(&encrypted, &key)
+                    .expect("self-benchmark decryption of what we just encrypted");
             }
 
-            let duration = start.elapsed() / iterations as u32;
+            let duration = start.elapsed() / u32::try_from(iterations).unwrap_or(1).max(1);
             results.insert(size, duration);
         }
 

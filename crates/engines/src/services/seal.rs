@@ -351,8 +351,20 @@ impl SealService {
                         email: "root@system.local".to_string(),
                         roles: vec!["root".to_string(), "admin".to_string()],
                         policies: vec!["root".to_string()],
-                        iat: now.timestamp() as usize,
-                        exp: exp.timestamp() as usize,
+                        // Checked, for the same reason as the token service: `as usize`
+                        // wraps a pre-1970 timestamp into an enormous positive one, and
+                        // this is a *root* token — one that never expires is the worst
+                        // possible instance of that bug.
+                        iat: usize::try_from(now.timestamp()).map_err(|_| {
+                            anyhow!(
+                                "system clock is before the epoch; refusing to mint a root token"
+                            )
+                        })?,
+                        exp: usize::try_from(exp.timestamp()).map_err(|_| {
+                            anyhow!(
+                                "system clock is before the epoch; refusing to mint a root token"
+                            )
+                        })?,
                         jti: Uuid::new_v4().to_string(),
                         iss: self.jwt_issuer.clone(),
                         aud: self.jwt_audience.clone(),

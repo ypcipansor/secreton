@@ -317,18 +317,23 @@ impl AuditDevice for SyslogAuditDevice {
     }
 }
 
-/// Webhook audit device
+/// Webhook audit device.
+///
+/// Behind the `webhook` feature, so the type cannot exist in a build with no HTTP client
+/// to send with.
+#[cfg(feature = "webhook")]
 pub struct WebhookAuditDevice {
     pub url: String,
 }
 
+#[cfg(feature = "webhook")]
 #[async_trait]
 impl AuditDevice for WebhookAuditDevice {
     async fn log(
         &self,
         event: &AuditEvent,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let _payload = serde_json::json!({
+        let payload = serde_json::json!({
             "id": event.id,
             "timestamp": event.timestamp.to_rfc3339(),
             "event": event.event_type.as_str(),
@@ -339,12 +344,14 @@ impl AuditDevice for WebhookAuditDevice {
             "metadata": event.metadata,
         });
 
-        #[cfg(feature = "reqwest")]
+        // `error_for_status` matters: without it a 500 from the collector counted as a
+        // delivered audit event.
         reqwest::Client::new()
             .post(&self.url)
-            .json(&_payload)
+            .json(&payload)
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         Ok(())
     }

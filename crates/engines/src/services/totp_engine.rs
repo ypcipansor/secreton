@@ -279,7 +279,10 @@ impl TotpEngineService {
             _ => Algorithm::SHA1,
         };
 
-        let digits = metadata_val["digits"].as_u64().unwrap_or(6) as usize;
+        let digits = metadata_val["digits"]
+            .as_u64()
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(6);
         let period = metadata_val["period"].as_u64().unwrap_or(30);
 
         let mut secret_bytes =

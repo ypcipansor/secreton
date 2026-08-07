@@ -525,7 +525,7 @@ pub async fn get_system_metrics(
     };
 
     let cpu = CpuMetrics {
-        cores: num_cpus::get() as u32,
+        cores: u32::try_from(num_cpus::get()).unwrap_or(u32::MAX),
         usage_percent: m.performance.cpu_usage_percent as f64,
         load_average: [
             m.system.load_average_1m as f64,

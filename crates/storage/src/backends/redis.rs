@@ -101,7 +101,7 @@ impl StorageTransaction for RedisTransaction {
                     if let Some(expires_at) = entry.expires_at {
                         let ttl = (expires_at - Utc::now()).num_seconds();
                         if ttl > 0 {
-                            pipe.set_ex(&key, value, ttl as u64);
+                            pipe.set_ex(&key, value, u64::try_from(ttl).unwrap_or(0));
                         } else {
                             // Already expired, ensure it is removed
                             pipe.del(&key);
@@ -182,7 +182,7 @@ impl StorageBackend for RedisBackend {
         if let Some(expires_at) = entry.expires_at {
             let ttl = (expires_at - Utc::now()).num_seconds();
             if ttl > 0 {
-                conn.set_ex::<_, _, ()>(&key, value, ttl as u64)
+                conn.set_ex::<_, _, ()>(&key, value, u64::try_from(ttl).unwrap_or(0))
                     .await
                     .map_err(|e| StorageError::QueryFailed {
                         message: format!("Failed to store entry with TTL: {}", e),
@@ -210,11 +210,15 @@ impl StorageBackend for RedisBackend {
             if let Some(expires_at) = entry.expires_at {
                 let ttl = (expires_at - Utc::now()).num_seconds();
                 if ttl > 0 {
-                    conn.set_ex::<_, _, ()>(&path_key, entry.id.to_string(), ttl as u64)
-                        .await
-                        .map_err(|e| StorageError::QueryFailed {
-                            message: format!("Failed to store path mapping with TTL: {}", e),
-                        })?;
+                    conn.set_ex::<_, _, ()>(
+                        &path_key,
+                        entry.id.to_string(),
+                        u64::try_from(ttl).unwrap_or(0),
+                    )
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to store path mapping with TTL: {}", e),
+                    })?;
                 } else {
                     conn.del::<_, ()>(&path_key)
                         .await

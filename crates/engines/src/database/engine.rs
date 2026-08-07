@@ -95,7 +95,7 @@ impl DatabaseEngine {
 
         match db_type {
             #[cfg(feature = "postgres")]
-            DatabaseType::PostgreSQL => self.revoke_postgres_credentials(username).await,
+            DatabaseType::PostgreSQL => self.revoke_postgres_with_retry(username).await,
             #[cfg(not(feature = "postgres"))]
             DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
                 "this build has no PostgreSQL driver; rebuild secreton-engines with the \
@@ -333,6 +333,41 @@ impl DatabaseEngine {
                 Err(e)
             }
         }
+    }
+
+    /// Revoke, retrying the whole transaction on a transient catalog conflict.
+    ///
+    /// `REASSIGN OWNED` / `DROP OWNED` / `DROP USER` update shared catalog rows, so a
+    /// revocation racing another revocation — or an issue for the same role — fails with
+    /// `tuple concurrently updated`. Retrying individual statements is not an option:
+    /// once one fails the transaction is aborted and every later statement errors too, so
+    /// the retry has to restart from `BEGIN`.
+    #[cfg(feature = "postgres")]
+    async fn revoke_postgres_with_retry(&self, username: &str) -> Result<(), DatabaseError> {
+        let mut attempt = 0u32;
+        loop {
+            match self.revoke_postgres_credentials(username).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt < 4 && Self::is_transient_message(&e) => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(20 * u64::from(attempt)))
+                        .await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Whether a `DatabaseError` describes a transient conflict.
+    ///
+    /// The typed `tokio_postgres::Error` has already been rendered to a string by the
+    /// time it reaches here, so this matches on what `describe_pg_error` produced.
+    #[cfg(feature = "postgres")]
+    fn is_transient_message(e: &DatabaseError) -> bool {
+        let text = e.to_string();
+        text.contains("tuple concurrently updated")
+            || text.contains("deadlock detected")
+            || text.contains("could not serialize access")
     }
 
     /// Generate PostgreSQL credentials

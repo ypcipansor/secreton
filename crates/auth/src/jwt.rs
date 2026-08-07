@@ -217,6 +217,11 @@ impl JwtTokenService {
     /// configured `access_token_duration`.  This allows callers to honour
     /// dynamic configuration (e.g. runtime session-timeout changes) while
     /// keeping the JWT `exp` claim in sync with the session record.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_access_token(
         &self,
         user_id: &str,
@@ -240,6 +245,11 @@ impl JwtTokenService {
     }
 
     /// Create access token with an optional explicit duration.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_access_token_with_duration(
         &self,
         user_id: &str,
@@ -302,6 +312,11 @@ impl JwtTokenService {
     }
 
     /// Create token pair (access + refresh)
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_token_pair(
         &self,
         user_id: &str,
@@ -329,6 +344,11 @@ impl JwtTokenService {
     /// When `duration_override` is `Some`, it is used for the access token's
     /// `exp` claim **and** the returned `expires_in` value, keeping the JWT
     /// lifetime in sync with the session record.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_token_pair_with_duration(
         &self,
         user_id: &str,
@@ -357,7 +377,7 @@ impl JwtTokenService {
             access_token,
             refresh_token,
             token_type: "Bearer".to_string(),
-            expires_in: effective_duration.num_seconds() as u64,
+            expires_in: u64::try_from(effective_duration.num_seconds()).unwrap_or(0),
             metadata: std::collections::HashMap::new(),
         })
     }
@@ -374,8 +394,11 @@ impl JwtTokenService {
             jsonwebtoken::decode::<AccessTokenClaims>(token, &decoding_key, &validation)
                 .map_err(JwtError::JwtError)?;
 
-        // Check expiration
-        let now = Utc::now().timestamp() as usize;
+        // Check expiration. A clock before the epoch wrapping into a huge `now` would
+        // make every token appear expired; wrapping the other way would make every token
+        // appear live. Neither is acceptable for the comparison that decides whether a
+        // credential still works.
+        let now = claim_timestamp(Utc::now().timestamp())?;
         if token_data.claims.claims.exp < now {
             return Err(JwtError::TokenExpired);
         }
@@ -401,8 +424,11 @@ impl JwtTokenService {
             jsonwebtoken::decode::<RefreshTokenClaims>(token, &decoding_key, &validation)
                 .map_err(JwtError::JwtError)?;
 
-        // Check expiration
-        let now = Utc::now().timestamp() as usize;
+        // Check expiration. A clock before the epoch wrapping into a huge `now` would
+        // make every token appear expired; wrapping the other way would make every token
+        // appear live. Neither is acceptable for the comparison that decides whether a
+        // credential still works.
+        let now = claim_timestamp(Utc::now().timestamp())?;
         if token_data.claims.exp < now {
             return Err(JwtError::TokenExpired);
         }

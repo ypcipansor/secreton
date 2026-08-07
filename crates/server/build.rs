@@ -13,6 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // environment.
         #[allow(unsafe_code)]
         unsafe {
+            // The disallowed-methods rule exists to stop runtime configuration going through
+            // the environment. A build script is single-threaded and setting PROTOC is how
+            // prost is told where to find the compiler.
+            #[allow(clippy::disallowed_methods)]
             std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path()?);
         }
 

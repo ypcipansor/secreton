@@ -81,7 +81,10 @@ pub fn build_router(state: AppState) -> Router {
     app.with_state(state.clone())
         .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(cfg.http.max_body_size))
-        .layer(TimeoutLayer::new(Duration::from_secs(cfg.http.timeout)))
+        .layer(TimeoutLayer::with_status_code(
+            http::StatusCode::GATEWAY_TIMEOUT,
+            Duration::from_secs(cfg.http.timeout),
+        ))
         .layer(cors_layer(&cfg))
         .layer(axum_middleware::from_fn_with_state(
             state.rate_limit.clone(),

@@ -187,9 +187,14 @@ impl TelemetryCollector {
                 metrics_guard.performance.network_rx_bytes = network_rx_bytes;
                 metrics_guard.performance.network_tx_bytes = network_tx_bytes;
 
-                metrics_guard.system.load_average_1m = load_avg.one as f32;
-                metrics_guard.system.load_average_5m = load_avg.five as f32;
-                metrics_guard.system.load_average_15m = load_avg.fifteen as f32;
+                // Load averages are reported as f64 and stored as f32 gauges; the lost
+                // precision is far below the noise in the measurement itself.
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    metrics_guard.system.load_average_1m = load_avg.one as f32;
+                    metrics_guard.system.load_average_5m = load_avg.five as f32;
+                    metrics_guard.system.load_average_15m = load_avg.fifteen as f32;
+                }
                 metrics_guard.system.uptime_seconds = uptime_seconds;
 
                 // We can't easily get active connections or database connections here without access to those pools
@@ -396,6 +401,17 @@ impl SystemMetrics {
                     self.custom.insert(metric.name, MetricValue::Counter(value));
                 }
             },
+            // A gauge arrives as `f64` and is stored in the narrower type each field
+            // declares. The conversions are deliberate and lossy by design: a load average
+            // does not need f64 precision, and a byte count is an integer. Rust's
+            // float-to-integer `as` saturates rather than wrapping, so an absurd reading
+            // clamps instead of becoming a small number — which is the behaviour a metric
+            // wants. Not applied more widely than this match.
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )]
             MetricValue::Gauge(value) => match metric.name.as_str() {
                 "response_time_ms" => self.requests.average_response_time_ms = value,
                 "cpu_usage_percent" => self.performance.cpu_usage_percent = value as f32,

@@ -209,11 +209,14 @@ impl MetricsAggregator {
                 continue;
             }
 
+            // `min`/`max` are `None` only for an empty slice, which the guard above
+            // already skipped — taken together rather than unwrapped twice.
+            let (Some(&min), Some(&max)) = (values.iter().min(), values.iter().max()) else {
+                continue;
+            };
             let sum: u64 = values.iter().sum();
-            let count = values.len() as u64;
+            let count = u64::try_from(values.len()).unwrap_or(u64::MAX).max(1);
             let avg = sum / count;
-            let min = *values.iter().min().unwrap();
-            let max = *values.iter().max().unwrap();
 
             aggregated.insert(format!("{}_count", key), MetricValue::Counter(count));
             aggregated.insert(format!("{}_avg", key), MetricValue::Gauge(avg as f64));

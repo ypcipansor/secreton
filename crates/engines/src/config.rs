@@ -499,7 +499,7 @@ pub struct LogRotationConfig {
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
-            bind_address: "127.0.0.1:8080".parse().unwrap(),
+            bind_address: "127.0.0.1:8080".parse().expect("literal socket address"),
             timeout: 30,
             max_body_size: 16 * 1024 * 1024, // 16MB
             keep_alive: 75,
@@ -514,7 +514,7 @@ impl Default for GrpcConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            bind_address: "127.0.0.1:9090".parse().unwrap(),
+            bind_address: "127.0.0.1:9090".parse().expect("literal socket address"),
             timeout: 30,
             max_message_size: 4 * 1024 * 1024, // 4MB
             reflection: false,

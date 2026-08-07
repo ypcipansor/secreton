@@ -117,7 +117,7 @@ impl PolicyEngine {
     /// Build policy from parsed pairs
     fn build_policy_from_pairs(
         &self,
-        mut pairs: pest::iterators::Pairs<Rule>,
+        mut pairs: pest::iterators::Pairs<'_, Rule>,
     ) -> PolicyResult<Policy> {
         let pair = pairs
             .next()
@@ -158,7 +158,7 @@ impl PolicyEngine {
     /// Parse policy header
     fn parse_policy_header(
         &self,
-        pair: pest::iterators::Pair<Rule>,
+        pair: pest::iterators::Pair<'_, Rule>,
         policy: &mut Policy,
     ) -> PolicyResult<()> {
         for inner_pair in pair.into_inner() {
@@ -178,7 +178,7 @@ impl PolicyEngine {
     }
 
     /// Parse rule block
-    fn parse_rule_block(&self, pair: pest::iterators::Pair<Rule>) -> PolicyResult<PolicyRule> {
+    fn parse_rule_block(&self, pair: pest::iterators::Pair<'_, Rule>) -> PolicyResult<PolicyRule> {
         let mut rule = PolicyRule {
             id: Uuid::new_v4(),
             name: format!("rule_{}", Uuid::new_v4().simple()),
@@ -212,7 +212,7 @@ impl PolicyEngine {
     /// Parse condition block
     fn parse_condition_block(
         &self,
-        pair: pest::iterators::Pair<Rule>,
+        pair: pest::iterators::Pair<'_, Rule>,
     ) -> PolicyResult<PolicyCondition> {
         let mut condition = PolicyCondition {
             attribute: String::new(),
@@ -239,7 +239,10 @@ impl PolicyEngine {
     }
 
     /// Parse operator
-    fn parse_operator(&self, pair: pest::iterators::Pair<Rule>) -> PolicyResult<ConditionOperator> {
+    fn parse_operator(
+        &self,
+        pair: pest::iterators::Pair<'_, Rule>,
+    ) -> PolicyResult<ConditionOperator> {
         match pair.as_str() {
             "==" => Ok(ConditionOperator::Equals),
             "!=" => Ok(ConditionOperator::NotEquals),
@@ -257,7 +260,7 @@ impl PolicyEngine {
     }
 
     /// Parse value list
-    fn parse_value_list(&self, pair: pest::iterators::Pair<Rule>) -> PolicyResult<Vec<String>> {
+    fn parse_value_list(&self, pair: pest::iterators::Pair<'_, Rule>) -> PolicyResult<Vec<String>> {
         let mut values = Vec::new();
 
         for inner_pair in pair.into_inner() {
@@ -281,7 +284,7 @@ impl PolicyEngine {
     }
 
     /// Parse string value
-    fn parse_string(&self, pair: pest::iterators::Pair<Rule>) -> Option<String> {
+    fn parse_string(&self, pair: pest::iterators::Pair<'_, Rule>) -> Option<String> {
         let text = pair.as_str();
         if text.starts_with('"') && text.ends_with('"') {
             Some(text[1..text.len() - 1].to_string())

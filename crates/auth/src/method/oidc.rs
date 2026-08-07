@@ -206,7 +206,10 @@ impl AuthMethodImpl for OidcAuthMethod {
                     .unwrap_or("openid profile email")
                     .to_string(),
             };
-            self.set_oidc_config(oidc_config);
+            // Propagated: a malformed URL in the auth-method configuration must fail
+            // initialisation, not be discarded so the method appears enabled with no
+            // client behind it.
+            self.set_oidc_config(oidc_config)?;
         }
 
         self.enabled = true;

@@ -670,7 +670,7 @@ impl AuditLogger {
         // even though matches exist past the cap — operators relying on
         // user/action/path filters should be aware that the cap applies
         // *before* filtering.
-        if entries.len() as u32 >= scan_limit {
+        if u32::try_from(entries.len()).unwrap_or(u32::MAX) >= scan_limit {
             tracing::warn!(
                 "Audit query reached scan limit of {} entries; results may be incomplete. \
                  Pass `AuditFilters.limit` to widen the window or narrow the time range.",

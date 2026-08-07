@@ -36,13 +36,6 @@ impl CliConfig {
         Ok(config)
     }
 
-    /// Defaults plus environment, for when no file exists.
-    pub(crate) fn from_environment() -> Self {
-        let mut config = Self::default();
-        config.apply_environment();
-        config
-    }
-
     fn apply_environment(&mut self) {
         if let Ok(url) = std::env::var("SECRETON_ADDR") {
             self.server_url = url;

@@ -1706,7 +1706,9 @@ pub async fn get_policy(
     // Propagate definitive errors that are NOT "policy not found".
     // PermissionDenied, Internal, Storage, Crypto — all must be
     // returned immediately.
-    let policy_err = policy_result.unwrap_err();
+    let Err(policy_err) = policy_result else {
+        unreachable!("the success branch above returns");
+    };
     if !matches!(policy_err, secret::SecretError::PolicyNotFound { .. }) {
         return Err(match policy_err {
             secret::SecretError::PermissionDenied(msg) => {

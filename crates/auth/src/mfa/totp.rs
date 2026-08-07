@@ -170,12 +170,20 @@ impl TotpService for InMemoryTotpService {
         let enrollments = self.enrollments.read().await;
 
         if let Some(enrollment) = enrollments.get(&request.entity_id) {
-            let current_time = Utc::now().timestamp() as u64;
+            // Signed throughout, then converted once. Going through `as u64` and back
+            // meant a clock at or before the epoch wrapped into an enormous value, and the
+            // skew window then checked nonsense time steps.
+            let current_time = Utc::now().timestamp();
+            let period = i64::from(self.config.period);
 
             // Check current time window and adjacent windows for clock skew
             for time_offset in [-1i64, 0, 1].iter() {
-                let check_time =
-                    (current_time as i64 + time_offset * self.config.period as i64) as u64;
+                let Some(check_time) = current_time
+                    .checked_add(time_offset * period)
+                    .and_then(|t| u64::try_from(t).ok())
+                else {
+                    continue;
+                };
                 let expected_code = Self::generate_totp(
                     &enrollment.secret,
                     check_time,

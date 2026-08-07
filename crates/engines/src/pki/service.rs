@@ -13,12 +13,6 @@ use tokio::sync::RwLock;
 pub struct PkiService {
     /// PKI engine
     engine: Arc<RwLock<PkiEngine>>,
-    /// Service start time
-    start_time: std::sync::Mutex<Option<std::time::Instant>>,
-    /// Service name
-    service_name: String,
-    /// Service version
-    service_version: String,
 }
 
 impl PkiService {
@@ -26,12 +20,7 @@ impl PkiService {
     pub fn new(config: PkiConfig) -> Self {
         let engine = Arc::new(RwLock::new(PkiEngine::new(config)));
 
-        Self {
-            engine,
-            start_time: std::sync::Mutex::new(None),
-            service_name: "PkiService".to_string(),
-            service_version: env!("CARGO_PKG_VERSION").to_string(),
-        }
+        Self { engine }
     }
 
     /// Generate a certificate

@@ -56,7 +56,7 @@ pub enum AlgorithmId {
 }
 
 impl fmt::Display for AlgorithmId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             AlgorithmId::Aes256Gcm => "AES-256-GCM",
             AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305",

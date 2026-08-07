@@ -25,8 +25,10 @@ struct AppState {
 impl MetricsServer {
     /// Create a new metrics server
     pub async fn new(port: u16) -> Result<Self, SecretonError> {
-        let mut config = MetricsConfig::default();
-        config.prometheus_port = port;
+        let config = MetricsConfig {
+            prometheus_port: port,
+            ..MetricsConfig::default()
+        };
 
         Ok(Self {
             config,
@@ -103,10 +105,7 @@ impl MetricPoint {
             name,
             metric_type,
             value,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: unix_secs_source().as_secs(),
             labels: HashMap::new(),
             metadata: HashMap::new(),
         }
@@ -183,4 +182,11 @@ async fn health_handler(State(_state): State<AppState>) -> impl IntoResponse {
         StatusCode::OK,
         format!("{{\"status\":\"{}\"}}", health_status),
     )
+}
+
+/// See the note on the same helper in `health.rs`.
+fn unix_secs_source() -> std::time::Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::ZERO)
 }

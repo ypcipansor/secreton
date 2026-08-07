@@ -309,7 +309,11 @@ impl CryptoService {
             key_info = Some((key_id, key));
         }
 
-        let (key_id, key) = key_info.unwrap();
+        // Set by the cache hit above or by the fetch that follows it; expressed as a
+        // binding rather than an unwrap so the two paths cannot drift apart.
+        let Some((key_id, key)) = key_info else {
+            return Err(anyhow::anyhow!("no active encryption key is available"));
+        };
 
         let encrypted_data = self
             .crypto_engine

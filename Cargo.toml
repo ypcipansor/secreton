@@ -222,8 +222,12 @@ rust_2018_idioms = { level = "warn", priority = -1 }
 all = { level = "warn", priority = -1 }
 # A secrets manager must not take the process down on malformed input, and it must
 # not paper over a failure by substituting a default secret.
+# `unwrap()` is silent about why it cannot fail; `expect("reason")` states the invariant
+# where a reviewer will read it. So the first is warned and the second is not — the
+# remedy for a flagged unwrap is to either handle the error or say, in the message, why
+# there is none. Several real panics in this repository were unwraps whose justifying
+# guard had drifted away or never existed.
 unwrap_used = "warn"
-expect_used = "warn"
 panic = "warn"
 todo = "warn"
 unimplemented = "warn"

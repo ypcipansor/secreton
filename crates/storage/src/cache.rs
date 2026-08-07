@@ -138,7 +138,11 @@ impl CacheBackend for InMemoryCache {
 
         data.insert(key.to_string(), entry);
         stats.entry_count = data.len() as u64;
-        stats.memory_usage_bytes = (stats.memory_usage_bytes as i64 + memory_delta) as u64;
+        stats.memory_usage_bytes = i64::try_from(stats.memory_usage_bytes)
+            .unwrap_or(i64::MAX)
+            .saturating_add(memory_delta)
+            .try_into()
+            .unwrap_or(0);
 
         Ok(())
     }

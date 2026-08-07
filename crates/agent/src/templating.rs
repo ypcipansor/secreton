@@ -132,10 +132,13 @@ impl TemplateManager {
 
         // Add environment variables to context
         let env_vars: HashMap<String, String> = std::env::vars().collect();
-        data_context.insert("env".to_string(), serde_json::to_value(env_vars).unwrap());
+        data_context.insert(
+            "env".to_string(),
+            serde_json::to_value(env_vars).expect("a map of strings always serialises"),
+        );
         data_context.insert(
             "secrets".to_string(),
-            serde_json::to_value(&secrets_map).unwrap(),
+            serde_json::to_value(&secrets_map).expect("a map of strings always serialises"),
         );
 
         // 4. Render
@@ -217,7 +220,11 @@ impl TemplateManager {
 
         // Regex to find: secrets.['(path)'] or secrets.["(path)"]
         // This is a heuristic.
-        let re = regex::Regex::new(r#"secrets\.\[['"]([^'"]+)['"]\]"#).unwrap();
+        // Compiled once; see the note in secreton-auth's template renderer.
+        static SECRET_REF: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r#"secrets\.\[['"]([^'"]+)['"]\]"#).expect("literal pattern")
+        });
+        let re = &*SECRET_REF;
         for cap in re.captures_iter(content) {
             if let Some(path) = cap.get(1) {
                 paths.push(path.as_str().to_string());

@@ -66,3 +66,9 @@ tokio = { workspace = true, features = ["full"] }
 [features]
 default = ["oidc"]
 oidc = ["dep:oauth2", "dep:reqwest"]
+# Webhook audit sink. `WebhookAuditDevice` was gated on `#[cfg(feature = "reqwest")]`, a
+# feature that does not exist — `dep:reqwest` creates no implicit feature — so the POST
+# was compiled out of every build and `log()` returned `Ok(())` having sent nothing. An
+# audit sink that silently drops events is worse than one that is absent, so the type
+# itself now lives behind this feature: a build that cannot send cannot construct one.
+webhook = ["dep:reqwest"]

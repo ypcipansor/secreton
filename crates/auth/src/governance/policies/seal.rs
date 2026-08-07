@@ -294,7 +294,12 @@ impl SealService {
 
             // Clear rekey operation
             let mut rekey_opt = self.rekey_operation.write().await;
-            let completed = rekey_opt.take().unwrap();
+            // The guard at the top of this function established that a rekey was in
+            // progress, but the lock was released in between — expressing it as a binding
+            // means a concurrent completion returns an error rather than panicking.
+            let Some(completed) = rekey_opt.take() else {
+                return Err(SealError::NoRekeyInProgress);
+            };
 
             Ok(completed)
         } else {

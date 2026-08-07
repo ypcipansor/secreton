@@ -294,7 +294,14 @@ impl SecretService {
             }
         }
 
-        let encrypted_entry = encrypted_entry.unwrap();
+        // Both branches above return `SecretNotFound` when this is `None`, but the guard
+        // and the use were fifteen lines apart. Bind it so a future edit to either branch
+        // cannot leave a panic behind.
+        let Some(encrypted_entry) = encrypted_entry else {
+            return Err(SecretError::SecretNotFound {
+                path: path.to_string(),
+            });
+        };
 
         // Try to get decrypted data from cache first (only if fetching current version implicitly)
         // To avoid race conditions where cache has newer data than our DB read, we only use cache if NO specific version was requested.
@@ -409,13 +416,13 @@ impl SecretService {
     /// Create or update secret.
     ///
     /// `ttl` semantics (in seconds):
-    ///   * `Some(n)` — set `expires_at = now + n`.
-    ///   * `None`    — **carry forward** the existing entry's `expires_at`
-    ///                 (or leave it unset for a brand-new entry).
+    /// * `Some(n)` — set `expires_at = now + n`.
+    /// * `None`    — **carry forward** the existing entry's `expires_at`
+    ///   (or leave it unset for a brand-new entry).
     ///
     /// There is intentionally no value of `ttl` that *clears* a previously
     /// set expiration through this public method: the carry-forward branch
-    /// is what allows TTL-unaware callers (gRPC, the warp adapter, internal
+    /// is what allows TTL-unaware callers (gRPC and internal
     /// rollback) to update a secret's data without silently stripping its
     /// expiration.  Callers that genuinely want to remove an expiration from
     /// an existing secret should route through `put_secret_internal` with
@@ -426,12 +433,13 @@ impl SecretService {
     /// API contract for handler authors: the REST `POST /secrets/{path}` and
     /// `PUT /secrets/{path}` endpoints expose three TTL modes via the request
     /// body:
-    ///   * `ttl: Some(n)`                     — set `expires_at = now + n`.
-    ///   * `ttl: None, clear_ttl: false/unset` — carry forward existing TTL.
-    ///   * `ttl: None, clear_ttl: true`        — clear TTL (non-expiring).
+    /// * `ttl: Some(n)`                     — set `expires_at = now + n`.
+    /// * `ttl: None, clear_ttl: false/unset` — carry forward existing TTL.
+    /// * `ttl: None, clear_ttl: true`        — clear TTL (non-expiring).
+    ///
     /// `ttl: Some(_)` together with `clear_ttl: true` is contradictory and
     /// must be rejected by handlers with a 400.  TTL-unaware update paths
-    /// (gRPC, the warp adapter used by the CLI) cannot clear TTLs and will
+    /// (gRPC, and any client that predates the flag) cannot clear TTLs and will
     /// always carry-forward — this is intentional, since silently stripping
     /// expirations on those paths is a worse failure mode than "rotate
     /// through the REST API to drop a TTL".
@@ -452,16 +460,14 @@ impl SecretService {
     /// the TTL and the carry-forward-from-existing logic.
     ///
     /// `expires_at_override` semantics:
-    ///   * `None`              — use the normal `ttl` / carry-forward logic.
-    ///   * `Some(None)`        — explicitly clear the expiration on the new
-    ///                           entry (e.g. rolling back to a historical
-    ///                           version that had no TTL).
-    ///   * `Some(Some(when))`  — set `expires_at = when` exactly (preserves
-    ///                           absolute timestamps from historical versions
-    ///                           without lossy now-relative TTL conversion).
-    #[allow(clippy::too_many_arguments)]
-    /// Write without re-running the caller-facing policy check.
+    /// * `None`              — use the normal `ttl` / carry-forward logic.
+    /// * `Some(None)`        — explicitly clear the expiration on the new entry
+    ///   (e.g. rolling back to a historical version that had no TTL).
+    /// * `Some(Some(when))`  — set `expires_at = when` exactly, preserving absolute
+    ///   timestamps from historical versions without a lossy now-relative conversion.
     ///
+    /// Write without re-running the caller-facing policy check.
+    #[allow(clippy::too_many_arguments)]
     /// `pub` because the lifecycle and rotation handlers in `secreton-server` need it, but
     /// the name is deliberately explicit: callers must have already authorised the write.
     pub async fn put_secret_internal(
@@ -613,7 +619,7 @@ impl SecretService {
         // version.
         //
         // When metadata is None, carry forward existing metadata/tags so that
-        // updates through APIs that don't support metadata (gRPC, warp) don't
+        // updates through APIs that don't support metadata (gRPC) don't
         // silently erase previously stored values.
         if let Some(meta) = &metadata {
             if let Some(desc) = &meta.description {
@@ -658,7 +664,7 @@ impl SecretService {
         //
         // When the caller does not supply a TTL (`ttl == None`), carry
         // forward the existing entry's `expires_at` so that updates
-        // through APIs that don't expose a TTL parameter (gRPC, warp,
+        // through APIs that don't expose a TTL parameter (gRPC,
         // internal rollback) don't silently strip a previously-set
         // expiration.  This mirrors the carry-forward semantics already
         // applied to metadata/tags above.
@@ -674,7 +680,7 @@ impl SecretService {
             // is still in the future.  If the previous version's `expires_at`
             // is already in the past (e.g. the user is updating a secret
             // whose TTL elapsed before the lifecycle sweep ran, or a
-            // TTL-unaware caller — gRPC, warp — is rotating an expired
+            // TTL-unaware caller — gRPC, say — is rotating an expired
             // secret's value), blindly copying the stale timestamp would
             // make the just-written entry immediately eligible for deletion
             // on the next sweep tick, silently destroying the data the user
@@ -723,8 +729,10 @@ impl SecretService {
         if let Some(lifecycle_svc) = &self.lifecycle {
             if let Some(expires_at) = entry.expires_at {
                 let now = chrono::Utc::now();
-                let remaining_secs = (expires_at - now).num_seconds().max(0) as u64;
-                let ttl_days = remaining_secs.div_ceil(86_400).max(1) as u32;
+                let remaining_secs =
+                    u64::try_from((expires_at - now).num_seconds().max(0)).unwrap_or(0);
+                let ttl_days =
+                    u32::try_from(remaining_secs.div_ceil(86_400).max(1)).unwrap_or(u32::MAX);
                 if let Err(e) = lifecycle_svc
                     .manager()
                     .set_expiration(path.to_string(), ttl_days)
@@ -1462,7 +1470,8 @@ impl SecretService {
         let version = metadata
             .get("version")
             .and_then(|v| v.as_u64())
-            .unwrap_or(1) as u32;
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1);
 
         let default_time = chrono::Utc::now().to_rfc3339();
         let created_at_str = metadata
@@ -1542,7 +1551,8 @@ impl SecretService {
                         let version = metadata
                             .get("version")
                             .and_then(|v| v.as_u64())
-                            .unwrap_or(1) as u32;
+                            .and_then(|v| u32::try_from(v).ok())
+                            .unwrap_or(1);
 
                         let default_time = chrono::Utc::now().to_rfc3339();
                         let created_at_str = metadata
@@ -2929,8 +2939,8 @@ mod tests {
             key: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 32]),
             salt: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 16]),
             version: 1,
-            created_at: chrono::Utc::now().timestamp() as u64,
-            rotated_at: chrono::Utc::now().timestamp() as u64,
+            created_at: u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0),
+            rotated_at: u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0),
             active: true,
             metadata: Default::default(),
             expires_at: 0,

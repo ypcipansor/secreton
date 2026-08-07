@@ -182,7 +182,7 @@ impl TotpService for PersistentTotpService {
                 })?;
 
             let current_time = Utc::now();
-            let current_timestamp = current_time.timestamp() as u64;
+            let current_timestamp = u64::try_from(current_time.timestamp()).unwrap_or(0);
 
             // Replay protection: Check last_used against current time window
             // Allow a small grace period or strictly check if used within the same window

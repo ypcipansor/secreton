@@ -98,7 +98,12 @@ impl InMemoryTemplateService {
 
     /// Extract variables from template
     fn extract_variables(template: &str) -> Vec<String> {
-        let re = Regex::new(r"\{\{(\w+)\}\}").unwrap();
+        // Compiled once. The pattern is a literal, so the previous `unwrap` could not
+        // fire — but `Regex::new` was being called on every render, which is the
+        // expensive part of a regex.
+        static PLACEHOLDER: std::sync::LazyLock<Regex> =
+            std::sync::LazyLock::new(|| Regex::new(r"\{\{(\w+)\}\}").expect("literal pattern"));
+        let re = &*PLACEHOLDER;
         re.captures_iter(template)
             .map(|cap| cap[1].to_string())
             .collect::<std::collections::HashSet<_>>()

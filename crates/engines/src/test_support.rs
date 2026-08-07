@@ -1,5 +1,13 @@
 //! Helpers shared by the unit tests in this crate. Only compiled under `cfg(test)`.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "The rule stops runtime configuration reaching the process through the \
+              environment. This module exists to set and clear environment variables for \
+              tests that exercise configuration loading, which is the one place doing so \
+              is the subject rather than a shortcut."
+)]
+
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 const TEST_ROOT_KEY: &str = "test_root_key_must_be_32_bytes_long!!";
@@ -22,7 +30,9 @@ fn env_lock() -> &'static Mutex<()> {
 /// Dropping it releases the lock; it does not restore the previous value, because every
 /// test that cares sets the state it needs on entry.
 #[must_use = "the environment is only serialised while the guard is alive"]
-pub(crate) struct RootKeyEnv(MutexGuard<'static, ()>);
+pub(crate) struct RootKeyEnv(
+    #[allow(dead_code, reason = "held for its Drop")] MutexGuard<'static, ()>,
+);
 
 /// Make the root key present, so services start unsealed.
 pub(crate) fn with_root_key() -> RootKeyEnv {

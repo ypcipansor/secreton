@@ -165,6 +165,14 @@ pub struct AdminService {
     performance: Arc<SecretPerformanceOptimizer>,
     audit: Arc<crate::services::audit::AuditLogger>,
     crypto: Option<Arc<CryptoService>>,
+    /// When this service was constructed.
+    ///
+    /// `get_system_uptime` used to read `/proc/uptime`, which is the *host's* uptime, not
+    /// this process's. A service crash-looping every thirty seconds on a host up for a
+    /// year reported a year — hiding exactly the condition an operator watches uptime to
+    /// catch. Its fallback was worse: `UNIX_EPOCH.elapsed()` is the current Unix
+    /// timestamp, so it reported roughly fifty-five years.
+    started_at: std::time::Instant,
     /// Serializes concurrent raw policy-content writes.
     ///
     /// `update_policy_content` performs a read-modify-write over
@@ -192,6 +200,7 @@ impl AdminService {
             performance,
             audit,
             crypto: None,
+            started_at: std::time::Instant::now(),
             policy_content_write_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
@@ -205,7 +214,7 @@ impl AdminService {
     /// Get system statistics
     pub async fn get_system_stats(&self) -> Result<SystemStats, AdminError> {
         // Get uptime
-        let uptime_seconds = self.get_system_uptime().await;
+        let uptime_seconds = self.get_system_uptime();
 
         // Get user count from auth service
         let total_users = self.auth.get_user_count().await.map_err(AdminError::Auth)?;
@@ -241,22 +250,12 @@ impl AdminService {
         })
     }
 
-    /// Get system uptime in seconds
-    async fn get_system_uptime(&self) -> u64 {
-        // Try to read from /proc/uptime
-        if let Ok(content) = tokio::fs::read_to_string("/proc/uptime").await {
-            if let Some(uptime_str) = content.split_whitespace().next() {
-                if let Ok(uptime) = uptime_str.parse::<f64>() {
-                    return uptime as u64;
-                }
-            }
-        }
-
-        // Fallback: use process start time
-        std::time::SystemTime::UNIX_EPOCH
-            .elapsed()
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
+    /// How long this service has been running, in seconds.
+    ///
+    /// Measured from construction with a monotonic `Instant`, so it is unaffected by
+    /// clock adjustments and reports the service rather than the host.
+    fn get_system_uptime(&self) -> u64 {
+        self.started_at.elapsed().as_secs()
     }
 
     /// Get storage counts (secrets and keys)
@@ -718,8 +717,6 @@ impl AdminService {
             details,
         })
     }
-
-    /// Compact database
 
     /// Get a specific backup
     pub async fn get_backup(&self, backup_id: &str) -> Result<BackupInfo, AdminError> {
@@ -1412,7 +1409,8 @@ impl AdminService {
                     let min_length = config
                         .get("password_policy_min_length")
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(8) as usize;
+                        .and_then(|v| usize::try_from(v).ok())
+                        .unwrap_or(8);
 
                     let require_uppercase = config
                         .get("password_policy_require_uppercase")
@@ -2203,7 +2201,9 @@ impl AdminService {
                 );
                 details.insert(
                     "update_count".to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(updated_count as u64)),
+                    serde_json::Value::Number(serde_json::Number::from(
+                        u64::try_from(updated_count).unwrap_or(0),
+                    )),
                 );
                 details
             },
@@ -3256,10 +3256,33 @@ mod tests {
             .get_system_stats()
             .await
             .expect("stats should be retrieved");
-        assert!(stats.uptime_seconds >= 0);
-        assert!(stats.total_users >= 0);
-        assert!(stats.cache_hit_rate >= 0.0 && stats.cache_hit_rate <= 1.0);
-        assert!(stats.requests_per_minute >= 0.0);
+        // `>= 0` on an unsigned field is a tautology — the assertions below have to
+        // constrain something the code could actually get wrong.
+        assert!(
+            stats.cache_hit_rate >= 0.0 && stats.cache_hit_rate <= 1.0,
+            "cache_hit_rate is a ratio, got {}",
+            stats.cache_hit_rate
+        );
+        assert!(
+            stats.requests_per_minute.is_finite(),
+            "requests_per_minute was {}",
+            stats.requests_per_minute
+        );
+
+        // A freshly-built service has issued nothing and knows of no users; a non-zero
+        // reading here would mean the stats are being read from somewhere else.
+        assert_eq!(
+            stats.total_users, 0,
+            "a new service reported existing users"
+        );
+
+        // Uptime is measured from service start, so it must be plausible rather than
+        // merely non-negative — the field was previously hardcoded elsewhere in this file.
+        assert!(
+            stats.uptime_seconds < 60,
+            "a service created moments ago reported {}s of uptime",
+            stats.uptime_seconds
+        );
     }
 
     #[tokio::test]

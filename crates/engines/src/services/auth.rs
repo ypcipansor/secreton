@@ -495,8 +495,8 @@ impl AuthenticationService {
     ///
     /// The boolean indicates whether MFA was actually verified:
     /// - `true`  — MFA code was validated successfully.
-    /// - `false` — MFA was not required (non-privileged + global MFA off)
-    ///             or TOFU applies (privileged user without MFA configured).
+    /// - `false` — MFA was not required (non-privileged + global MFA off), or TOFU
+    ///   applies (privileged user without MFA configured).
     ///
     /// Callers should set `mfa_required: true` on issued tokens when the
     /// return value is `false` and the user is privileged (TOFU), so that
@@ -510,6 +510,11 @@ impl AuthenticationService {
     /// This helper encapsulates the session object creation, serialization,
     /// encryption, and storage, ensuring consistent metadata handling across
     /// all authentication flows.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a session record's fields, passed individually because the caller \
+                  assembles them from three different sources"
+    )]
     async fn create_and_store_session(
         &self,
         user_id: &str,

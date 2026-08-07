@@ -22,7 +22,7 @@ pub struct PolicyService {
     /// Role storage
     roles: Arc<RwLock<HashMap<Uuid, Role>>>,
     /// Service start time
-    start_time: std::sync::Mutex<Option<std::time::Instant>>,
+    start_time: parking_lot::Mutex<Option<std::time::Instant>>,
     /// Service name
     service_name: String,
     /// Service version
@@ -38,7 +38,7 @@ impl PolicyService {
             engine,
             policies: Arc::new(RwLock::new(HashMap::new())),
             roles: Arc::new(RwLock::new(HashMap::new())),
-            start_time: std::sync::Mutex::new(None),
+            start_time: parking_lot::Mutex::new(None),
             service_name: "PolicyService".to_string(),
             service_version: env!("CARGO_PKG_VERSION").to_string(),
         }
@@ -435,7 +435,7 @@ impl Default for PolicyService {
 
 impl PolicyService {
     pub async fn start(&self) -> Result<(), SecretonError> {
-        let mut start_time = self.start_time.lock().expect("start_time mutex poisoned");
+        let mut start_time = self.start_time.lock();
         *start_time = Some(std::time::Instant::now());
         tracing::info!("PolicyService started");
         Ok(())
@@ -470,7 +470,6 @@ impl PolicyService {
     pub fn uptime_seconds(&self) -> u64 {
         self.start_time
             .lock()
-            .unwrap()
             .map(|start| start.elapsed().as_secs())
             .unwrap_or(0)
     }
