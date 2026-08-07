@@ -33,7 +33,24 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 - **5xx bodies could leak connection strings and file paths.**
 - Two `try_into().unwrap()` calls panicked on short caller-supplied key material.
 
-### Removed
+### Fixed
+
+- Dynamic database credentials now work. The `postgres` and `mysql` features the engine
+  branched on were never declared, so both paths compiled out and the endpoint answered
+  "feature disabled" in every build; the MongoDB and Redis paths returned a generated
+  username and password without creating any account. PostgreSQL and MySQL are now wired
+  with real drivers and integration tests; MongoDB and Redis are gone.
+- Concurrent credential issuance for one role no longer fails with `tuple concurrently
+  updated`, and PostgreSQL errors now carry the SQLSTATE and server message instead of
+  the literal string "db error".
+- Argon2id no longer panics when `parallelism` is absent from a parameter set.
+- JWT `iat`/`exp` conversion is checked; a clock before 1970 used to wrap into a token
+  that never expired.
+- A malformed OIDC URL in configuration is an error rather than a startup panic.
+- The cache and the agent's metrics registry use non-poisoning locks; one panicking
+  holder no longer turns a cache into a process-wide outage.
+
+## Removed
 
 - `warp`. The process ran two HTTP stacks on two ports because warp is on hyper 0.14 and
   Axum on hyper 1.0; `cargo tree -i warp` now finds nothing and there is no duplicate axum.

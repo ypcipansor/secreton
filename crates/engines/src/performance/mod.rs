@@ -75,7 +75,7 @@ impl PerformanceCoordinator {
             .record_metric(
                 "security_operation",
                 operation_name,
-                duration.as_millis() as u64,
+                u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             )
             .await;
     }
@@ -95,7 +95,11 @@ impl PerformanceCoordinator {
 
         // Also aggregate in metrics aggregator
         self.metrics_aggregator
-            .record_metric("secret_access", secret_path, duration.as_millis() as u64)
+            .record_metric(
+                "secret_access",
+                secret_path,
+                u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+            )
             .await;
     }
 

@@ -4,14 +4,14 @@ use crate::handlers::AppState;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    routing::{delete, get, post, put},
+    routing::{get, post},
 };
 use secreton_domain::ApiResponse;
 use secreton_domain::SecretonError;
 pub use secreton_domain::dto::lifecycle::{LifecycleStatistics, SecretLifecycle};
 use secreton_engines::Services;
 use secreton_engines::lifecycle::LifecycleHook;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
     Router::new()

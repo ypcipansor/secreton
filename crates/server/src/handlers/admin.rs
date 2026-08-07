@@ -356,12 +356,13 @@ pub async fn update_user(
 
     // Prevent admins from demoting themselves (removing their own admin role)
     if username == user.username {
-        if let Some(ref roles) = request.roles {
-            if !roles.contains(&"admin".to_string()) && !roles.contains(&"root".to_string()) {
-                return Err(crate::error::ApiError(SecretonError::Authorization {
-                    message: "Cannot remove admin privileges from your own account".to_string(),
-                }));
-            }
+        if let Some(ref roles) = request.roles
+            && !roles.contains(&"admin".to_string())
+            && !roles.contains(&"root".to_string())
+        {
+            return Err(crate::error::ApiError(SecretonError::Authorization {
+                message: "Cannot remove admin privileges from your own account".to_string(),
+            }));
         }
         if let Some(false) = request.enabled {
             return Err(crate::error::ApiError(SecretonError::Authorization {

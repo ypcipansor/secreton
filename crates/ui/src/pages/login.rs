@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::components::Redirect;
 
-use crate::api::{Credentials, Login as LoginAction};
+use crate::api::Login as LoginAction;
 use crate::auth::use_session;
 use crate::components::{Button, Input};
 

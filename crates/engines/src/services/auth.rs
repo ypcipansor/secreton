@@ -4,7 +4,7 @@
 //! delegating actual authentication logic to the auth crate while maintaining
 //! API-specific concerns like session management and storage integration.
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -215,10 +215,10 @@ impl AuthenticationService {
         // Fast path: return cached value if still fresh.
         {
             let cache = self.effective_config_cache.read().await;
-            if let Some(ref cached) = *cache {
-                if cached.fetched_at.elapsed() < EFFECTIVE_CONFIG_CACHE_TTL {
-                    return (cached.session_timeout, cached.mfa_enabled);
-                }
+            if let Some(ref cached) = *cache
+                && cached.fetched_at.elapsed() < EFFECTIVE_CONFIG_CACHE_TTL
+            {
+                return (cached.session_timeout, cached.mfa_enabled);
             }
         }
 
@@ -255,7 +255,7 @@ impl AuthenticationService {
                             {
                                 // Apply the same validation range (60-86400 seconds)
                                 // that the admin service enforces during updates.
-                                if timeout >= 60 && timeout <= 86400 {
+                                if (60..=86400).contains(&timeout) {
                                     session_timeout = timeout;
                                 } else {
                                     tracing::warn!(
@@ -375,18 +375,20 @@ impl AuthenticationService {
         crypto: Arc<CryptoService>,
         config: &AuthConfig,
     ) -> Result<Self> {
+        // Startup validation already requires this, but propagating beats panicking: a
+        // config path that reaches here without a secret should report which setting is
+        // missing, not abort.
+        let jwt_secret = config.jwt.secret.clone().ok_or_else(|| {
+            anyhow!("auth.jwt.secret is not configured; set SECRETON__AUTH__JWT__SECRET")
+        })?;
+
         // Create token service
         let token_config = TokenConfig {
-            jwt_secret: config
-                .jwt
-                .secret
-                .clone()
-                .expect("JWT secret must be configured"),
-            jwt_refresh_secret: config
-                .jwt
-                .secret
-                .clone()
-                .expect("JWT secret must be configured"), // Use same secret as no refresh_secret field
+            jwt_secret: jwt_secret.clone(),
+            // Access and refresh tokens are signed with the same key. See
+            // `validate_refresh_token` — it distinguishes the two by claim shape, not by
+            // key, so this is not a separation boundary.
+            jwt_refresh_secret: jwt_secret,
             access_token_duration: chrono::Duration::from_std(std::time::Duration::from_secs(
                 config.jwt.expiration,
             ))
@@ -707,8 +709,7 @@ impl AuthenticationService {
         if req.username == "root" {
             return Err(secreton_domain::SecretonError::Authentication {
                 message: "Root login disabled via password. Use unseal process.".to_string(),
-            }
-            .into());
+            });
         }
 
         // Check lockout status before attempting login.
@@ -727,40 +728,41 @@ impl AuthenticationService {
                 );
                 return Err(secreton_domain::SecretonError::Internal {
                     message: "An internal error occurred during authentication".to_string(),
-                }
-                .into());
+                });
             }
         };
         let mut stored_user: Option<User> = None;
 
         if let Some(ref entry) = user_entry {
             // Decrypt and deserialize user
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                if let Ok(u) = serde_json::from_slice::<User>(&decrypted) {
-                    stored_user = Some(u.clone());
-                    if let Some(locked_until) = u.locked_until {
-                        if locked_until > chrono::Utc::now() {
-                            if let Some(audit) = &self.audit {
-                                let _ = audit.log_event(crate::services::audit::SecurityEventType::AuthenticationFailure {
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await
+                && let Ok(u) = serde_json::from_slice::<User>(&decrypted)
+            {
+                stored_user = Some(u.clone());
+                if let Some(locked_until) = u.locked_until
+                    && locked_until > chrono::Utc::now()
+                {
+                    if let Some(audit) = &self.audit {
+                        let _ = audit
+                            .log_event(
+                                crate::services::audit::SecurityEventType::AuthenticationFailure {
                                     user: req.username.clone(),
                                     method: "userpass".to_string(),
                                     reason: "Account locked".to_string(),
-                                }).await;
-                            }
-                            return Err(secreton_domain::SecretonError::Authentication {
-                                message: "Account is locked. Please try again later.".to_string(),
-                            }
-                            .into());
-                        }
+                                },
+                            )
+                            .await;
                     }
+                    return Err(secreton_domain::SecretonError::Authentication {
+                        message: "Account is locked. Please try again later.".to_string(),
+                    });
+                }
 
-                    // Also check disabled/inactive status — mirrors authenticate()
-                    if u.disabled || !u.enabled || !u.is_active {
-                        return Err(secreton_domain::SecretonError::Authentication {
-                            message: "Invalid credentials".to_string(),
-                        }
-                        .into());
-                    }
+                // Also check disabled/inactive status — mirrors authenticate()
+                if u.disabled || !u.enabled || !u.is_active {
+                    return Err(secreton_domain::SecretonError::Authentication {
+                        message: "Invalid credentials".to_string(),
+                    });
                 }
             }
         }
@@ -809,20 +811,18 @@ impl AuthenticationService {
                 }
 
                 // Encrypt and update user in storage
-                if let Ok(user_data) = serde_json::to_vec(&u) {
-                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                        if let Some(mut entry) = user_entry {
-                            entry.encrypted_data = encrypted;
-                            let _ = self.storage.store(&entry).await;
-                        }
-                    }
+                if let Ok(user_data) = serde_json::to_vec(&u)
+                    && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+                    && let Some(mut entry) = user_entry
+                {
+                    entry.encrypted_data = encrypted;
+                    let _ = self.storage.store(&entry).await;
                 }
             }
 
             return Err(secreton_domain::SecretonError::Authentication {
                 message: "Invalid credentials".to_string(),
-            }
-            .into());
+            });
         }
 
         let user_info =
@@ -877,8 +877,7 @@ impl AuthenticationService {
             return Err(secreton_domain::SecretonError::Internal {
                 message: "Cannot enforce MFA: no valid user ID available for privileged user"
                     .to_string(),
-            }
-            .into());
+            });
         }
 
         let mfa_verified = match self
@@ -929,13 +928,12 @@ impl AuthenticationService {
                     }
 
                     // Persist the updated counter
-                    if let Ok(user_data) = serde_json::to_vec(&user) {
-                        if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                            if let Some(mut entry) = user_entry {
-                                entry.encrypted_data = encrypted;
-                                let _ = self.storage.store(&entry).await;
-                            }
-                        }
+                    if let Ok(user_data) = serde_json::to_vec(&user)
+                        && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+                        && let Some(mut entry) = user_entry
+                    {
+                        entry.encrypted_data = encrypted;
+                        let _ = self.storage.store(&entry).await;
                     }
                 }
 
@@ -955,8 +953,7 @@ impl AuthenticationService {
                     other => secreton_domain::SecretonError::Authentication {
                         message: other.to_string(),
                     },
-                }
-                .into());
+                });
             }
         };
 
@@ -1215,10 +1212,10 @@ impl AuthenticationService {
         // In-memory fast path.
         {
             let blacklist = self.token_blacklist.read().await;
-            if let Some(expires_at) = blacklist.get(token) {
-                if *expires_at > chrono::Utc::now() {
-                    return true;
-                }
+            if let Some(expires_at) = blacklist.get(token)
+                && *expires_at > chrono::Utc::now()
+            {
+                return true;
             }
         }
 
@@ -1304,10 +1301,10 @@ impl AuthenticationService {
         // idempotent on the storage side (same hash-keyed path).
         {
             let mut blacklist = self.token_blacklist.write().await;
-            if let Some(expires_at) = blacklist.get(refresh_token) {
-                if *expires_at > chrono::Utc::now() {
-                    return Err(AuthError::InvalidToken);
-                }
+            if let Some(expires_at) = blacklist.get(refresh_token)
+                && *expires_at > chrono::Utc::now()
+            {
+                return Err(AuthError::InvalidToken);
             }
             blacklist.insert(refresh_token.to_string(), refresh_expiry);
         }
@@ -1367,15 +1364,15 @@ impl AuthenticationService {
                             }
                         }
                     };
-                    if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
-                        if session.refresh_token.as_deref() == Some(refresh_token) {
-                            // Revoke the old access token
-                            self.revoke_token(session.token.clone(), session.expires_at)
-                                .await;
-                            // Delete the old session record
-                            let _ = self.storage.delete_by_path(&entry.path).await;
-                            break;
-                        }
+                    if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes)
+                        && session.refresh_token.as_deref() == Some(refresh_token)
+                    {
+                        // Revoke the old access token
+                        self.revoke_token(session.token.clone(), session.expires_at)
+                            .await;
+                        // Delete the old session record
+                        let _ = self.storage.delete_by_path(&entry.path).await;
+                        break;
                     }
                 }
             }
@@ -1444,15 +1441,15 @@ impl AuthenticationService {
             );
             return Err(AuthError::InvalidCredentials);
         }
-        if let Some(locked_until) = stored_user.locked_until {
-            if locked_until > chrono::Utc::now() {
-                tracing::warn!(
-                    "Token refresh denied for user '{}': account is locked until {}",
-                    claims.username,
-                    locked_until
-                );
-                return Err(AuthError::InvalidCredentials);
-            }
+        if let Some(locked_until) = stored_user.locked_until
+            && locked_until > chrono::Utc::now()
+        {
+            tracing::warn!(
+                "Token refresh denied for user '{}': account is locked until {}",
+                claims.username,
+                locked_until
+            );
+            return Err(AuthError::InvalidCredentials);
         }
 
         let is_privileged = stored_user.roles.contains(&"admin".to_string())
@@ -1547,8 +1544,7 @@ impl AuthenticationService {
                 user_agent,
                 session_timeout_secs,
             )
-            .await
-            .map_err(AuthError::from)?;
+            .await?;
 
         // Build the User from the data we already loaded from storage
         // (or from the token claims as a fallback).
@@ -1790,10 +1786,10 @@ impl AuthenticationService {
                     }
                 }
             };
-            if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes) {
-                if session.user_id == user_id {
-                    sessions.push(session);
-                }
+            if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes)
+                && session.user_id == user_id
+            {
+                sessions.push(session);
             }
         }
 
@@ -1974,8 +1970,7 @@ impl AuthenticationService {
                 user_agent,
                 session_timeout_secs,
             )
-            .await
-            .map_err(AuthError::from)?;
+            .await?;
 
         Ok(token)
     }
@@ -2061,21 +2056,21 @@ impl AuthenticationService {
         // `login()` so that locked accounts cannot authenticate through this
         // code path.
         if let Some(ref u) = pre_auth_user {
-            if let Some(locked_until) = u.locked_until {
-                if locked_until > chrono::Utc::now() {
-                    if let Some(audit) = &self.audit {
-                        let _ = audit
-                            .log_event(
-                                crate::services::audit::SecurityEventType::AuthenticationFailure {
-                                    user: credentials.username.clone(),
-                                    method: "userpass".to_string(),
-                                    reason: "Account locked".to_string(),
-                                },
-                            )
-                            .await;
-                    }
-                    return Err(AuthError::InvalidCredentials);
+            if let Some(locked_until) = u.locked_until
+                && locked_until > chrono::Utc::now()
+            {
+                if let Some(audit) = &self.audit {
+                    let _ = audit
+                        .log_event(
+                            crate::services::audit::SecurityEventType::AuthenticationFailure {
+                                user: credentials.username.clone(),
+                                method: "userpass".to_string(),
+                                reason: "Account locked".to_string(),
+                            },
+                        )
+                        .await;
                 }
+                return Err(AuthError::InvalidCredentials);
             }
             if u.disabled || !u.enabled || !u.is_active {
                 return Err(AuthError::InvalidCredentials);
@@ -2125,13 +2120,12 @@ impl AuthenticationService {
                 }
 
                 // Encrypt and update user in storage
-                if let Ok(user_data) = serde_json::to_vec(&u) {
-                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                        if let Some(mut entry) = pre_auth_entry.take() {
-                            entry.encrypted_data = encrypted;
-                            let _ = self.storage.store(&entry).await;
-                        }
-                    }
+                if let Ok(user_data) = serde_json::to_vec(&u)
+                    && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+                    && let Some(mut entry) = pre_auth_entry.take()
+                {
+                    entry.encrypted_data = encrypted;
+                    let _ = self.storage.store(&entry).await;
                 }
             }
 
@@ -2173,7 +2167,7 @@ impl AuthenticationService {
         };
 
         // Generate session ID
-        let session_id = Uuid::new_v4().to_string();
+        let _session_id = Uuid::new_v4().to_string();
 
         // Get effective config for session timeout and MFA enforcement
         let (session_timeout_secs, global_mfa_enabled) = self.get_effective_config().await;
@@ -2223,15 +2217,15 @@ impl AuthenticationService {
             Err(mfa_err) => {
                 // Only count `InvalidMfaCode` toward lockout — see the
                 // matching comment in `login()` for the full rationale.
-                if matches!(mfa_err, AuthError::InvalidMfaCode) {
-                    if let Some((mut u, entry)) = stored_user_entry {
-                        u.failed_login_attempts += 1;
+                if matches!(mfa_err, AuthError::InvalidMfaCode)
+                    && let Some((mut u, entry)) = stored_user_entry
+                {
+                    u.failed_login_attempts += 1;
 
-                        if !u.is_privileged() && u.failed_login_attempts >= 5 {
-                            u.locked_until =
-                                Some(chrono::Utc::now() + chrono::Duration::minutes(15));
-                            if let Some(audit) = &self.audit {
-                                let _ = audit
+                    if !u.is_privileged() && u.failed_login_attempts >= 5 {
+                        u.locked_until = Some(chrono::Utc::now() + chrono::Duration::minutes(15));
+                        if let Some(audit) = &self.audit {
+                            let _ = audit
                                 .log_event(
                                     crate::services::audit::SecurityEventType::AuthenticationFailure {
                                         user: credentials.username.clone(),
@@ -2241,17 +2235,16 @@ impl AuthenticationService {
                                     },
                                 )
                                 .await;
-                            }
                         }
+                    }
 
-                        // Persist the updated counter
-                        if let Ok(user_data) = serde_json::to_vec(&u) {
-                            if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                                let mut updated_entry = entry;
-                                updated_entry.encrypted_data = encrypted;
-                                let _ = self.storage.store(&updated_entry).await;
-                            }
-                        }
+                    // Persist the updated counter
+                    if let Ok(user_data) = serde_json::to_vec(&u)
+                        && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+                    {
+                        let mut updated_entry = entry;
+                        updated_entry.encrypted_data = encrypted;
+                        let _ = self.storage.store(&updated_entry).await;
                     }
                 }
 
@@ -2264,18 +2257,18 @@ impl AuthenticationService {
         // successful logins, which would cause premature lockout on the
         // next failure.  This runs AFTER MFA enforcement so that a failed
         // MFA code does not reset the counter.
-        if let Some((mut u, entry)) = stored_user_entry {
-            if u.failed_login_attempts > 0 || u.locked_until.is_some() {
-                u.failed_login_attempts = 0;
-                u.locked_until = None;
+        if let Some((mut u, entry)) = stored_user_entry
+            && (u.failed_login_attempts > 0 || u.locked_until.is_some())
+        {
+            u.failed_login_attempts = 0;
+            u.locked_until = None;
 
-                if let Ok(user_data) = serde_json::to_vec(&u) {
-                    if let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await {
-                        let mut updated_entry = entry;
-                        updated_entry.encrypted_data = encrypted;
-                        let _ = self.storage.store(&updated_entry).await;
-                    }
-                }
+            if let Ok(user_data) = serde_json::to_vec(&u)
+                && let Ok(encrypted) = self.crypto.encrypt_data(&user_data).await
+            {
+                let mut updated_entry = entry;
+                updated_entry.encrypted_data = encrypted;
+                let _ = self.storage.store(&updated_entry).await;
             }
         }
 
@@ -2325,8 +2318,7 @@ impl AuthenticationService {
                 user_agent,
                 session_timeout_secs,
             )
-            .await
-            .map_err(AuthError::from)?;
+            .await?;
 
         let mut result_metadata = std::collections::HashMap::new();
         result_metadata.insert("expires_in".to_string(), token_pair.expires_in.to_string());
@@ -2388,7 +2380,7 @@ impl AuthenticationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ServerConfig;
+
     use crate::services::crypto::CryptoService;
     // use secreton_crypto::SecurityParams;
     use secreton_storage::backends::MemoryBackend;

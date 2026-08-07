@@ -184,7 +184,7 @@ impl SecretPerformanceOptimizer {
     ) {
         let mut metrics = self.metrics.write().await;
         metrics.total_queries += 1;
-        metrics.total_query_time_ms += duration.as_millis() as u64;
+        metrics.total_query_time_ms += u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
 
         if metrics.total_queries > 0 {
             metrics.avg_query_time_ms =

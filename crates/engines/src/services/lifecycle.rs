@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant, interval_at};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::lifecycle::{HookType, LifecycleConfig, LifecycleHook, SecretLifecycleManagement};
 use crate::services::audit::{AuditLogger, SecurityEventType};
@@ -140,10 +140,10 @@ impl LifecycleService {
         let mut hooks = Vec::new();
 
         for entry in entries {
-            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await {
-                if let Ok(hook) = serde_json::from_slice::<LifecycleHook>(&decrypted) {
-                    hooks.push(hook);
-                }
+            if let Ok(decrypted) = self.crypto.decrypt(&entry.encrypted_data).await
+                && let Ok(hook) = serde_json::from_slice::<LifecycleHook>(&decrypted)
+            {
+                hooks.push(hook);
             }
         }
         Ok(hooks)
@@ -246,22 +246,22 @@ impl LifecycleService {
                 continue;
             }
 
-            if let Some(fresh) = self.storage.get_by_id(entry.id).await? {
-                if fresh.is_expired() {
-                    self.manager
-                        .trigger_lifecycle_hook(HookType::PostExpire, &fresh.path)
+            if let Some(fresh) = self.storage.get_by_id(entry.id).await?
+                && fresh.is_expired()
+            {
+                self.manager
+                    .trigger_lifecycle_hook(HookType::PostExpire, &fresh.path)
+                    .await;
+                if self.storage.delete_by_id(fresh.id).await? {
+                    deleted += 1;
+                    self.audit
+                        .log_event(SecurityEventType::SecretDeletion {
+                            secret_path: fresh.path.clone(),
+                            user: LIFECYCLE_AUDIT_ACTOR.to_string(),
+                        })
                         .await;
-                    if self.storage.delete_by_id(fresh.id).await? {
-                        deleted += 1;
-                        self.audit
-                            .log_event(SecurityEventType::SecretDeletion {
-                                secret_path: fresh.path.clone(),
-                                user: LIFECYCLE_AUDIT_ACTOR.to_string(),
-                            })
-                            .await;
-                        self.cleanup_history_for(&fresh.path).await;
-                        let _ = self.manager.remove_expiration(&fresh.path).await;
-                    }
+                    self.cleanup_history_for(&fresh.path).await;
+                    let _ = self.manager.remove_expiration(&fresh.path).await;
                 }
             }
         }

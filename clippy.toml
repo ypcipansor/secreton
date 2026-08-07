@@ -6,3 +6,12 @@ disallowed-methods = [
     { path = "std::env::set_var", reason = "not thread-safe; set configuration through ServerConfig" },
     { path = "std::env::remove_var", reason = "not thread-safe; set configuration through ServerConfig" },
 ]
+
+# `unwrap_used`, `expect_used` and `panic` are warned workspace-wide, and CI runs clippy
+# with `--all-targets -D warnings`. Without these, every test in the repository would need
+# an `#[allow]` attribute to compile under CI — a test that unwraps a known-good fixture is
+# saying "this cannot fail, and if it does I want the test to fail loudly", which is
+# exactly right. The lints stay in force for non-test code, which is where they matter.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

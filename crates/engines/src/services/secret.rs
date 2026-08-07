@@ -274,7 +274,7 @@ impl SecretService {
         // If specific version requested
         if let Some(v) = version {
             // Check if we have a current entry and if it matches the version
-            let current_matches = encrypted_entry.as_ref().map_or(false, |e| e.version == v);
+            let current_matches = encrypted_entry.as_ref().is_some_and(|e| e.version == v);
 
             if !current_matches {
                 // Fetch from history
@@ -300,61 +300,51 @@ impl SecretService {
         // To avoid race conditions where cache has newer data than our DB read, we only use cache if NO specific version was requested.
         let is_current = version.is_none();
 
-        if is_current {
-            if let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
-                // Parse version from cache (first 4 bytes)
-                if cached_data.len() > 4 {
-                    let (ver_bytes, data_bytes) = cached_data.split_at(4);
-                    let cached_ver = u32::from_be_bytes(ver_bytes.try_into().unwrap_or([0; 4]));
+        if is_current && let Ok(Some(cached_data)) = self.performance.get_cached(path).await {
+            // Parse version from cache (first 4 bytes)
+            if cached_data.len() > 4 {
+                let (ver_bytes, data_bytes) = cached_data.split_at(4);
+                let cached_ver = u32::from_be_bytes(ver_bytes.try_into().unwrap_or([0; 4]));
 
-                    // Only use cache if version matches the Source of Truth (DB metadata)
-                    if cached_ver == encrypted_entry.version {
-                        match serde_json::from_slice::<HashMap<String, String>>(data_bytes) {
-                            Ok(secret_map) => {
-                                // Log access in performance optimizer (cache hit)
-                                self.performance
-                                    .record_access(
-                                        path,
-                                        AccessType::Read,
-                                        start_time.elapsed(),
-                                        true,
-                                    )
-                                    .await;
+                // Only use cache if version matches the Source of Truth (DB metadata)
+                if cached_ver == encrypted_entry.version {
+                    match serde_json::from_slice::<HashMap<String, String>>(data_bytes) {
+                        Ok(secret_map) => {
+                            // Log access in performance optimizer (cache hit)
+                            self.performance
+                                .record_access(path, AccessType::Read, start_time.elapsed(), true)
+                                .await;
 
-                                let metadata = SecretMetadata {
-                                    description: encrypted_entry
-                                        .metadata
-                                        .get("description")
-                                        .cloned(),
-                                    tags: encrypted_entry.tags.clone(),
-                                    owner: encrypted_entry.metadata.get("owner").cloned(),
-                                    classification: encrypted_entry
-                                        .metadata
-                                        .get("classification")
-                                        .cloned(),
-                                };
+                            let metadata = SecretMetadata {
+                                description: encrypted_entry.metadata.get("description").cloned(),
+                                tags: encrypted_entry.tags.clone(),
+                                owner: encrypted_entry.metadata.get("owner").cloned(),
+                                classification: encrypted_entry
+                                    .metadata
+                                    .get("classification")
+                                    .cloned(),
+                            };
 
-                                return Ok(SecretData {
-                                    path: path.to_string(),
-                                    data: secret_map,
-                                    metadata,
-                                    version: encrypted_entry.version, // Use actual version from storage
-                                    previous_version: None,
-                                    created_at: encrypted_entry.created_at,
-                                    updated_at: encrypted_entry.updated_at,
-                                    expires_at: encrypted_entry.expires_at,
-                                });
-                            }
-                            Err(_) => {
-                                // If cached data is invalid, remove it
-                                let _ = self.performance.invalidate_cached(path).await;
-                            }
+                            return Ok(SecretData {
+                                path: path.to_string(),
+                                data: secret_map,
+                                metadata,
+                                version: encrypted_entry.version, // Use actual version from storage
+                                previous_version: None,
+                                created_at: encrypted_entry.created_at,
+                                updated_at: encrypted_entry.updated_at,
+                                expires_at: encrypted_entry.expires_at,
+                            });
+                        }
+                        Err(_) => {
+                            // If cached data is invalid, remove it
+                            let _ = self.performance.invalidate_cached(path).await;
                         }
                     }
-                } else {
-                    // Invalid cache format, remove it
-                    let _ = self.performance.invalidate_cached(path).await;
                 }
+            } else {
+                // Invalid cache format, remove it
+                let _ = self.performance.invalidate_cached(path).await;
             }
         }
 
@@ -895,10 +885,10 @@ impl SecretService {
         // report a deleted secret.  The lifecycle manager is best-effort
         // (in-memory only) and may not contain an entry for this path,
         // which is fine — `remove_expiration` is a no-op in that case.
-        if let Some(lifecycle_svc) = &self.lifecycle {
-            if let Err(e) = lifecycle_svc.manager().remove_expiration(path).await {
-                warn!("Failed to clear lifecycle for {}: {}", path, e);
-            }
+        if let Some(lifecycle_svc) = &self.lifecycle
+            && let Err(e) = lifecycle_svc.manager().remove_expiration(path).await
+        {
+            warn!("Failed to clear lifecycle for {}: {}", path, e);
         }
 
         self.performance
@@ -948,16 +938,16 @@ impl SecretService {
         // and immediately delete" behaviour; failing loudly here lets
         // them either re-set a TTL via a follow-up `put_secret` call or
         // pick a different version.
-        if let Some(historical_expires_at) = historical_data.expires_at {
-            if historical_expires_at <= chrono::Utc::now() {
-                return Err(SecretError::InvalidOperation(format!(
-                    "Cannot rollback to version {}: its expires_at ({}) is in the past, \
+        if let Some(historical_expires_at) = historical_data.expires_at
+            && historical_expires_at <= chrono::Utc::now()
+        {
+            return Err(SecretError::InvalidOperation(format!(
+                "Cannot rollback to version {}: its expires_at ({}) is in the past, \
                      which would make the rolled-back secret immediately eligible for \
                      lifecycle cleanup. Update the secret with a fresh TTL after rollback, \
                      or rollback to a different version.",
-                    version, historical_expires_at
-                )));
-            }
+                version, historical_expires_at
+            )));
         }
 
         // 2. Promotion: Put it as the new latest version.
@@ -1882,10 +1872,10 @@ impl SecretService {
                             // mirroring the semantics used in the handler's
                             // merge of raw-content policies so that both
                             // sources filter consistently.
-                            if let Some(f) = filter {
-                                if !policy.name.contains(f) {
-                                    continue;
-                                }
+                            if let Some(f) = filter
+                                && !policy.name.contains(f)
+                            {
+                                continue;
                             }
                             policies.push(policy);
                         }
@@ -1936,37 +1926,37 @@ impl SecretService {
         let mut versions = Vec::new();
         for entry in entries {
             // Extract version from path suffix
-            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
-                if let Ok(version) = v_str.parse::<u32>() {
-                    // Guard against prefix collision: the entry path
-                    // `key_data/{uid}/{key_id}_v{N}` could also be the legacy
-                    // (non-versioned) data of a *different* key whose name is
-                    // literally `{key_id}_v{N}`.  For example, listing versions
-                    // of key "mykey" with prefix `key_data/{uid}/mykey_v` would
-                    // match `key_data/{uid}/mykey_v1` — but that path may belong
-                    // to a pre-existing key named "mykey_v1" (created before the
-                    // `_v{digits}` name validation was added).  Skip the entry
-                    // when such a colliding key exists.
-                    let potential_key_name = format!("{}_v{}", key_id, version);
-                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
-                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
-                        continue;
-                    }
-
-                    versions.push(KeyInfo {
-                        id: current_key.id.clone(),
-                        name: current_key.name.clone(),
-                        key_type: current_key.key_type.clone(),
-                        version,
-                        status: if version == current_key.version {
-                            "active"
-                        } else {
-                            "historical"
-                        }
-                        .to_string(),
-                        created_at: entry.created_at,
-                    });
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix)
+                && let Ok(version) = v_str.parse::<u32>()
+            {
+                // Guard against prefix collision: the entry path
+                // `key_data/{uid}/{key_id}_v{N}` could also be the legacy
+                // (non-versioned) data of a *different* key whose name is
+                // literally `{key_id}_v{N}`.  For example, listing versions
+                // of key "mykey" with prefix `key_data/{uid}/mykey_v` would
+                // match `key_data/{uid}/mykey_v1` — but that path may belong
+                // to a pre-existing key named "mykey_v1" (created before the
+                // `_v{digits}` name validation was added).  Skip the entry
+                // when such a colliding key exists.
+                let potential_key_name = format!("{}_v{}", key_id, version);
+                let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                    continue;
                 }
+
+                versions.push(KeyInfo {
+                    id: current_key.id.clone(),
+                    name: current_key.name.clone(),
+                    key_type: current_key.key_type.clone(),
+                    version,
+                    status: if version == current_key.version {
+                        "active"
+                    } else {
+                        "historical"
+                    }
+                    .to_string(),
+                    created_at: entry.created_at,
+                });
             }
         }
 
@@ -1988,24 +1978,22 @@ impl SecretService {
                 }
             }
         }
-        if check_legacy {
-            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
-                // Only add if we don't already have a v1 entry from the versioned search
-                if !versions.iter().any(|v| v.version == 1) {
-                    versions.push(KeyInfo {
-                        id: current_key.id.clone(),
-                        name: current_key.name.clone(),
-                        key_type: current_key.key_type.clone(),
-                        version: 1,
-                        status: if current_key.version == 1 {
-                            "active"
-                        } else {
-                            "historical"
-                        }
-                        .to_string(),
-                        created_at: entry.created_at,
-                    });
-                }
+        if check_legacy && let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
+            // Only add if we don't already have a v1 entry from the versioned search
+            if !versions.iter().any(|v| v.version == 1) {
+                versions.push(KeyInfo {
+                    id: current_key.id.clone(),
+                    name: current_key.name.clone(),
+                    key_type: current_key.key_type.clone(),
+                    version: 1,
+                    status: if current_key.version == 1 {
+                        "active"
+                    } else {
+                        "historical"
+                    }
+                    .to_string(),
+                    created_at: entry.created_at,
+                });
             }
         }
 
@@ -2060,23 +2048,23 @@ impl SecretService {
 
         for entry in entries {
             // Only delete entries whose suffix after the prefix is a pure version number
-            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix) {
-                if let Ok(version) = v_str.parse::<u32>() {
-                    // Guard against prefix collision: `key_data/{uid}/{key_id}_v{N}`
-                    // could also be the legacy data of a different key named
-                    // `{key_id}_v{N}` (created before the `_v{digits}` name
-                    // validation was added). Skip if such a colliding key exists.
-                    let potential_key_name = format!("{}_v{}", key_id, version);
-                    let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
-                    if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
-                        continue;
-                    }
-
-                    self.storage
-                        .delete_by_id(entry.id)
-                        .await
-                        .map_err(SecretError::Storage)?;
+            if let Some(v_str) = entry.path.strip_prefix(&key_data_prefix)
+                && let Ok(version) = v_str.parse::<u32>()
+            {
+                // Guard against prefix collision: `key_data/{uid}/{key_id}_v{N}`
+                // could also be the legacy data of a different key named
+                // `{key_id}_v{N}` (created before the `_v{digits}` name
+                // validation was added). Skip if such a colliding key exists.
+                let potential_key_name = format!("{}_v{}", key_id, version);
+                let potential_meta = format!("keys/{}/{}", user.id, potential_key_name);
+                if let Ok(Some(_)) = self.storage.get_by_path(&potential_meta).await {
+                    continue;
                 }
+
+                self.storage
+                    .delete_by_id(entry.id)
+                    .await
+                    .map_err(SecretError::Storage)?;
             }
         }
 
@@ -2102,13 +2090,13 @@ impl SecretService {
                 }
             }
         }
-        if safe_to_delete_legacy {
-            if let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await {
-                self.storage
-                    .delete_by_id(entry.id)
-                    .await
-                    .map_err(SecretError::Storage)?;
-            }
+        if safe_to_delete_legacy
+            && let Ok(Some(entry)) = self.storage.get_by_path(&legacy_path).await
+        {
+            self.storage
+                .delete_by_id(entry.id)
+                .await
+                .map_err(SecretError::Storage)?;
         }
 
         // 4. Delete metadata last — all key material is already removed.
@@ -2154,14 +2142,14 @@ impl SecretService {
                 // (JSON with a "key_id" field). If so, the decryption failure is
                 // genuine (e.g. system key unavailable) — propagate the error
                 // instead of silently using the raw JSON bytes as key material.
-                if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(encrypted_data) {
-                    if parsed.get("key_id").is_some() {
-                        return Err(SecretError::Internal(anyhow::anyhow!(
-                            "Failed to decrypt key material (CryptoPacket detected but \
+                if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(encrypted_data)
+                    && parsed.get("key_id").is_some()
+                {
+                    return Err(SecretError::Internal(anyhow::anyhow!(
+                        "Failed to decrypt key material (CryptoPacket detected but \
                              decryption failed — system key may be unavailable): {}",
-                            decrypt_err
-                        )));
-                    }
+                        decrypt_err
+                    )));
                 }
 
                 // Legacy fallback: the key material was stored unencrypted

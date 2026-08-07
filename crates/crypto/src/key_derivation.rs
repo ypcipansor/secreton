@@ -76,6 +76,11 @@ impl KdfParams {
                         "Argon2id iterations too low (minimum 3)".to_string(),
                     ));
                 }
+                if self.parallelism.unwrap_or(0) == 0 {
+                    return Err(CryptoError::KeyGenerationFailed(
+                        "Argon2id requires parallelism of at least 1".to_string(),
+                    ));
+                }
             }
             _ => {
                 return Err(CryptoError::KeyGenerationFailed(format!(
@@ -171,14 +176,30 @@ pub fn derive_key(password: &[u8], params: &KdfParams) -> CryptoResult<DerivedKe
         AlgorithmId::Pbkdf2 => {
             derive_key_pbkdf2(password, &params.salt, params.iterations, params.key_length)?
         }
-        AlgorithmId::Argon2id => derive_key_argon2id(
-            password,
-            &params.salt,
-            params.memory_cost.unwrap(),
-            params.iterations,
-            params.parallelism.unwrap(),
-            params.key_length,
-        )?,
+        AlgorithmId::Argon2id => {
+            // `validate` above bounds `memory_cost` but says nothing about `parallelism`,
+            // so unwrapping both treated one guaranteed value and one unguarded one the
+            // same way — a KDF parameter set omitting `parallelism` panicked the process.
+            // Read them here, where the requirement is visible.
+            let memory_cost = params.memory_cost.ok_or_else(|| {
+                CryptoError::KeyGenerationFailed(
+                    "Argon2id requires memory_cost to be set".to_string(),
+                )
+            })?;
+            let parallelism = params.parallelism.ok_or_else(|| {
+                CryptoError::KeyGenerationFailed(
+                    "Argon2id requires parallelism to be set".to_string(),
+                )
+            })?;
+            derive_key_argon2id(
+                password,
+                &params.salt,
+                memory_cost,
+                params.iterations,
+                parallelism,
+                params.key_length,
+            )?
+        }
         _ => {
             return Err(CryptoError::KeyGenerationFailed(format!(
                 "Unsupported KDF algorithm: {}",
@@ -254,7 +275,9 @@ pub mod stretch {
             use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(master_key);
-            hasher.update((index as u32).to_be_bytes());
+            // Domain separator. It must be injective — two different subkeys hashing the
+            // same input would derive the same key — so widen rather than truncate.
+            hasher.update((index as u64).to_be_bytes());
             hasher.update(info.as_bytes());
 
             let hash = hasher.finalize();
@@ -264,7 +287,9 @@ pub mod stretch {
             while key.len() < key_length {
                 let mut hasher = Sha256::new();
                 hasher.update(&key);
-                hasher.update([key.len() as u8]);
+                // Also a domain separator: as a single byte this wrapped at 256, so a
+                // requested key longer than 256 bytes reused a counter value.
+                hasher.update((key.len() as u64).to_be_bytes());
                 key.extend_from_slice(&hasher.finalize());
             }
 
@@ -356,5 +381,57 @@ mod tests {
         assert_ne!(keys[0], keys[1]);
         assert_ne!(keys[1], keys[2]);
         assert_ne!(keys[0], keys[2]);
+    }
+}
+
+#[cfg(test)]
+mod parameter_tests {
+    use super::*;
+
+    fn argon2id_params() -> KdfParams {
+        KdfParams {
+            algorithm: AlgorithmId::Argon2id,
+            salt: vec![7u8; 16],
+            iterations: 3,
+            memory_cost: Some(65536),
+            parallelism: Some(1),
+            key_length: 32,
+        }
+    }
+
+    /// Argon2id parameters arrive from configuration. `parallelism` was read with
+    /// `unwrap()` while validation only bounded `memory_cost`, so a parameter set that
+    /// omitted it took the process down instead of being rejected.
+    #[test]
+    fn omitted_argon2id_parameters_are_rejected_not_panicked_on() {
+        for (label, params) in [
+            (
+                "parallelism",
+                KdfParams {
+                    parallelism: None,
+                    ..argon2id_params()
+                },
+            ),
+            (
+                "memory_cost",
+                KdfParams {
+                    memory_cost: None,
+                    ..argon2id_params()
+                },
+            ),
+        ] {
+            let err = derive_key(b"correct horse", &params)
+                .expect_err(&format!("missing {label} must be an error"));
+            assert!(
+                matches!(err, CryptoError::KeyGenerationFailed(_)),
+                "missing {label} gave {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_complete_argon2id_parameter_set_still_derives() {
+        let key = derive_key(b"correct horse", &argon2id_params()).expect("derive");
+        assert_eq!(key.key.len(), 32);
     }
 }

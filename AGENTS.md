@@ -93,6 +93,12 @@ hand-written `fetch` — the server function shares its request and response typ
 backend, so a mismatch is a compile error. Any page you add must be reachable from
 `app.rs`; an unrouted page is dead code.
 
+**A database for the credentials engine.** Add a cargo feature on `crates/engines`,
+implement issue *and* revoke, and add integration tests that connect and assert the
+account exists after issuing and is gone after revoking. Returning a generated
+username and password without provisioning anything is not an implementation — two
+backends shipped that way, and a caller cannot tell the difference from a response body.
+
 **A storage backend.** Implement `StorageBackend` in `crates/storage/src/backends/`,
 behind a cargo feature, with integration tests. A backend without tests does not go in.
 Nineteen were deleted for exactly this reason — they compiled, were selectable from

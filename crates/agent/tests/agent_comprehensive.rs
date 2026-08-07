@@ -3,7 +3,7 @@
 //! Tests for the agent's configuration, health checking and templating.
 
 use anyhow::Result;
-use secreton_agent::config::{MetricsConfig, SecurityConfig};
+use secreton_agent::config::MetricsConfig;
 use secreton_agent::{
     config::AgentConfig,
     metrics::{MetricPoint, MetricType},
@@ -138,7 +138,7 @@ mod agent_integration_tests {
     #[test]
     fn test_agent_configuration_validation() -> Result<()> {
         // Test agent configuration validation
-        let valid_configs = vec![
+        let valid_configs = [
             AgentConfig {
                 agent_id: "test-agent-1".to_string(),
                 name: "Test Agent 1".to_string(),

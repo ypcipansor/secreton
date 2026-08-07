@@ -199,19 +199,24 @@ impl SealService {
             .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
         // 7. Format Response
-        let keys_hex: Vec<String> = splits
-            .iter()
-            .map(|s| hex::encode(serde_json::to_vec(s).unwrap())) // We encode the whole Share struct
-            .collect();
-
-        let keys_base64: Vec<String> = splits
+        //
+        // Serialise once and encode the same bytes twice. Each share was previously
+        // serialised separately per encoding, with the failure discharged by `unwrap` — in
+        // the one path where a panic is least recoverable, since the root key is already
+        // stored by this point and a caller that never receives its unseal keys is left
+        // with a vault nobody can open.
+        let encoded: Vec<Vec<u8>> = splits
             .iter()
             .map(|s| {
-                base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    serde_json::to_vec(s).unwrap(),
-                )
+                serde_json::to_vec(s)
+                    .map_err(|e| anyhow!("Failed to serialise an unseal share: {}", e))
             })
+            .collect::<Result<_>>()?;
+
+        let keys_hex: Vec<String> = encoded.iter().map(hex::encode).collect();
+        let keys_base64: Vec<String> = encoded
+            .iter()
+            .map(|bytes| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes))
             .collect();
 
         // 8. Create Root User and Enable MFA

@@ -43,8 +43,12 @@ pub struct CacheStats {
 /// In-memory cache implementation for development/testing
 #[derive(Debug)]
 pub struct InMemoryCache {
-    data: std::sync::RwLock<std::collections::HashMap<String, CacheEntry>>,
-    stats: std::sync::RwLock<CacheStats>,
+    // `parking_lot` rather than `std`: a std lock poisons when a holder panics, and every
+    // call site discharged that with `unwrap()` — so one panic anywhere turned a *cache*
+    // into a process-wide outage. parking_lot does not poison, which is the right
+    // semantics here: stale cache state is recoverable, a dead server is not.
+    data: parking_lot::RwLock<std::collections::HashMap<String, CacheEntry>>,
+    stats: parking_lot::RwLock<CacheStats>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,8 +60,8 @@ struct CacheEntry {
 impl InMemoryCache {
     pub fn new() -> Self {
         Self {
-            data: std::sync::RwLock::new(std::collections::HashMap::new()),
-            stats: std::sync::RwLock::new(CacheStats {
+            data: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            stats: parking_lot::RwLock::new(CacheStats {
                 hit_count: 0,
                 miss_count: 0,
                 hit_rate: 0.0,
@@ -70,8 +74,8 @@ impl InMemoryCache {
 
     fn cleanup_expired(&self) {
         let now = std::time::Instant::now();
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         let original_count = data.len();
         data.retain(|_, entry| entry.expires_at.is_none_or(|expires| expires > now));
@@ -93,8 +97,8 @@ impl CacheBackend for InMemoryCache {
     async fn get(&self, key: &str) -> StorageResult<Option<Vec<u8>>> {
         self.cleanup_expired();
 
-        let data = self.data.read().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let data = self.data.read();
+        let mut stats = self.stats.write();
 
         match data.get(key) {
             Some(entry) => {
@@ -118,8 +122,8 @@ impl CacheBackend for InMemoryCache {
     async fn set(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> StorageResult<()> {
         let expires_at = ttl.map(|duration| std::time::Instant::now() + duration);
 
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         let entry = CacheEntry {
             data: value.clone(),
@@ -140,8 +144,8 @@ impl CacheBackend for InMemoryCache {
     }
 
     async fn delete(&self, key: &str) -> StorageResult<bool> {
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         if let Some(entry) = data.remove(key) {
             stats.entry_count = data.len() as u64;
@@ -160,8 +164,8 @@ impl CacheBackend for InMemoryCache {
     }
 
     async fn clear(&self) -> StorageResult<()> {
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         data.clear();
         stats.entry_count = 0;
@@ -173,7 +177,7 @@ impl CacheBackend for InMemoryCache {
     async fn stats(&self) -> StorageResult<CacheStats> {
         self.cleanup_expired();
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         let total_requests = stats.hit_count + stats.miss_count;
         stats.hit_rate = if total_requests > 0 {
             stats.hit_count as f64 / total_requests as f64

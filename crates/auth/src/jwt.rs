@@ -31,6 +31,11 @@ pub enum JwtError {
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
+
+    /// A claim value could not be represented — in practice, a system clock so far off
+    /// that a timestamp does not fit the claim type.
+    #[error("Invalid claim: {0}")]
+    InvalidClaims(String),
 }
 
 /// Token type enumeration
@@ -115,6 +120,21 @@ pub struct RefreshTokenClaims {
 
     /// Token ID
     pub jti: String,
+}
+
+/// Convert a Unix timestamp to the `usize` the JWT claims carry.
+///
+/// `as usize` silently wrapped a negative timestamp into an enormous positive one, so a
+/// host whose clock was set before 1970 would mint tokens with an `exp` far beyond any
+/// plausible date — credentials that never expire. It also truncates in 2038 on a 32-bit
+/// target. Failing loudly is the only safe behaviour for a value that decides when a
+/// credential stops working.
+fn claim_timestamp(ts: i64) -> Result<usize, JwtError> {
+    usize::try_from(ts).map_err(|_| {
+        JwtError::InvalidClaims(format!(
+            "timestamp {ts} is not representable; check the system clock"
+        ))
+    })
 }
 
 /// Token configuration
@@ -233,8 +253,8 @@ impl JwtTokenService {
     ) -> Result<String, JwtError> {
         let duration = duration_override.unwrap_or(self.config.access_token_duration);
         let now = Utc::now();
-        let iat = now.timestamp() as usize;
-        let exp = (now + duration).timestamp() as usize;
+        let iat = claim_timestamp(now.timestamp())?;
+        let exp = claim_timestamp((now + duration).timestamp())?;
 
         let claims = AccessTokenClaims {
             claims: Claims {
@@ -263,8 +283,8 @@ impl JwtTokenService {
     /// Create refresh token
     pub fn create_refresh_token(&self, user_id: &str, username: &str) -> Result<String, JwtError> {
         let now = Utc::now();
-        let iat = now.timestamp() as usize;
-        let exp = (now + self.config.refresh_token_duration).timestamp() as usize;
+        let iat = claim_timestamp(now.timestamp())?;
+        let exp = claim_timestamp((now + self.config.refresh_token_duration).timestamp())?;
 
         let claims = RefreshTokenClaims {
             sub: user_id.to_string(),
@@ -498,6 +518,32 @@ mod algorithm_tests {
                 "a token declaring alg={forged_alg} was accepted"
             );
         }
+    }
+
+    /// Access and refresh tokens are signed with the same key, so the only thing keeping
+    /// one from being replayed as the other is claim shape: `RefreshTokenClaims` requires
+    /// `jti`, which an access token does not carry. Nothing else enforces that, and an
+    /// access token accepted at the refresh endpoint would let a caller mint fresh token
+    /// pairs indefinitely from a single short-lived credential. Pin it.
+    #[test]
+    fn an_access_token_is_not_accepted_as_a_refresh_token() {
+        let svc = service();
+        let pair = svc
+            .create_token_pair("u1", "alice", None, &[], &[], false, None)
+            .expect("issue");
+
+        assert!(
+            svc.validate_refresh_token(&pair.access_token).is_err(),
+            "an access token was accepted at the refresh path"
+        );
+        assert!(
+            svc.validate_access_token(&pair.refresh_token).is_err(),
+            "a refresh token was accepted at the access path"
+        );
+
+        // Each is still valid on its own path.
+        assert!(svc.validate_access_token(&pair.access_token).is_ok());
+        assert!(svc.validate_refresh_token(&pair.refresh_token).is_ok());
     }
 
     #[test]

@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum DatabaseType {
     MySQL,
     PostgreSQL,
-    MongoDB,
-    Redis,
 }
 
 /// Database role configuration

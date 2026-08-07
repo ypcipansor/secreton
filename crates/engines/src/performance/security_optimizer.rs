@@ -72,7 +72,7 @@ impl SecurityPerformanceOptimizer {
 
     /// Record operation metrics
     pub fn record_operation(&mut self, operation_name: &str, duration: Duration, success: bool) {
-        let duration_ms = duration.as_millis() as u64;
+        let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
         let now = chrono::Utc::now();
 
         let metrics = self
@@ -142,7 +142,7 @@ impl SecurityPerformanceOptimizer {
 
     /// Check if operation is within performance bounds
     pub fn check_performance_bounds(&self, _operation_name: &str, duration: Duration) -> bool {
-        let duration_ms = duration.as_millis() as u64;
+        let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
 
         match self.config.optimization_level {
             OptimizationLevel::MaximumSecurity => duration_ms < 2000, // 2 seconds

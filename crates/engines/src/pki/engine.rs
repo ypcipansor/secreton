@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use der::Decode;
 use der::EncodePem;
 use rcgen::string::Ia5String;
-use rcgen::{CertificateParams, DistinguishedName, DnType, Issuer, SanType}; // Import Issuer trait
+use rcgen::{CertificateParams, DistinguishedName, DnType, SanType}; // Import Issuer trait
 use ssh_key::{Algorithm, PrivateKey};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -183,7 +183,7 @@ impl PkiEngine {
 
             // Create a temporary CA Certificate struct to use as the issuer context
             // We use the loaded CA key pair so the public key matches the signer
-            let ca_cert_struct = ca_params.self_signed(&ca_key_pair).map_err(|e| {
+            let _ca_cert_struct = ca_params.self_signed(&ca_key_pair).map_err(|e| {
                 PkiError::CertificateGeneration(format!("Failed to reconstruct CA context: {}", e))
             })?;
 

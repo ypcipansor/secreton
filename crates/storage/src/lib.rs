@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -368,12 +367,11 @@ pub trait StorageBackend: std::fmt::Debug + Send + Sync {
         let now = Utc::now();
 
         for entry in entries {
-            if let Some(expires_at) = entry.expires_at {
-                if expires_at < now {
-                    if self.delete_by_id(entry.id).await? {
-                        deleted_count += 1;
-                    }
-                }
+            if let Some(expires_at) = entry.expires_at
+                && expires_at < now
+                && self.delete_by_id(entry.id).await?
+            {
+                deleted_count += 1;
             }
         }
 

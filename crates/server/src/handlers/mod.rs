@@ -4,8 +4,6 @@
 //! response. Business logic lives in `secreton-engines`, so the same operation can also be
 //! reached from a gRPC method or a Leptos server function without duplication.
 
-use secreton_engines::Services;
-
 pub mod admin;
 pub mod auth;
 pub mod database;

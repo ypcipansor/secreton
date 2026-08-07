@@ -259,7 +259,7 @@ pub async fn mtls_auth_middleware(
                 )
                 .await;
 
-                let validation_time = start_time.elapsed().as_millis() as u64;
+                let validation_time = u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
 
                 if validation.valid {
                     info!(

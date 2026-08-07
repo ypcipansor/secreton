@@ -175,6 +175,11 @@ tokio-postgres = { version = "0.7", features = [
 ] }
 tokio-postgres-rustls = "0.13"
 deadpool-postgres = "0.14"
+# Dynamic database credentials for MySQL. `default-features = false` drops the bundled
+# TLS stack so the workspace keeps one TLS implementation (rustls) rather than two.
+mysql_async = { version = "0.36", default-features = false, features = [
+    "default-rustls",
+] }
 redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 
 # ---- Config / CLI ----------------------------------------------------------
@@ -204,7 +209,12 @@ criterion = { version = "0.7", features = ["html_reports"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
-missing_debug_implementations = "warn"
+# `missing_debug_implementations` is deliberately not enabled. It fires hardest on
+# `crates/crypto` — KeyManager, the wrapping keys, the encryption engines — and the only
+# way to silence it there is to put a `Debug` impl on a type holding key material. That is
+# precisely what invariant 7 in AGENTS.md forbids. A lint whose remedy is the bug is worse
+# than no lint. Add `#[derive(Debug)]` where it helps diagnostics and the type holds no
+# secret; never to satisfy a lint.
 unreachable_pub = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 

@@ -652,7 +652,6 @@ impl Default for LoggingConfig {
 mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    use std::time::Duration;
 
     fn sample_api_config() -> ServerConfig {
         ServerConfig {
@@ -832,8 +831,6 @@ impl ServerConfig {
     /// falling back to defaults would start the server with a different configuration than
     /// the operator wrote.
     pub fn load(path: &str) -> Result<Self, secreton_domain::SecretonError> {
-        use secreton_domain::SecretonError;
-
         let mut config = if std::path::Path::new(path).exists() {
             let text = std::fs::read_to_string(path)?;
             toml::from_str::<Self>(&text)?

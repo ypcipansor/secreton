@@ -4,7 +4,6 @@ use crate::services::admin::AdminService;
 use crate::services::audit::{AuditLogger, SecurityEventType};
 use crate::services::auth::AuthenticationService;
 use crate::services::crypto::CryptoService;
-use secreton_auth::governance::policies::audit::{AuditEventType, AuditStatus};
 use secreton_storage::{MemoryBackend, QueryParams, StorageBackend};
 use std::sync::Arc;
 
@@ -58,7 +57,7 @@ async fn test_audit_log_persistence() {
     let expiry = entry.expires_at.unwrap();
     let days_diff = (expiry - now).num_days();
     assert!(
-        days_diff >= 2550 && days_diff <= 2560,
+        (2550..=2560).contains(&days_diff),
         "Expiration should be approx 7 years"
     );
 

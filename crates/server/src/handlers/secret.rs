@@ -1633,10 +1633,10 @@ pub async fn list_policies(
                     }
                     // Apply the same `filter` semantics used by
                     // `SecretService::list_policies` (substring match on name).
-                    if let Some(f) = query.filter.as_deref() {
-                        if !name.contains(f) {
-                            continue;
-                        }
+                    if let Some(f) = query.filter.as_deref()
+                        && !name.contains(f)
+                    {
+                        continue;
                     }
                     policy_responses.push(PolicyResponse {
                         name,

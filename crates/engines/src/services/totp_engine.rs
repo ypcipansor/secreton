@@ -146,7 +146,7 @@ impl TotpEngineService {
                 actual_len,
                 MIN_SECRET_BYTES,
                 // ceil(16 * 8 / 5) = 26 base32 characters (no padding)
-                (MIN_SECRET_BYTES * 8 + 4) / 5,
+                (MIN_SECRET_BYTES * 8).div_ceil(5),
             )));
         }
 

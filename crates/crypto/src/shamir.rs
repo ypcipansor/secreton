@@ -8,6 +8,15 @@
 //! - Cryptographically secure random number generation
 //! - Constant-time operations where possible
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "GF(256) arithmetic. Every cast here is bounded by the field size: the log \
+              and exp tables are indexed 0..256, and share indices run 1..=255 by \
+              construction. The casts are exact, not lossy, and rewriting them as \
+              try_from would add a fallible path that can never fail."
+)]
+
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt;

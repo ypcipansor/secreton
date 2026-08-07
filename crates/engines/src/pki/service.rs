@@ -6,8 +6,6 @@ use super::model::{
     CertificateRequest, CertificateResponse, PkiConfig, RevocationRequest, SshKeyRequest,
     SshKeyResponse,
 };
-use async_trait::async_trait;
-use secreton_domain::ServiceHealth;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

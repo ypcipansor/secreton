@@ -225,8 +225,9 @@ impl TransitKey {
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-                let nonce = ChaChaNonce::from(nonce_array);
+                // `nonce_bytes` is already `[u8; 12]`; the round trip through a slice
+                // only created a fallible conversion to unwrap.
+                let nonce = ChaChaNonce::from(nonce_bytes);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {
@@ -256,8 +257,9 @@ impl TransitKey {
 
                 let mut nonce_bytes = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce_bytes);
-                let nonce_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-                let nonce = ChaChaNonce::from(nonce_array);
+                // `nonce_bytes` is already `[u8; 12]`; the round trip through a slice
+                // only created a fallible conversion to unwrap.
+                let nonce = ChaChaNonce::from(nonce_bytes);
 
                 let mut payload = plaintext.to_vec();
                 if let Some(ctx) = context {

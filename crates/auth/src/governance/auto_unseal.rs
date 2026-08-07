@@ -336,14 +336,14 @@ impl Default for AutoUnsealService {
 
 // Add base64 dependency simulation
 mod base64 {
-    pub fn encode(data: &[u8]) -> String {
+    pub(super) fn encode(data: &[u8]) -> String {
         // Simplified base64 encoding
         data.iter()
             .map(|b| format!("{:02x}", b))
             .collect::<String>()
     }
 
-    pub fn decode(s: &str) -> Result<Vec<u8>, String> {
+    pub(super) fn decode(s: &str) -> Result<Vec<u8>, String> {
         // Simplified base64 decoding
         if !s.len().is_multiple_of(2) {
             return Err("Invalid base64".to_string());

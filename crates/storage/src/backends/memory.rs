@@ -241,11 +241,11 @@ impl StorageBackend for MemoryBackend {
 
     async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>> {
         let mut states = self.oauth_states.write();
-        if let Some(oauth_state) = states.get(state) {
-            if oauth_state.expires_at < Utc::now() {
-                states.remove(state);
-                return Ok(None);
-            }
+        if let Some(oauth_state) = states.get(state)
+            && oauth_state.expires_at < Utc::now()
+        {
+            states.remove(state);
+            return Ok(None);
         }
         Ok(states.remove(state))
     }

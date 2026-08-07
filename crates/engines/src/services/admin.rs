@@ -347,12 +347,12 @@ impl AdminService {
                 let count = entries
                     .iter()
                     .filter(|entry| {
-                        entry.metadata.get("log_data").map_or(false, |data| {
+                        entry.metadata.get("log_data").is_some_and(|data| {
                             serde_json::from_str::<serde_json::Value>(data)
                                 .ok()
                                 .and_then(|v| v.get("timestamp")?.as_str().map(String::from))
                                 .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
-                                .map_or(false, |ts| {
+                                .is_some_and(|ts| {
                                     let ts_utc = ts.with_timezone(&chrono::Utc);
                                     ts_utc >= start_time && ts_utc <= end_time
                                 })
@@ -632,7 +632,7 @@ impl AdminService {
         Ok(MaintenanceResult {
             operation: "restore_backup".to_string(),
             success: true,
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             details: {
                 let mut details = HashMap::new();
                 details.insert(
@@ -714,7 +714,7 @@ impl AdminService {
         Ok(MaintenanceResult {
             operation: "garbage_collection".to_string(),
             success,
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             details,
         })
     }
@@ -791,7 +791,7 @@ impl AdminService {
         Ok(MaintenanceResult {
             operation: "compact_database".to_string(),
             success: compaction_result.success,
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             details: compaction_result.details,
         })
     }
@@ -817,7 +817,7 @@ impl AdminService {
         Ok(MaintenanceResult {
             operation: "vacuum_database".to_string(),
             success,
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             details,
         })
     }
@@ -843,7 +843,7 @@ impl AdminService {
             .audit
             .get_entries(filters)
             .await
-            .map_err(|e| AdminError::Internal(e.into()))?;
+            .map_err(AdminError::Internal)?;
 
         let mut logs: Vec<AuditLogEntry> = entries
             .into_iter()
@@ -2002,7 +2002,7 @@ impl AdminService {
         // Validate value types and ranges
         if let Some(val) = config_updates.get("session_timeout") {
             match val.as_u64() {
-                Some(v) if v < 60 || v > 86400 => {
+                Some(v) if !(60..=86400).contains(&v) => {
                     return Err(AdminError::InvalidConfig(
                         "session_timeout must be between 60 and 86400 seconds (1 minute to 24 hours)".to_string(),
                     ));
@@ -2189,7 +2189,7 @@ impl AdminService {
         Ok(MaintenanceResult {
             operation: "update_config".to_string(),
             success: true,
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
             details: {
                 let mut details = HashMap::new();
                 details.insert(
@@ -3194,7 +3194,7 @@ mod tests {
     use super::*;
     use crate::config::AuthConfig;
     use crate::services::audit::AuditLogger;
-    use secreton_crypto::SecurityParams;
+
     use secreton_storage::backends::MemoryBackend;
 
     #[tokio::test]
@@ -3275,14 +3275,14 @@ mod tests {
         let active_key_id = "test_active_key_123";
         let active_key_data = vec![1; 32]; // dummy encrypted key data
 
-        let mut active_key_ref_entry = secreton_storage::SecretEntry::new(
+        let active_key_ref_entry = secreton_storage::SecretEntry::new(
             "sys/keys/active_key_ref".to_string(),
             active_key_id.as_bytes().to_vec(),
             secreton_storage::EncryptionMetadata::default(),
             secreton_storage::SecurityLevel::TopSecret,
             uuid::Uuid::nil(),
         );
-        let mut active_key_entry = secreton_storage::SecretEntry::new(
+        let active_key_entry = secreton_storage::SecretEntry::new(
             format!("sys/keys/{}", active_key_id),
             active_key_data,
             secreton_storage::EncryptionMetadata::default(),

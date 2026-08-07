@@ -22,10 +22,10 @@ fn env_lock() -> &'static Mutex<()> {
 /// Dropping it releases the lock; it does not restore the previous value, because every
 /// test that cares sets the state it needs on entry.
 #[must_use = "the environment is only serialised while the guard is alive"]
-pub struct RootKeyEnv(MutexGuard<'static, ()>);
+pub(crate) struct RootKeyEnv(MutexGuard<'static, ()>);
 
 /// Make the root key present, so services start unsealed.
-pub fn with_root_key() -> RootKeyEnv {
+pub(crate) fn with_root_key() -> RootKeyEnv {
     let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: the mutex guarantees no other test thread is reading or writing the
     // environment while this runs.
@@ -37,7 +37,7 @@ pub fn with_root_key() -> RootKeyEnv {
 }
 
 /// Make the root key absent, so services start sealed.
-pub fn without_root_key() -> RootKeyEnv {
+pub(crate) fn without_root_key() -> RootKeyEnv {
     let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: as above — the mutex serialises all access to this variable.
     #[allow(unsafe_code)]

@@ -65,7 +65,9 @@ impl DatabaseEngine {
             }
             #[cfg(not(feature = "postgres"))]
             DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
-                "PostgreSQL feature disabled".to_string(),
+                "this build has no PostgreSQL driver; rebuild secreton-engines with the \
+                 `postgres` feature to issue PostgreSQL credentials"
+                    .to_string(),
             )),
 
             #[cfg(feature = "mysql")]
@@ -75,14 +77,10 @@ impl DatabaseEngine {
             }
             #[cfg(not(feature = "mysql"))]
             DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
-                "MySQL feature disabled".to_string(),
+                "this build has no MySQL driver; rebuild secreton-engines with the `mysql` \
+                 feature to issue MySQL credentials"
+                    .to_string(),
             )),
-
-            DatabaseType::MongoDB => {
-                self.generate_mongodb_credentials(role_name, &role.sql)
-                    .await
-            }
-            DatabaseType::Redis => self.generate_redis_credentials(role_name).await,
         }
     }
 
@@ -100,18 +98,19 @@ impl DatabaseEngine {
             DatabaseType::PostgreSQL => self.revoke_postgres_credentials(username).await,
             #[cfg(not(feature = "postgres"))]
             DatabaseType::PostgreSQL => Err(DatabaseError::InvalidConfiguration(
-                "PostgreSQL feature disabled".to_string(),
+                "this build has no PostgreSQL driver; rebuild secreton-engines with the \
+                 `postgres` feature to issue PostgreSQL credentials"
+                    .to_string(),
             )),
 
             #[cfg(feature = "mysql")]
             DatabaseType::MySQL => self.revoke_mysql_credentials(username).await,
             #[cfg(not(feature = "mysql"))]
             DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
-                "MySQL feature disabled".to_string(),
+                "this build has no MySQL driver; rebuild secreton-engines with the `mysql` \
+                 feature to issue MySQL credentials"
+                    .to_string(),
             )),
-
-            DatabaseType::MongoDB => self.revoke_mongodb_credentials(username).await,
-            DatabaseType::Redis => self.revoke_redis_credentials(username).await,
         }
     }
 
@@ -232,20 +231,11 @@ impl DatabaseEngine {
         // PostgreSQL identifier quoting (double-quote escaping) is more robust
         // than MySQL string-literal escaping, but we still reject unexpected
         // characters to maintain a strict security posture.
-        if !username
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err(DatabaseError::InvalidConfiguration(format!(
-                "Refusing to revoke PostgreSQL user '{}': username contains \
-                 characters outside the expected [a-zA-Z0-9_] set",
-                username
-            )));
-        }
+        Self::ensure_sql_safe(username, "username to revoke")?;
 
         let pool = self.get_pg_pool().await?;
         let client = pool.get().await.map_err(|e| {
-            DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {}", e))
+            DatabaseError::ConnectionFailed(format!("Failed to get PostgreSQL connection: {e}"))
         })?;
 
         // In PostgreSQL, we must reassign owned objects and revoke all privileges
@@ -264,7 +254,10 @@ impl DatabaseEngine {
         let params: &[&(dyn ToSql + Sync)] = &[];
 
         client.execute("BEGIN", params).await.map_err(|e| {
-            DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e))
+            DatabaseError::QueryFailed(format!(
+                "Failed to begin transaction: {}",
+                Self::describe_pg_error(&e)
+            ))
         })?;
 
         let result = async {
@@ -285,16 +278,25 @@ impl DatabaseEngine {
                 .query_opt("SELECT 1 FROM pg_roles WHERE rolname = $1", &[&username])
                 .await
                 .map_err(|e| {
-                    DatabaseError::QueryFailed(format!("Failed to check role existence: {}", e))
+                    DatabaseError::QueryFailed(format!(
+                        "Failed to check role existence: {}",
+                        Self::describe_pg_error(&e)
+                    ))
                 })?;
             let role_exists = role_exists_row.is_some();
 
             if role_exists {
                 client.execute(&reassign_sql, params).await.map_err(|e| {
-                    DatabaseError::QueryFailed(format!("Failed to reassign owned objects: {}", e))
+                    DatabaseError::QueryFailed(format!(
+                        "Failed to reassign owned objects: {}",
+                        Self::describe_pg_error(&e)
+                    ))
                 })?;
                 client.execute(&drop_owned_sql, params).await.map_err(|e| {
-                    DatabaseError::QueryFailed(format!("Failed to drop owned objects: {}", e))
+                    DatabaseError::QueryFailed(format!(
+                        "Failed to drop owned objects: {}",
+                        Self::describe_pg_error(&e)
+                    ))
                 })?;
             } else {
                 tracing::info!(
@@ -304,7 +306,10 @@ impl DatabaseEngine {
                 );
             }
             client.execute(&drop_user_sql, params).await.map_err(|e| {
-                DatabaseError::QueryFailed(format!("Failed to drop PostgreSQL user: {}", e))
+                DatabaseError::QueryFailed(format!(
+                    "Failed to drop PostgreSQL user: {}",
+                    Self::describe_pg_error(&e)
+                ))
             })?;
             Ok::<(), DatabaseError>(())
         }
@@ -313,7 +318,10 @@ impl DatabaseEngine {
         match result {
             Ok(()) => {
                 client.execute("COMMIT", params).await.map_err(|e| {
-                    DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e))
+                    DatabaseError::QueryFailed(format!(
+                        "Failed to commit transaction: {}",
+                        Self::describe_pg_error(&e)
+                    ))
                 })?;
                 Ok(())
             }
@@ -337,10 +345,10 @@ impl DatabaseEngine {
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
         let password = self.generate_password();
-        let expiration = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::seconds(default_ttl as i64))
-            .unwrap_or_else(chrono::Utc::now)
-            .to_rfc3339();
+        let expiration = Self::expiry_for(default_ttl)?;
+
+        Self::ensure_sql_safe(&username, "generated username")?;
+        Self::ensure_sql_safe(&password, "generated password")?;
 
         // Get connection
         let pool = self.get_pg_pool().await?;
@@ -358,7 +366,12 @@ impl DatabaseEngine {
         client
             .execute(&create_user_sql, params)
             .await
-            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to create user: {}", e)))?;
+            .map_err(|e| {
+                DatabaseError::QueryFailed(format!(
+                    "Failed to create user: {}",
+                    Self::describe_pg_error(&e)
+                ))
+            })?;
 
         // Execute role SQL statements
         let statements = self.replace_placeholders(role_sql, &username, &password, &expiration);
@@ -372,15 +385,27 @@ impl DatabaseEngine {
                 continue;
             }
 
-            if let Err(e) = client.execute(stmt, params).await {
-                // Attempt cleanup on failure (best effort)
-                let _ = client
-                    .execute(&format!("DROP USER IF EXISTS \"{}\"", username), params)
-                    .await;
-                return Err(DatabaseError::QueryFailed(format!(
-                    "Failed to execute role statement '{}': {}",
-                    stmt, e
-                )));
+            let mut attempt = 0;
+            loop {
+                match client.execute(stmt, params).await {
+                    Ok(_) => break,
+                    Err(e) if Self::is_transient_conflict(&e) && attempt < 4 => {
+                        attempt += 1;
+                        tokio::time::sleep(std::time::Duration::from_millis(20 * attempt)).await;
+                    }
+                    Err(e) => {
+                        // Best-effort cleanup: leaving the account behind without its
+                        // grants would be worse than failing outright.
+                        let _ = client
+                            .execute(&format!("DROP USER IF EXISTS \"{}\"", username), params)
+                            .await;
+                        return Err(DatabaseError::QueryFailed(format!(
+                            "Failed to execute role statement '{}': {}",
+                            stmt,
+                            Self::describe_pg_error(&e)
+                        )));
+                    }
+                }
             }
         }
 
@@ -395,6 +420,43 @@ impl DatabaseEngine {
         data.insert("expiration".to_string(), Value::String(expiration));
 
         Ok(data)
+    }
+
+    /// Whether a PostgreSQL error is a transient serialisation conflict worth retrying.
+    ///
+    /// `GRANT ... ON DATABASE` updates a row in a shared catalog, so two callers issuing
+    /// credentials for the same role at the same time collide with `XX000: tuple
+    /// concurrently updated`. Nothing is wrong with either request — one simply has to go
+    /// second. Without this, concurrent issuance for one role failed outright.
+    #[cfg(feature = "postgres")]
+    fn is_transient_conflict(e: &tokio_postgres::Error) -> bool {
+        e.as_db_error().is_some_and(|db| {
+            db.message().contains("tuple concurrently updated")
+                || db.code() == &tokio_postgres::error::SqlState::T_R_SERIALIZATION_FAILURE
+                || db.code() == &tokio_postgres::error::SqlState::T_R_DEADLOCK_DETECTED
+        })
+    }
+
+    /// Render a `tokio_postgres` error usefully.
+    ///
+    /// Its `Display` is the literal string "db error" — the SQLSTATE, the message and the
+    /// server's hint all live in the `DbError` behind it. Reporting the bare Display left
+    /// an operator debugging a role statement with nothing to go on.
+    #[cfg(feature = "postgres")]
+    fn describe_pg_error(e: &tokio_postgres::Error) -> String {
+        match e.as_db_error() {
+            Some(db) => {
+                let mut out = format!("{}: {}", db.code().code(), db.message());
+                if let Some(detail) = db.detail() {
+                    out.push_str(&format!(" ({detail})"));
+                }
+                if let Some(hint) = db.hint() {
+                    out.push_str(&format!(" [hint: {hint}]"));
+                }
+                out
+            }
+            None => e.to_string(),
+        }
     }
 
     fn replace_placeholders(
@@ -421,24 +483,14 @@ impl DatabaseEngine {
         // interpolation below.  The escaping (`replace`) is kept as a
         // secondary safeguard but should never be exercised for valid
         // usernames.
-        if !username
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err(DatabaseError::InvalidConfiguration(format!(
-                "Refusing to revoke MySQL user '{}': username contains \
-                 characters outside the expected [a-zA-Z0-9_] set",
-                username
-            )));
-        }
+        Self::ensure_sql_safe(username, "username to revoke")?;
 
         let pool = self.get_mysql_pool().await?;
         let mut conn = pool.get_conn().await.map_err(|e| {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
         })?;
 
-        let safe_username = username.replace('\\', "\\\\").replace('\'', "''");
-        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", safe_username);
+        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
 
         use mysql_async::prelude::Queryable;
         conn.query_drop(revoke_sql)
@@ -461,22 +513,19 @@ impl DatabaseEngine {
         // MySQL doesn't strictly require valid until in CREATE USER, but we might want to handle expiration
         // by a scheduled job or event scheduler. For now, we just create the user.
         // If the role_sql contains expiration logic (e.g. event creation), it will be executed.
-        let expiration = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::seconds(default_ttl as i64))
-            .unwrap_or_else(chrono::Utc::now)
-            .to_rfc3339();
+        let expiration = Self::expiry_for(default_ttl)?;
+
+        Self::ensure_sql_safe(&username, "generated username")?;
+        Self::ensure_sql_safe(&password, "generated password")?;
 
         let pool = self.get_mysql_pool().await?;
         let mut conn = pool.get_conn().await.map_err(|e| {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
         })?;
 
-        // Create user
-        // We use % as host to allow connections from anywhere (standard for dynamic secrets)
-        // or we could make it configurable. Defaults to %.
-        // WARNING: Ensure username and password are safe from SQL injection.
-        // `generate_username` and `generate_password` use strictly Alphanumeric characters,
-        // so direct interpolation here is safe.
+        // `%` as host, the usual choice for dynamic secrets. Interpolation is safe because
+        // `ensure_sql_safe` above rejects anything outside [A-Za-z0-9_]; MySQL cannot
+        // parameterise CREATE USER.
         let create_user_sql = format!(
             "CREATE USER '{}'@'%' IDENTIFIED BY '{}'",
             username, password
@@ -525,77 +574,26 @@ impl DatabaseEngine {
         Ok(data)
     }
 
-    /// Revoke MongoDB credentials
-    async fn revoke_mongodb_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // MongoDB revocation is not yet implemented. Return a dedicated
-        // error so the caller can distinguish "not implemented" from a
-        // real failure and decide whether to delete the lease record.
-        tracing::warn!(
-            "MongoDB credential revocation not implemented; \
-             user '{}' may still be active on the target database",
-            username
-        );
-        Err(DatabaseError::RevocationNotImplemented(format!(
-            "MongoDB credential revocation not implemented; \
-             user '{}' must be removed manually",
-            username
-        )))
-    }
-
-    /// Generate MongoDB credentials
-    async fn generate_mongodb_credentials(
-        &self,
-        role_name: &str,
-        _role_sql: &str,
-    ) -> Result<HashMap<String, Value>, DatabaseError> {
-        let username = self.generate_username();
-        let password = self.generate_password();
-
-        let mut data = HashMap::new();
-        data.insert("username".to_string(), Value::String(username));
-        data.insert("password".to_string(), Value::String(password));
-        data.insert("role".to_string(), Value::String(role_name.to_string()));
-        data.insert(
-            "connection_string".to_string(),
-            Value::String(self.sanitize_connection_url(&self.config.connection_url)),
-        );
-
-        Ok(data)
-    }
-
-    /// Revoke Redis credentials
-    async fn revoke_redis_credentials(&self, username: &str) -> Result<(), DatabaseError> {
-        // Redis revocation is not yet implemented. Return a dedicated
-        // error so the caller can distinguish "not implemented" from a
-        // real failure and decide whether to delete the lease record.
-        tracing::warn!(
-            "Redis credential revocation not implemented; \
-             user '{}' may still be active on the target database",
-            username
-        );
-        Err(DatabaseError::RevocationNotImplemented(format!(
-            "Redis credential revocation not implemented; \
-             user '{}' must be removed manually",
-            username
-        )))
-    }
-
-    /// Generate Redis credentials
-    async fn generate_redis_credentials(
-        &self,
-        role_name: &str,
-    ) -> Result<HashMap<String, Value>, DatabaseError> {
-        let password = self.generate_password();
-
-        let mut data = HashMap::new();
-        data.insert("password".to_string(), Value::String(password));
-        data.insert("role".to_string(), Value::String(role_name.to_string()));
-        data.insert(
-            "connection_string".to_string(),
-            Value::String(self.sanitize_connection_url(&self.config.connection_url)),
-        );
-
-        Ok(data)
+    /// Reject anything that is not ASCII alphanumeric or `_`.
+    ///
+    /// PostgreSQL cannot parameterise `CREATE USER ... PASSWORD`, so the username and
+    /// password are interpolated into SQL text. The generators below produce only
+    /// alphanumerics, which makes that safe — but "safe because of a comment three
+    /// functions away" is how injection bugs are born. Every value that reaches SQL text
+    /// passes through here first, so changing a charset breaks loudly instead of silently
+    /// opening a hole.
+    fn ensure_sql_safe(value: &str, what: &str) -> Result<(), DatabaseError> {
+        if value.is_empty() {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "refusing to build SQL with an empty {what}"
+            )));
+        }
+        if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "refusing to build SQL: {what} contains characters outside [A-Za-z0-9_]"
+            )));
+        }
+        Ok(())
     }
 
     /// Generate a random username (prefixed with 's_' for safety)
@@ -608,6 +606,28 @@ impl DatabaseEngine {
             .map(char::from)
             .collect();
         format!("s_{}", suffix)
+    }
+
+    /// Expiry timestamp for a credential with `ttl_secs` of life left.
+    ///
+    /// A TTL large enough to overflow the calendar used to fall back to *now*, which
+    /// silently issued a credential that had already expired — the caller got a working
+    /// username and a database account it could not use.
+    fn expiry_for(ttl_secs: u64) -> Result<String, DatabaseError> {
+        let ttl = i64::try_from(ttl_secs).map_err(|_| {
+            DatabaseError::InvalidConfiguration(format!("ttl of {ttl_secs}s is out of range"))
+        })?;
+        // `TimeDelta::seconds` panics out of range rather than returning None, so a TTL
+        // read from configuration could take the process down. `try_seconds` is the
+        // non-panicking form.
+        chrono::TimeDelta::try_seconds(ttl)
+            .and_then(|d| chrono::Utc::now().checked_add_signed(d))
+            .map(|t| t.to_rfc3339())
+            .ok_or_else(|| {
+                DatabaseError::InvalidConfiguration(format!(
+                    "ttl of {ttl_secs}s overflows the representable date range"
+                ))
+            })
     }
 
     /// Generate a random password
@@ -629,10 +649,6 @@ impl DatabaseEngine {
             Ok(DatabaseType::PostgreSQL)
         } else if connection_url.starts_with("mysql://") {
             Ok(DatabaseType::MySQL)
-        } else if connection_url.starts_with("mongodb://") {
-            Ok(DatabaseType::MongoDB)
-        } else if connection_url.starts_with("redis://") {
-            Ok(DatabaseType::Redis)
         } else {
             Err(DatabaseError::UnsupportedDatabaseType(format!(
                 "Unsupported database type in URL: {}",
@@ -679,12 +695,12 @@ impl DatabaseEngine {
     /// Sanitize connection URL to remove credentials
     fn sanitize_connection_url(&self, url: &str) -> String {
         // Simple heuristic: if url contains @, replace user:pass section
-        if let Some(at_pos) = url.rfind('@') {
-            if let Some(scheme_end) = url.find("://") {
-                let prefix = &url[0..scheme_end + 3];
-                let suffix = &url[at_pos + 1..];
-                return format!("{}****:****@{}", prefix, suffix);
-            }
+        if let Some(at_pos) = url.rfind('@')
+            && let Some(scheme_end) = url.find("://")
+        {
+            let prefix = &url[0..scheme_end + 3];
+            let suffix = &url[at_pos + 1..];
+            return format!("{}****:****@{}", prefix, suffix);
         }
         url.to_string()
     }
@@ -694,31 +710,150 @@ impl DatabaseEngine {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_replace_placeholders() {
-        let config = DatabaseConfig::default();
-        let engine = DatabaseEngine::new(config);
+    fn engine() -> DatabaseEngine {
+        DatabaseEngine::new(DatabaseConfig::default())
+    }
 
+    #[test]
+    fn placeholders_are_substituted() {
         let sql =
             "CREATE ROLE \"{{name}}\" WITH PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';";
-        let username = "user123";
-        let password = "secretPassWord";
-        let expiration = "2025-01-01T00:00:00Z";
-
-        let result = engine.replace_placeholders(sql, username, password, expiration);
-
+        let result = engine().replace_placeholders(sql, "user123", "pw", "2025-01-01T00:00:00Z");
         assert_eq!(
             result,
-            "CREATE ROLE \"user123\" WITH PASSWORD 'secretPassWord' VALID UNTIL '2025-01-01T00:00:00Z';"
+            "CREATE ROLE \"user123\" WITH PASSWORD 'pw' VALID UNTIL '2025-01-01T00:00:00Z';"
+        );
+        assert!(!result.contains("{{"), "a placeholder survived: {result}");
+    }
+
+    /// The generators are the only reason interpolating into SQL text is safe. If someone
+    /// widens the charset — to add symbols to a password, say — this fails rather than
+    /// quietly creating an injection point in `CREATE USER`.
+    #[test]
+    fn generated_credentials_never_leave_the_sql_safe_charset() {
+        let e = engine();
+        for _ in 0..1_000 {
+            let username = e.generate_username();
+            let password = e.generate_password();
+
+            assert!(username.starts_with("s_"), "username lost its prefix");
+            assert_eq!(username.len(), 18);
+            assert_eq!(password.len(), 32);
+
+            DatabaseEngine::ensure_sql_safe(&username, "username")
+                .expect("generated username must be SQL-safe");
+            DatabaseEngine::ensure_sql_safe(&password, "password")
+                .expect("generated password must be SQL-safe");
+        }
+    }
+
+    #[test]
+    fn credentials_are_not_reused_between_calls() {
+        let e = engine();
+        let a = e.generate_password();
+        let b = e.generate_password();
+        assert_ne!(a, b, "two calls returned the same password");
+    }
+
+    #[test]
+    fn sql_unsafe_values_are_refused() {
+        for hostile in [
+            "bob'; DROP TABLE users; --",
+            "bob\"; DROP TABLE users; --",
+            "bob--",
+            "bob;",
+            "bob bob",
+            "bob\\",
+            "böb",
+            "",
+        ] {
+            assert!(
+                DatabaseEngine::ensure_sql_safe(hostile, "test value").is_err(),
+                "accepted a value that would reach SQL text: {hostile:?}"
+            );
+        }
+        DatabaseEngine::ensure_sql_safe("s_aB3_9", "test value").expect("ordinary name");
+    }
+
+    /// An overflowing TTL used to fall back to `Utc::now()`, handing back a credential
+    /// that had already expired while reporting success.
+    #[test]
+    fn an_overflowing_ttl_is_an_error_not_an_expired_credential() {
+        assert!(DatabaseEngine::expiry_for(u64::MAX).is_err());
+        assert!(DatabaseEngine::expiry_for(i64::MAX as u64).is_err());
+
+        let ok = DatabaseEngine::expiry_for(3600).expect("an hour is representable");
+        let parsed = chrono::DateTime::parse_from_rfc3339(&ok).expect("rfc3339");
+        assert!(
+            parsed > chrono::Utc::now(),
+            "expiry must be in the future, got {ok}"
         );
     }
 
     #[test]
-    fn test_generate_username_format() {
-        let config = DatabaseConfig::default();
-        let engine = DatabaseEngine::new(config);
-        let username = engine.generate_username();
-        assert!(username.starts_with("s_"));
-        assert_eq!(username.len(), 18); // s_ + 16 chars
+    fn only_databases_the_engine_can_provision_are_detected() {
+        let e = engine();
+        assert_eq!(
+            e.detect_database_type("postgresql://h/db").unwrap(),
+            DatabaseType::PostgreSQL
+        );
+        assert_eq!(
+            e.detect_database_type("postgres://h/db").unwrap(),
+            DatabaseType::PostgreSQL
+        );
+        assert_eq!(
+            e.detect_database_type("mysql://h/db").unwrap(),
+            DatabaseType::MySQL
+        );
+
+        // These used to route to code paths that invented a username and password and
+        // returned them without creating any account. Detection must refuse them.
+        for unsupported in [
+            "mongodb://h/db",
+            "redis://h",
+            "sqlite://local.db",
+            "http://h",
+            "",
+        ] {
+            assert!(
+                e.detect_database_type(unsupported).is_err(),
+                "accepted a database it cannot provision: {unsupported:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_returned_connection_string_carries_no_password() {
+        let e = engine();
+        let sanitised =
+            e.sanitize_connection_url("postgresql://admin:hunter2@db.internal:5432/app");
+        assert!(
+            !sanitised.contains("hunter2"),
+            "password leaked: {sanitised}"
+        );
+        assert!(!sanitised.contains("admin"), "username leaked: {sanitised}");
+        assert!(sanitised.contains("db.internal:5432/app"), "{sanitised}");
+
+        // A password containing '@' must not defeat the split.
+        let awkward = e.sanitize_connection_url("postgresql://admin:p@ss@db.internal/app");
+        assert!(!awkward.contains("p@ss"), "password leaked: {awkward}");
+        assert!(awkward.contains("db.internal/app"), "{awkward}");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_engine_issues_nothing() {
+        // `new` leaves the engine disabled. Issuing from it would mean handing out a
+        // credential for a database the operator has not configured.
+        let e = engine();
+        let err = e.generate_credentials("any-role").await.unwrap_err();
+        assert!(matches!(err, DatabaseError::EngineDisabled), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_role_is_refused_before_any_connection_is_made() {
+        let mut e = engine();
+        e.enabled = true;
+        let err = e.generate_credentials("no-such-role").await.unwrap_err();
+        assert!(matches!(err, DatabaseError::RoleNotFound(_)), "{err:?}");
     }
 }

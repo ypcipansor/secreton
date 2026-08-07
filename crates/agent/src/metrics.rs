@@ -2,11 +2,12 @@
 
 use crate::config::MetricsConfig;
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use parking_lot::RwLock;
 use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Metrics server for serving Prometheus metrics
@@ -134,7 +135,7 @@ pub struct MetricSeries {
 /// HTTP handler for /metrics endpoint
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     // Generate Prometheus format metrics
-    let metrics = state.metrics.read().unwrap();
+    let metrics = state.metrics.read();
     let mut prometheus_output = String::new();
 
     for (_, series) in metrics.iter() {

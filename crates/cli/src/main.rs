@@ -175,14 +175,12 @@ async fn main() -> Result<()> {
     }
 
     // Load token from file if not in config
-    if config.token.is_none() {
-        if let Some(path) = get_token_path() {
-            if path.exists() {
-                if let Ok(token) = tokio::fs::read_to_string(path).await {
-                    config.token = Some(token.trim().to_string());
-                }
-            }
-        }
+    if config.token.is_none()
+        && let Some(path) = get_token_path()
+        && path.exists()
+        && let Ok(token) = tokio::fs::read_to_string(path).await
+    {
+        config.token = Some(token.trim().to_string());
     }
 
     // Override token from env var

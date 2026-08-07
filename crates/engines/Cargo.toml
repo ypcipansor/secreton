@@ -61,6 +61,26 @@ x509-parser.workspace = true
 # Tokens
 jsonwebtoken.workspace = true
 
+# Dynamic database credentials. Optional, because a deployment that does not issue
+# database credentials should not link a database driver — and because the engine
+# refuses to serve a database whose driver was not compiled in, rather than inventing
+# a credential for it.
+deadpool-postgres = { workspace = true, optional = true }
+tokio-postgres = { workspace = true, optional = true }
+mysql_async = { workspace = true, optional = true }
+
+[features]
+default = ["postgres"]
+# These gate the dynamic-database-credentials engine. They previously appeared in
+# `#[cfg(feature = ...)]` attributes without ever being declared here, so every
+# postgres and mysql code path in the engine was silently compiled out and the
+# endpoint answered "PostgreSQL feature disabled" in every build ever produced.
+postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
+mysql = ["dep:mysql_async"]
+
 [dev-dependencies]
 pretty_assertions.workspace = true
+# The postgres integration tests connect directly to verify the account the engine
+# claims to have created actually exists.
+tokio-postgres.workspace = true
 tokio = { workspace = true, features = ["full"] }

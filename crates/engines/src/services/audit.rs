@@ -653,13 +653,13 @@ impl AuditLogger {
         // Flush buffered events to storage before querying so recent entries are visible.
         // Only flush when auditing is enabled — when disabled, no devices are registered
         // so there is nothing to flush, but we still want to query historical data.
-        if self.enabled {
-            if let Err(e) = self.service.flush().await {
-                tracing::warn!(
-                    "Audit flush failed before query, recent events may be missing: {}",
-                    e
-                );
-            }
+        if self.enabled
+            && let Err(e) = self.service.flush().await
+        {
+            tracing::warn!(
+                "Audit flush failed before query, recent events may be missing: {}",
+                e
+            );
         }
 
         let entries = self.storage.list(&query_params).await?;
@@ -680,65 +680,65 @@ impl AuditLogger {
         let mut results = Vec::new();
 
         for entry in entries {
-            if let Some(log_data) = entry.metadata.get("log_data") {
-                if let Ok(event) = serde_json::from_str::<AuditEvent>(log_data) {
-                    // Apply filters
-                    if let Some(user) = &filters.user {
-                        if &event.user != user {
-                            continue;
-                        }
-                    }
-                    if let Some(action) = &filters.action {
-                        if &event.operation != action {
-                            continue;
-                        }
-                    }
-                    if let Some(path) = &filters.path {
-                        if &event.resource != path {
-                            continue;
-                        }
-                    }
-                    if let Some(start) = filters.start_date {
-                        if event.timestamp < start {
-                            continue;
-                        }
-                    }
-                    if let Some(end) = filters.end_date {
-                        if event.timestamp > end {
-                            continue;
-                        }
-                    }
-
-                    let id = Uuid::parse_str(&event.id).unwrap_or_default();
-                    let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
-                    let original_user = event.user.clone();
-                    let timestamp = event.timestamp;
-                    let action = event.operation.clone();
-                    let resource_type = event.resource.clone();
-                    let ip_address = event.client_ip.clone();
-                    let success = matches!(event.status, AuditStatus::Success);
-                    let details: HashMap<String, serde_json::Value> = event
-                        .metadata
-                        .into_iter()
-                        .map(|(k, v)| (k, serde_json::Value::String(v)))
-                        .collect();
-                    results.push(RichAuditEntry {
-                        original_user,
-                        entry: secreton_storage::models::storage_models::AuditEntry {
-                            id,
-                            timestamp,
-                            user_id,
-                            action,
-                            resource_type,
-                            resource_id: None,
-                            details,
-                            ip_address,
-                            user_agent: None,
-                            success,
-                            error_message: None,
-                        },
-                    });
+            if let Some(log_data) = entry.metadata.get("log_data")
+                && let Ok(event) = serde_json::from_str::<AuditEvent>(log_data)
+            {
+                // Apply filters
+                if let Some(user) = &filters.user
+                    && &event.user != user
+                {
+                    continue;
                 }
+                if let Some(action) = &filters.action
+                    && &event.operation != action
+                {
+                    continue;
+                }
+                if let Some(path) = &filters.path
+                    && &event.resource != path
+                {
+                    continue;
+                }
+                if let Some(start) = filters.start_date
+                    && event.timestamp < start
+                {
+                    continue;
+                }
+                if let Some(end) = filters.end_date
+                    && event.timestamp > end
+                {
+                    continue;
+                }
+
+                let id = Uuid::parse_str(&event.id).unwrap_or_default();
+                let user_id = Uuid::parse_str(&event.user).unwrap_or_default();
+                let original_user = event.user.clone();
+                let timestamp = event.timestamp;
+                let action = event.operation.clone();
+                let resource_type = event.resource.clone();
+                let ip_address = event.client_ip.clone();
+                let success = matches!(event.status, AuditStatus::Success);
+                let details: HashMap<String, serde_json::Value> = event
+                    .metadata
+                    .into_iter()
+                    .map(|(k, v)| (k, serde_json::Value::String(v)))
+                    .collect();
+                results.push(RichAuditEntry {
+                    original_user,
+                    entry: secreton_storage::models::storage_models::AuditEntry {
+                        id,
+                        timestamp,
+                        user_id,
+                        action,
+                        resource_type,
+                        resource_id: None,
+                        details,
+                        ip_address,
+                        user_agent: None,
+                        success,
+                        error_message: None,
+                    },
+                });
             }
         }
 

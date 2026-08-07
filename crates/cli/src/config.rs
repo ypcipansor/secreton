@@ -6,7 +6,7 @@ use secreton_domain::{Result as SecretonResult, SecretonError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CliConfig {
+pub(crate) struct CliConfig {
     pub server_url: String,
     /// Bearer token. Written to the config file only if the user asks; otherwise it is
     /// read from `SECRETON_TOKEN` so a token need not sit on disk.
@@ -28,7 +28,7 @@ impl Default for CliConfig {
 
 impl CliConfig {
     /// Read configuration from `path`, then let the environment override it.
-    pub fn load_from_file(path: impl AsRef<Path>) -> SecretonResult<Self> {
+    pub(crate) fn load_from_file(path: impl AsRef<Path>) -> SecretonResult<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut config: Self = toml::from_str(&content)?;
         config.apply_environment();
@@ -37,7 +37,7 @@ impl CliConfig {
     }
 
     /// Defaults plus environment, for when no file exists.
-    pub fn from_environment() -> Self {
+    pub(crate) fn from_environment() -> Self {
         let mut config = Self::default();
         config.apply_environment();
         config
@@ -54,7 +54,7 @@ impl CliConfig {
         }
     }
 
-    pub fn validate(&self) -> SecretonResult<()> {
+    pub(crate) fn validate(&self) -> SecretonResult<()> {
         if self.server_url.is_empty() {
             return Err(SecretonError::Configuration {
                 message: "server_url cannot be empty".to_string(),

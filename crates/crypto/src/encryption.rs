@@ -1,10 +1,36 @@
 //! Symmetric encryption implementations
 
-use crate::{AlgorithmId, CryptoError, CryptoResult, generate_random_bytes};
+use crate::{AlgorithmId, CryptoError, CryptoResult};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use chacha20poly1305::ChaCha20Poly1305;
+use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+
+/// A fresh 12-byte AEAD nonce.
+///
+/// Returns the array rather than a `Vec`, so the caller has nothing left to unwrap. The
+/// previous shape asked for 12 random bytes and then re-derived the length with a fallible
+/// conversion it discharged with `unwrap`.
+fn random_nonce() -> CryptoResult<[u8; 12]> {
+    let mut nonce = [0u8; 12];
+    OsRng
+        .try_fill_bytes(&mut nonce)
+        .map_err(|_| CryptoError::RandomGenerationFailed)?;
+    Ok(nonce)
+}
+
+/// Read a stored nonce, rejecting one that is not 12 bytes.
+///
+/// The nonce comes off disk with the ciphertext, so its length is not something this
+/// process controls. Length check and conversion are one expression: separating them let a
+/// future edit remove the guard while leaving the `unwrap` that depended on it.
+fn nonce_from(bytes: &[u8]) -> CryptoResult<[u8; 12]> {
+    bytes
+        .try_into()
+        .map_err(|_| CryptoError::InvalidNonceLength)
+}
 
 /// Encrypted data container
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,10 +64,9 @@ impl SymmetricCipher for Aes256GcmCipher {
             actual: key.len(),
         })?;
 
-        // Generate random nonce
-        let nonce_bytes = generate_random_bytes(12)?;
-        let nonce_bytes_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-        let nonce = Nonce::from(nonce_bytes_array);
+        let nonce_array = random_nonce()?;
+        let nonce = Nonce::from(nonce_array);
+        let nonce_bytes = nonce_array.to_vec();
 
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("AES-GCM encryption failed: {}", e))
@@ -63,16 +88,11 @@ impl SymmetricCipher for Aes256GcmCipher {
             });
         }
 
-        if encrypted.nonce.len() != 12 {
-            return Err(CryptoError::InvalidNonceLength);
-        }
-
         let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptoError::InvalidKeyLength {
             expected: 32,
             actual: key.len(),
         })?;
-        let nonce_array: [u8; 12] = encrypted.nonce.as_slice().try_into().unwrap();
-        let nonce = Nonce::from(nonce_array);
+        let nonce = Nonce::from(nonce_from(&encrypted.nonce)?);
 
         cipher
             .decrypt(&nonce, encrypted.ciphertext.as_ref())
@@ -98,10 +118,9 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
                 actual: key.len(),
             })?;
 
-        // Generate random nonce
-        let nonce_bytes = generate_random_bytes(12)?;
-        let nonce_bytes_array: [u8; 12] = nonce_bytes.as_slice().try_into().unwrap();
-        let nonce = Nonce::from(nonce_bytes_array);
+        let nonce_array = random_nonce()?;
+        let nonce = Nonce::from(nonce_array);
+        let nonce_bytes = nonce_array.to_vec();
 
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
             CryptoError::EncryptionFailed(format!("ChaCha20-Poly1305 encryption failed: {}", e))
@@ -132,8 +151,7 @@ impl SymmetricCipher for ChaCha20Poly1305Cipher {
                 expected: 32,
                 actual: key.len(),
             })?;
-        let nonce_array: [u8; 12] = encrypted.nonce.as_slice().try_into().unwrap();
-        let nonce = Nonce::from(nonce_array);
+        let nonce = Nonce::from(nonce_from(&encrypted.nonce)?);
 
         cipher
             .decrypt(&nonce, encrypted.ciphertext.as_ref())

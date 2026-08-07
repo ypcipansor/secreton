@@ -7,12 +7,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub mod audit;
 pub mod auto_unseal;
 pub mod error;
 pub mod policies;
 
-pub use audit::{AuditBackend, AuditError, AuditLog, AuditStatus};
 pub use auto_unseal::{AutoUnsealError, KmsProvider};
 pub use error::SecurityError;
 pub use policies::audit::{AuditEvent, AuditEventType, AuditStatus as PolicyAuditStatus};

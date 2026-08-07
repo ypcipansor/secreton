@@ -291,11 +291,18 @@ impl QuotasService {
                         resource: quota._name.clone(),
                     })?;
 
-            // For rate limits, check if window has expired
+            // For rate limits, check if window has expired.
+            //
+            // `window_seconds` was read with `unwrap()`, so a rate-limit quota saved
+            // without one panicked here — on the enforcement path, meaning every request
+            // subject to that quota took the process down rather than being limited.
             if quota.quota_type == QuotaType::RateLimit {
+                let window_seconds = quota.window_seconds.unwrap_or(0);
                 if let Some(window_start) = quota_usage.window_start {
-                    let window_duration =
-                        chrono::Duration::seconds(quota.window_seconds.unwrap() as i64);
+                    let window_duration = chrono::TimeDelta::try_seconds(
+                        i64::try_from(window_seconds).unwrap_or(i64::MAX),
+                    )
+                    .unwrap_or_else(|| chrono::TimeDelta::seconds(0));
                     if Utc::now() - window_start > window_duration {
                         // Window expired, reset
                         quota_usage.reset();
@@ -310,8 +317,11 @@ impl QuotasService {
                 quota_usage.record_violation();
 
                 let reset_at = if quota.quota_type == QuotaType::RateLimit {
-                    quota_usage.window_start.map(|start| {
-                        start + chrono::Duration::seconds(quota.window_seconds.unwrap() as i64)
+                    quota_usage.window_start.and_then(|start| {
+                        let seconds =
+                            i64::try_from(quota.window_seconds.unwrap_or(0)).unwrap_or(i64::MAX);
+                        chrono::TimeDelta::try_seconds(seconds)
+                            .and_then(|d| start.checked_add_signed(d))
                     })
                 } else {
                     None

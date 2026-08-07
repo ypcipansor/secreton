@@ -63,7 +63,10 @@ Ten crates, strictly layered — a crate may only depend on those above it.
 Claims here match what is implemented and tested; anything not listed is not present.
 
 **Secret engines** — KV v2 (versioned, with rollback), Transit (encryption as a service),
-PKI, SSH certificate signing, dynamic database credentials, TOTP.
+PKI, SSH certificate signing, TOTP, and dynamic database credentials for PostgreSQL and
+MySQL. The database engine issues a real account on the target server and drops it on
+revocation; the `postgres` and `mysql` cargo features select which drivers are compiled
+in, and a database whose driver is absent is refused rather than served.
 
 **Storage** — in-memory and file (always available, no external service), PostgreSQL
 (recommended), Redis, and Raft. Raft is single-node and **experimental**: no cluster
