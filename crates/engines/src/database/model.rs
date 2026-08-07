@@ -22,6 +22,22 @@ pub struct DatabaseRole {
     /// set to `null`.
     #[serde(default = "default_ttl", deserialize_with = "deserialize_ttl_default")]
     pub default_ttl: u64,
+    /// MySQL host part of the account, as in `CREATE USER 'name'@'host'`.
+    ///
+    /// Defaults to `%` (connect from anywhere), which is what the engine used to hardcode.
+    /// Making it per-role matters twice over: restricting an account to the address that
+    /// will actually use it is a real access control, and on a server that still has the
+    /// anonymous `''@'localhost'` entries a default install creates, an account created
+    /// only as `@'%'` cannot authenticate from localhost at all — MySQL matches the more
+    /// specific anonymous row first.
+    ///
+    /// Ignored by the PostgreSQL path, which has no host component in `CREATE USER`.
+    #[serde(default = "default_mysql_host")]
+    pub mysql_host: String,
+}
+
+fn default_mysql_host() -> String {
+    "%".to_string()
 }
 
 fn default_max_ttl() -> u64 {

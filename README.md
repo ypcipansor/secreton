@@ -65,8 +65,12 @@ Claims here match what is implemented and tested; anything not listed is not pre
 **Secret engines** — KV v2 (versioned, with rollback), Transit (encryption as a service),
 PKI, SSH certificate signing, TOTP, and dynamic database credentials for PostgreSQL and
 MySQL. The database engine issues a real account on the target server and drops it on
-revocation; the `postgres` and `mysql` cargo features select which drivers are compiled
-in, and a database whose driver is absent is refused rather than served.
+revocation — both paths are covered by integration tests that connect and check the
+account exists, authenticates, carries the role's grants, and is gone after revoking. The
+`postgres` and `mysql` cargo features select which drivers are compiled in, and a database
+whose driver is absent is refused rather than served. MySQL roles take an optional
+`mysql_host` (default `%`) so an account can be restricted to the address that will use
+it.
 
 **Storage** — in-memory and file (always available, no external service), PostgreSQL
 (recommended), Redis, and Raft. Raft is single-node and **experimental**: no cluster

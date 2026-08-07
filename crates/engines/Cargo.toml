@@ -83,4 +83,7 @@ pretty_assertions.workspace = true
 # The postgres integration tests connect directly to verify the account the engine
 # claims to have created actually exists.
 tokio-postgres.workspace = true
+# The MySQL integration tests connect directly to verify the account the engine claims to
+# have created actually exists and carries the role's grants.
+mysql_async.workspace = true
 tokio = { workspace = true, features = ["full"] }

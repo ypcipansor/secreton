@@ -53,18 +53,28 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 10s
           --health-timeout 5s --health-retries 5
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: secreton
+          MARIADB_DATABASE: secreton_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --locked --features secreton-engines/postgres
+      - run: cargo nextest run --workspace --locked --features secreton-engines/postgres,secreton-engines/mysql
         env:
           DATABASE_URL: postgres://secreton:secreton@localhost:5432/secreton_test
           # Without this the dynamic-database-credentials integration tests skip. They are
           # the only tests that prove an issued credential corresponds to a real account
           # rather than a fabricated one, so CI must actually run them.
           SECRETON_TEST_POSTGRES_URL: postgres://secreton:secreton@localhost:5432/secreton_test
+          SECRETON_TEST_MYSQL_URL: mysql://root:secreton@127.0.0.1:3306/secreton_test
       - run: cargo test --doc --workspace --locked
 
   wasm:

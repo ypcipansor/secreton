@@ -39,7 +39,11 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   branched on were never declared, so both paths compiled out and the endpoint answered
   "feature disabled" in every build; the MongoDB and Redis paths returned a generated
   username and password without creating any account. PostgreSQL and MySQL are now wired
-  with real drivers and integration tests; MongoDB and Redis are gone.
+  with real drivers and integration tests against live servers; MongoDB and Redis are gone.
+- MySQL revocation now drops the account on every host it exists for. It dropped only
+  `'user'@'%'`, so an account created under any other host survived revocation and stayed
+  usable — the one outcome revocation exists to prevent. The host is also configurable
+  per role now (`mysql_host`, default `%`) instead of hardcoded.
 - Concurrent credential issuance for one role no longer fails with `tuple concurrently
   updated`, and PostgreSQL errors now carry the SQLSTATE and server message instead of
   the literal string "db error".

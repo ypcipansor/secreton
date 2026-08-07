@@ -46,6 +46,8 @@ fn engine_for(url: &str) -> DatabaseEngine {
             sql: "GRANT CONNECT ON DATABASE postgres TO \"{{name}}\";".to_string(),
             default_ttl: 3600,
             max_ttl: 86400,
+            // Ignored by the PostgreSQL path; PostgreSQL has no host in CREATE USER.
+            mysql_host: "%".to_string(),
         },
     );
     engine

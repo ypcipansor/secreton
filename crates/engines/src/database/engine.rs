@@ -72,8 +72,13 @@ impl DatabaseEngine {
 
             #[cfg(feature = "mysql")]
             DatabaseType::MySQL => {
-                self.generate_mysql_credentials(role_name, &role.sql, role.default_ttl)
-                    .await
+                self.generate_mysql_credentials(
+                    role_name,
+                    &role.sql,
+                    role.default_ttl,
+                    &role.mysql_host,
+                )
+                .await
             }
             #[cfg(not(feature = "mysql"))]
             DatabaseType::MySQL => Err(DatabaseError::InvalidConfiguration(
@@ -525,9 +530,33 @@ impl DatabaseEngine {
             DatabaseError::ConnectionFailed(format!("Failed to get MySQL connection: {}", e))
         })?;
 
-        let revoke_sql = format!("DROP USER IF EXISTS '{}'@'%'", username);
-
+        // Drop the account on *every* host it exists for, not just `%`. Revocation is
+        // asked for a username, and a role can be configured with any host; a row left
+        // behind under a different host is a credential that still works, which is the
+        // one outcome revocation exists to prevent.
         use mysql_async::prelude::Queryable;
+        let hosts: Vec<String> = conn
+            .exec("SELECT Host FROM mysql.user WHERE User = ?", (username,))
+            .await
+            .map_err(|e| {
+                DatabaseError::QueryFailed(format!("Failed to look up MySQL account: {e}"))
+            })?;
+
+        for host in &hosts {
+            Self::ensure_host_safe(host)?;
+        }
+
+        let revoke_sql = hosts
+            .iter()
+            .map(|host| format!("DROP USER IF EXISTS '{username}'@'{host}'"))
+            .collect::<Vec<_>>()
+            .join("; ");
+
+        if revoke_sql.is_empty() {
+            // Already gone — an operator removed it, or a previous revoke succeeded.
+            return Ok(());
+        }
+
         conn.query_drop(revoke_sql)
             .await
             .map_err(|e| DatabaseError::QueryFailed(format!("Failed to drop MySQL user: {}", e)))?;
@@ -542,6 +571,7 @@ impl DatabaseEngine {
         role_name: &str,
         role_sql: &str,
         default_ttl: u64,
+        host: &str,
     ) -> Result<HashMap<String, Value>, DatabaseError> {
         let username = self.generate_username();
         let password = self.generate_password();
@@ -552,6 +582,7 @@ impl DatabaseEngine {
 
         Self::ensure_sql_safe(&username, "generated username")?;
         Self::ensure_sql_safe(&password, "generated password")?;
+        Self::ensure_host_safe(host)?;
 
         let pool = self.get_mysql_pool().await?;
         let mut conn = pool.get_conn().await.map_err(|e| {
@@ -561,10 +592,8 @@ impl DatabaseEngine {
         // `%` as host, the usual choice for dynamic secrets. Interpolation is safe because
         // `ensure_sql_safe` above rejects anything outside [A-Za-z0-9_]; MySQL cannot
         // parameterise CREATE USER.
-        let create_user_sql = format!(
-            "CREATE USER '{}'@'%' IDENTIFIED BY '{}'",
-            username, password
-        );
+        let create_user_sql =
+            format!("CREATE USER '{username}'@'{host}' IDENTIFIED BY '{password}'");
 
         use mysql_async::prelude::Queryable;
 
@@ -587,7 +616,7 @@ impl DatabaseEngine {
             if let Err(e) = conn.query_drop(stmt).await {
                 // Attempt cleanup
                 let _ = conn
-                    .query_drop(format!("DROP USER IF EXISTS '{}'@'%'", username))
+                    .query_drop(format!("DROP USER IF EXISTS '{username}'@'{host}'"))
                     .await;
                 return Err(DatabaseError::QueryFailed(format!(
                     "Failed to execute role statement '{}': {}",
@@ -626,6 +655,29 @@ impl DatabaseEngine {
         if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(DatabaseError::InvalidConfiguration(format!(
                 "refusing to build SQL: {what} contains characters outside [A-Za-z0-9_]"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Reject a MySQL host pattern that could break out of its quotes.
+    ///
+    /// Hosts legitimately contain `%`, `.`, `-` and `_` (`192.168.1.%`, `app.internal`),
+    /// so `ensure_sql_safe` is too strict here — but the value still comes from role
+    /// configuration and lands in SQL text, so it gets its own allowlist rather than none.
+    #[cfg(feature = "mysql")]
+    fn ensure_host_safe(host: &str) -> Result<(), DatabaseError> {
+        if host.is_empty() {
+            return Err(DatabaseError::InvalidConfiguration(
+                "mysql_host must not be empty".to_string(),
+            ));
+        }
+        if !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '%' | '.' | '-' | '_' | ':'))
+        {
+            return Err(DatabaseError::InvalidConfiguration(format!(
+                "mysql_host {host:?} contains characters outside [A-Za-z0-9%.:_-]"
             )));
         }
         Ok(())
@@ -788,6 +840,32 @@ mod tests {
         let a = e.generate_password();
         let b = e.generate_password();
         assert_ne!(a, b, "two calls returned the same password");
+    }
+
+    /// The host reaches SQL text from role configuration, so it gets an allowlist of its
+    /// own — wider than the username's, because a host legitimately contains `%` and `.`,
+    /// but not absent.
+    #[cfg(feature = "mysql")]
+    #[test]
+    fn mysql_hosts_are_validated_without_being_over_restricted() {
+        for ok in [
+            "%",
+            "localhost",
+            "192.168.1.%",
+            "app.internal",
+            "db-01",
+            "::1",
+        ] {
+            DatabaseEngine::ensure_host_safe(ok).unwrap_or_else(|e| {
+                panic!("rejected a legitimate host {ok:?}: {e}");
+            });
+        }
+        for bad in ["", "'; DROP USER x; --", "host'", "a b", "hostname\\"] {
+            assert!(
+                DatabaseEngine::ensure_host_safe(bad).is_err(),
+                "accepted a host that would reach SQL text: {bad:?}"
+            );
+        }
     }
 
     #[test]
