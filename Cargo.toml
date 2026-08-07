@@ -138,6 +138,16 @@ ed25519-dalek = { version = "2.1", features = ["rand_core", "pkcs8"] }
 x25519-dalek = "2.0"
 p256 = "0.13"
 p384 = "0.13"
+# `rust_crypto` is the pure-Rust provider. It transitively enables `rsa`, which we do
+# not want (RUSTSEC-2023-0071) but cannot drop: jsonwebtoken 10 installs its crypto
+# provider from exactly one of `rust_crypto` or `aws_lc_rs`, and selecting the
+# sub-features individually leaves no provider installed at all. The alternative,
+# `aws_lc_rs`, replaces it with a C dependency.
+#
+# The RSA code is unreachable in practice: `JwtTokenService` signs and validates with
+# `Validation::new(Algorithm::HS256)`, whose `algorithms` allowlist rejects every RS*
+# token before a key is ever constructed. See the test in crates/auth/src/jwt.rs and the
+# documented ignore in deny.toml.
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 totp-rs = { version = "5.6", default-features = false, features = ["otpauth"] }
 

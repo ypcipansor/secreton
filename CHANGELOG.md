@@ -45,8 +45,9 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   `"Not implemented"` at runtime while being selectable from configuration.
 - 8 of 12 authentication methods. None was reachable from a route; the Kubernetes one had
   never been compiled at all, and failed with thirty errors when its feature was enabled.
-- The `rsa` dependency (RUSTSEC-2023-0071, unfixed timing side channel), which the manifest
-  already claimed not to use.
+- All direct use of the `rsa` crate (RUSTSEC-2023-0071), which the manifest already
+  claimed not to use. It remains in the tree transitively via `jsonwebtoken`'s provider;
+  SECURITY.md documents why that code is unreachable, and a test pins it.
 - `nginx/`, `Dockerfile.frontend`, `Trunk.toml`, the `cdn.tailwindcss.com` script, the
   second HTTP client in the WASM bundle, and the `+10` port offset.
 

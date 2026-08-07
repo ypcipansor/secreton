@@ -65,9 +65,12 @@ real defect in this repository.
 5. **No build-time network access.** A build script that downloads an artifact breaks
    hermetic, offline and air-gapped builds. This is why `utoipa-swagger-ui` is not a
    dependency — serve `/api-docs/openapi.json` and vendor any UI asset under `public/`.
-6. **No RSA.** The `rsa` crate carries an unfixed timing side channel
-   (RUSTSEC-2023-0071). Use Ed25519, or P-256/P-384 where interoperability demands a
-   NIST curve.
+6. **No reachable RSA.** Never construct or accept an RSA key. Use Ed25519, or
+   P-256/P-384 where interoperability demands a NIST curve. `rsa` is in the tree
+   transitively via `jsonwebtoken`'s provider and cannot currently be dropped without
+   swapping to a C dependency; it stays unreachable because JWT validation allowlists
+   HS256 only. If you touch `crates/auth/src/jwt.rs`, keep
+   `only_hs256_tokens_are_accepted` passing — it is what makes that claim true.
 7. **Secrets are `Zeroize`.** Key material and plaintext get zeroed on drop, and never
    appear in a `Debug` impl, a log line or an error message.
 8. **Config is validated at startup.** A missing or malformed setting must stop the

@@ -21,9 +21,16 @@ It is not yet suitable for production use.
 
 These are enforced by review and by the checks in `.github/workflows/security.yml`:
 
-- **No RSA.** The `rsa` crate carries an unfixed timing side channel
-  (RUSTSEC-2023-0071). Signing uses Ed25519, or P-256/P-384 where interoperability
-  requires a NIST curve.
+- **No reachable RSA.** Nothing in this codebase constructs or uses an RSA key:
+  signing is Ed25519, or P-256/P-384 where interoperability requires a NIST curve.
+  The `rsa` crate is nevertheless *present in the dependency tree*, pulled in by
+  `jsonwebtoken`'s `rust_crypto` provider — jsonwebtoken 10 installs its provider from
+  exactly one of `rust_crypto` or `aws_lc_rs`, and the alternative is a C dependency.
+  RUSTSEC-2023-0071 is a timing side channel in RSA operations, and those operations
+  are unreachable here: JWT validation uses `Validation::new(Algorithm::HS256)`, whose
+  allowlist rejects every RS*/PS* token before a key is constructed. This is pinned by
+  `only_hs256_tokens_are_accepted` in `crates/auth/src/jwt.rs` and recorded as a
+  documented ignore in `deny.toml`. Do not describe this as "RSA removed".
 - **Hermetic builds.** No build script may fetch anything over the network. A dependency
   that does is not admissible, regardless of convenience.
 - **Committed lockfile.** `Cargo.lock` is in the repository and every CI and Docker

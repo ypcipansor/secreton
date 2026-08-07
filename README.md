@@ -74,8 +74,9 @@ SSO. Sessions in the browser are `HttpOnly` cookies; programmatic clients use
 `Authorization: Bearer`.
 
 **Cryptography** — AES-256-GCM and ChaCha20-Poly1305 for data, Argon2id for passwords,
-Ed25519 and P-256/P-384 for signatures, Shamir sharing for the unseal flow. There is no
-RSA: the `rsa` crate carries an unfixed timing side channel (RUSTSEC-2023-0071).
+Ed25519 and P-256/P-384 for signatures, Shamir sharing for the unseal flow. No RSA key is
+ever constructed or accepted; see [SECURITY.md](SECURITY.md) for why the `rsa` crate is
+still in the tree transitively and why its code is unreachable.
 
 **Interfaces** — REST under `/api/v1`, OpenAPI at `/api-docs/openapi.json`, gRPC (with
 health checking and reflection) on the same port, and Leptos server functions for the UI.

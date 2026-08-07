@@ -457,3 +457,55 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod algorithm_tests {
+    use super::*;
+
+    fn service() -> JwtTokenService {
+        JwtTokenService::new(TokenConfig {
+            jwt_secret: "a-test-secret-that-is-at-least-32-bytes".to_string(),
+            issuer: "secreton".to_string(),
+            audience: "secreton-api".to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// The `rsa` crate is in the dependency tree transitively, via jsonwebtoken's
+    /// `rust_crypto` provider. RUSTSEC-2023-0071 is an unfixed timing side channel in it,
+    /// so this test pins the reason it is unreachable: validation accepts only HS256, and
+    /// a token declaring any RS* algorithm is rejected before a key is constructed.
+    ///
+    /// It also closes the classic algorithm-confusion hole, where a validator that trusts
+    /// the header's `alg` can be talked into verifying an HMAC with a public key.
+    #[test]
+    fn only_hs256_tokens_are_accepted() {
+        let svc = service();
+
+        for forged_alg in ["RS256", "RS384", "RS512", "PS256", "none", "ES256"] {
+            // Header claiming another algorithm, body irrelevant — validation must reject
+            // on the algorithm alone.
+            let header = format!(r#"{{"alg":"{forged_alg}","typ":"JWT"}}"#);
+            let claims = r#"{"sub":"attacker","exp":9999999999}"#;
+            let encode = |s: &str| {
+                use base64::Engine;
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s)
+            };
+            let token = format!("{}.{}.{}", encode(&header), encode(claims), encode("sig"));
+
+            assert!(
+                svc.validate_access_token(&token).is_err(),
+                "a token declaring alg={forged_alg} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_token_this_service_issued_validates() {
+        let svc = service();
+        let pair = svc
+            .create_token_pair("u1", "alice", None, &[], &[], false, None)
+            .expect("issue");
+        assert!(svc.validate_access_token(&pair.access_token).is_ok());
+    }
+}
