@@ -5,27 +5,15 @@ members = [
     "crates/crypto",
     "crates/storage",
     "crates/auth",
+    "crates/engines",
     # Re-enabled one at a time as each crate is migrated to the new layout.
-    # "crates/engines",
     # "crates/client",
     # "crates/ui",
     # "crates/server",
     # "crates/cli",
     # "crates/agent",
 ]
-exclude = [
-    "crates/secrets",
-    "crates/secrets-pki",
-    "crates/secrets-database",
-    "crates/security",
-    "crates/api",
-    "crates/config",
-    "crates/core",
-    "crates/grpc",
-    "crates/ui",
-    "crates/cli",
-    "crates/agent",
-]
+exclude = ["crates/ui", "crates/cli", "crates/agent", "crates/server"]
 
 [workspace.package]
 version = "0.1.0"

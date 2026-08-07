@@ -1,0 +1,65 @@
+[package]
+name = "secreton-engines"
+description = "Secret engines, seal and audit pipeline for Secreton — the business logic layer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+secreton-auth.workspace = true
+secreton-crypto.workspace = true
+secreton-domain.workspace = true
+secreton-storage.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "fs"] }
+tracing.workspace = true
+uuid.workspace = true
+
+base32.workspace = true
+base64.workspace = true
+hex.workspace = true
+hmac.workspace = true
+lru.workspace = true
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+sysinfo = "0.37"
+sha2.workspace = true
+sha3.workspace = true
+totp-rs.workspace = true
+zeroize.workspace = true
+
+# PKI / SSH engines
+ed25519-dalek.workspace = true
+pem.workspace = true
+rcgen.workspace = true
+ssh-key = { version = "0.6", features = ["ed25519", "alloc", "std", "rand_core"] }
+const-oid = "0.9"
+der = "0.7"
+time = "0.3"
+x509-cert = "0.2"
+x509-parser.workspace = true
+
+# Tokens
+jsonwebtoken.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tokio = { workspace = true, features = ["full"] }

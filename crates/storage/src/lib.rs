@@ -16,7 +16,7 @@ pub mod cache;
 pub mod factory;
 pub mod models;
 
-pub use backends::FileBackend;
+pub use backends::{FileBackend, MemoryBackend};
 #[cfg(feature = "postgres")]
 pub use backends::PostgresBackend;
 #[cfg(feature = "raft")]
