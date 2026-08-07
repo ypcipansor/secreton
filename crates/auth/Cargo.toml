@@ -66,6 +66,3 @@ tokio = { workspace = true, features = ["full"] }
 [features]
 default = ["oidc"]
 oidc = ["dep:oauth2", "dep:reqwest"]
-# Kubernetes workload identity. Off by default: it only makes sense in-cluster,
-# where the projected service-account token is mounted.
-kubernetes = ["dep:reqwest"]

@@ -1,125 +1,109 @@
 # Secreton
 
-> **⚠️ Project Status: Alpha / Early Development**
->
-> Secreton is in active development and is **not yet production-ready**. Some features are partially implemented, and APIs or storage schemas may be subject to breaking changes. Use only in development or testing environments.
+> **Alpha.** Under active development and not production-ready. APIs and storage
+> schemas may change without a migration path.
 
-Secreton is a Rust-based secrets management platform. It provides secure storage, encryption, and access control for sensitive data.
+A secrets-management platform in Rust: a [Leptos](https://leptos.dev) web application and a
+REST + gRPC API, served by **one Axum process on one port**.
 
-## Overview
+## What it is
 
-Secreton is organized as a Rust workspace with several domain-driven modules, including:
-- **api**: REST API server (Axum & Warp)
-- **agent**: Sidecar for auto-auth and templating
-- **auth**: Authentication methods & identity
-- **cli**: Command-line interface
-- **core**: Core business logic
-- **crypto**: Cryptographic operations using RustCrypto
-- **storage**: Storage backend abstractions (PostgreSQL, Redis, File, etc.)
-- **ui**: Web UI implemented with Leptos (WASM)
+Storage, encryption and access control for sensitive values, with a versioned KV engine,
+encryption-as-a-service, a certificate authority, SSH certificate signing, dynamic database
+credentials and TOTP.
 
-## Prerequisites
+The architecture is the point: it is meant to be a foundation you build on, so the
+boundaries are enforced rather than described. `crates/domain` has no I/O and compiles for
+WebAssembly, which is why the UI shares its types. `crates/engines` has no HTTP, which is
+why the same service backs a REST handler, a gRPC method and a Leptos server function
+without a translation layer.
 
-- **Rust**: 1.90+ (2024 edition)
-- **Database**: PostgreSQL (recommended) or SQLite for development
+## Quick start
 
-## Quick Start
-
-### 1. Clone and Build
+Requires the toolchain pinned in `rust-toolchain.toml` (installed automatically by rustup)
+and [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos).
 
 ```bash
-git clone https://github.com/analisaperlengkapan/secreton.git
-cd secreton
-cargo build --workspace --release
+cargo install cargo-leptos --locked
+
+# Required: the server refuses to start without it.
+export SECRETON__AUTH__JWT__SECRET="$(openssl rand -base64 48)"
+
+cargo leptos serve
 ```
 
-### 2. Start Database (Optional, for PostgreSQL)
+Then open <http://localhost:3000>. No database is needed — storage defaults to in-memory,
+so a fresh checkout runs with no setup. State is lost on restart; configure PostgreSQL in
+`secreton.toml` for anything else.
+
+With Docker:
 
 ```bash
-docker run -d --name secreton-db \
-  -e POSTGRES_USER=secreton_user \
-  -e POSTGRES_PASSWORD=secreton_pass \
-  -e POSTGRES_DB=secreton_db \
-  -p 5432:5432 \
-  postgres:15
+cp .env.example .env   # fill in SECRETON_JWT_SECRET and POSTGRES_PASSWORD
+docker compose up --build
 ```
 
-### 3. Run the API Server
+## Layout
 
-```bash
-cargo run -p secreton-api --release --bin api_server
-```
+Ten crates, strictly layered — a crate may only depend on those above it.
 
-The primary API server will start, alongside other configured services (like gRPC).
+| Crate | What it holds |
+|---|---|
+| `crates/domain` | Shared types, the one `SecretonError`, the API envelope. No I/O, no web framework, compiles for wasm32. |
+| `crates/crypto` | AEAD, KDFs, signing, Shamir sharing, the transit engine, the storage barrier. |
+| `crates/storage` | One `StorageBackend` trait; memory, file, PostgreSQL, Redis, Raft. |
+| `crates/auth` | Authentication methods, identity, MFA, tokens, the policy engine, governance. |
+| `crates/engines` | Secret engines, seal, audit, lifecycle, and the `Services` graph. No HTTP. |
+| `crates/ui` | The Leptos application. Compiles twice: into the server, and to wasm. |
+| `crates/server` | Axum router, handlers, middleware, gRPC, and the binary. |
+| `crates/client` · `cli` · `agent` | Typed HTTP client and the two auxiliary binaries. |
 
-## Features & APIs
+## What is supported
 
-The API Server serves several categories of RESTful endpoints under the `/api/v1` path prefix:
+Claims here match what is implemented and tested; anything not listed is not present.
 
-### Authentication & Identity (`/auth`)
-Handles user logins, token verification, and multi-factor authentication.
-- **POST `/auth/login`**: Authenticate and retrieve a token.
-- **POST `/auth/logout`**: Invalidate the current token.
-- **POST `/auth/refresh`**: Refresh an existing authentication token.
-- **POST `/auth/verify`**: Verify the validity of a token.
-- **MFA Endpoints**: `/auth/mfa/setup`, `/auth/mfa/verify`, `/auth/mfa/disable` for managing two-factor authentication.
-- **OAuth Endpoints**: `/auth/oauth/{provider}` for third-party logins.
+**Secret engines** — KV v2 (versioned, with rollback), Transit (encryption as a service),
+PKI, SSH certificate signing, dynamic database credentials, TOTP.
 
-### Secret Management (`/secret`)
-The core functionality for creating, retrieving, and managing encrypted secrets and cryptographic keys.
-- **GET/POST/PUT/DELETE `/secret/secrets/{path}`**: CRUD operations for individual secrets.
-- **GET `/secret/secrets`**: List all available secrets in the root namespace.
-- **GET `/secret/secret-versions/{path}`**: View the history and past versions of a secret.
-- **GET/POST/PUT/DELETE `/secret/keys`**: Manage cryptographic keys.
-- **POST `/secret/keys/{key_id}/rotate`**: Rotate a specific cryptographic key.
+**Storage** — in-memory and file (always available, no external service), PostgreSQL
+(recommended), Redis, and Raft. Raft is single-node and **experimental**: no cluster
+membership changes, no leader election across processes.
 
-### Administration (`/admin`)
-Endpoints for system administrators to manage users, roles, and access controls.
-- **GET/POST/PUT/DELETE `/admin/users`**: Manage user accounts.
-- **GET/POST `/admin/users/{user_id}/roles`**: Assign and retrieve roles for a user.
-- **GET/POST `/admin/roles`**: Manage roles and policies.
+**Authentication** — username/password, AppRole for machine-to-machine, and OIDC for human
+SSO. Sessions in the browser are `HttpOnly` cookies; programmatic clients use
+`Authorization: Bearer`.
 
-### System & Health (`/sys`, `/health`)
-Operations for system maintenance, monitoring, and configurations.
-- **GET `/sys/config`**: Retrieve current system configuration.
-- **GET `/health`**: Check the health and status of the Secreton server.
-- **GET `/metrics`**: Export prometheus metrics for monitoring.
+**Cryptography** — AES-256-GCM and ChaCha20-Poly1305 for data, Argon2id for passwords,
+Ed25519 and P-256/P-384 for signatures, Shamir sharing for the unseal flow. There is no
+RSA: the `rsa` crate carries an unfixed timing side channel (RUSTSEC-2023-0071).
 
-## Supported Storage Backends
-Secreton abstracts the persistence layer, supporting multiple storage backends:
-- **PostgreSQL**: Fully supported (recommended)
-- **Redis**: Working backend with caching support
-- **In-Memory/File**: For development and testing environments
-- **Raft Consensus**: Built-in distributed consensus backend
-
-## Cryptography & Security
-- **Encryption**: Utilizes `RustCrypto` (AES-256-GCM, ChaCha20-Poly1305) for secure encryption of secrets at rest.
-- **Memory Safety**: Uses `zeroize` to securely wipe sensitive data from memory after use.
-- **Role-Based Access Control (RBAC)**: Fine-grained permissions and policy enforcement.
-- **Audit Logging**: Comprehensive tracking of all security events and access logs.
+**Interfaces** — REST under `/api/v1`, OpenAPI at `/api-docs/openapi.json`, gRPC (with
+health checking and reflection) on the same port, and Leptos server functions for the UI.
 
 ## Development
 
-### Running Tests
-
-```bash
-# Run all tests
-cargo test --workspace --all-features
-```
-
-### Formatting and Linting
-
 ```bash
 cargo fmt --all
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --locked --all-targets -- -D warnings
+cargo test   --workspace --locked
+
+# The UI must keep compiling for wasm; this is the check that catches a
+# server-only dependency leaking into crates/ui.
+cargo check -p secreton-ui --locked --target wasm32-unknown-unknown \
+    --no-default-features --features hydrate
 ```
 
-## Security Policy
+[`AGENTS.md`](AGENTS.md) is the working reference: layout, commands, the invariants that
+review enforces, and how to add an endpoint, a page or a storage backend. It applies to
+human contributors as much as to AI agents.
 
-**DO NOT** open public GitHub issues for security vulnerabilities.
+Architecture decisions and the evidence behind them are in [`docs/adr/`](docs/adr/).
 
-Please report them privately using the GitHub Security Advisory tab ("Report a vulnerability") or email the security contact in `Cargo.toml`. See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+## Security
+
+Report vulnerabilities privately — see [SECURITY.md](SECURITY.md). Do not open a public
+issue.
 
 ## License
 
-This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+Apache-2.0. See [LICENSE](LICENSE).

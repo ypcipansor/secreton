@@ -1,24 +1,72 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+
+Full architectural rewrite. The workspace went from 23 crates and ~170k lines to 10 crates
+and ~59k, and from not compiling at all to a green build with a full test suite.
+
+### Fixed
+
+- **The workspace could not be built.** `rust-version = "1.95"` exceeded every available
+  toolchain, and with `--ignore-rust-version` the build still failed because
+  `utoipa-swagger-ui`'s build script downloads a zip over the network at compile time.
+- **Transactions silently discarded writes.** `begin_transaction()` on the in-memory
+  backend returned a transaction whose `store`, `update` and `delete` were `Ok(())` no-ops;
+  a caller that committed was told it had succeeded.
+- **One failing webhook aborted secret expiry.** `trigger_lifecycle_hook` propagated errors
+  with `?`, so an unreachable third-party endpoint left expired secrets live and skipped
+  every hook after it.
+- **Services were resolved by string from a `Box<dyn Any>` registry**, and the router
+  resolved the admin service from a field holding the audit logger.
+- **CORS defaulted to `allow_origin: ["*"]`** and the router applied `Any` for origins,
+  methods and headers — on a secrets manager, out of the box.
+- **Sessions were JWTs in `localStorage`**, readable by any injected script.
+- **`/metrics` returned hardcoded zeros**, so a dashboard built on it looked healthy.
+- **The liveness probe required a bearer token**, because the middleware's list of public
+  paths had drifted from the router.
+- **Rate limiting silently did nothing** whenever its `init_rate_limiting()` call was
+  skipped, and identified clients by the first `X-Forwarded-For` entry, which any client
+  can set.
+- **5xx bodies could leak connection strings and file paths.**
+- Two `try_into().unwrap()` calls panicked on short caller-supplied key material.
+
+### Removed
+
+- `warp`. The process ran two HTTP stacks on two ports because warp is on hyper 0.14 and
+  Axum on hyper 1.0; `cargo tree -i warp` now finds nothing and there is no duplicate axum.
+- The root `tests/` tree (~30 files). The root manifest is a virtual workspace, so cargo
+  never compiled any of it.
+- Three orphan crates with no dependents (graphql, enterprise, infrastructure) and four
+  stub-only ones (integrations, monitoring, performance, replication).
+- 19 of 24 storage backends. Each was a 130–320 line sketch with no tests that returned
+  `"Not implemented"` at runtime while being selectable from configuration.
+- 8 of 12 authentication methods. None was reachable from a route; the Kubernetes one had
+  never been compiled at all, and failed with thirty errors when its feature was enabled.
+- The `rsa` dependency (RUSTSEC-2023-0071, unfixed timing side channel), which the manifest
+  already claimed not to use.
+- `nginx/`, `Dockerfile.frontend`, `Trunk.toml`, the `cdn.tailwindcss.com` script, the
+  second HTTP client in the WASM bundle, and the `+10` port offset.
+
+### Added
+
+- Leptos SSR with hydration, built by `cargo-leptos` into the same binary. Data flows
+  through typed `#[server]` functions; the browser holds no token.
+- gRPC on `tonic` 0.14 merged into the shared Axum router, with health checking,
+  reflection, and the `AuthService::Login` the proto had always declared but never
+  implemented.
+- Configuration validated at startup: a missing or short JWT secret, a wildcard CORS
+  origin, or a zero timeout stops the process rather than surfacing later.
+- Property-based tests for the cryptographic primitives (AEAD round-trip, tamper
+  detection, nonce reuse, Shamir quorum behaviour).
+- `AGENTS.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue and PR templates,
+  and three ADRs recording the single-router, Leptos-SSR and gRPC decisions.
+- Rebuilt CI: concurrency groups, a wasm guardrail job, a feature matrix, SHA-pinned
+  third-party actions, and `--locked` everywhere. `Cargo.lock` is now committed.
+- A single multi-stage `Dockerfile` producing a distroless, non-root image on one port.
 
 ## [0.1.0] - 2026-05-20
 
-### Added
-- Initial release of Secreton.
-- Core secret management (KV engine).
-- Transit engine for cryptographic operations.
-- PKI and Database secret engines.
-- REST and gRPC API interfaces.
-- Web UI implemented with Leptos (WASM).
-- Support for multiple storage backends (PostgreSQL, Redis, File, Raft).
-- Identity and access management (RBAC).
-- Multi-factor authentication (MFA) support.
-- System metrics and audit logging.
-- Advanced backup and recovery features.
-- Distributed tracing and observability pipeline.
-- Plugin system for extensibility.
-- CLI for interacting with the Secreton server.
+Initial release.

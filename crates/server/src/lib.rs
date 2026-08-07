@@ -22,6 +22,8 @@ pub mod shutdown;
 
 #[cfg(feature = "grpc")]
 pub mod grpc;
+#[cfg(feature = "ui")]
+pub mod ui;
 #[cfg(feature = "grpc")]
 pub mod proto;
 
