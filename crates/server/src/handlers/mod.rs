@@ -1,6 +1,7 @@
 //! HTTP request handlers.
 //!
-//! Handlers are thin: they validate input, call a service on [`Services`], and shape the
+//! Handlers are thin: they validate input, call a service on
+//! [`Services`](secreton_engines::Services), and shape the
 //! response. Business logic lives in `secreton-engines`, so the same operation can also be
 //! reached from a gRPC method or a Leptos server function without duplication.
 

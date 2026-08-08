@@ -4,10 +4,15 @@
 //! `axum-test`, so they cover the wiring that unit tests cannot: which routes sit outside
 //! the auth layer, what an unauthenticated caller learns, and what a 5xx body contains.
 //!
-//! The `ui` feature is off here — the frontend toolchain is not needed to test the API,
-//! and leaving it off keeps this loop fast.
-
-#![cfg(not(feature = "ui"))]
+//! This file used to open with `#![cfg(not(feature = "ui"))]`, on the reasoning that the
+//! frontend toolchain was not needed to test the API. `ui` is in the crate's default
+//! feature set, so the attribute compiled all twelve tests out of every ordinary
+//! `cargo test` — including CI's. `cargo test -p secreton-server --test e2e` reported
+//! "running 0 tests" and passed. Tests that never run are worse than no tests: they read
+//! as coverage.
+//!
+//! The suite now builds the router with whatever features are enabled, which is the point
+//! of an end-to-end test — the router under test is the one that ships.
 
 use secreton_engines::{ServerConfig, Services};
 use secreton_server::build_router;
@@ -31,6 +36,15 @@ async fn test_server() -> axum_test::TestServer {
     let state = AppState {
         rate_limit: RateLimit::new(config.rate_limit.global.requests, 0),
         services,
+        // Only the SSR side is exercised here. `site_root` points at a directory that the
+        // tests never populate, which is deliberate: the asset handler is the last
+        // fallback, so a request reaching it means routing went wrong, and an empty
+        // directory makes that show up as a miss rather than a stale hit.
+        #[cfg(feature = "ui")]
+        leptos_options: leptos::prelude::LeptosOptions::builder()
+            .output_name("secreton-e2e")
+            .site_root("target/site-e2e".to_string())
+            .build(),
     };
 
     axum_test::TestServer::new(build_router(state)).expect("test server")

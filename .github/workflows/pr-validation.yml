@@ -81,6 +81,16 @@ jobs:
 
       - name: Label PR by size
         run: |
+          # `gh pr edit --add-label` fails outright when the label does not exist in the
+          # repository — it does not create one. None of these had ever been created, so
+          # this step failed with "'size:xl' not found" on every pull request the
+          # workflow had ever run against. Create them first; `gh label create` exits
+          # non-zero when the label already exists, which is the normal case.
+          gh label create "size:small"  --color 0e8a16 --description "Under 100 lines changed"  || true
+          gh label create "size:medium" --color fbca04 --description "100-500 lines changed"    || true
+          gh label create "size:large"  --color d93f0b --description "500-1000 lines changed"   || true
+          gh label create "size:xl"     --color b60205 --description "Over 1000 lines changed"  || true
+
           gh pr edit ${{ github.event.pull_request.number }} \
             --remove-label "size:small,size:medium,size:large,size:xl" || true
           gh pr edit ${{ github.event.pull_request.number }} \

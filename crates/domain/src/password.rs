@@ -9,7 +9,12 @@ use crate::{Result, SecretonError};
 const LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const UPPER: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DIGITS: &[u8] = b"0123456789";
-const DEFAULT_SPECIAL: &str = "!@#$%^&*";
+/// Special characters a [`PasswordPolicy`] accepts when it does not name its own set.
+///
+/// Public because [`PasswordPolicy::allowed_special_chars`] documents itself in terms of
+/// it: a caller deciding whether to override the default has to be able to see what the
+/// default is.
+pub const DEFAULT_SPECIAL: &str = "!@#$%^&*";
 
 /// Rules a password must satisfy, used both to validate user input and to drive generation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

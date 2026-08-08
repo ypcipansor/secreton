@@ -1,0 +1,27 @@
+# cargo-audit configuration.
+#
+# This file exists because cargo-audit and cargo-deny do not share one. Both check the
+# same RustSec database and both find the same four advisories here, but `deny.toml`
+# is read only by cargo-deny — so the ignores documented there had no effect on the
+# `cargo audit` job, which failed with "1 vulnerability found / 3 denied warnings"
+# while cargo-deny's advisories check passed on the identical set.
+#
+# The full reasoning for each entry lives in `deny.toml` under `[advisories] ignore`,
+# with the reachability argument written out. Keep the two lists in step: an advisory
+# added or dropped in one belongs in the other, or CI disagrees with itself again.
+[advisories]
+ignore = [
+    # rsa — Marvin timing side channel. Transitive via jsonwebtoken's `rust_crypto`
+    # provider and unreachable: validation allowlists HS256, so no RSA key is ever
+    # constructed. Pinned by `only_hs256_tokens_are_accepted` in crates/auth/src/jwt.rs.
+    "RUSTSEC-2023-0071",
+    # paste — unmaintained build-time proc-macro, reached through leptos. Ships no
+    # runtime code.
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile — unmaintained, not vulnerable. Transitive through mysql_async,
+    # which sits behind an off-by-default feature.
+    "RUSTSEC-2025-0134",
+    # proc-macro-error2 — unmaintained build-time proc-macro, reached through
+    # leptos_macro. Ships no runtime code.
+    "RUSTSEC-2026-0173",
+]

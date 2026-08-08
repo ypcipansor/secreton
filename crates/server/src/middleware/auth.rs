@@ -33,7 +33,7 @@ pub struct CurrentUser(pub User);
 /// satisfy a substring test and let a half-enrolled session read secrets. `mfa/disable`
 /// is deliberately absent — a user who has not enrolled has nothing to disable, and
 /// allowing it would let them stay half-enrolled indefinitely.
-const MFA_PENDING_ALLOWED: &[&str] = &[
+pub const MFA_PENDING_ALLOWED: &[&str] = &[
     "/api/v1/auth/mfa/setup",
     "/api/v1/auth/mfa/verify",
     "/api/v1/auth/logout",

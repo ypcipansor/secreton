@@ -87,6 +87,35 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       - uses: taiki-e/install-action@cargo-leptos
+      # cargo-leptos picks which Tailwind binary to download using
+      # `cfg!(target_env = "musl")` — evaluated when *cargo-leptos itself* was compiled,
+      # not against the machine it runs on. install-action ships a musl build, so on this
+      # glibc runner cargo-leptos concludes it is on musl and fetches
+      # `tailwindcss-linux-x64-musl`. That asset is dynamically linked against
+      # /lib/ld-musl-x86_64.so.1, which does not exist here, so execve returns ENOENT and
+      # the job died on "No such file or directory (os error 2)" the moment cargo finished
+      # — after a full twelve-minute release build.
+      #
+      # `Exe::get()` consults PATH before downloading anything, so supplying the binary
+      # here bypasses that path entirely. It also pins the version and checks the hash,
+      # rather than inheriting whatever cargo-leptos currently defaults to and trusting an
+      # unverified mid-build download.
+      #
+      # The Dockerfile is not affected: it runs `cargo install cargo-leptos`, which builds
+      # a gnu binary, so the same check correctly selects the glibc asset there.
+      - name: Install the Tailwind CLI
+        env:
+          TAILWIND_VERSION: v4.2.1
+          TAILWIND_SHA256: 39e8d4e24b3c83b0a6e69e100a972fbc75d5fef8dce47b3ddac3cf92dea81fe3
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/tailwindcss" \
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-linux-x64"
+          echo "${TAILWIND_SHA256}  $HOME/.local/bin/tailwindcss" | sha256sum -c -
+          chmod +x "$HOME/.local/bin/tailwindcss"
+          "$HOME/.local/bin/tailwindcss" --help | head -1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # This is the guardrail that replaces the separate `frontend` crate the official
       # Leptos workspace template uses: it fails if a server-only dependency leaks into
       # crates/ui. Nothing else in CI would catch that.
