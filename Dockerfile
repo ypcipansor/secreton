@@ -7,12 +7,23 @@
 # bundle, via cargo-leptos. There is no second frontend image and no nginx —
 # the server serves its own frontend, which is the point of the SSR move.
 #
-# No build stage reaches the network for anything but the crates registry:
-# protoc is vendored, Tailwind is compiled locally, and there is no
-# utoipa-swagger-ui downloading a zip mid-build. That is what makes this
-# reproducible and air-gappable.
+# protoc is vendored and there is no utoipa-swagger-ui downloading a zip
+# mid-build, so the application's own build touches nothing but the crates
+# registry. Two things in this stage still do: `cargo install cargo-leptos`
+# compiles openssl-sys from source (openssl-src is in its tree), and
+# cargo-leptos fetches the Tailwind CLI on first use because this project sets
+# `tailwind-input-file`. Both happen while building the image, not while
+# building the application — but calling the image "air-gapped" would be wrong.
+#
+# perl and make are what openssl-src needs. The slim image ships perl-base,
+# which lacks FindBin, so OpenSSL's ./Configure aborts on line 15 and
+# `cargo install cargo-leptos` fails outright — this image could not be built
+# without them.
 FROM rust:1.94.1-slim-bookworm AS chef
 WORKDIR /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends perl make pkg-config \
+ && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked \
  && cargo install cargo-leptos --locked \
  && rustup target add wasm32-unknown-unknown

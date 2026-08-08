@@ -48,7 +48,18 @@ futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1"
-bincode = { version = "2.0", features = ["serde"] }
+# Replaces `bincode`, whose team announced a permanent end to development
+# (RUSTSEC-2025-0141). It is used only to encode entries for the in-memory cache — never
+# for anything persisted — so swapping the serializer needs no migration and nothing on
+# disk changes. A permanently abandoned direct dependency in a secrets manager means no
+# future fix for anything found in it, which is not a position worth holding for a
+# transient encoding.
+#
+# `default-features = false` matters: postcard's default pulls `heapless` 0.7, which pulls
+# `atomic-polyfill` — itself unmaintained (RUSTSEC-2023-0089). Trading one abandoned crate
+# for another, further from our control, would be no improvement. `use-std` gives the
+# std-backed API this crate needs and nothing else.
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 
 # ---- Errors ----------------------------------------------------------------
 anyhow = "1.0"
@@ -176,7 +187,10 @@ tokio-postgres = { version = "0.7", features = [
 tokio-postgres-rustls = "0.13"
 deadpool-postgres = "0.14"
 # Dynamic database credentials for MySQL. `default-features = false` drops the bundled
-# TLS stack so the workspace keeps one TLS implementation (rustls) rather than two.
+# zlib in favour of the Rust one; `default-rustls` selects rustls over native-tls, which
+# is what the rest of the workspace already uses. It resolves to the aws-lc-rs provider —
+# already present via reqwest, so this adds no new C dependency, though it is worth
+# knowing that this is not a pure-Rust path.
 mysql_async = { version = "0.36", default-features = false, features = [
     "default-rustls",
 ] }

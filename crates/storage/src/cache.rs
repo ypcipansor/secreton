@@ -234,8 +234,7 @@ where
 
         if result.is_ok() {
             // Cache the entry on successful store
-            let serialized = bincode::serde::encode_to_vec(entry, bincode::config::standard())
-                .unwrap_or_default();
+            let serialized = postcard::to_stdvec(entry).unwrap_or_default();
             let _ = self
                 .cache
                 .set(
@@ -262,10 +261,7 @@ where
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
-            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
-                &cached_data,
-                bincode::config::standard(),
-            )
+            && let Ok(entry) = postcard::from_bytes::<SecretEntry>(&cached_data)
         {
             return Ok(Some(entry));
         }
@@ -275,8 +271,7 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+            && let Ok(serialized) = postcard::to_stdvec(entry)
         {
             let _ = self
                 .cache
@@ -292,10 +287,7 @@ where
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
-            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
-                &cached_data,
-                bincode::config::standard(),
-            )
+            && let Ok(entry) = postcard::from_bytes::<SecretEntry>(&cached_data)
         {
             return Ok(Some(entry));
         }
@@ -305,8 +297,7 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+            && let Ok(serialized) = postcard::to_stdvec(entry)
         {
             let _ = self
                 .cache
@@ -322,9 +313,7 @@ where
 
         if result.is_ok() {
             // Update cache
-            if let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
-            {
+            if let Ok(serialized) = postcard::to_stdvec(entry) {
                 let _ = self
                     .cache
                     .set(
@@ -501,5 +490,93 @@ mod tests {
         let stats = cache.stats().await.unwrap();
         assert_eq!(stats.entry_count, 0);
         assert_eq!(stats.memory_usage_bytes, 0);
+    }
+}
+
+#[cfg(test)]
+mod round_trip_tests {
+    use super::*;
+    use crate::{EncryptionMetadata, SecurityLevel};
+
+    fn sample_entry() -> SecretEntry {
+        let mut entry = SecretEntry::new(
+            "kv/app/db-password".to_string(),
+            // Ciphertext: arbitrary bytes, including zero and 0xFF, which a text encoding
+            // would have to escape and a length-prefixed one must round-trip exactly.
+            vec![0u8, 1, 2, 250, 255, 0, 128],
+            EncryptionMetadata {
+                algorithm: "AES-256-GCM".to_string(),
+                key_id: "key-1".to_string(),
+                iv: vec![9u8; 12],
+                ..Default::default()
+            },
+            SecurityLevel::Secret,
+            uuid::Uuid::new_v4(),
+        );
+        entry
+            .metadata
+            .insert("owner".to_string(), "platform-team".to_string());
+        entry.tags.push("production".to_string());
+        entry.version = 7;
+        entry.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(2));
+        entry
+    }
+
+    /// The cache stores entries as bytes, so the encoder is load-bearing: a serializer
+    /// that silently drops or reorders a field would hand back a *different secret* than
+    /// the one stored. Nothing tested this — the existing cache tests exercise the
+    /// backend's set/get, not the layer that encodes an entry into it.
+    #[test]
+    fn an_entry_survives_the_cache_encoding_unchanged() {
+        let original = sample_entry();
+
+        let encoded = postcard::to_stdvec(&original).expect("encode");
+        let decoded: SecretEntry = postcard::from_bytes(&encoded).expect("decode");
+
+        assert_eq!(decoded.id, original.id);
+        assert_eq!(decoded.path, original.path);
+        assert_eq!(
+            decoded.encrypted_data, original.encrypted_data,
+            "ciphertext did not survive the round trip"
+        );
+        assert_eq!(decoded.metadata, original.metadata);
+        assert_eq!(decoded.tags, original.tags);
+        assert_eq!(decoded.version, original.version);
+        assert_eq!(decoded.owner_id, original.owner_id);
+        assert_eq!(decoded.expires_at, original.expires_at);
+    }
+
+    /// An empty ciphertext is a legitimate value (an empty secret) and a common edge for
+    /// length-prefixed encodings.
+    #[test]
+    fn an_entry_with_no_ciphertext_round_trips() {
+        let mut entry = sample_entry();
+        entry.encrypted_data.clear();
+        entry.metadata.clear();
+        entry.tags.clear();
+        entry.expires_at = None;
+
+        let encoded = postcard::to_stdvec(&entry).expect("encode");
+        let decoded: SecretEntry = postcard::from_bytes(&encoded).expect("decode");
+
+        assert!(decoded.encrypted_data.is_empty());
+        assert_eq!(decoded.expires_at, None);
+        assert_eq!(decoded.path, entry.path);
+    }
+
+    /// Truncated or foreign bytes must be rejected, not decoded into a partial entry —
+    /// the read paths treat a successful decode as a cache hit and return it to the caller.
+    #[test]
+    fn corrupt_cache_bytes_are_rejected() {
+        let encoded = postcard::to_stdvec(&sample_entry()).expect("encode");
+
+        assert!(
+            postcard::from_bytes::<SecretEntry>(&encoded[..encoded.len() / 2]).is_err(),
+            "a truncated entry decoded successfully"
+        );
+        assert!(
+            postcard::from_bytes::<SecretEntry>(b"not an entry at all").is_err(),
+            "arbitrary bytes decoded as an entry"
+        );
     }
 }

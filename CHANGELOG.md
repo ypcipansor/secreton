@@ -10,6 +10,15 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 
 ### Fixed
 
+- `cargo deny check` passes. It had never been run against this branch: the `bincode`
+  direct dependency is permanently unmaintained (RUSTSEC-2025-0141), an ignore for
+  `fxhash`/wasmtime referred to a dependency this repository no longer has, and the
+  advisories for `rustls-pemfile` and `proc-macro-error2` were undeclared. Every remaining
+  ignore now states why it is there and what would let it be removed.
+- The in-memory cache encodes entries with `postcard` instead of `bincode`, and the
+  encoding is covered by round-trip tests — including that corrupt bytes are rejected
+  rather than decoded into a partial entry and returned as a cache hit.
+
 - **The workspace could not be built.** `rust-version = "1.95"` exceeded every available
   toolchain, and with `--ignore-rust-version` the build still failed because
   `utoipa-swagger-ui`'s build script downloads a zip over the network at compile time.
