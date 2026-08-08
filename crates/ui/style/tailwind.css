@@ -1,3 +1,15 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4, which is what cargo-leptos fetches.
+ *
+ * This file previously used the v3 directives (`@tailwind base/components/utilities`)
+ * alongside a v3 `tailwind.config.js`. v4 removed both: the directives are gone and the
+ * JS config is ignored unless a stylesheet opts into it with `@config`. The build did not
+ * fail — it would have produced a stylesheet with no utilities in it, and the application
+ * would have rendered unstyled.
+ *
+ * `@source` replaces the config's `content` array. Scanning the .rs sources is what makes
+ * this work at all: Tailwind reads class names out of the `view!` macros, which is why a
+ * generic glob over HTML would find nothing.
+ */
+@import "tailwindcss";
+
+@source "../src/**/*.rs";

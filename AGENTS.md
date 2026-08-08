@@ -41,6 +41,11 @@ cargo leptos serve
 # Both feature combinations must build
 cargo check -p secreton-server --locked --no-default-features
 cargo check -p secreton-server --locked --features grpc
+
+# The image is the only thing that exercises cargo-leptos end to end — the Tailwind
+# run, wasm-bindgen, wasm-opt and the feature set cargo-leptos builds with. Six
+# separate defects lived in that path while every cargo command passed.
+docker build -t secreton:local .
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Do not add `+nightly` to any command.

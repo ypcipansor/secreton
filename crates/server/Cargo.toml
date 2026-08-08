@@ -88,6 +88,12 @@ tower = { workspace = true, features = ["util"] }
 [features]
 default = ["grpc", "ui"]
 ui = ["dep:leptos", "dep:leptos_axum", "dep:leptos_meta", "dep:secreton-ui"]
+# cargo-leptos builds the binary with `bin-features` from the workspace metadata, which
+# names `ssr` — the conventional name for "this is the server half". That feature did not
+# exist here (only `secreton-ui` had one), so `cargo leptos build` failed immediately with
+# "the package 'secreton-server' does not contain this feature: ssr". It forwards to `ui`,
+# which already pulls secreton-ui with its own ssr feature enabled.
+ssr = ["ui"]
 grpc = [
     "dep:prost",
     "dep:protoc-bin-vendored",

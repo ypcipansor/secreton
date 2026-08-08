@@ -10,6 +10,13 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 
 ### Fixed
 
+- The Docker image builds and runs. It never had been built: `cargo install cargo-leptos`
+  failed for want of perl, `cargo leptos build --locked` used a flag that does not exist,
+  `style-file` pointed at a file that has never been in the repository, `secreton-server`
+  had no `ssr` feature for cargo-leptos to build with, the Tailwind config was v3 syntax
+  against the v4 CLI cargo-leptos fetches, and the runtime bound 127.0.0.1:8080 — so even
+  once it built, the container served nobody.
+
 - `cargo deny check` passes. It had never been run against this branch: the `bincode`
   direct dependency is permanently unmaintained (RUSTSEC-2025-0141), an ignore for
   `fxhash`/wasmtime referred to a dependency this repository no longer has, and the

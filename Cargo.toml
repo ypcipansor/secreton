@@ -303,14 +303,15 @@ site-pkg-dir = "pkg"
 site-addr = "127.0.0.1:3000"
 reload-port = 3001
 
-style-file = "crates/ui/style/main.css"
+# `style-file` is deliberately absent. It pointed at crates/ui/style/main.css, a file
+# that has never existed in this repository, and cargo-leptos reads it before doing
+# anything else — so `cargo leptos build` failed at "No such file or directory" before
+# reaching a single line of Rust. Styling goes through Tailwind, below; setting both is
+# not how cargo-leptos is configured.
 tailwind-input-file = "crates/ui/style/tailwind.css"
-tailwind-config-file = "crates/ui/tailwind.config.js"
 assets-dir = "crates/ui/public"
 
 browserquery = "defaults"
-watch = false
-env = "DEV"
 
 bin-features = ["ssr"]
 bin-default-features = false
