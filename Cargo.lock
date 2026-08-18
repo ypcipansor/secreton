@@ -4730,7 +4730,6 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "jsonwebtoken",
- "lru",
  "mysql_async",
  "parking_lot",
  "pem",

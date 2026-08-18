@@ -24,4 +24,8 @@ ignore = [
     # proc-macro-error2 — unmaintained build-time proc-macro, reached through
     # leptos_macro. Ships no runtime code.
     "RUSTSEC-2026-0173",
+    # lru — unsound `LruCache::pop()`. No longer used by this repository; it survives
+    # only through mysql_async, which pins ^0.16.3 and so cannot take the patched 0.18.2,
+    # behind an off-by-default feature.
+    "RUSTSEC-2026-0253",
 ]
