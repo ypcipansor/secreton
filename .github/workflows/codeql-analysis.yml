@@ -26,7 +26,7 @@ jobs:
   analyze:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -48,11 +48,15 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpq-dev
-
+      # No `apt-get install libpq-dev` here. Nothing in this workspace links against
+      # libpq: the drivers are tokio-postgres, deadpool-postgres and mysql_async, all pure
+      # Rust, and the lockfile contains no pq-sys, mysqlclient-sys or openssl-sys. ci.yml
+      # installs no system packages at all and builds the same feature set.
+      #
+      # It was not merely redundant. On 2026-08-18 that step hung in apt for five hours
+      # and fifty-nine minutes until the job hit its timeout, so the analysis never ran.
+      # `timeout-minutes` is now an hour rather than six: the analysis takes about
+      # forty-five minutes, so an hour still fits it while capping what a hang can cost.
       - name: Build for CodeQL
         run: |
           cargo build --workspace --all-features --verbose
