@@ -17,7 +17,6 @@ pub mod handlers;
 pub mod middleware;
 pub mod openapi;
 pub mod router;
-pub mod session;
 pub mod shutdown;
 
 #[cfg(feature = "grpc")]

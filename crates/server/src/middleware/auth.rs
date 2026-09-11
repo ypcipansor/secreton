@@ -18,10 +18,10 @@ use axum::response::Response;
 use axum_extra::extract::CookieJar;
 use secreton_auth::User;
 use secreton_domain::SecretonError;
+use secreton_domain::session::SESSION_COOKIE;
 use secreton_engines::Services;
 
 use crate::error::ApiError;
-use crate::session::SESSION_COOKIE;
 
 /// The authenticated principal, inserted as a request extension.
 #[derive(Debug, Clone)]

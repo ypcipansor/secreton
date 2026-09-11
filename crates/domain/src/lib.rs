@@ -17,6 +17,7 @@ pub mod error;
 pub mod models;
 pub mod password;
 pub mod security;
+pub mod session;
 
 pub use api::{ApiResponse, PaginationParams, QueryParams};
 pub use audit::AuditEvent;

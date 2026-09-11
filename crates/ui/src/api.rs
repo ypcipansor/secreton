@@ -179,8 +179,11 @@ pub async fn current_session() -> Result<Option<SessionUser>, ServerFnError> {
 // Server-only cookie plumbing
 // ---------------------------------------------------------------------------
 
+// The cookie's name and attributes come from `secreton-domain`, which the Axum middleware
+// in `secreton-server` reads too. A local copy of the name here is what let this file and
+// that middleware drift apart in the first place.
 #[cfg(feature = "ssr")]
-const SESSION_COOKIE: &str = "secreton_session";
+use secreton_domain::session::{self, SESSION_COOKIE};
 
 #[cfg(feature = "ssr")]
 fn current_token() -> Option<String> {
@@ -197,31 +200,43 @@ fn current_token() -> Option<String> {
     None
 }
 
+/// Whether the request arrived over TLS, which decides the cookie's `Secure` attribute.
+///
+/// This server does not terminate TLS; a proxy does, and reports the original scheme in
+/// `x-forwarded-proto`. That is the same signal `middleware::security_headers` uses to
+/// decide HSTS, so the two cannot disagree about whether a request was secure.
+///
+/// Setting and clearing both read it here. Previously only the setting path did, which is
+/// how the two headers came to disagree.
 #[cfg(feature = "ssr")]
-fn set_session_cookie(token: &str, ttl_seconds: i64) -> Result<(), ServerFnError> {
-    // `Secure` is asserted whenever the request arrived over TLS. Setting it
-    // unconditionally would make login silently fail over plain `http://localhost`,
-    // because the browser drops the cookie without an error the page can see.
-    let secure = use_context::<axum::http::HeaderMap>()
+fn cookie_secure() -> bool {
+    use_context::<axum::http::HeaderMap>()
         .and_then(|h| {
             h.get("x-forwarded-proto")
                 .and_then(|v| v.to_str().ok())
                 .map(|v| v.eq_ignore_ascii_case("https"))
         })
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
 
-    let cookie = format!(
-        "{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={ttl_seconds}{}",
-        if secure { "; Secure" } else { "" }
-    );
+/// Attach a `Set-Cookie` to the response this server function is producing.
+#[cfg(feature = "ssr")]
+fn put_set_cookie(value: String) -> Result<(), ServerFnError> {
     if let Some(response) = use_context::<leptos_axum::ResponseOptions>() {
         response.insert_header(
             axum::http::header::SET_COOKIE,
-            axum::http::HeaderValue::from_str(&cookie)
+            axum::http::HeaderValue::from_str(&value)
                 .map_err(|e| ServerFnError::new(format!("invalid session cookie: {e}")))?,
         );
     }
     Ok(())
+}
+
+#[cfg(feature = "ssr")]
+fn set_session_cookie(token: &str, ttl_seconds: i64) -> Result<(), ServerFnError> {
+    let value = session::session_cookie(token, ttl_seconds, cookie_secure())
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    put_set_cookie(value)
 }
 
 #[cfg(not(feature = "ssr"))]
@@ -231,17 +246,9 @@ fn set_session_cookie(_token: &str, _ttl_seconds: i64) -> Result<(), ServerFnErr
 
 #[cfg(feature = "ssr")]
 fn clear_session_cookie() -> Result<(), ServerFnError> {
-    // Attributes must match the ones used when setting, or the browser treats this as a
-    // different cookie and the original session stays live.
-    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
-    if let Some(response) = use_context::<leptos_axum::ResponseOptions>() {
-        response.insert_header(
-            axum::http::header::SET_COOKIE,
-            axum::http::HeaderValue::from_str(&cookie)
-                .map_err(|e| ServerFnError::new(format!("invalid session cookie: {e}")))?,
-        );
-    }
-    Ok(())
+    // `clearing_cookie` reads its attributes from the same place `session_cookie` does, so
+    // this cannot drift from the header that set the cookie.
+    put_set_cookie(session::clearing_cookie(cookie_secure()))
 }
 
 #[cfg(not(feature = "ssr"))]

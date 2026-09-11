@@ -56,7 +56,7 @@ impl Modify for SecurityAddon {
         components.add_security_scheme(
             "session",
             SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(
-                crate::session::SESSION_COOKIE,
+                secreton_domain::session::SESSION_COOKIE,
             ))),
         );
     }
@@ -79,6 +79,9 @@ mod tests {
         let schemes = &json["components"]["securitySchemes"];
         assert_eq!(schemes["bearer"]["scheme"], "bearer");
         assert_eq!(schemes["session"]["in"], "cookie");
-        assert_eq!(schemes["session"]["name"], crate::session::SESSION_COOKIE);
+        assert_eq!(
+            schemes["session"]["name"],
+            secreton_domain::session::SESSION_COOKIE
+        );
     }
 }
