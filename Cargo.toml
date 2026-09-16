@@ -87,9 +87,9 @@ leptos_axum = "0.8"
 leptos_meta = "0.8"
 leptos_router = "0.8"
 axum = { version = "0.8", features = ["macros", "json", "tracing"] }
-axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+axum-extra = { version = "0.12", features = ["cookie", "typed-header"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "fs",
     "trace",
     "cors",
@@ -208,7 +208,7 @@ pest = "2.7"
 pest_derive = "2.7"
 
 # ---- Dev / test ------------------------------------------------------------
-axum-test = "18"
+axum-test = "21"
 proptest = { version = "1.5", default-features = false, features = ["std"] }
 tokio-test = "0.4"
 pretty_assertions = "1.4"
