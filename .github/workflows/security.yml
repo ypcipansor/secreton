@@ -25,7 +25,7 @@ jobs:
     name: cargo-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
       # Prebuilt binary. Compiling cargo-audit from source took minutes per run.
       - uses: taiki-e/install-action@cargo-audit
@@ -42,7 +42,7 @@ jobs:
         # Separate jobs so a licence problem is not hidden behind an advisory.
         check: [advisories, bans, licenses, sources]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The action bundles its own cargo-deny, and v2.0.11's is too old to parse the
       # CVSS 4.0 advisories now in the database — it aborts with "unsupported CVSS
       # version: 4.0" before checking anything. Installing the binary directly keeps
@@ -61,12 +61,12 @@ jobs:
       # job dies on an unhandled rejection.
       pull-requests: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       # Pinned to a release SHA. These previously tracked @master and @main, which
       # means an upstream compromise executes in a workflow holding this repo's token.
-      - uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -76,7 +76,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # 0.30.0 referenced `aquasecurity/setup-trivy@v0.2.2`, a tag that has since been
       # removed, so the job failed at "Unable to resolve action" before scanning.
       #
