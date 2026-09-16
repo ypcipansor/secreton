@@ -70,13 +70,50 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    #"RUSTSEC-0000-0000",
-    #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
-    #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
-    #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
-    # Production deployment: ignore unmaintained crates that are required for core functionality
-    { id = "RUSTSEC-2024-0436", reason = "paste is required by leptos framework - actively maintained fork available but not yet compatible" },
-    { id = "RUSTSEC-2025-0057", reason = "fxhash is required by wasmtime (WebAssembly runtime) - no viable alternative available" },
+    # RUSTSEC-2023-0071 — Marvin, a timing side channel in the `rsa` crate.
+    #
+    # `rsa` is not a direct dependency and no RSA key is ever constructed here. It arrives
+    # via `jsonwebtoken`'s `rust_crypto` provider, which cannot be deselected: jsonwebtoken
+    # 10 installs its crypto provider from exactly one of `rust_crypto` or `aws_lc_rs`, and
+    # the alternative is a C dependency.
+    #
+    # The vulnerable code is unreachable: JWT validation uses
+    # `Validation::new(Algorithm::HS256)`, whose allowlist rejects RS*/PS* tokens before a
+    # key is constructed. Pinned by `only_hs256_tokens_are_accepted` in
+    # crates/auth/src/jwt.rs. Revisit if jsonwebtoken gains a provider feature that
+    # excludes RSA.
+    "RUSTSEC-2023-0071",
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; pulled in by leptos, not directly. It is a proc-macro, so it runs at build time and ships no code. Revisit when leptos moves off it." },
+    # RUSTSEC-2025-0134 — rustls-pemfile is unmaintained.
+    #
+    # Not a vulnerability: the crate is archived, and its own advisory notes that the last
+    # release is a thin wrapper around code that now lives in rustls-pki-types. It arrives
+    # via mysql_async, so nothing here can drop it while the `mysql` feature exists — and
+    # that feature is off by default, so a stock build does not contain it at all. Revisit
+    # when mysql_async migrates to `rustls_pki_types::PemObject`.
+    { id = "RUSTSEC-2025-0134", reason = "unmaintained (not vulnerable); transitive through mysql_async, which sits behind an off-by-default feature" },
+    # RUSTSEC-2026-0173 — proc-macro-error2 is unmaintained.
+    #
+    # A proc-macro crate reached only through `leptos_macro`, so it runs at build time and
+    # contributes no code to the binary. Nothing here can drop it while the UI uses Leptos.
+    { id = "RUSTSEC-2026-0173", reason = "unmaintained build-time proc-macro, transitive through leptos_macro; ships no runtime code" },
+    # RUSTSEC-2026-0253 — use-after-free in `lru`'s `LruCache::pop()` when a stored key's
+    # `Drop` panics, leaving a dangling node linked in the LRU list.
+    #
+    # This repository no longer uses `lru`. It was declared in crates/engines and never
+    # referenced there, and the one file that did use it —
+    # crates/server/src/middleware/legacy.rs — was an orphan from the restructure that no
+    # module declared, so it had never been compiled. Both are gone.
+    #
+    # It remains in the lockfile through mysql_async, which requires `lru = "0.16.3"` and
+    # so cannot take the patched 0.18.2; that sits behind the off-by-default `mysql`
+    # feature, so a stock build does not contain it. Reaching the bug needs a stored key
+    # whose `Drop` panics, and mysql_async's statement cache is keyed by strings, whose
+    # `Drop` cannot. Revisit when mysql_async widens its requirement.
+    { id = "RUSTSEC-2026-0253", reason = "unsound (not vulnerable); transitive through mysql_async behind an off-by-default feature, which pins ^0.16.3 and cannot take the patched 0.18.2" },
+    # RUSTSEC-2025-0057 (fxhash, via wasmtime) was ignored here for a wasmtime dependency
+    # this repository no longer has — the experimental WebAssembly modules were deleted.
+    # cargo-deny reports an unmatched ignore as a warning, which is how it was found.
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

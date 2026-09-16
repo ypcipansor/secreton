@@ -1,5 +1,5 @@
 use secreton_agent::run_agent;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

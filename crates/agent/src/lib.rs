@@ -17,11 +17,9 @@ pub mod config;
 pub mod health;
 pub mod metrics;
 // pub mod monitoring;  // Removed - use secreton_monitoring crate instead
-pub mod security;
 pub mod templating;
 
 // Re-export from monitoring crate
-pub use secreton_monitoring::*;
 
 // Re-export local modules
 pub use auth::*;
@@ -29,16 +27,13 @@ pub use config::*;
 pub use health::*;
 pub use metrics::*;
 // pub use monitoring::*;  // Removed - use secreton_monitoring crate instead
-pub use security::*;
 pub use templating::*;
 
-use secreton_core::CoreError;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 pub struct SecretonAgent {
     config: AgentConfig,
     // monitor: Arc<secreton_monitoring::SystemMonitor>,  // Using monitoring crate directly
-    security_enforcer: Arc<SecurityEnforcer>,
     health_checker: Arc<HealthChecker>,
     auth_handler: Arc<AuthHandler>,
     template_manager: Arc<TemplateManager>,
@@ -53,14 +48,10 @@ impl SecretonAgent {
             env!("CARGO_PKG_VERSION")
         );
 
-        // Create security event channel
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-
         // Create health check channel
         let (health_tx, _health_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // let monitor = Arc::new(SystemMonitor::new(config.monitoring.clone(), monitoring_tx));
-        let security_enforcer = Arc::new(SecurityEnforcer::new(config.security.clone(), event_tx));
         let health_checker = Arc::new(HealthChecker::new(config.health.clone(), health_tx));
 
         // Initialize Vault/Secreton Agent features
@@ -77,7 +68,6 @@ impl SecretonAgent {
         Ok(Self {
             config,
             // monitor,  // Using monitoring crate directly
-            security_enforcer,
             health_checker,
             auth_handler,
             template_manager,
@@ -94,7 +84,6 @@ impl SecretonAgent {
 
         // Start all services
         // let monitor_task = self.start_monitoring_service(shutdown_rx.resubscribe());  // Using monitoring crate directly
-        let security_task = self.start_security_service(shutdown_rx.resubscribe());
         let health_task = self.start_health_service(shutdown_rx.resubscribe());
         let metrics_task = self.start_metrics_service(shutdown_rx.resubscribe());
         let template_task = self.start_template_service(shutdown_rx.resubscribe());
@@ -105,7 +94,6 @@ impl SecretonAgent {
         // Wait for shutdown signal
         tokio::select! {
             // _ = monitor_task => warn!("Monitoring service stopped"),  // Using monitoring crate directly
-            _ = security_task => warn!("Security service stopped"),
             _ = health_task => warn!("Health service stopped"),
             _ = metrics_task => warn!("Metrics service stopped"),
             _ = template_task => warn!("Template service stopped"),
@@ -132,40 +120,6 @@ impl SecretonAgent {
         Ok(())
     }
 
-    /// Start security enforcement service
-    async fn start_security_service(
-        &self,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    ) -> Result<(), SecretonError> {
-        let _enforcer = Arc::clone(&self.security_enforcer);
-
-        tokio::spawn(async move {
-            let interval = Duration::from_secs(300); // 5 minutes
-            let mut interval_timer = tokio::time::interval(interval);
-
-            loop {
-                tokio::select! {
-                    _ = interval_timer.tick() => {
-                        tracing::debug!("Security enforcement service tick");
-                        // Perform security checks here
-                    }
-                    _ = shutdown_rx.recv() => {
-                        debug!("Security service shutting down");
-                        break;
-                    }
-                }
-            }
-
-            Ok::<(), CoreError>(())
-        })
-        .await
-        .map_err(|e| CoreError::Internal {
-            message: format!("Security service task failed: {}", e),
-        })??;
-
-        Ok(())
-    }
-
     /// Start authentication renewal service
     async fn start_auth_service(
         &self,
@@ -183,7 +137,7 @@ impl SecretonAgent {
             Ok(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Auth service task failed: {}", e),
         })??;
 
@@ -207,7 +161,7 @@ impl SecretonAgent {
             Ok(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Template service task failed: {}", e),
         })??;
 
@@ -250,10 +204,10 @@ impl SecretonAgent {
                 }
             }
 
-            Ok::<(), CoreError>(())
+            Ok::<(), SecretonError>(())
         })
         .await
-        .map_err(|e| CoreError::Internal {
+        .map_err(|e| SecretonError::Internal {
             message: format!("Metrics service task failed: {}", e),
         })??;
 
@@ -269,7 +223,7 @@ impl SecretonAgent {
             uptime_seconds: 0,      // Should calculate actual uptime
             monitoring_active: true,
             alerting_active: true,
-            security_active: true,
+            security_active: false,
             health_active: true,
             metrics_active: true,
             last_monitoring_check: Utc::now(),

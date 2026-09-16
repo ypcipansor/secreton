@@ -8,11 +8,7 @@ use p256::ecdsa::{
 use p384::ecdsa::{
     Signature as P384Signature, SigningKey as P384SigningKey, VerifyingKey as P384VerifyingKey,
 };
-use rsa::{
-    Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey,
-    pkcs8::{DecodePrivateKey, DecodePublicKey},
-};
-use sha2::Sha256;
+use pkcs8::{DecodePrivateKey, DecodePublicKey};
 use signature::{Signer, Verifier};
 
 /// Signing engine for digital signatures
@@ -29,7 +25,12 @@ impl SigningEngine {
                         actual: key.len(),
                     });
                 }
-                let signing_key = SigningKey::from_bytes(key.try_into().unwrap());
+                let seed: &[u8; 32] =
+                    key.try_into().map_err(|_| CryptoError::InvalidKeyLength {
+                        expected: 32,
+                        actual: key.len(),
+                    })?;
+                let signing_key = SigningKey::from_bytes(seed);
                 let signature = signing_key.sign(data);
                 Ok(signature.to_vec())
             }
@@ -46,15 +47,6 @@ impl SigningEngine {
                 })?;
                 let signature: P384Signature = signing_key.sign(data);
                 Ok(signature.to_vec())
-            }
-            AlgorithmId::Rsa2048 | AlgorithmId::Rsa4096 => {
-                let private_key = RsaPrivateKey::from_pkcs8_der(key)
-                    .map_err(|e| CryptoError::InvalidKey(format!("Invalid RSA key: {}", e)))?;
-                let signing_key = Pkcs1v15Sign::new::<Sha256>();
-                let signature = private_key
-                    .sign(signing_key, data)
-                    .map_err(|e| CryptoError::SigningFailed(e.to_string()))?;
-                Ok(signature)
             }
             _ => Err(CryptoError::InvalidAlgorithm(format!(
                 "Algorithm {} not supported for signing",
@@ -78,8 +70,8 @@ impl SigningEngine {
                 // If key is 32 bytes, assume it's private seed (standard for this codebase's generate_key)
                 // If we want to support verifying with public key, we'd need to know if it's public.
                 // For now, we assume we are using the stored key which is private.
-                if key.len() == 32 {
-                    let signing_key = SigningKey::from_bytes(key.try_into().unwrap());
+                if let Ok(seed) = <&[u8; 32]>::try_from(key) {
+                    let signing_key = SigningKey::from_bytes(seed);
                     let verifying_key = signing_key.verifying_key();
 
                     let signature = Signature::from_bytes(signature.try_into().map_err(|_| {
@@ -145,20 +137,6 @@ impl SigningEngine {
                         CryptoError::InvalidSignature(format!("Invalid ECDSA signature: {}", e))
                     })?;
                     Ok(verifying_key.verify(data, &signature).is_ok())
-                }
-            }
-            AlgorithmId::Rsa2048 | AlgorithmId::Rsa4096 => {
-                // Try parsing as private key first
-                if let Ok(private_key) = RsaPrivateKey::from_pkcs8_der(key) {
-                    let public_key = private_key.to_public_key();
-                    let verifying_key = Pkcs1v15Sign::new::<Sha256>();
-                    Ok(public_key.verify(verifying_key, data, signature).is_ok())
-                } else {
-                    // Try as public key
-                    let public_key = RsaPublicKey::from_public_key_der(key)
-                        .map_err(|e| CryptoError::InvalidKey(format!("Invalid RSA key: {}", e)))?;
-                    let verifying_key = Pkcs1v15Sign::new::<Sha256>();
-                    Ok(public_key.verify(verifying_key, data, signature).is_ok())
                 }
             }
             _ => Err(CryptoError::InvalidAlgorithm(format!(

@@ -10,6 +10,12 @@ on:
     - cron: '0 2 * * 1'
   workflow_dispatch:
 
+# Without this, each push to a pull request starts another full `--all-features`
+# workspace build while the previous one is still running.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -20,7 +26,7 @@ jobs:
   analyze:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -42,25 +48,63 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpq-dev
-
+      # No `apt-get install libpq-dev` here. Nothing in this workspace links against
+      # libpq: the drivers are tokio-postgres, deadpool-postgres and mysql_async, all pure
+      # Rust, and the lockfile contains no pq-sys, mysqlclient-sys or openssl-sys. ci.yml
+      # installs no system packages at all and builds the same feature set.
+      #
+      # It was not merely redundant. On 2026-08-18 that step hung in apt for five hours
+      # and fifty-nine minutes until the job hit its timeout, so the analysis never ran.
+      # `timeout-minutes` is now an hour rather than six: the analysis takes about
+      # forty-five minutes, so an hour still fits it while capping what a hang can cost.
       - name: Build for CodeQL
         run: |
           cargo build --workspace --all-features --verbose
 
+      # The analysis itself works: a run over this workspace extracted 196 of 196 Rust
+      # files with zero extraction errors and executed the full security-and-quality
+      # suite. What failed was publishing it — "Code scanning is not enabled for this
+      # repository", because that needs GitHub Advanced Security on a private repository.
+      # No permission or workflow change reaches it; `security-events: write` was already
+      # granted. So the job burned a full `--all-features` workspace build and then failed
+      # at the last step, every time, with results nobody could read.
+      #
+      # `upload: false` writes the SARIF locally instead, and the next step keeps it as a
+      # build artifact so the findings are actually retrievable. If code scanning is ever
+      # enabled on this repository, set `upload: true` and drop the artifact step — the
+      # Security tab is a better home for this than a zip file.
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{matrix.language}}"
-          upload: true
+          upload: false
+          output: codeql-results
 
-      - name: Summary
+      - name: Keep the SARIF as an artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: codeql-results-${{ matrix.language }}
+          path: codeql-results
+          retention-days: 30
+
+      # Findings are reported, not enforced. Gating on them needs the existing baseline
+      # triaged first — `security-and-quality` includes quality queries, so an unreviewed
+      # threshold would either fail on day one or be set so loose it catches nothing.
+      # Counting them here at least makes the number visible on every run.
+      - name: Summarise findings
+        if: always()
         run: |
-          echo "## 🔍 CodeQL Analysis Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Language: ${{ matrix.language }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Status: ✅ Analysis completed successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check the Security tab for detailed results." >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          echo "## CodeQL: ${{ matrix.language }}" >> "$GITHUB_STEP_SUMMARY"
+          total=0
+          for f in codeql-results/*.sarif; do
+            [ -e "$f" ] || continue
+            n=$(jq '[.runs[].results // [] | length] | add // 0' "$f")
+            total=$((total + n))
+          done
+          echo "- Results: **${total}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SARIF is attached to this run as \`codeql-results-${{ matrix.language }}\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Results are not uploaded to the Security tab: code scanning is not enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "for this repository, which on a private repository requires Advanced Security." >> "$GITHUB_STEP_SUMMARY"

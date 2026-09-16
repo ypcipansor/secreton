@@ -1,7 +1,7 @@
 //! Health monitoring module for the Secreton agent
 
 use crate::config::HealthConfig;
-use secreton_core::CoreResult;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -119,7 +119,7 @@ impl HealthChecker {
     pub async fn start(
         &self,
         mut shutdown: tokio::sync::broadcast::Receiver<()>,
-    ) -> CoreResult<()> {
+    ) -> Result<(), SecretonError> {
         tracing::info!("Starting health checker");
 
         let check_interval = Duration::from_secs(self.config.check_interval_seconds);
@@ -142,7 +142,7 @@ impl HealthChecker {
     }
 
     /// Perform all health checks
-    async fn perform_health_checks(&self) -> CoreResult<()> {
+    async fn perform_health_checks(&self) -> Result<(), SecretonError> {
         tracing::debug!("Performing health checks");
 
         // Perform basic health checks
@@ -154,7 +154,7 @@ impl HealthChecker {
     }
 
     /// Check memory usage
-    async fn check_memory_usage(&self) -> CoreResult<()> {
+    async fn check_memory_usage(&self) -> Result<(), SecretonError> {
         let memory = sysinfo::System::new_all();
         let total_memory = memory.total_memory() as f64;
         let used_memory = memory.used_memory() as f64;
@@ -173,10 +173,7 @@ impl HealthChecker {
                 name: "memory_usage".to_string(),
                 status,
                 message: format!("Memory usage: {:.1}%", usage_percent),
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                timestamp: unix_secs_source().as_secs(),
                 response_time_ms: None,
                 details: {
                     let mut map = HashMap::new();
@@ -200,7 +197,7 @@ impl HealthChecker {
     }
 
     /// Check disk usage
-    async fn check_disk_usage(&self) -> CoreResult<()> {
+    async fn check_disk_usage(&self) -> Result<(), SecretonError> {
         use sysinfo::Disks;
         let disks = Disks::new_with_refreshed_list();
 
@@ -226,10 +223,7 @@ impl HealthChecker {
                     name: format!("disk_usage_{}", mount_point),
                     status,
                     message: format!("Disk usage ({}): {:.1}%", mount_point, usage_percent),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: {
                         let mut map = HashMap::new();
@@ -255,7 +249,7 @@ impl HealthChecker {
     }
 
     /// Check network connectivity
-    async fn check_network_connectivity(&self) -> CoreResult<()> {
+    async fn check_network_connectivity(&self) -> Result<(), SecretonError> {
         // Simple connectivity check to a reliable endpoint
         match self
             .http_client
@@ -269,10 +263,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Healthy,
                     message: "Network connectivity is healthy".to_string(),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -283,10 +274,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Degraded,
                     message: "Network connectivity has issues".to_string(),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -297,10 +285,7 @@ impl HealthChecker {
                     name: "network_connectivity".to_string(),
                     status: HealthStatus::Unhealthy,
                     message: format!("Network connectivity failed: {}", e),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: unix_secs_source().as_secs(),
                     response_time_ms: None,
                     details: HashMap::new(),
                 };
@@ -350,10 +335,7 @@ impl HealthChecker {
 
         HealthSummary {
             overall_status,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: unix_secs_source().as_secs(),
             healthy_checks,
             degraded_checks,
             unhealthy_checks,
@@ -381,4 +363,14 @@ impl HealthChecker {
             .unwrap_or(Duration::ZERO)
             .as_secs()
     }
+}
+
+/// Seconds since the Unix epoch, saturating at 0.
+///
+/// `duration_since(UNIX_EPOCH).unwrap()` panics on a host whose clock predates 1970.
+/// A health reporter is the last component that should take the process down.
+fn unix_secs_source() -> std::time::Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::ZERO)
 }

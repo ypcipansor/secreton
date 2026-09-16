@@ -12,7 +12,7 @@ use super::core::*;
 use super::renewal::*;
 use super::revocation::*;
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Token service trait
 #[async_trait]

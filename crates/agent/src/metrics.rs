@@ -1,12 +1,13 @@
 //! Metrics collection module for the Secreton agent
 
+use crate::config::MetricsConfig;
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
-use secreton_config::MetricsConfig;
-use secreton_errors::SecretonError;
+use parking_lot::RwLock;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Metrics server for serving Prometheus metrics
@@ -24,8 +25,10 @@ struct AppState {
 impl MetricsServer {
     /// Create a new metrics server
     pub async fn new(port: u16) -> Result<Self, SecretonError> {
-        let mut config = MetricsConfig::default();
-        config.prometheus_port = port;
+        let config = MetricsConfig {
+            prometheus_port: port,
+            ..MetricsConfig::default()
+        };
 
         Ok(Self {
             config,
@@ -102,10 +105,7 @@ impl MetricPoint {
             name,
             metric_type,
             value,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: unix_secs_source().as_secs(),
             labels: HashMap::new(),
             metadata: HashMap::new(),
         }
@@ -134,7 +134,7 @@ pub struct MetricSeries {
 /// HTTP handler for /metrics endpoint
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     // Generate Prometheus format metrics
-    let metrics = state.metrics.read().unwrap();
+    let metrics = state.metrics.read();
     let mut prometheus_output = String::new();
 
     for (_, series) in metrics.iter() {
@@ -182,4 +182,11 @@ async fn health_handler(State(_state): State<AppState>) -> impl IntoResponse {
         StatusCode::OK,
         format!("{{\"status\":\"{}\"}}", health_status),
     )
+}
+
+/// See the note on the same helper in `health.rs`.
+fn unix_secs_source() -> std::time::Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::ZERO)
 }

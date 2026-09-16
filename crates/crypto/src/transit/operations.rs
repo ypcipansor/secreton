@@ -66,7 +66,7 @@ impl TransitOperations {
             key_type,
             created_at: Utc::now(),
             latest_version: 1,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -112,7 +112,7 @@ impl TransitOperations {
             key_name: request.key_name,
             ciphertext,
             key_version: request.key_version,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -156,7 +156,7 @@ impl TransitOperations {
         Ok(DecryptResponse {
             key_name: request.key_name,
             plaintext,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -203,7 +203,7 @@ impl TransitOperations {
             signature,
             algorithm: request.algorithm,
             key_version: request.key_version,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -259,7 +259,7 @@ impl TransitOperations {
             key_name: request.key_name,
             is_valid,
             algorithm: request.algorithm,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -290,7 +290,7 @@ impl TransitOperations {
             key_name: request.key_name,
             new_version,
             rotated_at: Utc::now(),
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -318,7 +318,7 @@ impl TransitOperations {
             random_data,
             bytes: request.bytes,
             format: request.format,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 
@@ -364,7 +364,7 @@ impl TransitOperations {
             key_name: request.key_name,
             derived_key,
             length: request.length,
-            processing_time_ms: processing_time.as_millis() as u64,
+            processing_time_ms: u64::try_from(processing_time.as_millis()).unwrap_or(u64::MAX),
         })
     }
 

@@ -2,14 +2,14 @@
 
 use crate::{SecretEntry, StorageResult};
 use async_trait::async_trait;
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
 /// Cache backend trait
 #[async_trait]
-pub trait CacheBackend: Send + Sync {
+pub trait CacheBackend: std::fmt::Debug + Send + Sync {
     /// Get an entry from cache
     async fn get(&self, key: &str) -> StorageResult<Option<Vec<u8>>>;
 
@@ -41,9 +41,14 @@ pub struct CacheStats {
 }
 
 /// In-memory cache implementation for development/testing
+#[derive(Debug)]
 pub struct InMemoryCache {
-    data: std::sync::RwLock<std::collections::HashMap<String, CacheEntry>>,
-    stats: std::sync::RwLock<CacheStats>,
+    // `parking_lot` rather than `std`: a std lock poisons when a holder panics, and every
+    // call site discharged that with `unwrap()` — so one panic anywhere turned a *cache*
+    // into a process-wide outage. parking_lot does not poison, which is the right
+    // semantics here: stale cache state is recoverable, a dead server is not.
+    data: parking_lot::RwLock<std::collections::HashMap<String, CacheEntry>>,
+    stats: parking_lot::RwLock<CacheStats>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,8 +60,8 @@ struct CacheEntry {
 impl InMemoryCache {
     pub fn new() -> Self {
         Self {
-            data: std::sync::RwLock::new(std::collections::HashMap::new()),
-            stats: std::sync::RwLock::new(CacheStats {
+            data: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            stats: parking_lot::RwLock::new(CacheStats {
                 hit_count: 0,
                 miss_count: 0,
                 hit_rate: 0.0,
@@ -69,8 +74,8 @@ impl InMemoryCache {
 
     fn cleanup_expired(&self) {
         let now = std::time::Instant::now();
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         let original_count = data.len();
         data.retain(|_, entry| entry.expires_at.is_none_or(|expires| expires > now));
@@ -92,8 +97,8 @@ impl CacheBackend for InMemoryCache {
     async fn get(&self, key: &str) -> StorageResult<Option<Vec<u8>>> {
         self.cleanup_expired();
 
-        let data = self.data.read().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let data = self.data.read();
+        let mut stats = self.stats.write();
 
         match data.get(key) {
             Some(entry) => {
@@ -117,8 +122,8 @@ impl CacheBackend for InMemoryCache {
     async fn set(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> StorageResult<()> {
         let expires_at = ttl.map(|duration| std::time::Instant::now() + duration);
 
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         let entry = CacheEntry {
             data: value.clone(),
@@ -133,14 +138,18 @@ impl CacheBackend for InMemoryCache {
 
         data.insert(key.to_string(), entry);
         stats.entry_count = data.len() as u64;
-        stats.memory_usage_bytes = (stats.memory_usage_bytes as i64 + memory_delta) as u64;
+        stats.memory_usage_bytes = i64::try_from(stats.memory_usage_bytes)
+            .unwrap_or(i64::MAX)
+            .saturating_add(memory_delta)
+            .try_into()
+            .unwrap_or(0);
 
         Ok(())
     }
 
     async fn delete(&self, key: &str) -> StorageResult<bool> {
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         if let Some(entry) = data.remove(key) {
             stats.entry_count = data.len() as u64;
@@ -159,8 +168,8 @@ impl CacheBackend for InMemoryCache {
     }
 
     async fn clear(&self) -> StorageResult<()> {
-        let mut data = self.data.write().unwrap();
-        let mut stats = self.stats.write().unwrap();
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
 
         data.clear();
         stats.entry_count = 0;
@@ -172,7 +181,7 @@ impl CacheBackend for InMemoryCache {
     async fn stats(&self) -> StorageResult<CacheStats> {
         self.cleanup_expired();
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         let total_requests = stats.hit_count + stats.miss_count;
         stats.hit_rate = if total_requests > 0 {
             stats.hit_count as f64 / total_requests as f64
@@ -185,6 +194,7 @@ impl CacheBackend for InMemoryCache {
 }
 
 /// Cached storage wrapper that adds caching to any storage backend
+#[derive(Debug)]
 pub struct CachedStorage<S: crate::StorageBackend, C: CacheBackend> {
     storage: S,
     cache: C,
@@ -224,8 +234,7 @@ where
 
         if result.is_ok() {
             // Cache the entry on successful store
-            let serialized = bincode::serde::encode_to_vec(entry, bincode::config::standard())
-                .unwrap_or_default();
+            let serialized = postcard::to_stdvec(entry).unwrap_or_default();
             let _ = self
                 .cache
                 .set(
@@ -252,10 +261,7 @@ where
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
-            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
-                &cached_data,
-                bincode::config::standard(),
-            )
+            && let Ok(entry) = postcard::from_bytes::<SecretEntry>(&cached_data)
         {
             return Ok(Some(entry));
         }
@@ -265,8 +271,7 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+            && let Ok(serialized) = postcard::to_stdvec(entry)
         {
             let _ = self
                 .cache
@@ -282,10 +287,7 @@ where
 
         // Try cache first
         if let Ok(Some(cached_data)) = self.cache.get(&cache_key).await
-            && let Ok((entry, _)) = bincode::serde::decode_from_slice::<SecretEntry, _>(
-                &cached_data,
-                bincode::config::standard(),
-            )
+            && let Ok(entry) = postcard::from_bytes::<SecretEntry>(&cached_data)
         {
             return Ok(Some(entry));
         }
@@ -295,8 +297,7 @@ where
 
         // Cache the result if found
         if let Some(ref entry) = entry
-            && let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
+            && let Ok(serialized) = postcard::to_stdvec(entry)
         {
             let _ = self
                 .cache
@@ -312,9 +313,7 @@ where
 
         if result.is_ok() {
             // Update cache
-            if let Ok(serialized) =
-                bincode::serde::encode_to_vec(entry, bincode::config::standard())
-            {
+            if let Ok(serialized) = postcard::to_stdvec(entry) {
                 let _ = self
                     .cache
                     .set(
@@ -491,5 +490,93 @@ mod tests {
         let stats = cache.stats().await.unwrap();
         assert_eq!(stats.entry_count, 0);
         assert_eq!(stats.memory_usage_bytes, 0);
+    }
+}
+
+#[cfg(test)]
+mod round_trip_tests {
+    use super::*;
+    use crate::{EncryptionMetadata, SecurityLevel};
+
+    fn sample_entry() -> SecretEntry {
+        let mut entry = SecretEntry::new(
+            "kv/app/db-password".to_string(),
+            // Ciphertext: arbitrary bytes, including zero and 0xFF, which a text encoding
+            // would have to escape and a length-prefixed one must round-trip exactly.
+            vec![0u8, 1, 2, 250, 255, 0, 128],
+            EncryptionMetadata {
+                algorithm: "AES-256-GCM".to_string(),
+                key_id: "key-1".to_string(),
+                iv: vec![9u8; 12],
+                ..Default::default()
+            },
+            SecurityLevel::Secret,
+            uuid::Uuid::new_v4(),
+        );
+        entry
+            .metadata
+            .insert("owner".to_string(), "platform-team".to_string());
+        entry.tags.push("production".to_string());
+        entry.version = 7;
+        entry.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(2));
+        entry
+    }
+
+    /// The cache stores entries as bytes, so the encoder is load-bearing: a serializer
+    /// that silently drops or reorders a field would hand back a *different secret* than
+    /// the one stored. Nothing tested this — the existing cache tests exercise the
+    /// backend's set/get, not the layer that encodes an entry into it.
+    #[test]
+    fn an_entry_survives_the_cache_encoding_unchanged() {
+        let original = sample_entry();
+
+        let encoded = postcard::to_stdvec(&original).expect("encode");
+        let decoded: SecretEntry = postcard::from_bytes(&encoded).expect("decode");
+
+        assert_eq!(decoded.id, original.id);
+        assert_eq!(decoded.path, original.path);
+        assert_eq!(
+            decoded.encrypted_data, original.encrypted_data,
+            "ciphertext did not survive the round trip"
+        );
+        assert_eq!(decoded.metadata, original.metadata);
+        assert_eq!(decoded.tags, original.tags);
+        assert_eq!(decoded.version, original.version);
+        assert_eq!(decoded.owner_id, original.owner_id);
+        assert_eq!(decoded.expires_at, original.expires_at);
+    }
+
+    /// An empty ciphertext is a legitimate value (an empty secret) and a common edge for
+    /// length-prefixed encodings.
+    #[test]
+    fn an_entry_with_no_ciphertext_round_trips() {
+        let mut entry = sample_entry();
+        entry.encrypted_data.clear();
+        entry.metadata.clear();
+        entry.tags.clear();
+        entry.expires_at = None;
+
+        let encoded = postcard::to_stdvec(&entry).expect("encode");
+        let decoded: SecretEntry = postcard::from_bytes(&encoded).expect("decode");
+
+        assert!(decoded.encrypted_data.is_empty());
+        assert_eq!(decoded.expires_at, None);
+        assert_eq!(decoded.path, entry.path);
+    }
+
+    /// Truncated or foreign bytes must be rejected, not decoded into a partial entry —
+    /// the read paths treat a successful decode as a cache hit and return it to the caller.
+    #[test]
+    fn corrupt_cache_bytes_are_rejected() {
+        let encoded = postcard::to_stdvec(&sample_entry()).expect("encode");
+
+        assert!(
+            postcard::from_bytes::<SecretEntry>(&encoded[..encoded.len() / 2]).is_err(),
+            "a truncated entry decoded successfully"
+        );
+        assert!(
+            postcard::from_bytes::<SecretEntry>(b"not an entry at all").is_err(),
+            "arbitrary bytes decoded as an entry"
+        );
     }
 }

@@ -1,170 +1,75 @@
 version: 2
 updates:
-  # Cargo dependencies
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 25
-    reviewers:
-      - "analisaperlengkapan"
-    assignees:
-      - "analisaperlengkapan"
-    labels:
-      - "dependencies"
-      - "rust"
+      interval: weekly
+      day: monday
+    # Was 25. A queue that large is never reviewed, and unreviewed dependency
+    # updates to a secrets manager are worse than slightly stale ones.
+    open-pull-requests-limit: 8
+    labels: [dependencies, rust]
     commit-message:
       prefix: "deps"
-      prefix-development: "deps-dev"
-      include: "scope"
+      prefix-development: "deps(dev)"
     groups:
-      # Group RustCrypto updates together
+      # Grouped so one ecosystem bump is one reviewable pull request rather than
+      # a dozen that must be merged in the right order to keep the tree consistent.
       rustcrypto:
         patterns:
           - "aes*"
+          - "argon2"
+          - "blake3"
           - "chacha20*"
-          - "sha*"
-          - "hmac*"
-          - "pbkdf2*"
-          - "argon2*"
-          - "scrypt*"
-          - "bcrypt*"
-          - "ring"
+          - "digest"
           - "ed25519*"
-          - "x25519*"
-          - "curve25519*"
+          - "hkdf"
+          - "hmac"
+          - "k256"
           - "p256"
           - "p384"
-          - "k256"
-          - "blake*"
-          - "digest"
+          - "pbkdf2"
+          - "scrypt"
+          - "sha2"
+          - "sha3"
           - "signature"
-          - "elliptic-curve"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group async ecosystem updates
-      async:
-        patterns:
-          - "tokio*"
-          - "async-*"
-          - "futures*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group serde ecosystem
-      serde:
-        patterns:
-          - "serde*"
-          - "toml"
-          - "config"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group security crates
-      security:
-        patterns:
+          - "subtle"
+          - "x25519*"
           - "zeroize*"
-          - "secrecy*"
-          - "rustls*"
-          - "rustls-*"
-          - "webpki*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group database crates
-      database:
-        patterns:
-          - "tokio-postgres*"
-          - "postgres*"
-          - "deadpool*"
-          - "redis*"
-          - "mongodb*"
-          - "mysql*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group AWS SDK updates
-      aws:
-        patterns:
-          - "aws-*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group HTTP/network crates
-      network:
-        patterns:
-          - "axum*"
-          - "hyper*"
-          - "reqwest*"
-          - "tower*"
-          - "tonic*"
-          - "warp"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group CLI crates
-      cli:
-        patterns:
-          - "clap*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Group monitoring crates
-      monitoring:
-        patterns:
-          - "prometheus*"
-          - "opentelemetry*"
-          - "tracing*"
-          - "metrics*"
-          - "sentry*"
-        update-types:
-          - "minor"
-          - "patch"
+      leptos:
+        patterns: ["leptos*"]
+      axum-tower:
+        patterns: ["axum*", "tower*", "hyper*", "http*"]
+      tonic:
+        patterns: ["tonic*", "prost*"]
+      async:
+        patterns: ["tokio*", "async-*", "futures*"]
+      serde:
+        patterns: ["serde*", "toml", "config"]
+      storage:
+        patterns: ["tokio-postgres*", "deadpool*", "redis"]
+      observability:
+        patterns: ["tracing*", "metrics*", "opentelemetry*"]
 
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "analisaperlengkapan"
-    assignees:
-      - "analisaperlengkapan"
-    labels:
-      - "dependencies"
-      - "github-actions"
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, ci]
     commit-message:
       prefix: "ci"
-      include: "scope"
     groups:
-      github-actions:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+      actions:
+        patterns: ["*"]
 
-  # Docker dependencies
-  - package-ecosystem: "docker"
-    directory: "/"
+  - package-ecosystem: docker
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 5
-    reviewers:
-      - "analisaperlengkapan"
-    assignees:
-      - "analisaperlengkapan"
-    labels:
-      - "dependencies"
-      - "docker"
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
     commit-message:
       prefix: "docker"
-      include: "scope"

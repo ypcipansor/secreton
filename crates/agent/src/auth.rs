@@ -3,7 +3,7 @@
 //! Handles authentication with the Secreton API and token management.
 
 use crate::config::VaultConfig;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -59,12 +59,12 @@ impl AuthHandler {
 
     /// Renew the current token
     async fn renew_token(&self) -> Result<(), SecretonError> {
-        let token = self.get_token().await;
-        if token.is_none() {
+        let Some(token) = self.get_token().await else {
             return Ok(());
-        }
-
-        let config = self.config.as_ref().unwrap();
+        };
+        let Some(config) = self.config.as_ref() else {
+            return Ok(());
+        };
         let url = format!(
             "{}/api/v1/auth/token/renew-self",
             config.server_url.trim_end_matches('/')
@@ -73,7 +73,7 @@ impl AuthHandler {
         match self
             .client
             .post(&url)
-            .header("X-Vault-Token", token.unwrap())
+            .header("X-Vault-Token", &token)
             .send()
             .await
         {
@@ -135,14 +135,10 @@ impl AuthHandler {
 
     /// Validate the current token with the API
     pub async fn validate(&self) -> Result<bool, SecretonError> {
-        let token = self.get_token().await;
-        if token.is_none() {
+        let Some(token) = self.get_token().await else {
             return Ok(false);
-        }
-
-        let config = if let Some(c) = &self.config {
-            c
-        } else {
+        };
+        let Some(config) = self.config.as_ref() else {
             return Ok(false);
         };
 
@@ -151,7 +147,7 @@ impl AuthHandler {
         match self
             .client
             .get(&url)
-            .header("X-Vault-Token", token.unwrap()) // Using Vault-compatible header or Authorization
+            .header("X-Vault-Token", &token)
             .send()
             .await
         {
@@ -188,12 +184,8 @@ impl AuthHandler {
             })?;
 
         // Handle path format (ensure it starts with /v1/)
-        let api_path = if path.starts_with("secret/") {
-            format!(
-                "v1/{}/data/{}",
-                "secret",
-                path.strip_prefix("secret/").unwrap()
-            )
+        let api_path = if let Some(rest) = path.strip_prefix("secret/") {
+            format!("v1/secret/data/{rest}")
         } else if !path.starts_with("v1/") {
             format!("v1/secret/data/{}", path)
         } else {

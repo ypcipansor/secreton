@@ -31,6 +31,11 @@ pub enum JwtError {
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
+
+    /// A claim value could not be represented — in practice, a system clock so far off
+    /// that a timestamp does not fit the claim type.
+    #[error("Invalid claim: {0}")]
+    InvalidClaims(String),
 }
 
 /// Token type enumeration
@@ -117,6 +122,21 @@ pub struct RefreshTokenClaims {
     pub jti: String,
 }
 
+/// Convert a Unix timestamp to the `usize` the JWT claims carry.
+///
+/// `as usize` silently wrapped a negative timestamp into an enormous positive one, so a
+/// host whose clock was set before 1970 would mint tokens with an `exp` far beyond any
+/// plausible date — credentials that never expire. It also truncates in 2038 on a 32-bit
+/// target. Failing loudly is the only safe behaviour for a value that decides when a
+/// credential stops working.
+fn claim_timestamp(ts: i64) -> Result<usize, JwtError> {
+    usize::try_from(ts).map_err(|_| {
+        JwtError::InvalidClaims(format!(
+            "timestamp {ts} is not representable; check the system clock"
+        ))
+    })
+}
+
 /// Token configuration
 #[derive(Debug, Clone)]
 pub struct TokenConfig {
@@ -197,6 +217,11 @@ impl JwtTokenService {
     /// configured `access_token_duration`.  This allows callers to honour
     /// dynamic configuration (e.g. runtime session-timeout changes) while
     /// keeping the JWT `exp` claim in sync with the session record.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_access_token(
         &self,
         user_id: &str,
@@ -220,6 +245,11 @@ impl JwtTokenService {
     }
 
     /// Create access token with an optional explicit duration.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_access_token_with_duration(
         &self,
         user_id: &str,
@@ -233,8 +263,8 @@ impl JwtTokenService {
     ) -> Result<String, JwtError> {
         let duration = duration_override.unwrap_or(self.config.access_token_duration);
         let now = Utc::now();
-        let iat = now.timestamp() as usize;
-        let exp = (now + duration).timestamp() as usize;
+        let iat = claim_timestamp(now.timestamp())?;
+        let exp = claim_timestamp((now + duration).timestamp())?;
 
         let claims = AccessTokenClaims {
             claims: Claims {
@@ -263,8 +293,8 @@ impl JwtTokenService {
     /// Create refresh token
     pub fn create_refresh_token(&self, user_id: &str, username: &str) -> Result<String, JwtError> {
         let now = Utc::now();
-        let iat = now.timestamp() as usize;
-        let exp = (now + self.config.refresh_token_duration).timestamp() as usize;
+        let iat = claim_timestamp(now.timestamp())?;
+        let exp = claim_timestamp((now + self.config.refresh_token_duration).timestamp())?;
 
         let claims = RefreshTokenClaims {
             sub: user_id.to_string(),
@@ -282,6 +312,11 @@ impl JwtTokenService {
     }
 
     /// Create token pair (access + refresh)
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_token_pair(
         &self,
         user_id: &str,
@@ -309,6 +344,11 @@ impl JwtTokenService {
     /// When `duration_override` is `Some`, it is used for the access token's
     /// `exp` claim **and** the returned `expires_in` value, keeping the JWT
     /// lifetime in sync with the session record.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "these are the claims a token carries; grouping them into a params \
+                  struct would only move the list somewhere else"
+    )]
     pub fn create_token_pair_with_duration(
         &self,
         user_id: &str,
@@ -337,7 +377,7 @@ impl JwtTokenService {
             access_token,
             refresh_token,
             token_type: "Bearer".to_string(),
-            expires_in: effective_duration.num_seconds() as u64,
+            expires_in: u64::try_from(effective_duration.num_seconds()).unwrap_or(0),
             metadata: std::collections::HashMap::new(),
         })
     }
@@ -354,8 +394,11 @@ impl JwtTokenService {
             jsonwebtoken::decode::<AccessTokenClaims>(token, &decoding_key, &validation)
                 .map_err(JwtError::JwtError)?;
 
-        // Check expiration
-        let now = Utc::now().timestamp() as usize;
+        // Check expiration. A clock before the epoch wrapping into a huge `now` would
+        // make every token appear expired; wrapping the other way would make every token
+        // appear live. Neither is acceptable for the comparison that decides whether a
+        // credential still works.
+        let now = claim_timestamp(Utc::now().timestamp())?;
         if token_data.claims.claims.exp < now {
             return Err(JwtError::TokenExpired);
         }
@@ -381,8 +424,11 @@ impl JwtTokenService {
             jsonwebtoken::decode::<RefreshTokenClaims>(token, &decoding_key, &validation)
                 .map_err(JwtError::JwtError)?;
 
-        // Check expiration
-        let now = Utc::now().timestamp() as usize;
+        // Check expiration. A clock before the epoch wrapping into a huge `now` would
+        // make every token appear expired; wrapping the other way would make every token
+        // appear live. Neither is acceptable for the comparison that decides whether a
+        // credential still works.
+        let now = claim_timestamp(Utc::now().timestamp())?;
         if token_data.claims.exp < now {
             return Err(JwtError::TokenExpired);
         }
@@ -455,5 +501,83 @@ mod tests {
             assert_eq!(config1.jwt_secret.len(), 36);
             assert_eq!(config1.jwt_refresh_secret.len(), 36);
         }
+    }
+}
+
+#[cfg(test)]
+mod algorithm_tests {
+    use super::*;
+
+    fn service() -> JwtTokenService {
+        JwtTokenService::new(TokenConfig {
+            jwt_secret: "a-test-secret-that-is-at-least-32-bytes".to_string(),
+            issuer: "secreton".to_string(),
+            audience: "secreton-api".to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// The `rsa` crate is in the dependency tree transitively, via jsonwebtoken's
+    /// `rust_crypto` provider. RUSTSEC-2023-0071 is an unfixed timing side channel in it,
+    /// so this test pins the reason it is unreachable: validation accepts only HS256, and
+    /// a token declaring any RS* algorithm is rejected before a key is constructed.
+    ///
+    /// It also closes the classic algorithm-confusion hole, where a validator that trusts
+    /// the header's `alg` can be talked into verifying an HMAC with a public key.
+    #[test]
+    fn only_hs256_tokens_are_accepted() {
+        let svc = service();
+
+        for forged_alg in ["RS256", "RS384", "RS512", "PS256", "none", "ES256"] {
+            // Header claiming another algorithm, body irrelevant — validation must reject
+            // on the algorithm alone.
+            let header = format!(r#"{{"alg":"{forged_alg}","typ":"JWT"}}"#);
+            let claims = r#"{"sub":"attacker","exp":9999999999}"#;
+            let encode = |s: &str| {
+                use base64::Engine;
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s)
+            };
+            let token = format!("{}.{}.{}", encode(&header), encode(claims), encode("sig"));
+
+            assert!(
+                svc.validate_access_token(&token).is_err(),
+                "a token declaring alg={forged_alg} was accepted"
+            );
+        }
+    }
+
+    /// Access and refresh tokens are signed with the same key, so the only thing keeping
+    /// one from being replayed as the other is claim shape: `RefreshTokenClaims` requires
+    /// `jti`, which an access token does not carry. Nothing else enforces that, and an
+    /// access token accepted at the refresh endpoint would let a caller mint fresh token
+    /// pairs indefinitely from a single short-lived credential. Pin it.
+    #[test]
+    fn an_access_token_is_not_accepted_as_a_refresh_token() {
+        let svc = service();
+        let pair = svc
+            .create_token_pair("u1", "alice", None, &[], &[], false, None)
+            .expect("issue");
+
+        assert!(
+            svc.validate_refresh_token(&pair.access_token).is_err(),
+            "an access token was accepted at the refresh path"
+        );
+        assert!(
+            svc.validate_access_token(&pair.refresh_token).is_err(),
+            "a refresh token was accepted at the access path"
+        );
+
+        // Each is still valid on its own path.
+        assert!(svc.validate_access_token(&pair.access_token).is_ok());
+        assert!(svc.validate_refresh_token(&pair.refresh_token).is_ok());
+    }
+
+    #[test]
+    fn a_token_this_service_issued_validates() {
+        let svc = service();
+        let pair = svc
+            .create_token_pair("u1", "alice", None, &[], &[], false, None)
+            .expect("issue");
+        assert!(svc.validate_access_token(&pair.access_token).is_ok());
     }
 }

@@ -1,0 +1,53 @@
+# `version:` is deliberately absent — it has been obsolete since Compose v2 and
+# emits a warning on every command.
+
+name: secreton
+
+services:
+  secreton:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # UI, REST API and gRPC all on one port.
+      - "3000:3000"
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      SECRETON__HTTP__BIND_ADDRESS: 0.0.0.0:3000
+      # Required: startup fails without it rather than generating one, because a
+      # generated secret invalidates every issued token on the next restart.
+      SECRETON__AUTH__JWT__SECRET: ${SECRETON_JWT_SECRET:?set SECRETON_JWT_SECRET in .env}
+      # compose puts one proxy in front of nothing, so the peer address is the
+      # client address; see AGENTS.md on why this is not blindly set higher.
+      SECRETON__HTTP__TRUSTED_PROXIES: "0"
+      SECRETON_CONFIG: /app/secreton.toml
+    volumes:
+      - ./secreton.toml:/app/secreton.toml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secreton}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-secreton}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-secreton}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    # Not published to the host: the database is reachable only from the compose
+    # network. The previous file exposed 5432, 6379, 3000 and 9090 to the host.
+
+volumes:
+  postgres_data:

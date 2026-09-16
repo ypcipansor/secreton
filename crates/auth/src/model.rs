@@ -278,7 +278,11 @@ pub struct AuthMethod {
 }
 
 /// User entity
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Default` is derived so tests and builders can construct one without listing twenty
+/// fields. A defaulted user is inert: not active, not enabled, no roles, empty password
+/// hash — so an accidentally-defaulted user cannot authenticate.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct User {
     pub id: String,
     pub username: String,

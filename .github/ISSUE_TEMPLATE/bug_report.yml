@@ -1,0 +1,34 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** See
+        [SECURITY.md](../blob/main/SECURITY.md) for the private disclosure process.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what occurred instead.
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start with `cargo leptos serve`
+        2. ...
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact any secret material before pasting.
+      render: text

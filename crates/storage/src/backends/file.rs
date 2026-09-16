@@ -8,7 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use std::time::SystemTime;
 use uuid::Uuid;
 
 /// File-based storage backend using JSON serialization
+#[derive(Debug)]
 pub struct FileBackend {
     storage_path: PathBuf,
 }

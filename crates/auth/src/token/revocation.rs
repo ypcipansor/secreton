@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::core::*;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Token revocation service trait
 #[async_trait]

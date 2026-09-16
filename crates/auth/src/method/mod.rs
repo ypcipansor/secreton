@@ -1,37 +1,25 @@
-//! Individual authentication method implementations
+//! Authentication methods.
+//!
+//! The set is deliberately small and each entry is reachable from a route:
+//!
+//! - `userpass`  — username and password, the bootstrap path
+//! - `approle`   — role id plus secret id, for machine-to-machine authentication
+//! - `oidc`      — human SSO against an OpenID Connect provider
+//!
+//! Eight further methods (LDAP, GitHub, Okta, AWS IAM, SAML, RADIUS, X.509, Kubernetes)
+//! previously lived here. None was reachable from a route. The Kubernetes one had never
+//! been compiled at all — its feature was never enabled in CI — and contained API misuse
+//! that only surfaced when the feature was finally turned on
+//! (`Api::all(client.to_string())`, among thirty errors). They were removed rather than
+//! left to imply support that did not exist; the `AuthMethod` trait is the extension
+//! point for adding one back, with tests and a CI job that builds its feature.
 
 pub mod approle;
-#[cfg(feature = "aws")]
-pub mod aws;
-pub mod certificate;
-pub mod github;
-#[cfg(feature = "kubernetes")]
-pub mod kubernetes;
-#[cfg(feature = "ldap")]
-pub mod ldap;
 #[cfg(feature = "oidc")]
 pub mod oidc;
-pub mod okta;
-#[cfg(feature = "radius")]
-pub mod radius;
-#[cfg(feature = "saml")]
-pub mod saml;
 pub mod userpass;
 
 pub use approle::*;
-#[cfg(feature = "aws")]
-pub use aws::*;
-pub use certificate::*;
-pub use github::*;
-#[cfg(feature = "kubernetes")]
-pub use kubernetes::*;
-#[cfg(feature = "ldap")]
-pub use ldap::*;
 #[cfg(feature = "oidc")]
 pub use oidc::*;
-pub use okta::*;
-#[cfg(feature = "radius")]
-pub use radius::*;
-#[cfg(feature = "saml")]
-pub use saml::*;
 pub use userpass::*;

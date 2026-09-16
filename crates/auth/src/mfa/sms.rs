@@ -4,7 +4,7 @@ use crate::service::AuthMethodResult;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;

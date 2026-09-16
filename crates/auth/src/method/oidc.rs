@@ -8,7 +8,7 @@ use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
 use reqwest::Client;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -48,19 +48,31 @@ impl OidcAuthMethod {
         }
     }
 
-    /// Set OIDC configuration
-    pub fn set_oidc_config(&mut self, config: OidcClientConfig) {
-        // Build OAuth2 client first before moving config
-        let client = BasicClient::new(ClientId::new(config.client_id.clone()))
-            .set_client_secret(ClientSecret::new(config.client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(config.auth_url.clone()).expect("Invalid auth URL"))
-            .set_token_uri(TokenUrl::new(config.token_url.clone()).expect("Invalid token URL"))
-            .set_redirect_uri(
-                RedirectUrl::new(config.redirect_url.clone()).expect("Invalid redirect URL"),
-            );
+    /// Set OIDC configuration.
+    ///
+    /// Returns an error rather than panicking on a malformed URL. These three values come
+    /// from operator configuration, so a typo in `auth_url` used to take the process down
+    /// on startup — the one moment an operator has the least information to diagnose it.
+    pub fn set_oidc_config(&mut self, config: OidcClientConfig) -> AuthMethodResult<()> {
+        let invalid = |field: &str, e: url::ParseError| SecretonError::Configuration {
+            message: format!("OIDC {field} is not a valid URL: {e}"),
+        };
 
-        self.client = Some(client);
+        let auth_uri = AuthUrl::new(config.auth_url.clone()).map_err(|e| invalid("auth_url", e))?;
+        let token_uri =
+            TokenUrl::new(config.token_url.clone()).map_err(|e| invalid("token_url", e))?;
+        let redirect_uri = RedirectUrl::new(config.redirect_url.clone())
+            .map_err(|e| invalid("redirect_url", e))?;
+
+        self.client = Some(
+            BasicClient::new(ClientId::new(config.client_id.clone()))
+                .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+                .set_auth_uri(auth_uri)
+                .set_token_uri(token_uri)
+                .set_redirect_uri(redirect_uri),
+        );
         self.oidc_config = Some(config);
+        Ok(())
     }
 
     /// Start OIDC authentication flow
@@ -194,7 +206,10 @@ impl AuthMethodImpl for OidcAuthMethod {
                     .unwrap_or("openid profile email")
                     .to_string(),
             };
-            self.set_oidc_config(oidc_config);
+            // Propagated: a malformed URL in the auth-method configuration must fail
+            // initialisation, not be discarded so the method appears enabled with no
+            // client behind it.
+            self.set_oidc_config(oidc_config)?;
         }
 
         self.enabled = true;

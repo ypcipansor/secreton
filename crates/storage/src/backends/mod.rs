@@ -1,63 +1,22 @@
-//! Storage backend implementations
+//! Storage backend implementations.
+//!
+//! `memory` and `file` are always compiled; the rest are behind features so a
+//! deployment only pays for the backend it actually uses.
 
 pub mod file;
+pub mod memory;
+#[cfg(feature = "postgres")]
 pub mod postgres;
+#[cfg(feature = "raft")]
 pub mod raft;
+#[cfg(feature = "redis")]
 pub mod redis;
 
-// New storage backends
-pub mod cassandra;
-pub mod cockroachdb;
-pub mod consul;
-pub mod dynamodb;
-pub mod etcd;
-pub mod mongodb;
-pub mod mysql;
-pub mod s3;
-
-// Azure and GCS backends (commented out due to missing dependencies)
-// pub mod azure_blob;
-// pub mod gcs;
-
-// Additional storage backends
-pub mod aerospike;
-pub mod alicloud_oss;
-pub mod couchdb;
-pub mod foundationdb;
-pub mod manta;
-pub mod mssql;
-pub mod oci;
-pub mod spanner;
-pub mod swift;
-pub mod zookeeper;
-
 pub use file::FileBackend;
+pub use memory::MemoryBackend;
+#[cfg(feature = "postgres")]
 pub use postgres::PostgresBackend;
+#[cfg(feature = "raft")]
 pub use raft::{RaftConfig, RaftStorageBackend};
+#[cfg(feature = "redis")]
 pub use redis::RedisBackend;
-
-// Export new backends
-pub use cassandra::{CassandraConfig, CassandraStorage};
-pub use cockroachdb::{CockroachDBConfig, CockroachDBStorage};
-pub use consul::{ConsulStorage, ConsulStorageConfig};
-pub use dynamodb::{DynamoDBStorage, DynamoDBStorageConfig};
-pub use etcd::{EtcdStorage, EtcdStorageConfig};
-pub use mongodb::{MongoDBConfig, MongoDBStorage};
-pub use mysql::{MySQLStorage, MySQLStorageConfig};
-pub use s3::{S3Storage, S3StorageConfig};
-
-// Export Azure and GCS backends (commented out due to missing dependencies)
-// pub use azure_blob::{AzureBlobConfig, AzureBlobStorage};
-// pub use gcs::{GcsConfig, GoogleCloudStorage};
-
-// Export additional backends
-pub use aerospike::{AerospikeConfig, AerospikeStorage};
-pub use alicloud_oss::{AliCloudOSSConfig, AliCloudOSSStorage};
-pub use couchdb::{CouchDBConfig, CouchDBStorage};
-pub use foundationdb::{FoundationDBConfig, FoundationDBStorage};
-pub use manta::{MantaConfig, MantaStorage};
-pub use mssql::{MSSQLConfig, MSSQLStorage};
-pub use oci::{OCIConfig, OCIStorage};
-pub use spanner::{SpannerConfig, SpannerStorage};
-pub use swift::{SwiftConfig, SwiftStorage};
-pub use zookeeper::{ZooKeeperConfig, ZooKeeperStorage};

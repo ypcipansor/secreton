@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use rand::rngs::OsRng;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 

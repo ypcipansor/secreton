@@ -7,12 +7,13 @@ use crate::{
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
 use futures::future::try_join_all;
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use std::sync::Arc;
 use tokio_postgres::{NoTls, Row};
 use uuid::Uuid;
 
 /// PostgreSQL storage backend
+#[derive(Debug)]
 pub struct PostgresBackend {
     pool: Arc<Pool>,
 }
@@ -417,7 +418,7 @@ impl StorageBackend for PostgresBackend {
                 })?;
 
         let count: i64 = rows[0].get(0);
-        Ok(count as u64)
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
@@ -499,8 +500,8 @@ impl StorageBackend for PostgresBackend {
         let storage_size: i64 = size_rows[0].get(0);
 
         Ok(StorageStats {
-            total_entries: total_entries as u64,
-            total_size_bytes: storage_size as u64,
+            total_entries: u64::try_from(total_entries).unwrap_or(0),
+            total_size_bytes: u64::try_from(storage_size).unwrap_or(0),
             average_entry_size: if total_entries > 0 {
                 storage_size as f64 / total_entries as f64
             } else {
@@ -725,7 +726,7 @@ impl PostgresBackend {
             security_level,
             metadata,
             tags: row.get("tags"),
-            version: row.get::<_, i32>("version") as u32,
+            version: u32::try_from(row.get::<_, i32>("version")).unwrap_or(0),
             owner_id: row.get("owner_id"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
@@ -735,12 +736,14 @@ impl PostgresBackend {
 }
 
 /// PostgreSQL transaction implementation
+#[derive(Debug)]
 pub struct PostgresTransaction {
     pool: Arc<Pool>,
     operations: Vec<PostgresOperation>,
     committed: bool,
 }
 
+#[derive(Debug)]
 enum PostgresOperation {
     Store(SecretEntry),
     Update(SecretEntry),

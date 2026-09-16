@@ -1,0 +1,31 @@
+[package]
+name = "secreton-domain"
+description = "Shared domain types, unified error type and API envelope for Secreton"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+# `http` gives us StatusCode without pulling in a web framework, so this crate
+# still compiles for wasm32 and is usable from the Leptos UI.
+http.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

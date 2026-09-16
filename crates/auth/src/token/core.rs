@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::service::AuthMethodResult;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 
 /// Token types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

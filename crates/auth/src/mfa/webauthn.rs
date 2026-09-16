@@ -6,7 +6,7 @@ use crate::service::AuthMethodResult;
 use async_trait::async_trait;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;

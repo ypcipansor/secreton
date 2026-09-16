@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::Utc;
 use redis::{AsyncCommands, Client, aio::ConnectionManager};
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +25,7 @@ pub struct RedisTransaction {
     committed: bool,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum RedisTransactionOp {
     Store(SecretEntry),
     Update(SecretEntry),
@@ -101,7 +101,7 @@ impl StorageTransaction for RedisTransaction {
                     if let Some(expires_at) = entry.expires_at {
                         let ttl = (expires_at - Utc::now()).num_seconds();
                         if ttl > 0 {
-                            pipe.set_ex(&key, value, ttl as u64);
+                            pipe.set_ex(&key, value, u64::try_from(ttl).unwrap_or(0));
                         } else {
                             // Already expired, ensure it is removed
                             pipe.del(&key);
@@ -153,6 +153,22 @@ impl RedisBackend {
     }
 }
 
+// `redis::aio::ConnectionManager` is not `Debug`, so these are written by hand rather
+// than derived. They deliberately print no connection details.
+impl std::fmt::Debug for RedisBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedisBackend")
+    }
+}
+
+impl std::fmt::Debug for RedisTransaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisTransaction")
+            .field("pending_operations", &self.operations.len())
+            .finish()
+    }
+}
+
 #[async_trait]
 impl StorageBackend for RedisBackend {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
@@ -166,7 +182,7 @@ impl StorageBackend for RedisBackend {
         if let Some(expires_at) = entry.expires_at {
             let ttl = (expires_at - Utc::now()).num_seconds();
             if ttl > 0 {
-                conn.set_ex::<_, _, ()>(&key, value, ttl as u64)
+                conn.set_ex::<_, _, ()>(&key, value, u64::try_from(ttl).unwrap_or(0))
                     .await
                     .map_err(|e| StorageError::QueryFailed {
                         message: format!("Failed to store entry with TTL: {}", e),
@@ -194,11 +210,15 @@ impl StorageBackend for RedisBackend {
             if let Some(expires_at) = entry.expires_at {
                 let ttl = (expires_at - Utc::now()).num_seconds();
                 if ttl > 0 {
-                    conn.set_ex::<_, _, ()>(&path_key, entry.id.to_string(), ttl as u64)
-                        .await
-                        .map_err(|e| StorageError::QueryFailed {
-                            message: format!("Failed to store path mapping with TTL: {}", e),
-                        })?;
+                    conn.set_ex::<_, _, ()>(
+                        &path_key,
+                        entry.id.to_string(),
+                        u64::try_from(ttl).unwrap_or(0),
+                    )
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to store path mapping with TTL: {}", e),
+                    })?;
                 } else {
                     conn.del::<_, ()>(&path_key)
                         .await

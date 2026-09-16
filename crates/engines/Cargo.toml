@@ -1,0 +1,88 @@
+[package]
+name = "secreton-engines"
+description = "Secret engines, seal and audit pipeline for Secreton — the business logic layer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+secreton-auth.workspace = true
+secreton-crypto.workspace = true
+secreton-domain.workspace = true
+secreton-storage.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "fs"] }
+tracing.workspace = true
+uuid.workspace = true
+
+base32.workspace = true
+base64.workspace = true
+hex.workspace = true
+hmac.workspace = true
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+sysinfo = "0.37"
+sha2.workspace = true
+sha3.workspace = true
+totp-rs.workspace = true
+zeroize.workspace = true
+
+# PKI / SSH engines
+ed25519-dalek.workspace = true
+pem.workspace = true
+rcgen.workspace = true
+ssh-key = { version = "0.6", features = ["ed25519", "alloc", "std", "rand_core"] }
+const-oid = "0.9"
+der = "0.7"
+time = "0.3"
+x509-cert = "0.2"
+x509-parser.workspace = true
+
+# Tokens
+jsonwebtoken.workspace = true
+
+# Dynamic database credentials. Optional, because a deployment that does not issue
+# database credentials should not link a database driver — and because the engine
+# refuses to serve a database whose driver was not compiled in, rather than inventing
+# a credential for it.
+deadpool-postgres = { workspace = true, optional = true }
+tokio-postgres = { workspace = true, optional = true }
+mysql_async = { workspace = true, optional = true }
+
+[features]
+default = ["postgres"]
+# These gate the dynamic-database-credentials engine. They previously appeared in
+# `#[cfg(feature = ...)]` attributes without ever being declared here, so every
+# postgres and mysql code path in the engine was silently compiled out and the
+# endpoint answered "PostgreSQL feature disabled" in every build ever produced.
+postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
+mysql = ["dep:mysql_async"]
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+# The postgres integration tests connect directly to verify the account the engine
+# claims to have created actually exists.
+tokio-postgres.workspace = true
+# The MySQL integration tests connect directly to verify the account the engine claims to
+# have created actually exists and carries the role's grants.
+mysql_async.workspace = true
+tokio = { workspace = true, features = ["full"] }

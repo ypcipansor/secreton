@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -15,23 +14,18 @@ pub mod backends;
 pub mod cache;
 pub mod factory;
 pub mod models;
-pub mod storage_backends;
 
-// Re-export common backends
-pub use backends::{FileBackend, PostgresBackend, RaftConfig, RaftStorageBackend, RedisBackend};
+#[cfg(feature = "postgres")]
+pub use backends::PostgresBackend;
+#[cfg(feature = "redis")]
+pub use backends::RedisBackend;
+pub use backends::{FileBackend, MemoryBackend};
+#[cfg(feature = "raft")]
+pub use backends::{RaftConfig, RaftStorageBackend};
 
-// Re-export new backends
-pub use backends::{ConsulStorage, ConsulStorageConfig};
-pub use backends::{DynamoDBStorage, DynamoDBStorageConfig};
-pub use backends::{EtcdStorage, EtcdStorageConfig};
-pub use backends::{MySQLStorage, MySQLStorageConfig};
-pub use backends::{S3Storage, S3StorageConfig};
-
-// Re-export factory
 pub use factory::{StorageBackendType, StorageFactory, StorageFactoryConfig};
 
-// Import from common
-use secreton_common::models::oauth_state::OAuthState;
+use secreton_domain::OAuthState;
 
 /// Encryption metadata for secreton entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +304,7 @@ pub type StorageResult<T> = Result<T, StorageError>;
 
 /// Storage backend trait for different implementations
 #[async_trait]
-pub trait StorageBackend: Send + Sync {
+pub trait StorageBackend: std::fmt::Debug + Send + Sync {
     /// Store a secreton entry
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()>;
 
@@ -373,12 +367,11 @@ pub trait StorageBackend: Send + Sync {
         let now = Utc::now();
 
         for entry in entries {
-            if let Some(expires_at) = entry.expires_at {
-                if expires_at < now {
-                    if self.delete_by_id(entry.id).await? {
-                        deleted_count += 1;
-                    }
-                }
+            if let Some(expires_at) = entry.expires_at
+                && expires_at < now
+                && self.delete_by_id(entry.id).await?
+            {
+                deleted_count += 1;
             }
         }
 
@@ -402,7 +395,7 @@ pub trait StorageBackend: Send + Sync {
 
 /// Transaction interface for atomic operations
 #[async_trait]
-pub trait StorageTransaction: Send + Sync {
+pub trait StorageTransaction: std::fmt::Debug + Send + Sync {
     /// Store entry within transaction
     async fn store(&mut self, entry: &SecretEntry) -> StorageResult<()>;
 
@@ -486,280 +479,6 @@ impl Default for PoolSettings {
             idle_timeout_seconds: 600,
             max_lifetime_seconds: 3600,
         }
-    }
-}
-
-/// Simple in-memory mock storage backend for testing and development
-#[derive(Debug, Clone)]
-pub struct MockStorageBackend {
-    data: Arc<std::sync::RwLock<HashMap<String, SecretEntry>>>,
-    id_index: Arc<std::sync::RwLock<HashMap<Uuid, String>>>,
-    oauth_states: Arc<std::sync::RwLock<HashMap<String, OAuthState>>>,
-}
-
-impl Default for MockStorageBackend {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MockStorageBackend {
-    pub fn new() -> Self {
-        Self {
-            data: Arc::new(std::sync::RwLock::new(HashMap::new())),
-            id_index: Arc::new(std::sync::RwLock::new(HashMap::new())),
-            oauth_states: Arc::new(std::sync::RwLock::new(HashMap::new())),
-        }
-    }
-}
-
-#[async_trait]
-impl StorageBackend for MockStorageBackend {
-    async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let mut data = self.data.write().unwrap();
-        let mut id_index = self.id_index.write().unwrap();
-
-        data.insert(entry.path.clone(), entry.clone());
-        id_index.insert(entry.id, entry.path.clone());
-
-        Ok(())
-    }
-
-    async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
-        let id_index = self.id_index.read().unwrap();
-        if let Some(path) = id_index.get(&id) {
-            let data = self.data.read().unwrap();
-            Ok(data.get(path).cloned())
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
-        let data = self.data.read().unwrap();
-        Ok(data.get(path).cloned())
-    }
-
-    async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
-        let mut data = self.data.write().unwrap();
-        if data.contains_key(&entry.path) {
-            data.insert(entry.path.clone(), entry.clone());
-            Ok(())
-        } else {
-            Err(StorageError::NotFound {
-                resource_type: "SecretEntry".to_string(),
-                id: entry.id.to_string(),
-            })
-        }
-    }
-
-    async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
-        let mut id_index = self.id_index.write().unwrap();
-        if let Some(path) = id_index.remove(&id) {
-            let mut data = self.data.write().unwrap();
-            if data.remove(&path).is_some() {
-                Ok(true)
-            } else {
-                // restore index consistency if data missing unexpectedly
-                id_index.insert(id, path);
-                Ok(false)
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
-    async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        let mut data = self.data.write().unwrap();
-        if let Some(entry) = data.remove(path) {
-            let mut id_index = self.id_index.write().unwrap();
-            id_index.remove(&entry.id);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
-        let data = self.data.read().unwrap();
-        let mut results: Vec<SecretEntry> = data
-            .values()
-            .filter(|entry| {
-                // Simple filtering logic
-                if let Some(prefix) = &params.path_prefix
-                    && !entry.path.starts_with(prefix)
-                {
-                    return false;
-                }
-                if let Some(owner) = params.owner_id
-                    && entry.owner_id != owner
-                {
-                    return false;
-                }
-                !entry.is_expired() || params.include_expired
-            })
-            .cloned()
-            .collect();
-
-        // Apply limit
-        if let Some(limit) = params.limit {
-            results.truncate(limit as usize);
-        }
-
-        Ok(results)
-    }
-
-    async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
-        let entries = self.list(params).await?;
-        Ok(entries.len() as u64)
-    }
-
-    async fn exists(&self, path: &str) -> StorageResult<bool> {
-        let data = self.data.read().unwrap();
-        Ok(data.contains_key(path))
-    }
-
-    async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
-        // For mock, just return a no-op transaction
-        Ok(Box::new(MockTransaction))
-    }
-
-    async fn health_check(&self) -> StorageResult<HealthStatus> {
-        Ok(HealthStatus {
-            is_healthy: true,
-            response_time_ms: 1.0,
-            connections_active: 1,
-            connections_idle: 0,
-            last_error: None,
-            uptime_seconds: 3600,
-        })
-    }
-
-    async fn get_stats(&self) -> StorageResult<StorageStats> {
-        let data = self.data.read().unwrap();
-        let total_entries = data.len() as u64;
-        let total_size_bytes = data.values().map(|e| e.encrypted_data.len() as u64).sum();
-
-        Ok(StorageStats {
-            total_entries,
-            total_size_bytes,
-            average_entry_size: if total_entries > 0 {
-                total_size_bytes as f64 / total_entries as f64
-            } else {
-                0.0
-            },
-            entries_by_security_level: HashMap::new(),
-            entries_created_today: total_entries,
-            entries_updated_today: 0,
-            expired_entries: 0,
-        })
-    }
-
-    async fn migrate(&self) -> StorageResult<()> {
-        // Mock migration - nothing to do
-        Ok(())
-    }
-
-    async fn compact(&self) -> StorageResult<()> {
-        Ok(())
-    }
-
-    async fn vacuum(&self) -> StorageResult<()> {
-        Ok(())
-    }
-
-    async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
-        let now = Utc::now();
-        let mut data = self.data.write().unwrap();
-        let mut id_index = self.id_index.write().unwrap();
-        let mut deleted_count = 0;
-
-        // Collect keys to delete first to avoid borrowing issues
-        let keys_to_delete: Vec<String> = data
-            .iter()
-            .filter(|(_, entry)| {
-                let matches_prefix = if let Some(prefix) = &path_prefix {
-                    entry.path.starts_with(prefix)
-                } else {
-                    true
-                };
-
-                let is_expired = if let Some(expires_at) = entry.expires_at {
-                    expires_at < now
-                } else {
-                    false
-                };
-
-                matches_prefix && is_expired
-            })
-            .map(|(k, _)| k.clone())
-            .collect();
-
-        for key in keys_to_delete {
-            if let Some(entry) = data.remove(&key) {
-                id_index.remove(&entry.id);
-                deleted_count += 1;
-            }
-        }
-
-        Ok(deleted_count)
-    }
-
-    async fn store_oauth_state(&self, state: &OAuthState) -> StorageResult<()> {
-        let mut states = self.oauth_states.write().unwrap();
-        states.insert(state.state.clone(), state.clone());
-        Ok(())
-    }
-
-    async fn get_oauth_state(&self, state: &str) -> StorageResult<Option<OAuthState>> {
-        let mut states = self.oauth_states.write().unwrap();
-        if let Some(oauth_state) = states.get(state) {
-            if oauth_state.expires_at < Utc::now() {
-                states.remove(state);
-                return Ok(None);
-            }
-        }
-        Ok(states.remove(state))
-    }
-
-    async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
-        let mut states = self.oauth_states.write().unwrap();
-        let mut count = 0;
-        states.retain(|_, state| {
-            if state.expires_at < Utc::now() {
-                count += 1;
-                false
-            } else {
-                true
-            }
-        });
-        Ok(count)
-    }
-}
-
-/// Mock transaction for testing
-pub struct MockTransaction;
-
-#[async_trait]
-impl StorageTransaction for MockTransaction {
-    async fn store(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
-        Ok(())
-    }
-
-    async fn update(&mut self, _entry: &SecretEntry) -> StorageResult<()> {
-        Ok(())
-    }
-
-    async fn delete(&mut self, _id: Uuid) -> StorageResult<bool> {
-        Ok(true)
-    }
-
-    async fn commit(self: Box<Self>) -> StorageResult<()> {
-        Ok(())
-    }
-
-    async fn rollback(self: Box<Self>) -> StorageResult<()> {
-        Ok(())
     }
 }
 

@@ -1,0 +1,167 @@
+//! SSH Secret Engine Handlers
+
+use secreton_domain::SecretonError;
+use secreton_engines::Services;
+
+use axum::{
+    Router,
+    extract::{Json, State},
+    response::Json as AxumJson,
+    routing::{get, post},
+};
+use serde::{Deserialize, Serialize};
+
+use crate::error::ApiResult;
+use crate::extractors::AuthenticatedUser;
+use crate::handlers::AppState;
+use secreton_domain::ApiResponse;
+use secreton_engines::services::audit::SecurityEventType;
+use secreton_engines::services::ssh::{SSH_MAX_LEASE_TTL, SshServiceError};
+
+/// Map a [`SshServiceError`] to the appropriate [`crate::error::ApiError`] variant
+fn map_ssh_err(err: SshServiceError) -> crate::error::ApiError {
+    match err {
+        SshServiceError::NotFound(msg) => {
+            crate::error::ApiError(SecretonError::NotFound { resource: msg })
+        }
+        SshServiceError::Conflict(msg) => {
+            crate::error::ApiError(SecretonError::Conflict { message: msg })
+        }
+        SshServiceError::BadRequest(msg) => {
+            crate::error::ApiError(SecretonError::Validation { message: msg })
+        }
+        SshServiceError::Internal(msg) => {
+            crate::error::ApiError(SecretonError::Internal { message: msg })
+        }
+    }
+}
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/config/ca", get(get_ca_public_key).post(generate_ca))
+        .route("/sign", post(sign_key))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CaResponse {
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignKeyRequest {
+    pub public_key: String,
+    pub valid_principals: Option<Vec<String>>,
+    pub ttl: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedKeyResponse {
+    pub signed_key: String,
+    /// The effective TTL applied to the certificate (may differ from the
+    /// requested value due to clamping).
+    pub ttl: u64,
+}
+
+async fn get_ca_public_key(
+    State(state): State<Services>,
+    AuthenticatedUser(_user): AuthenticatedUser,
+) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
+    let pub_key = state.ssh.get_ca_public_key().await.map_err(map_ssh_err)?;
+
+    match pub_key {
+        Some(pk) => Ok(AxumJson(ApiResponse::success(CaResponse {
+            public_key: pk,
+        }))),
+        None => Err(crate::error::ApiError(SecretonError::NotFound {
+            resource: "SSH CA not configured".to_string(),
+        })),
+    }
+}
+
+async fn generate_ca(
+    State(state): State<Services>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> ApiResult<AxumJson<ApiResponse<CaResponse>>> {
+    // Only admin/root users may generate a CA
+    if !user.is_admin() {
+        return Err(crate::error::ApiError(SecretonError::Authorization {
+            message: "Admin privileges required to generate SSH CA".to_string(),
+        }));
+    }
+
+    let pub_key = state.ssh.generate_ca().await.map_err(map_ssh_err)?;
+
+    // Audit log the CA generation
+    state
+        .audit
+        .log_event(SecurityEventType::SshCaGeneration {
+            user: user.username.clone(),
+        })
+        .await;
+
+    Ok(AxumJson(ApiResponse::success(CaResponse {
+        public_key: pub_key,
+    })))
+}
+
+async fn sign_key(
+    State(state): State<Services>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<SignKeyRequest>,
+) -> ApiResult<AxumJson<ApiResponse<SignedKeyResponse>>> {
+    // Validate that a public key was actually provided.
+    if payload.public_key.trim().is_empty() {
+        return Err(crate::error::ApiError(SecretonError::Validation {
+            message: "public_key must not be empty".to_string(),
+        }));
+    }
+
+    // Enforce the max lease TTL (30 days) to prevent arbitrarily long-lived
+    // certificates and potential u64 overflow in the engine's timestamp math.
+    let min_ttl: u64 = 1; // Prevent immediately-expired certificates
+    let ttl = payload
+        .ttl
+        .unwrap_or(3600)
+        .clamp(min_ttl, SSH_MAX_LEASE_TTL);
+
+    // Security: Only allow users to sign for their own username by default.
+    // If specific principals are requested, verify they are allowed.
+    // For now, we enforce that users can ONLY sign for their own username
+    // unless they have administrative privileges.
+    let principals = match payload.valid_principals {
+        Some(p) if !p.is_empty() => {
+            if !user.is_admin() {
+                // Non-admin users can only request their own username
+                if p.len() != 1 || p[0] != user.username {
+                    return Err(crate::error::ApiError(SecretonError::Authorization {
+                        message: "Non-admin users can only sign keys for their own username"
+                            .to_string(),
+                    }));
+                }
+            }
+            p
+        }
+        _ => vec![user.username.clone()],
+    };
+
+    let (signed_key, effective_ttl) = state
+        .ssh
+        .sign_key(&payload.public_key, principals.clone(), ttl)
+        .await
+        .map_err(map_ssh_err)?;
+
+    // Audit log the key signing operation
+    state
+        .audit
+        .log_event(SecurityEventType::SshKeySign {
+            user: user.username.clone(),
+            principals,
+            ttl: effective_ttl,
+        })
+        .await;
+
+    Ok(AxumJson(ApiResponse::success(SignedKeyResponse {
+        signed_key,
+        ttl: effective_ttl,
+    })))
+}

@@ -9,58 +9,22 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub mod advanced_key_manager;
-pub mod authenticated_key_operations;
-pub mod crypto_policy_engine;
 pub mod cryptography;
 pub mod encryption;
 pub mod error;
 pub mod hashing;
-pub mod homomorphic_encryption;
 pub mod key_derivation;
 pub mod key_manager;
-pub mod kmip;
-pub mod kv_engine;
-pub mod policy_enforced_crypto;
-// pub mod pqc; // Disabled for now
-pub mod secure_multi_party_computation;
 pub mod shamir;
 pub mod signing;
-pub mod transform;
 pub mod transit;
+pub mod wrapping;
 
-// Integration modules are now enabled
-pub mod integration;
-
-pub use advanced_key_manager::{
-    AdvancedKeyManager, KeyManagerError, KeyState as AdvancedKeyState, KeyType as AdvancedKeyType,
-};
-pub use authenticated_key_operations::{
-    AuthenticatedKeyError, AuthenticatedKeyOperations, KeyOperation, KeyOperationRequest,
-    KeyOperationResult, KeyPermission, MetricType,
-};
-pub use crypto_policy_engine::{
-    AlgorithmMetadata, AlgorithmStatus, ComplianceStandard, ComplianceStatus, CryptoAlgorithm,
-    CryptoAudit, CryptoInventoryItem, CryptoOperationRequest, CryptoPolicy, CryptoPolicyEngine,
-    PolicyError,
-};
 pub use cryptography::*;
 pub use encryption::*;
 pub use error::*;
-pub use homomorphic_encryption::{Ciphertext, HEError, HESystem};
 pub use key_derivation::{DerivedKey, KdfParams, derive_key};
 pub use key_manager::*;
-pub use kmip::{KeyState as KmipKeyState, KmipClient};
-pub use kv_engine::*;
-pub use policy_enforced_crypto::{
-    ComplianceScanResult, ComplianceViolation, EncryptedSecret, MigrationPlan, MigrationProgress,
-    PolicyEnforcedCryptoOperations, PolicyEnforcedEncryptionRequest, PolicyEnforcementError,
-    RemediationStatus, ViolationType,
-};
-pub use secure_multi_party_computation::{
-    ComputationRequest, ComputationResult, DKGResult, PartialSignature, Participant, SMPCError,
-    SMPCProtocol, SMPCSession, SMPCSystem, SecretShare, SessionState, ThresholdSignature,
-};
 pub use shamir::*;
 pub use signing::*;
 pub use transit::TransitEngine;
@@ -72,9 +36,11 @@ pub enum AlgorithmId {
     Aes256Gcm,
     ChaCha20Poly1305,
 
-    // Asymmetric encryption / signing
-    Rsa2048,
-    Rsa4096,
+    // Asymmetric signing.
+    //
+    // RSA is deliberately absent: the `rsa` crate carries an unfixed timing
+    // side-channel advisory (RUSTSEC-2023-0071, "Marvin"), and Ed25519 or the
+    // NIST curves cover every use this codebase has.
     EcdsaP256,
     EcdsaP384,
     Ed25519,
@@ -90,12 +56,10 @@ pub enum AlgorithmId {
 }
 
 impl fmt::Display for AlgorithmId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             AlgorithmId::Aes256Gcm => "AES-256-GCM",
             AlgorithmId::ChaCha20Poly1305 => "ChaCha20-Poly1305",
-            AlgorithmId::Rsa2048 => "RSA-2048",
-            AlgorithmId::Rsa4096 => "RSA-4096",
             AlgorithmId::EcdsaP256 => "ECDSA-P256",
             AlgorithmId::EcdsaP384 => "ECDSA-P384",
             AlgorithmId::Ed25519 => "Ed25519",
@@ -124,8 +88,6 @@ impl SecurityParams {
         let (key_size, iterations, salt_size) = match algorithm {
             AlgorithmId::Aes256Gcm => (32, None, Some(12)),
             AlgorithmId::ChaCha20Poly1305 => (32, None, Some(12)),
-            AlgorithmId::Rsa2048 => (256, None, None),
-            AlgorithmId::Rsa4096 => (512, None, None),
             AlgorithmId::EcdsaP256 => (32, None, None),
             AlgorithmId::EcdsaP384 => (48, None, None),
             AlgorithmId::Ed25519 => (32, None, None),
@@ -148,8 +110,6 @@ impl SecurityParams {
     pub fn is_secure(&self) -> bool {
         match self.algorithm {
             AlgorithmId::Aes256Gcm | AlgorithmId::ChaCha20Poly1305 => self.key_size >= 32,
-            AlgorithmId::Rsa2048 => self.key_size >= 256,
-            AlgorithmId::Rsa4096 => self.key_size >= 512,
             AlgorithmId::EcdsaP256 => self.key_size >= 32,
             AlgorithmId::EcdsaP384 => self.key_size >= 48,
             AlgorithmId::Ed25519 => self.key_size >= 32,
@@ -174,18 +134,6 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
     let params = SecurityParams::new(algorithm);
 
     match algorithm {
-        AlgorithmId::Rsa2048 | AlgorithmId::Rsa4096 => {
-            let bit_size = params.key_size * 8;
-            let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bit_size).map_err(|e| {
-                CryptoError::KeyGenerationFailed(format!("RSA generation failed: {}", e))
-            })?;
-
-            let doc = private_key.to_pkcs8_der().map_err(|e| {
-                CryptoError::KeyGenerationFailed(format!("RSA PKCS8 encoding failed: {}", e))
-            })?;
-
-            Ok(doc.as_bytes().to_vec())
-        }
         AlgorithmId::EcdsaP256 => {
             let secret_key = p256::SecretKey::random(&mut OsRng);
             let doc = secret_key.to_pkcs8_der().map_err(|e| {
@@ -207,13 +155,10 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
             Ok(doc.as_bytes().to_vec())
         }
         AlgorithmId::Ed25519 => {
-            // ed25519-dalek might not have 'rand' or 'pkcs8' feature enabled in workspace
-            // Use explicit random generation and from_bytes
+            // The 32-byte seed *is* the Ed25519 private key; `SigningKey::from_bytes`
+            // in `signing.rs` consumes exactly this representation.
             let mut seed = [0u8; 32];
             OsRng.fill_bytes(&mut seed);
-
-            // We return the raw 32-byte seed as the private key for Ed25519.
-            // This avoids dependency on the 'pkcs8' feature of ed25519-dalek which might be missing.
             Ok(seed.to_vec())
         }
         _ => generate_random_bytes(params.key_size),

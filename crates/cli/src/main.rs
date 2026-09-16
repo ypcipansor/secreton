@@ -7,7 +7,6 @@ use tracing_subscriber::FmtSubscriber;
 mod config;
 
 use config::CliConfig;
-use secreton_config::Config;
 
 #[derive(Parser)]
 #[command(
@@ -150,6 +149,16 @@ enum SecretCommand {
     Delete { path: String },
 }
 
+/// Render a JSON field for display, or `unknown` when the server did not send it.
+///
+/// These were `unwrap()`, so a server response missing any expected field aborted the
+/// CLI with a panic and a backtrace instead of printing what it did know.
+fn field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .map_or_else(|| "unknown".to_string(), ToString::to_string)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -176,14 +185,12 @@ async fn main() -> Result<()> {
     }
 
     // Load token from file if not in config
-    if config.token.is_none() {
-        if let Some(path) = get_token_path() {
-            if path.exists() {
-                if let Ok(token) = tokio::fs::read_to_string(path).await {
-                    config.token = Some(token.trim().to_string());
-                }
-            }
-        }
+    if config.token.is_none()
+        && let Some(path) = get_token_path()
+        && path.exists()
+        && let Ok(token) = tokio::fs::read_to_string(path).await
+    {
+        config.token = Some(token.trim().to_string());
     }
 
     // Override token from env var
@@ -417,12 +424,8 @@ async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()
             if response.status().is_success() {
                 let body: serde_json::Value = response.json().await?;
                 if let Some(data) = body.get("data") {
-                    println!("Sealed: {}", data.get("sealed").unwrap());
-                    println!(
-                        "Progress: {}/{}",
-                        data.get("progress").unwrap(),
-                        data.get("t").unwrap()
-                    );
+                    println!("Sealed: {}", field(data, "sealed"));
+                    println!("Progress: {}/{}", field(data, "progress"), field(data, "t"));
                 }
             } else {
                 let err_text = response.text().await?;
@@ -444,10 +447,10 @@ async fn operator_command(cmd: OperatorCommand, config: &CliConfig) -> Result<()
             if response.status().is_success() {
                 let body: serde_json::Value = response.json().await?;
                 if let Some(data) = body.get("data") {
-                    println!("Sealed: {}", data.get("sealed").unwrap());
-                    println!("Threshold: {}", data.get("t").unwrap());
-                    println!("Shares: {}", data.get("n").unwrap());
-                    println!("Progress: {}", data.get("progress").unwrap());
+                    println!("Sealed: {}", field(data, "sealed"));
+                    println!("Threshold: {}", field(data, "t"));
+                    println!("Shares: {}", field(data, "n"));
+                    println!("Progress: {}", field(data, "progress"));
                 }
             } else {
                 println!("Error getting status: {}", response.status());

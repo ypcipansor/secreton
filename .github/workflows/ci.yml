@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Supersedes an earlier push run on the same ref instead of letting runs pile up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # The toolchain, its components and the wasm target all come from
+      # rust-toolchain.toml, so CI compiles with exactly what a developer has.
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - run: cargo clippy --workspace --locked --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: secreton
+          POSTGRES_PASSWORD: secreton
+          POSTGRES_DB: secreton_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: secreton
+          MARIADB_DATABASE: secreton_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --locked --features secreton-engines/postgres,secreton-engines/mysql
+        env:
+          DATABASE_URL: postgres://secreton:secreton@localhost:5432/secreton_test
+          # Without this the dynamic-database-credentials integration tests skip. They are
+          # the only tests that prove an issued credential corresponds to a real account
+          # rather than a fabricated one, so CI must actually run them.
+          SECRETON_TEST_POSTGRES_URL: postgres://secreton:secreton@localhost:5432/secreton_test
+          SECRETON_TEST_MYSQL_URL: mysql://root:secreton@127.0.0.1:3306/secreton_test
+      - run: cargo test --doc --workspace --locked
+
+  wasm:
+    name: WASM + Leptos build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - uses: taiki-e/install-action@cargo-leptos
+      # cargo-leptos picks which Tailwind binary to download using
+      # `cfg!(target_env = "musl")` — evaluated when *cargo-leptos itself* was compiled,
+      # not against the machine it runs on. install-action ships a musl build, so on this
+      # glibc runner cargo-leptos concludes it is on musl and fetches
+      # `tailwindcss-linux-x64-musl`. That asset is dynamically linked against
+      # /lib/ld-musl-x86_64.so.1, which does not exist here, so execve returns ENOENT and
+      # the job died on "No such file or directory (os error 2)" the moment cargo finished
+      # — after a full twelve-minute release build.
+      #
+      # `Exe::get()` consults PATH before downloading anything, so supplying the binary
+      # here bypasses that path entirely. It also pins the version and checks the hash,
+      # rather than inheriting whatever cargo-leptos currently defaults to and trusting an
+      # unverified mid-build download.
+      #
+      # The Dockerfile is not affected: it runs `cargo install cargo-leptos`, which builds
+      # a gnu binary, so the same check correctly selects the glibc asset there.
+      - name: Install the Tailwind CLI
+        env:
+          TAILWIND_VERSION: v4.2.1
+          TAILWIND_SHA256: 39e8d4e24b3c83b0a6e69e100a972fbc75d5fef8dce47b3ddac3cf92dea81fe3
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/tailwindcss" \
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-linux-x64"
+          echo "${TAILWIND_SHA256}  $HOME/.local/bin/tailwindcss" | sha256sum -c -
+          chmod +x "$HOME/.local/bin/tailwindcss"
+          "$HOME/.local/bin/tailwindcss" --help | head -1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # This is the guardrail that replaces the separate `frontend` crate the official
+      # Leptos workspace template uses: it fails if a server-only dependency leaks into
+      # crates/ui. Nothing else in CI would catch that.
+      - name: Check the UI compiles for wasm
+        run: |
+          cargo check -p secreton-ui --locked \
+            --target wasm32-unknown-unknown \
+            --no-default-features --features hydrate
+      - name: Build server + wasm bundle
+        run: cargo leptos build --release
+
+  features:
+    name: Feature matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # gRPC is a feature, so both shapes have to keep compiling. `--all-features`
+        # would hide a break in the default build.
+        features: ["--no-default-features", "--features grpc"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - run: cargo check -p secreton-server --locked ${{ matrix.features }}
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo hack check --workspace --locked --rust-version --ignore-private
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      - run: cargo doc --workspace --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      # Build only — no registry push from a pull request.
+      - uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Single required status check, so branch protection does not need updating every
+  # time a job is added or renamed.
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [fmt, clippy, test, wasm, features, msrv, docs, docker]
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "All checks passed."

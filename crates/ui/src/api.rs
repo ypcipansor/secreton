@@ -1,152 +1,257 @@
-use gloo_storage::{LocalStorage, Storage};
-use reqwest::{Client, Method, StatusCode};
+//! Data access from the UI, over Leptos server functions.
+//!
+//! Every call here runs **on the server**. Under `ssr` the body executes directly against
+//! `secreton-engines`; under `hydrate` the `#[server]` macro generates the HTTP call for
+//! the browser. Two things follow, and both were problems before:
+//!
+//! 1. **The browser never holds a token.** The session cookie is `HttpOnly`, so the
+//!    request carries it automatically and no script can read it. The old code kept a JWT
+//!    in `localStorage` and attached it by hand.
+//! 2. **Request and response types are shared.** A mismatch between the UI and the API is
+//!    a compile error. The old client parsed responses by trying `ApiResponse<T>` and
+//!    falling back to raw `T`, because the warp and Axum halves of the API disagreed on
+//!    the envelope.
+
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-const API_BASE_URL: &str = "/api/v1";
+#[cfg(feature = "ssr")]
+use secreton_engines::Services;
 
-#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ApiError {
-    #[error("Network error")]
-    Network,
-    #[error("Unauthorized: {0}")]
-    Unauthorized(String),
-    #[error("Forbidden: {0}")]
-    Forbidden(String),
-    #[error("Not Found: {0}")]
-    NotFound(String),
-    #[error("Server Error: {0}")]
-    ServerError(String),
-    #[error("Client Error: {0}")]
-    ClientError(String),
-    #[error("Deserialization Error: {0}")]
-    Deserialization(String),
-    #[error("Unknown Error: {0}")]
-    Unknown(String),
+/// Health of the system, as shown on the dashboard.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SystemStatus {
+    pub sealed: bool,
+    pub version: String,
+    pub storage_backend: String,
+    pub secret_count: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-    // timestamp field might be present but we can ignore it if we don't need it
-    #[serde(default)]
-    pub timestamp: Option<String>,
+/// Look up the services from the request-scoped Leptos context.
+///
+/// `secreton-server` provides them for every server-function call, so a handler that
+/// forgets to is a startup failure rather than a silent `None` at request time.
+#[cfg(feature = "ssr")]
+fn services() -> Result<Services, ServerFnError> {
+    use_context::<Services>().ok_or_else(|| {
+        ServerFnError::new("services were not provided to the server-function context")
+    })
 }
 
-pub async fn request<T, B>(method: Method, path: &str, body: Option<B>) -> Result<T, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-    B: Serialize,
-{
-    let client = Client::new();
-    let url = format!("{}{}", API_BASE_URL, path);
+#[server(name = GetSystemStatus, prefix = "/api/sfn")]
+pub async fn system_status() -> Result<SystemStatus, ServerFnError> {
+    let services = services()?;
+    Ok(SystemStatus {
+        sealed: services.seal.is_sealed().await,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        storage_backend: format!("{:?}", services.config.storage.backend_type),
+        secret_count: services
+            .storage
+            .count(&Default::default())
+            .await
+            .unwrap_or(0),
+    })
+}
 
-    let mut builder = client
-        .request(method, &url)
-        .header("Content-Type", "application/json");
+/// Credentials submitted by the login form.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+    pub mfa_code: Option<String>,
+}
 
-    if let Ok(token) = LocalStorage::get::<String>("secreton_token") {
-        builder = builder.header("Authorization", format!("Bearer {}", token));
+/// What the UI needs to know about the signed-in user. Deliberately not the full
+/// `User` record: password hashes and MFA secrets must never cross to the browser.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionUser {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub roles: Vec<String>,
+    pub mfa_pending: bool,
+}
+
+#[server(name = Login, prefix = "/api/sfn")]
+pub async fn login(credentials: Credentials) -> Result<SessionUser, ServerFnError> {
+    use secreton_engines::services::auth::ApiLoginRequest;
+
+    let services = services()?;
+    let (client_ip, user_agent) = client_metadata();
+
+    let response = services
+        .auth
+        .login(
+            ApiLoginRequest {
+                username: credentials.username,
+                password: credentials.password,
+                mfa_code: credentials.mfa_code.filter(|c| !c.is_empty()),
+            },
+            client_ip,
+            user_agent,
+        )
+        .await
+        // The error is deliberately not forwarded verbatim: distinguishing "no such user"
+        // from "wrong password" turns the login form into a username oracle.
+        .map_err(|e| {
+            tracing::warn!(error = %e, "login failed");
+            ServerFnError::new("invalid credentials")
+        })?;
+
+    let token = response.token;
+
+    // The cookie is set here, inside the server function, so the token is issued and
+    // stored without ever being handed to the page.
+    set_session_cookie(
+        &token.access_token,
+        i64::try_from(token.expires_in).unwrap_or(i64::MAX),
+    )?;
+
+    Ok(SessionUser {
+        mfa_pending: token
+            .user
+            .metadata
+            .get("mfa_pending")
+            .map(|v| v == "true")
+            .unwrap_or(false),
+        username: token.user.username,
+        display_name: token.user.display_name,
+        roles: token.user.roles,
+    })
+}
+
+/// Client address and user agent, recorded on the session for auditing.
+#[cfg(feature = "ssr")]
+fn client_metadata() -> (String, String) {
+    let headers = use_context::<axum::http::HeaderMap>();
+    let header = |name: &str| {
+        headers
+            .as_ref()
+            .and_then(|h| h.get(name))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string()
+    };
+    (header("x-forwarded-for"), header("user-agent"))
+}
+
+#[cfg(not(feature = "ssr"))]
+fn client_metadata() -> (String, String) {
+    (String::new(), String::new())
+}
+
+#[server(name = Logout, prefix = "/api/sfn")]
+pub async fn logout() -> Result<(), ServerFnError> {
+    let services = services()?;
+    if let Some(token) = current_token() {
+        // Revoke server-side as well as clearing the cookie. Clearing alone would leave
+        // a still-valid token that anyone who captured it could keep using.
+        services
+            .auth
+            .revoke_token(token, chrono::Utc::now() + chrono::Duration::days(1))
+            .await;
     }
+    clear_session_cookie()?;
+    Ok(())
+}
 
-    if let Some(b) = body {
-        builder = builder.json(&b);
+#[server(name = CurrentSession, prefix = "/api/sfn")]
+pub async fn current_session() -> Result<Option<SessionUser>, ServerFnError> {
+    let services = services()?;
+    let Some(token) = current_token() else {
+        return Ok(None);
+    };
+    let Ok(user) = services.auth.validate_token(&token).await else {
+        return Ok(None);
+    };
+    Ok(Some(SessionUser {
+        mfa_pending: user
+            .metadata
+            .get("mfa_pending")
+            .map(|v| v == "true")
+            .unwrap_or(false),
+        username: user.username,
+        display_name: user.display_name,
+        roles: user.roles,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Server-only cookie plumbing
+// ---------------------------------------------------------------------------
+
+// The cookie's name and attributes come from `secreton-domain`, which the Axum middleware
+// in `secreton-server` reads too. A local copy of the name here is what let this file and
+// that middleware drift apart in the first place.
+#[cfg(feature = "ssr")]
+use secreton_domain::session::{self, SESSION_COOKIE};
+
+#[cfg(feature = "ssr")]
+fn current_token() -> Option<String> {
+    let headers = use_context::<axum::http::HeaderMap>()?;
+    let cookies = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    cookies.split(';').find_map(|c| {
+        let (name, value) = c.trim().split_once('=')?;
+        (name == SESSION_COOKIE).then(|| value.to_string())
+    })
+}
+
+#[cfg(not(feature = "ssr"))]
+fn current_token() -> Option<String> {
+    None
+}
+
+/// Whether the request arrived over TLS, which decides the cookie's `Secure` attribute.
+///
+/// This server does not terminate TLS; a proxy does, and reports the original scheme in
+/// `x-forwarded-proto`. That is the same signal `middleware::security_headers` uses to
+/// decide HSTS, so the two cannot disagree about whether a request was secure.
+///
+/// Setting and clearing both read it here. Previously only the setting path did, which is
+/// how the two headers came to disagree.
+#[cfg(feature = "ssr")]
+fn cookie_secure() -> bool {
+    use_context::<axum::http::HeaderMap>()
+        .and_then(|h| {
+            h.get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.eq_ignore_ascii_case("https"))
+        })
+        .unwrap_or(false)
+}
+
+/// Attach a `Set-Cookie` to the response this server function is producing.
+#[cfg(feature = "ssr")]
+fn put_set_cookie(value: String) -> Result<(), ServerFnError> {
+    if let Some(response) = use_context::<leptos_axum::ResponseOptions>() {
+        response.insert_header(
+            axum::http::header::SET_COOKIE,
+            axum::http::HeaderValue::from_str(&value)
+                .map_err(|e| ServerFnError::new(format!("invalid session cookie: {e}")))?,
+        );
     }
-
-    let response = builder.send().await.map_err(|_| ApiError::Network)?;
-    let status = response.status();
-
-    if status == StatusCode::UNAUTHORIZED {
-        LocalStorage::delete("secreton_token");
-        // We could dispatch a custom event here if we wanted to notify the app immediately
-        return Err(ApiError::Unauthorized("Session expired".to_string()));
-    }
-
-    // Try to parse as ApiResponse first
-    let text = response.text().await.map_err(|_| ApiError::Network)?;
-
-    // Attempt to deserialize into ApiResponse<T>
-    match serde_json::from_str::<ApiResponse<T>>(&text) {
-        Ok(api_response) => {
-            if api_response.success {
-                // Return data if present, or try to deserialize T from Null if T allows it (e.g. Option)
-                // If data is None but success is true, it might be a T=() case or T=Option<..>
-                match api_response.data {
-                    Some(data) => Ok(data),
-                    None => {
-                        // If T is (), return it. Hacky way to check?
-                        // Actually, if T is deserializable from Null/None, we can try that.
-                        // But usually we expect data.
-                        serde_json::from_value(serde_json::Value::Null).map_err(|_| {
-                            ApiError::ServerError("No data in successful response".to_string())
-                        })
-                    }
-                }
-            } else {
-                let msg = api_response
-                    .error
-                    .unwrap_or_else(|| "Unknown API error".to_string());
-                match status {
-                    s if s == StatusCode::FORBIDDEN => Err(ApiError::Forbidden(msg)),
-                    s if s == StatusCode::NOT_FOUND => Err(ApiError::NotFound(msg)),
-                    s if s.is_server_error() => Err(ApiError::ServerError(msg)),
-                    _ => Err(ApiError::ClientError(msg)),
-                }
-            }
-        }
-        Err(_e) => {
-            // Fallback: If parsing ApiResponse failed, maybe it's a raw error or legacy endpoint?
-            // Or maybe the T structure didn't match.
-            // Check if status implies error
-            if !status.is_success() {
-                match status {
-                    StatusCode::FORBIDDEN => Err(ApiError::Forbidden("Access denied".to_string())),
-                    StatusCode::NOT_FOUND => {
-                        Err(ApiError::NotFound("Resource not found".to_string()))
-                    }
-                    _ => Err(ApiError::ServerError(format!(
-                        "Request failed with status {}: {}",
-                        status, text
-                    ))),
-                }
-            } else {
-                // It was success 200 OK but failed to parse ApiResponse wrapper.
-                // Maybe it returned raw T?
-                serde_json::from_str::<T>(&text)
-                    .map_err(|de| ApiError::Deserialization(format!("{} (Raw: {})", de, text)))
-            }
-        }
-    }
+    Ok(())
 }
 
-pub async fn get<T>(path: &str) -> Result<T, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    request(Method::GET, path, None::<()>).await
+#[cfg(feature = "ssr")]
+fn set_session_cookie(token: &str, ttl_seconds: i64) -> Result<(), ServerFnError> {
+    let value = session::session_cookie(token, ttl_seconds, cookie_secure())
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    put_set_cookie(value)
 }
 
-pub async fn post<T, B>(path: &str, body: B) -> Result<T, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-    B: Serialize,
-{
-    request(Method::POST, path, Some(body)).await
+#[cfg(not(feature = "ssr"))]
+fn set_session_cookie(_token: &str, _ttl_seconds: i64) -> Result<(), ServerFnError> {
+    Ok(())
 }
 
-pub async fn put<T, B>(path: &str, body: B) -> Result<T, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-    B: Serialize,
-{
-    request(Method::PUT, path, Some(body)).await
+#[cfg(feature = "ssr")]
+fn clear_session_cookie() -> Result<(), ServerFnError> {
+    // `clearing_cookie` reads its attributes from the same place `session_cookie` does, so
+    // this cannot drift from the header that set the cookie.
+    put_set_cookie(session::clearing_cookie(cookie_secure()))
 }
 
-pub async fn delete<T>(path: &str) -> Result<T, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    request(Method::DELETE, path, None::<()>).await
+#[cfg(not(feature = "ssr"))]
+fn clear_session_cookie() -> Result<(), ServerFnError> {
+    Ok(())
 }

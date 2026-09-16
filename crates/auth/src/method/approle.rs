@@ -4,7 +4,7 @@ use crate::model::*;
 use crate::service::*;
 use async_trait::async_trait;
 use chrono::Utc;
-use secreton_errors::SecretonError;
+use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use uuid::Uuid;

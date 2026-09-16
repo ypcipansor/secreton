@@ -1,37 +1,74 @@
 [package]
 name = "secreton-ui"
-version = "0.1.0"
-edition = "2024"
+description = "Leptos web application for Secreton, rendered on the server and hydrated in the browser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib is the wasm bundle cargo-leptos builds; rlib is what the server links.
+#
+# The official start-axum-workspace template splits these into an `app` crate and a thin
+# `frontend` cdylib. That split guards against feature unification switching `ssr` on
+# during the wasm build when several workspace members depend on the app crate — which
+# does not apply here, because only `secreton-server` depends on this crate and
+# cargo-leptos invokes the wasm build as a separate `--target wasm32-unknown-unknown`
+# compilation. The guard it would have provided is a CI job instead; see AGENTS.md.
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
 
 [dependencies]
-leptos = { version = "0.8", features = ["csr"] }
-leptos_router = "0.8"
-leptos_meta = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json"] }
-gloo-net = "0.5"
-gloo-storage = "0.3"
-console_error_panic_hook = "0.1"
-wasm-bindgen = "0.2"
-chrono = { version = "0.4", features = ["serde", "wasmbind"] }
-uuid = { version = "1.0", features = ["serde", "v4", "js"] }
-thiserror = "1.0"
-log = "0.4"
-wasm-logger = "0.2"
-leptos_icons = "0.3"
-icondata = "0.3"
-web-sys = { workspace = true, features = ["Window", "Navigator", "Clipboard"] }
-base64 = "0.22"
-secreton-common = { path = "../common", default-features = false }
+secreton-domain.workspace = true
 
-[dev-dependencies]
-wasm-bindgen-test = "0.3"
+leptos = { workspace = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true, features = ["wasmbind"] }
+tracing = { workspace = true }
 
-# Profile for smaller binary size
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 'z'
-panic = "abort"
-strip = true
+# Client-side only
+console_error_panic_hook = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+# Server-side only. Anything added here must be optional and behind `ssr`, or the
+# wasm build breaks — that is what the CI wasm job catches.
+axum = { workspace = true, optional = true }
+leptos_axum = { workspace = true, optional = true }
+secreton-engines = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
+
+# `secreton-domain` pulls `rand` and `uuid`, both of which need an explicit source of
+# randomness on wasm or they fail to compile. Declaring them here enables those features
+# through Cargo's unification, for the wasm build only. This is exactly the class of
+# failure the CI wasm job exists to catch — nothing else in the build would.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { workspace = true, features = ["js"] }
+
+[features]
+default = []
+hydrate = [
+    "leptos/hydrate",
+    "dep:console_error_panic_hook",
+    "dep:wasm-bindgen",
+]
+ssr = [
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:axum",
+    "dep:leptos_axum",
+    "dep:secreton-engines",
+    "dep:tokio",
+]
