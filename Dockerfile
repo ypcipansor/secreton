@@ -25,7 +25,7 @@
 # which lacks FindBin, so OpenSSL's ./Configure aborts on line 15 and
 # `cargo install cargo-leptos` fails outright — this image could not be built
 # without them.
-FROM rust:1.94.1-slim-bookworm AS chef
+FROM rust:1.98.0-slim-bookworm AS chef
 WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends perl make pkg-config cmake g++ \
