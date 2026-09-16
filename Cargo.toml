@@ -190,7 +190,7 @@ deadpool-postgres = "0.14"
 # is what the rest of the workspace already uses. It resolves to the aws-lc-rs provider —
 # already present via reqwest, so this adds no new C dependency, though it is worth
 # knowing that this is not a pure-Rust path.
-mysql_async = { version = "0.36", default-features = false, features = [
+mysql_async = { version = "0.37", default-features = false, features = [
     "default-rustls",
 ] }
 redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
