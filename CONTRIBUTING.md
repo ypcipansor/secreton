@@ -27,7 +27,10 @@ because violating it caused a real defect here. The three that surprise people m
 
 - Rust — rustup installs the pinned toolchain from `rust-toolchain.toml` (1.94.1) on first
   use. Do not pass `+nightly` to any command.
-- [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos): `cargo install cargo-leptos --locked`
+- [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos):
+  `cargo install cargo-leptos --locked --version 0.3.7`. The pin is required on this
+  toolchain — 0.3.8 and later resolve `wasm_split_cli_support` 0.2.3, which does not
+  compile on 1.94.1 (E0658). See the Dockerfile.
 - PostgreSQL and MySQL — only if you are working on the dynamic database-credentials
   engine. Everything else runs against in-memory storage with no external service.
 - Node and `playwright-core` — only for regenerating screenshots.

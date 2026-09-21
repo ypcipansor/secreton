@@ -1,0 +1,11 @@
+# Fingerprints gitleaks reports that are known false positives. One per line.
+#
+# Only the nightly `gitleaks dir` scan reads the tree, so entries here are for
+# findings that are not secrets at all. Anything that *is* a secret gets rotated
+# and removed, not listed.
+#
+# The test fixture below names a key, not a credential. `generic-api-key` scores it
+# on entropy in a `"transit-_key-1"` string literal, which is a key *identifier*
+# asserted by `test_register_key` in the same file. There is no key material in the
+# line, and the surrounding tests generate their material at runtime.
+crates/crypto/src/cryptography/key_rotation.rs:generic-api-key:555

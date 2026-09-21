@@ -79,7 +79,10 @@ Requires the toolchain pinned in `rust-toolchain.toml` (Rust 1.94.1, installed
 automatically by rustup) and [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos).
 
 ```bash
-cargo install cargo-leptos --locked
+# 0.3.7 is the last release whose lockfile resolves `wasm_split_cli_support` 0.2.2.
+# Later releases need 0.2.3, which uses `if let` guards — unstable on 1.94.1 — so an
+# unpinned install aborts with E0658. See the Dockerfile for the full note.
+cargo install cargo-leptos --locked --version 0.3.7
 
 # Required: the server refuses to start without it.
 export SECRETON__AUTH__JWT__SECRET="$(openssl rand -base64 48)"

@@ -25,13 +25,20 @@
 # which lacks FindBin, so OpenSSL's ./Configure aborts on line 15 and
 # `cargo install cargo-leptos` fails outright — this image could not be built
 # without them.
+#
+# cargo-leptos is pinned to 0.3.7 rather than taking the latest. 0.3.8 and 0.3.9
+# require `wasm_split_cli_support ^0.2.3`, whose `reloc.rs` uses `if let` guards in
+# match arms — still unstable on the 1.94.1 toolchain pinned here, so `--locked`
+# fails with E0658 and the image never builds. 0.3.7's published lockfile resolves
+# `wasm_split_cli_support` 0.2.2, which compiles on 1.94.1. Revisit once the
+# toolchain moves past the feature gate or wasm_split ships a fix.
 FROM rust:1.94.1-slim-bookworm AS chef
 WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends perl make pkg-config cmake g++ \
  && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked \
- && cargo install cargo-leptos --locked \
+ && cargo install cargo-leptos --locked --version 0.3.7 \
  && rustup target add wasm32-unknown-unknown
 
 FROM chef AS planner

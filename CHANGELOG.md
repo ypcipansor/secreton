@@ -66,6 +66,28 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 - A malformed OIDC URL in configuration is an error rather than a startup panic.
 - The cache and the agent's metrics registry use non-poisoning locks; one panicking
   holder no longer turns a cache into a process-wide outage.
+- `cargo audit` and `cargo deny check advisories` pass. RUSTSEC-2026-0285 was
+  published against `rustls` after this lockfile was written, and both jobs reported
+  it against the committed `rustls` 0.23.43. The advisory's patched range starts at
+  0.23.45, so no earlier release clears it. `rustls` is now 0.23.45; the same update
+  moves `rustls-webpki` 0.103.13 → 0.103.15 and pulls `aws-lc-rs` 1.18.1 with
+  `aws-lc-sys` 0.45.0. Nothing in the workspace pins either crate below the patched
+  release, and no other package moves.
+- The `Docker build` job passes. It failed in `cargo install cargo-leptos --locked`
+  before reaching this workspace: unpinned, `cargo-leptos` resolved to 0.3.9, which
+  requires `wasm_split_cli_support ^0.2.3`, and that crate's `reloc.rs` uses `if let`
+  guards in match arms — still unstable on the pinned 1.94.1 toolchain, so the install
+  aborted with E0658. `cargo-leptos` is now pinned to 0.3.7, whose published lockfile
+  resolves the 0.2.2 release that compiles.
+- The `Secret scanning` job passes. `gitleaks-action` v2 refuses to scan a repository
+  owned by an organization without a `GITLEAKS_LICENSE` issued by gitleaks.io, and this
+  repository belongs to one, so the job exited before reading a line of the tree on
+  every run. The scanner binary is MIT-licensed and needs no key, so the workflow now
+  runs it directly, pinned by version and verified by sha256. A pull request or a push
+  scans only the commits under test; the nightly run scans the tree as it stands. The
+  tree scan reports one finding — a `"transit-_key-1"` string literal in a
+  key-rotation test, scored as a generic API key on entropy — which names a key rather
+  than containing one. It is listed in `.gitleaksignore`.
 
 ### Removed
 
