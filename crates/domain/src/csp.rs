@@ -42,18 +42,29 @@ pub fn csp_without_nonce() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::RngCore;
+
+    /// A nonce as the server produces one: fresh random bytes per response, never a
+    /// literal. A hard-coded value here would model production incorrectly, and reads to
+    /// a scanner as a real nonce baked into the source.
+    fn fresh_nonce() -> String {
+        let mut bytes = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
 
     #[test]
     fn a_nonced_policy_names_that_nonce_and_still_allows_wasm() {
-        let policy = csp_with_nonce("abc123");
-        assert!(policy.contains("'nonce-abc123'"), "{policy}");
+        let nonce = fresh_nonce();
+        let policy = csp_with_nonce(&nonce);
+        assert!(policy.contains(&format!("'nonce-{nonce}'")), "{policy}");
         assert!(policy.contains("'wasm-unsafe-eval'"), "{policy}");
         assert!(!policy.contains("{nonce}"), "{policy}");
     }
 
     #[test]
     fn a_nonced_policy_does_not_admit_arbitrary_inline_script() {
-        let policy = csp_with_nonce("abc123");
+        let policy = csp_with_nonce(&fresh_nonce());
         assert!(
             !policy.contains("script-src 'self' 'unsafe-inline'"),
             "inline script must be admitted only through the nonce: {policy}"
@@ -73,7 +84,7 @@ mod tests {
 
     #[test]
     fn the_hardening_directives_survive_substitution() {
-        for policy in [csp_with_nonce("n"), csp_without_nonce()] {
+        for policy in [csp_with_nonce(&fresh_nonce()), csp_without_nonce()] {
             for directive in [
                 "frame-ancestors 'none'",
                 "object-src 'none'",
