@@ -1695,6 +1695,73 @@ impl AuthenticationService {
         .await
     }
 
+    /// Look up a user by username, decrypting the stored record.
+    ///
+    /// `Ok(None)` means the record is absent; an error means it exists but could not be
+    /// read. Callers must not collapse the two — "no such user" and "storage is broken"
+    /// are different situations.
+    pub async fn find_user_by_username(&self, username: &str) -> Result<Option<User>, AuthError> {
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
+        let Some(entry) = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AuthError::Storage)?
+        else {
+            return Ok(None);
+        };
+        let bytes = self.crypto.decrypt(&entry.encrypted_data).await?;
+        let user = serde_json::from_slice(&bytes)
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("corrupt user record: {}", e)))?;
+        Ok(Some(user))
+    }
+
+    /// Record a session and mint an access token bound to it, for a flow that has
+    /// already established the caller's identity.
+    ///
+    /// The returned token carries the session's `jti`, which is what `validate_token`
+    /// requires; a token minted without one is rejected on every request, so this is the
+    /// only supported way to hand out a credential outside the login path.
+    pub async fn issue_session_token(
+        &self,
+        user: &User,
+        ip_address: String,
+        user_agent: String,
+    ) -> Result<String, AuthError> {
+        let (session_timeout_secs, _) = self.get_effective_config().await;
+        let session_duration =
+            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+                .unwrap_or(chrono::Duration::hours(1));
+
+        let session_id = Uuid::new_v4().to_string();
+        let token_pair = self
+            .token_service
+            .create_token_pair_with_duration(
+                &user.id,
+                &user.username,
+                user.email.as_deref(),
+                &user.roles,
+                &user.policies,
+                false,
+                Some(session_id.clone()),
+                Some(session_duration),
+            )
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("failed to mint token: {}", e)))?;
+
+        self.create_and_store_session(
+            &user.id,
+            session_id,
+            token_pair.access_token.clone(),
+            Some(token_pair.refresh_token.clone()),
+            ip_address,
+            user_agent,
+            session_timeout_secs,
+        )
+        .await?;
+
+        Ok(token_pair.access_token)
+    }
+
     /// Check if user has permission (simplified)
     pub async fn has_permission(&self, user: &User, permission: &str) -> Result<bool, AuthError> {
         // Simplified permission check based on roles
@@ -2097,7 +2164,19 @@ impl AuthenticationService {
             .auth_service
             .login(&request)
             .await
-            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Auth failed: {}", e)))?;
+            // A wrong password is a client error, not a fault. Folding it into
+            // `Internal` here made every failed login answer 500 — which is both the wrong
+            // status and a lie about the server's health, and it buried real login failures
+            // in the server-error log where nobody looks for a typo.
+            .map_err(|e| match e {
+                secreton_domain::SecretonError::InvalidCredentials
+                | secreton_domain::SecretonError::UserNotFound { .. }
+                | secreton_domain::SecretonError::AccountDisabled { .. }
+                | secreton_domain::SecretonError::AccountLocked { .. } => {
+                    AuthError::InvalidCredentials
+                }
+                other => AuthError::Internal(anyhow::anyhow!("Auth failed: {}", other)),
+            })?;
 
         if !result.success {
             // Increment failed_login_attempts and persist — mirrors the logic

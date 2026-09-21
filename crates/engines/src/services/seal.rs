@@ -1,6 +1,5 @@
 use crate::services::crypto::CryptoService;
 use anyhow::{Result, anyhow};
-use jsonwebtoken::{EncodingKey, Header, encode};
 use secreton_crypto::shamir::{self, Share};
 use secreton_crypto::{AlgorithmId, EncryptedData};
 use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
@@ -14,9 +13,9 @@ use uuid::Uuid;
 pub struct SealService {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     crypto: Arc<CryptoService>,
-    jwt_secret: String,
-    jwt_issuer: String,
-    jwt_audience: String,
+    // Set after construction (`Services::new` builds auth after seal) and used by
+    // `unseal` to record the session that binds the root token it mints.
+    auth: std::sync::OnceLock<Arc<crate::services::auth::AuthenticationService>>,
 
     // In-memory buffer for unseal shares
     // (share_index, share_data)
@@ -54,37 +53,27 @@ struct EncryptedRootKey {
 const INIT_PATH: &str = "sys/init";
 const ROOT_KEY_PATH: &str = "sys/root_key_enc";
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    username: String,
-    email: String,
-    roles: Vec<String>,
-    policies: Vec<String>,
-    iat: usize,
-    exp: usize,
-    jti: String,
-    iss: String,
-    aud: String,
-    token_type: String,
-}
-
 impl SealService {
-    pub fn new(
-        storage: Arc<dyn StorageBackend + Send + Sync>,
-        crypto: Arc<CryptoService>,
-        jwt_secret: String,
-        jwt_issuer: String,
-        jwt_audience: String,
-    ) -> Self {
+    pub fn new(storage: Arc<dyn StorageBackend + Send + Sync>, crypto: Arc<CryptoService>) -> Self {
         Self {
             storage,
             crypto,
-            jwt_secret,
-            jwt_issuer,
-            jwt_audience,
+            auth: std::sync::OnceLock::new(),
             unseal_buffer: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// Hand the seal service the auth service it needs to open the root session.
+    ///
+    /// Assigned here rather than passed to `new` because `Services::new` constructs seal
+    /// before auth; a `OnceLock` keeps that ordering honest without an `Option` that every
+    /// caller has to handle. Called once at startup.
+    pub fn with_auth(
+        self: Arc<Self>,
+        auth: Arc<crate::services::auth::AuthenticationService>,
+    ) -> Arc<Self> {
+        let _ = self.auth.set(auth);
+        self
     }
 
     /// Check if the system is initialized
@@ -341,42 +330,37 @@ impl SealService {
                     tracing::info!("Vault unsealed successfully.");
                     buffer.clear();
 
-                    // Generate short-lived Root Token for Admin Management sessions
-                    let now = chrono::Utc::now();
-                    let exp = now + chrono::Duration::hours(1); // 1 hour for root tasks
+                    // Hand back a usable root credential, not just a signed string.
+                    //
+                    // The previous version encoded a JWT here directly and returned it.
+                    // That token carried a `jti`, but nothing ever wrote the matching
+                    // session record, and `validate_token` rejects any token whose `jti`
+                    // has no session — so *every* call made with the token unseal just
+                    // returned was refused with "token rejected". Unsealing wiped the
+                    // shares buffer, so there was no way to get another one. The vault
+                    // was open and unreachable.
+                    //
+                    // `issue_session_token` mints the token *and* records the session it
+                    // is bound to, while the root key is still installed.
+                    let auth = self.auth.get().ok_or_else(|| {
+                        anyhow!("seal service has no auth service; root login cannot be issued")
+                    })?;
+                    let root_user = auth
+                        .find_user_by_username("root")
+                        .await
+                        .map_err(|e| anyhow!("Failed to load root user: {}", e))?
+                        .ok_or_else(|| {
+                            anyhow!("root user is missing; cannot issue a root token")
+                        })?;
 
-                    let claims = Claims {
-                        sub: "root".to_string(),
-                        username: "root".to_string(),
-                        email: "root@system.local".to_string(),
-                        roles: vec!["root".to_string(), "admin".to_string()],
-                        policies: vec!["root".to_string()],
-                        // Checked, for the same reason as the token service: `as usize`
-                        // wraps a pre-1970 timestamp into an enormous positive one, and
-                        // this is a *root* token — one that never expires is the worst
-                        // possible instance of that bug.
-                        iat: usize::try_from(now.timestamp()).map_err(|_| {
-                            anyhow!(
-                                "system clock is before the epoch; refusing to mint a root token"
-                            )
-                        })?,
-                        exp: usize::try_from(exp.timestamp()).map_err(|_| {
-                            anyhow!(
-                                "system clock is before the epoch; refusing to mint a root token"
-                            )
-                        })?,
-                        jti: Uuid::new_v4().to_string(),
-                        iss: self.jwt_issuer.clone(),
-                        aud: self.jwt_audience.clone(),
-                        token_type: "access".to_string(),
-                    };
-
-                    let root_token = encode(
-                        &Header::default(),
-                        &claims,
-                        &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-                    )
-                    .map_err(|e| anyhow!("Failed to generate root token: {}", e))?;
+                    let root_token = auth
+                        .issue_session_token(
+                            &root_user,
+                            "unseal".to_string(),
+                            "seal-service".to_string(),
+                        )
+                        .await
+                        .map_err(|e| anyhow!("Failed to issue root token: {}", e))?;
 
                     return Ok(UnsealResponse {
                         sealed: false,
@@ -461,13 +445,8 @@ mod tests {
                 .with_mfa(mfa.clone()),
         );
 
-        let seal_service = SealService::new(
-            storage.clone(),
-            crypto.clone(),
-            "test-secret".to_string(),
-            "secreton".to_string(),
-            "secreton-api".to_string(),
-        );
+        let seal_service = Arc::new(SealService::new(storage.clone(), crypto.clone()))
+            .with_auth(Arc::clone(&auth));
 
         // 1. Check initial state
         assert!(!seal_service.is_initialized().await);

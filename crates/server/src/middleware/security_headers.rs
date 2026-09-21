@@ -13,22 +13,7 @@ use axum::http::header::{
 use axum::middleware::Next;
 use axum::response::Response;
 
-/// Content-Security-Policy.
-///
-/// `wasm-unsafe-eval` is required: instantiating a WebAssembly module counts as eval, and
-/// the Leptos client bundle is WASM. `'unsafe-inline'` for styles is required by Leptos'
-/// hydration, which emits inline style attributes. Scripts get neither, so an injected
-/// `<script>` still cannot run.
-const CSP: &str = "default-src 'self'; \
-     script-src 'self' 'wasm-unsafe-eval'; \
-     style-src 'self' 'unsafe-inline'; \
-     img-src 'self' data:; \
-     font-src 'self'; \
-     connect-src 'self'; \
-     object-src 'none'; \
-     base-uri 'none'; \
-     form-action 'self'; \
-     frame-ancestors 'none'";
+use secreton_domain::csp::csp_without_nonce;
 
 pub async fn apply(request: Request, next: Next) -> Response {
     // Whether the client reached us over TLS. HSTS on a plain-HTTP response is ignored by
@@ -49,7 +34,16 @@ pub async fn apply(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
 
-    headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    // A rendered document has already set a policy naming its nonce. Overwriting it here
+    // would announce a value the scripts in that document do not carry — which is the
+    // failure this whole path exists to avoid, so the existing header wins.
+    if !headers.contains_key(CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_str(&csp_without_nonce()).expect("CSP is a valid header value"),
+        );
+    }
+
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));

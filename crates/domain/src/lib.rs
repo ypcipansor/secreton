@@ -12,6 +12,7 @@
 
 pub mod api;
 pub mod audit;
+pub mod csp;
 pub mod dto;
 pub mod error;
 pub mod models;

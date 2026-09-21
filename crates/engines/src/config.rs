@@ -11,7 +11,14 @@ use secreton_storage::StorageFactoryConfig;
 use serde::{Deserialize, Serialize};
 
 /// Main API configuration
+///
+/// Every table here is `#[serde(default)]`, so a configuration file names only the
+/// settings it wants to change. That is what a configuration file is for, and without it
+/// serde demands every field of every struct: the committed `secreton.toml` omits
+/// `auth.jwt.expiration` and declined to deserialize, taking the server down before it
+/// bound a port.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct ServerConfig {
     /// HTTP server configuration
     pub http: HttpConfig,
@@ -122,6 +129,7 @@ pub struct AuthConfig {
 
 /// JWT configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct JwtConfig {
     /// JWT signing secret (auto-generated if not provided)
     pub secret: Option<String>,
@@ -195,6 +203,7 @@ pub struct MtlsConfig {
 
 /// Session configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionConfig {
     /// Session timeout (seconds)
     pub timeout: u64,
@@ -217,6 +226,7 @@ pub enum SessionStore {
 
 /// Cookie configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CookieConfig {
     /// Cookie name
     pub name: String,
@@ -239,6 +249,7 @@ pub struct CookieConfig {
 
 /// Multi-factor authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct MfaConfig {
     /// Enable MFA
     pub enabled: bool,
@@ -258,6 +269,7 @@ pub struct MfaConfig {
 
 /// TOTP configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TotpConfig {
     /// Issuer name
     pub issuer: String,
@@ -972,5 +984,29 @@ mod validation_tests {
             ServerConfig::load(path.to_str().unwrap()).is_err(),
             "a malformed file must fail loudly, not silently fall back to defaults"
         );
+    }
+
+    /// The file in the repository is the one every new checkout runs with, so it has to
+    /// parse. It did not: `[audit]` set three of `AuditConfig`'s six fields and the struct
+    /// had no `#[serde(default)]`, so `cargo leptos serve` died with "missing field
+    /// `level`" before binding a port. A partial-table test is what catches that class of
+    /// drift, since a struct-level default makes every omitted key legal.
+    #[test]
+    fn the_committed_configuration_file_loads() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../secreton.toml");
+        let config = ServerConfig::load(path)
+            .expect("the committed secreton.toml must deserialize; CI runs with it");
+        // A `[storage]` table that only sets `backend_type` relies on the same defaulting.
+        assert_eq!(config.audit.retention_days, 2555);
+    }
+
+    /// A table that sets none of an optional struct's fields must still deserialize.
+    #[test]
+    fn a_partial_table_falls_back_to_its_struct_default() {
+        let parsed: ServerConfig =
+            toml::from_str("[audit]\nenabled = false\n").expect("partial [audit] must parse");
+        assert!(!parsed.audit.enabled);
+        assert_eq!(parsed.audit.retention_days, 2555);
+        assert_eq!(parsed.audit.max_batch_size, 100);
     }
 }

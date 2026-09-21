@@ -38,6 +38,21 @@ fn services() -> Result<Services, ServerFnError> {
     })
 }
 
+/// The request headers this server function is answering.
+///
+/// Leptos' Axum integration provides the request's [`Parts`], not a bare `HeaderMap` —
+/// the headers live inside it. Reading `HeaderMap` from context therefore always returned
+/// `None`, which silently reduced every cookie lookup to "no session": the browser held a
+/// valid `HttpOnly` session cookie and the server still reported the visitor signed out,
+/// so login appeared to succeed and then bounced straight back to the form. Both types are
+/// accepted here so the helper keeps working if an integration provides either.
+#[cfg(feature = "ssr")]
+fn request_headers() -> Option<axum::http::HeaderMap> {
+    use_context::<axum::http::request::Parts>()
+        .map(|parts| parts.headers)
+        .or_else(use_context::<axum::http::HeaderMap>)
+}
+
 #[server(name = GetSystemStatus, prefix = "/api/sfn")]
 pub async fn system_status() -> Result<SystemStatus, ServerFnError> {
     let services = services()?;
@@ -122,7 +137,7 @@ pub async fn login(credentials: Credentials) -> Result<SessionUser, ServerFnErro
 /// Client address and user agent, recorded on the session for auditing.
 #[cfg(feature = "ssr")]
 fn client_metadata() -> (String, String) {
-    let headers = use_context::<axum::http::HeaderMap>();
+    let headers = request_headers();
     let header = |name: &str| {
         headers
             .as_ref()
@@ -134,6 +149,9 @@ fn client_metadata() -> (String, String) {
     (header("x-forwarded-for"), header("user-agent"))
 }
 
+// Unused on the client build: only the `#[server]` bodies call these, and those compile
+// only under `ssr`. The stub keeps the name resolvable in both builds.
+#[allow(dead_code)]
 #[cfg(not(feature = "ssr"))]
 fn client_metadata() -> (String, String) {
     (String::new(), String::new())
@@ -187,7 +205,7 @@ use secreton_domain::session::{self, SESSION_COOKIE};
 
 #[cfg(feature = "ssr")]
 fn current_token() -> Option<String> {
-    let headers = use_context::<axum::http::HeaderMap>()?;
+    let headers = request_headers()?;
     let cookies = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
     cookies.split(';').find_map(|c| {
         let (name, value) = c.trim().split_once('=')?;
@@ -195,6 +213,9 @@ fn current_token() -> Option<String> {
     })
 }
 
+// Unused on the client build: only the `#[server]` bodies call these, and those compile
+// only under `ssr`. The stub keeps the name resolvable in both builds.
+#[allow(dead_code)]
 #[cfg(not(feature = "ssr"))]
 fn current_token() -> Option<String> {
     None
@@ -210,7 +231,7 @@ fn current_token() -> Option<String> {
 /// how the two headers came to disagree.
 #[cfg(feature = "ssr")]
 fn cookie_secure() -> bool {
-    use_context::<axum::http::HeaderMap>()
+    request_headers()
         .and_then(|h| {
             h.get("x-forwarded-proto")
                 .and_then(|v| v.to_str().ok())
@@ -239,6 +260,9 @@ fn set_session_cookie(token: &str, ttl_seconds: i64) -> Result<(), ServerFnError
     put_set_cookie(value)
 }
 
+// Unused on the client build: only the `#[server]` bodies call these, and those compile
+// only under `ssr`. The stub keeps the name resolvable in both builds.
+#[allow(dead_code)]
 #[cfg(not(feature = "ssr"))]
 fn set_session_cookie(_token: &str, _ttl_seconds: i64) -> Result<(), ServerFnError> {
     Ok(())
@@ -251,6 +275,9 @@ fn clear_session_cookie() -> Result<(), ServerFnError> {
     put_set_cookie(session::clearing_cookie(cookie_secure()))
 }
 
+// Unused on the client build: only the `#[server]` bodies call these, and those compile
+// only under `ssr`. The stub keeps the name resolvable in both builds.
+#[allow(dead_code)]
 #[cfg(not(feature = "ssr"))]
 fn clear_session_cookie() -> Result<(), ServerFnError> {
     Ok(())

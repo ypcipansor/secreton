@@ -48,9 +48,6 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   can set.
 - **5xx bodies could leak connection strings and file paths.**
 - Two `try_into().unwrap()` calls panicked on short caller-supplied key material.
-
-### Fixed
-
 - Dynamic database credentials now work. The `postgres` and `mysql` features the engine
   branched on were never declared, so both paths compiled out and the endpoint answered
   "feature disabled" in every build; the MongoDB and Redis paths returned a generated
@@ -70,7 +67,7 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 - The cache and the agent's metrics registry use non-poisoning locks; one panicking
   holder no longer turns a cache into a process-wide outage.
 
-## Removed
+### Removed
 
 - `warp`. The process ran two HTTP stacks on two ports because warp is on hyper 0.14 and
   Axum on hyper 1.0; `cargo tree -i warp` now finds nothing and there is no duplicate axum.
