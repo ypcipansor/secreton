@@ -200,6 +200,9 @@ impl Services {
         // Give the seal service the auth service, so a successful unseal can issue a root
         // token that is bound to a real session and therefore actually usable.
         let seal = seal.with_auth(auth.clone());
+        // And the audit logger, so both the success and the failure of an unseal are
+        // recorded — the failure is the one a reviewer needs to see.
+        let seal = seal.with_audit(audit.clone());
 
         // Initialize policy service
         let policy_service = Arc::new(PolicyService::new());

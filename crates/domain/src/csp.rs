@@ -39,6 +39,71 @@ pub fn csp_without_nonce() -> String {
     CSP_TEMPLATE.replace("'nonce-{nonce}' ", "")
 }
 
+/// The nonce issued for one rendered response.
+///
+/// The policy that authorises a document's inline scripts and the nonce those scripts
+/// carry must be the same value, or the browser refuses to run them and the page never
+/// hydrates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderedNonce(String);
+
+/// Response header under which the trusted renderer echoes the nonce its inline scripts
+/// carry.
+///
+/// The security-header middleware reads it, builds the policy from it, and removes it, so
+/// the client never sees it. It exists to draw the line between a document the renderer
+/// actually built and any other response: only a match earns a nonce-bearing policy. A
+/// response that merely carries a CSP header, or a marker whose value is not this
+/// request's nonce, gets the script-free policy instead, and every response gets the
+/// mandatory hardening directives.
+pub const RENDERED_NONCE_HEADER: &str = "x-secreton-rendered-nonce";
+
+/// Whether a value is usable as a nonce in a policy and as a header value.
+///
+/// A nonce is substituted into a header, so anything outside the base64url alphabet could
+/// terminate it or smuggle a directive. Rejecting rather than sanitising keeps the policy
+/// text unambiguous.
+pub fn is_well_formed_nonce(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+impl RenderedNonce {
+    /// Mint a nonce from 16 bytes of OS randomness. Fresh per response: a value an
+    /// attacker can predict is not a nonce.
+    pub fn generate() -> Self {
+        use rand::RngCore;
+
+        let mut bytes = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        let mut out = String::with_capacity(32);
+        for byte in bytes {
+            use std::fmt::Write;
+            let _ = write!(out, "{byte:02x}");
+        }
+        Self(out)
+    }
+
+    /// Wrap a nonce minted elsewhere, such as by the renderer.
+    pub fn from_value(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The nonce as it appears in a policy and in a `nonce` attribute.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for RenderedNonce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

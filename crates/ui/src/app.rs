@@ -32,15 +32,16 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     }
 }
 
-/// Publishes the Content-Security-Policy for this document, naming the same nonce Leptos
-/// stamps onto the inline `<script>` tags it emits here.
+/// Names the nonce Leptos stamps onto the inline `<script>` tags it emits here, so the
+/// security-header middleware can build a policy that authorises exactly those scripts.
 ///
-/// This has to happen inside the render: the nonce is generated per response and only the
-/// renderer knows it. The value reaches the client on the CSP response header, which the
-/// security-headers middleware leaves alone precisely so this one survives. Without it the
-/// browser refuses every inline script on the page — including `HydrationScripts`, which
-/// boots the WASM bundle and opens the hydration stream — so the page renders but never
-/// becomes interactive.
+/// This has to happen inside the render: the nonce is generated per response by Leptos and
+/// only the renderer knows it. It is echoed under
+/// [`secreton_domain::csp::RENDERED_NONCE_HEADER`], a private header the middleware reads
+/// and removes, so the client never sees it and nothing downstream can choose a policy.
+/// Without a matching nonce the browser refuses every inline script on the page —
+/// including `HydrationScripts`, which boots the WASM bundle — so the page renders but
+/// never becomes interactive.
 ///
 /// Only the server has a response to attach a header to, hence the `ssr` gate; in the
 /// browser this component is a no-op.
@@ -48,15 +49,13 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 fn Csp() -> impl IntoView {
     #[cfg(feature = "ssr")]
     {
-        if let Some(nonce) = leptos::nonce::use_nonce() {
-            let policy = secreton_domain::csp::csp_with_nonce(&nonce);
-            if let Some(options) = use_context::<leptos_axum::ResponseOptions>() {
-                options.insert_header(
-                    axum::http::header::CONTENT_SECURITY_POLICY,
-                    axum::http::HeaderValue::from_str(&policy)
-                        .expect("CSP is a valid header value"),
-                );
-            }
+        if let Some(nonce) = leptos::nonce::use_nonce()
+            && let Some(options) = use_context::<leptos_axum::ResponseOptions>()
+        {
+            options.insert_header(
+                axum::http::HeaderName::from_static(secreton_domain::csp::RENDERED_NONCE_HEADER),
+                axum::http::HeaderValue::from_str(&nonce).expect("a nonce is a valid header value"),
+            );
         }
     }
 }

@@ -31,6 +31,16 @@ const SESSION_STORAGE_PREFIX: &str = "sys/auth/sessions/";
 /// are cleaned up via `delete_expired`.
 const REVOKED_TOKEN_STORAGE_PREFIX: &str = "sys/auth/revoked-tokens/";
 
+/// How long a bootstrap credential stays valid: the token an unseal hands back, and the
+/// session record behind it.
+///
+/// Fixed rather than taken from the interactive session policy, because the two are not
+/// the same credential. `system/config` can raise an ordinary session timeout to 24 hours,
+/// which is a defensible choice for a human at a keyboard; the root token returned by an
+/// unseal is the most privileged credential in the system and should not inherit it by
+/// accident. One hour matches the compiled-in default for `auth.jwt.expiration`.
+pub const BOOTSTRAP_TOKEN_TTL_SECS: u64 = 3600;
+
 #[derive(Debug, Deserialize)]
 pub struct ApiLoginRequest {
     pub username: String,
@@ -1722,15 +1732,22 @@ impl AuthenticationService {
     /// The returned token carries the session's `jti`, which is what `validate_token`
     /// requires; a token minted without one is rejected on every request, so this is the
     /// only supported way to hand out a credential outside the login path.
+    ///
+    /// `duration_secs` is explicit and *required*, deliberately. This method previously
+    /// read the effective session timeout, which an operator can raise to 24 hours through
+    /// `system/config`. That made the credential returned by an unseal silently inherit
+    /// whatever the interactive-session policy was, so the one credential that can
+    /// reconfigure the vault lived for a day. Bootstrap credentials take
+    /// [`BOOTSTRAP_TOKEN_TTL_SECS`] and the caller says so.
     pub async fn issue_session_token(
         &self,
         user: &User,
         ip_address: String,
         user_agent: String,
+        duration_secs: u64,
     ) -> Result<String, AuthError> {
-        let (session_timeout_secs, _) = self.get_effective_config().await;
         let session_duration =
-            chrono::Duration::from_std(std::time::Duration::from_secs(session_timeout_secs))
+            chrono::Duration::from_std(std::time::Duration::from_secs(duration_secs))
                 .unwrap_or(chrono::Duration::hours(1));
 
         let session_id = Uuid::new_v4().to_string();
@@ -1755,7 +1772,7 @@ impl AuthenticationService {
             Some(token_pair.refresh_token.clone()),
             ip_address,
             user_agent,
-            session_timeout_secs,
+            duration_secs,
         )
         .await?;
 

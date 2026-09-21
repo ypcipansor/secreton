@@ -165,8 +165,11 @@ tidak ada dalam kode maupun konfigurasi.
 
 Diterapkan oleh middleware `security_headers` pada setiap respons, bukan oleh reverse proxy.
 Karena tidak ada Nginx dalam deployment bawaannya, header ini harus datang dari proses itu
-sendiri. Header yang ada (dapat dikonfigurasi) mencakup `X-Frame-Options`,
-`X-Content-Type-Options`, `Content-Security-Policy`, `Referrer-Policy`, dan HSTS.
+sendiri. Header yang selalu ada mencakup `X-Frame-Options`, `X-Content-Type-Options`,
+`Content-Security-Policy`, `Referrer-Policy`, dan `Permissions-Policy`; HSTS hanya
+diterbitkan ketika skema efektif permintaan tervalidasi sebagai HTTPS — `X-Forwarded-Proto`
+dari klien langsung diabaikan kecuali `http.trusted_proxies` menyatakan adanya proxy
+tepercaya.
 
 ### 4.3 Alur Autentikasi
 

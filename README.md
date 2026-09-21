@@ -99,7 +99,8 @@ and unsealing with a quorum of them:
 
 ```bash
 # Generate shares (here 3 shares, 2 required to unseal) and unseal. The response that
-# reaches the threshold carries a one-time root token; store it, it is not shown again.
+# reaches the threshold carries a root token valid for one hour; store it, it is not shown
+# again. `root_username` names the account that token belongs to and may be any name.
 KEYS=$(curl -sX POST localhost:3000/api/v1/sys/init -H 'Content-Type: application/json' \
   -d '{"shares":3,"threshold":2,"root_username":"root"}' | jq -r '.data.keys[]')
 
@@ -112,7 +113,10 @@ done <<< "$KEYS"
 ```
 
 Store the shares and the root token somewhere safe — the shares are the only way to unseal
-after a restart.
+after a restart. The root token is a bootstrap credential: it expires one hour after it is
+issued, and is deliberately not tied to the configurable session timeout. If issuing it
+fails after the barrier has already opened, repeat the unseal call — the vault stays open
+and no shares are needed to retry.
 
 Root has no password login, so the UI needs a real account. Create one with the root token:
 

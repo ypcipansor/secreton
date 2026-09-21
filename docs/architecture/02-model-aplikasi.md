@@ -248,8 +248,14 @@ membacanya. Klien programatik (CLI, agent, layanan lain) memakai
 ### 5.4 Header Keamanan
 
 Diterapkan oleh middleware `security_headers` pada setiap respons. Detailnya ada di
-`crates/server/src/middleware/security_headers.rs`; nilai seperti CSP dapat dikonfigurasi
-dan divalidasi saat startup.
+`crates/server/src/middleware/security_headers.rs`. Policy CSP dibangun oleh middleware
+tersebut, bukan diserahkan ke handler: hanya dokumen HTML yang membawa nonce milik renderer
+(yang dikembalikan lewat header internal) yang mendapat policy bernonce; respons lain
+ditimpa dengan `csp_without_nonce()` sehingga handler tidak dapat melemahkan policy.
+Directive `frame-ancestors`, `object-src`, `base-uri`, dan `form-action` selalu ada.
+Middleware juga menyelesaikan skema efektif permintaan berdasarkan koneksi dan jumlah proxy
+tepercaya (`http.trusted_proxies`), lalu menerbitkannya sebagai `ResolvedScheme`; keputusan
+HSTS dan atribut `Secure` cookie membaca hasil yang sama.
 
 ### 5.5 Audit
 

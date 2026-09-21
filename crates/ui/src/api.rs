@@ -223,21 +223,25 @@ fn current_token() -> Option<String> {
 
 /// Whether the request arrived over TLS, which decides the cookie's `Secure` attribute.
 ///
-/// This server does not terminate TLS; a proxy does, and reports the original scheme in
-/// `x-forwarded-proto`. That is the same signal `middleware::security_headers` uses to
-/// decide HSTS, so the two cannot disagree about whether a request was secure.
-///
-/// Setting and clearing both read it here. Previously only the setting path did, which is
-/// how the two headers came to disagree.
+/// This server does not terminate TLS; a proxy does and may report the original scheme in
+/// `x-forwarded-proto`. The decision is never read from that header here: the
+/// security-header middleware resolves the effective scheme against the configured proxy
+/// trust and publishes it as [`ResolvedScheme`], and this reads that. Reading the raw
+/// header directly, which this used to do, meant a directly exposed server believed any
+/// client that sent `X-Forwarded-Proto: https` — and the cookie and the HSTS header then
+/// disagreed about whether the request was secure.
 #[cfg(feature = "ssr")]
 fn cookie_secure() -> bool {
-    request_headers()
-        .and_then(|h| {
-            h.get("x-forwarded-proto")
-                .and_then(|v| v.to_str().ok())
-                .map(|v| v.eq_ignore_ascii_case("https"))
-        })
-        .unwrap_or(false)
+    cookie_secure_from(use_context::<secreton_domain::proxy::ResolvedScheme>())
+}
+
+/// The cookie decision, separated from the context lookup so it can be tested directly.
+///
+/// Absence of a resolved scheme means no trusted resolution happened, which is not the
+/// same as "the request was secure" — so it is treated as insecure rather than assumed.
+#[cfg(feature = "ssr")]
+fn cookie_secure_from(resolved: Option<secreton_domain::proxy::ResolvedScheme>) -> bool {
+    resolved.map(|r| r.0.is_https()).unwrap_or(false)
 }
 
 /// Attach a `Set-Cookie` to the response this server function is producing.
@@ -281,4 +285,24 @@ fn clear_session_cookie() -> Result<(), ServerFnError> {
 #[cfg(not(feature = "ssr"))]
 fn clear_session_cookie() -> Result<(), ServerFnError> {
     Ok(())
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+    use secreton_domain::proxy::{ResolvedScheme, Scheme};
+
+    #[test]
+    fn a_directly_exposed_request_is_never_secure() {
+        // No resolved scheme means no trusted resolution ran. The old code read
+        // `X-Forwarded-Proto` straight from the request headers, so a client could turn
+        // `Secure` on for itself; absence now means "insecure", never "assume secure".
+        assert!(!cookie_secure_from(None));
+    }
+
+    #[test]
+    fn the_cookie_follows_the_resolved_scheme_not_a_header() {
+        assert!(cookie_secure_from(Some(ResolvedScheme(Scheme::Https))));
+        assert!(!cookie_secure_from(Some(ResolvedScheme(Scheme::Http))));
+    }
 }

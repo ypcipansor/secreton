@@ -113,8 +113,12 @@ dibaca. Konversi ke dan dari plaintext hanya terjadi di dalam barrier kriptograf
 | `created_at`, `updated_at` | `DateTime<Utc>` | Timestamp |
 | `last_login` | `Option<DateTime<Utc>>` | Login terakhir |
 
-Root tidak memiliki login password. Alur inisialisasi mencetak root token sekali pakai,
-bukan membuat akun root dengan password.
+Root tidak memiliki login password. `init` menerima `root_username` dan membuat akun root
+dengan nama tersebut; identitasnya disimpan agar `unseal` menerbitkan token untuk akun itu,
+bukan untuk nama tetap `"root"`. Token tersebut berlaku satu jam (TTL bootstrap tetap, tidak
+mengikuti session timeout yang dapat dikonfigurasi), dan hanya setelah threshold share
+tercapai. Jika penerbitan token gagal setelah barrier terbuka, ulangi panggilan `unseal`;
+vault tetap terbuka dan tidak perlu share lagi.
 
 Lockout: setelah 5 percobaan gagal, akun non-privileged dikunci selama 15 menit
 (`crates/engines/src/services/auth.rs`). Akun privileged sengaja tidak dikunci dengan cara
